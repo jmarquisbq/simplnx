@@ -173,6 +173,8 @@ set(filter_algorithms
   AlignSectionsMisorientation
   AlignSectionsMutualInformation
   BadDataNeighborOrientationCheck
+  BadDataNeighborOrientationCheckScanline
+  BadDataNeighborOrientationCheckWorklist
   CAxisSegmentFeatures
   ComputeAvgCAxes
   ComputeAvgOrientations
@@ -187,9 +189,12 @@ set(filter_algorithms
   ComputeFZQuaternions
   ComputeGBCD
   ComputeGBCDMetricBased
-  ComputeGBCDPoleFigure
+  ComputeGBCDPoleFigureDirect
+  ComputeGBCDPoleFigureScanline
   ComputeGBPDMetricBased
   ComputeIPFColors
+  ComputeIPFColorsDirect
+  ComputeIPFColorsScanline
   ComputeKernelAvgMisorientations
   ComputeMisorientations
   ComputeQuaternionConjugate

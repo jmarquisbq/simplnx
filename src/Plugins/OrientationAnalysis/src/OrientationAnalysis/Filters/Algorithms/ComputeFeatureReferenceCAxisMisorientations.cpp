@@ -15,7 +15,10 @@
 #include <EbsdLib/Orientation/OrientationFwd.hpp>
 #include <EbsdLib/Orientation/Quaternion.hpp>
 
+#include <nonstd/span.hpp>
+
 #include <algorithm>
+#include <memory>
 
 using namespace nx::core;
 using namespace nx::core::OrientationUtilities;
@@ -39,13 +42,18 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
 
   // Preflight: every ensemble index must resolve to a Hex Laue class for the filter to do anything.
   // We need to know both whether any phase is hex (else hard error) and whether all phases are hex
-  // (else warn the user that non-hex phases will be skipped).
+  // (else warn the user that non-hex phases will be skipped). Cache ensemble-level crystalStructures
+  // locally (tiny array, avoids per-element OOC overhead during the main cell loop).
   const auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
+  const usize numCrystalStructures = crystalStructures.getNumberOfTuples();
+  std::vector<uint32> crystalStructuresLocal(numCrystalStructures);
+  crystalStructures.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresLocal.data(), numCrystalStructures));
+
   bool anyPhaseIsHex = false;
   bool allPhasesAreHex = true;
-  for(usize i = 1; i < crystalStructures.size(); ++i)
+  for(usize i = 1; i < numCrystalStructures; ++i)
   {
-    const auto crystalStructureType = crystalStructures[i];
+    const auto crystalStructureType = crystalStructuresLocal[i];
     const bool isHex = crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_High || crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_Low;
     anyPhaseIsHex = anyPhaseIsHex || isHex;
     allPhasesAreHex = allPhasesAreHex && isHex;
@@ -66,27 +74,30 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
   }
 
   /* **************************************************************************
-   * Get References to the Input and output Data Arrays
+   * Get DataStore references for bulk I/O
    */
-  // Input Cell Data
-  const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
-  const auto& quats = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath);
-  const auto& cellPhases = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath);
-  // Input Feature Data
-  const auto& avgCAxes = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->AvgCAxesArrayPath);
+  // Input Cell Data (DataStore refs for copyIntoBuffer)
+  const auto& featureIdsStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
+  const auto& quatsStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath).getDataStoreRef();
+  const auto& cellPhasesStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath).getDataStoreRef();
 
-  // Output Cell Data
-  auto& cellRefCAxisMis = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureReferenceCAxisMisorientationsArrayPath);
+  // Input Feature Data — cache avgCAxes locally (feature-level, small)
+  const auto& avgCAxes = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->AvgCAxesArrayPath);
+  const usize totalFeatures = avgCAxes.getNumberOfTuples();
+  const usize avgCAxesSize = totalFeatures * 3;
+  std::vector<float32> avgCAxesLocal(avgCAxesSize);
+  avgCAxes.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(avgCAxesLocal.data(), avgCAxesSize));
+
+  // Output Cell Data (DataStore ref for copyFromBuffer)
+  auto& cellRefCAxisMisStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureReferenceCAxisMisorientationsArrayPath).getDataStoreRef();
+
   // Output Feature Data
   auto& featAvgCAxisMis = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureAvgCAxisMisorientationsArrayPath);
   featAvgCAxisMis.fill(0.0f);
   auto& featStdevCAxisMis = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureStdevCAxisMisorientationsArrayPath);
   featStdevCAxisMis.fill(0.0f);
 
-  const usize totalPoints = featureIds.getNumberOfTuples();
-  const usize totalFeatures = avgCAxes.getNumberOfTuples();
-
-  const usize numQuatComps = quats.getNumberOfComponents();
+  const usize numQuatComps = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath).getNumberOfComponents();
 
   std::vector<usize> counts(totalFeatures, 0);
   std::vector<float32> avgMisorientations(totalFeatures, 0.0f);
@@ -96,11 +107,21 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
   const auto xPoints = static_cast<int64>(uDims[0]);
   const auto yPoints = static_cast<int64>(uDims[1]);
   const auto zPoints = static_cast<int64>(uDims[2]);
+  const usize sliceSize = static_cast<usize>(xPoints * yPoints);
+  const usize quatSliceSize = sliceSize * numQuatComps;
 
   const Eigen::Vector3d cAxis{0.0, 0.0, 1.0};
 
+  // Z-slice buffers for cell-level arrays (avoids per-element OOC access)
+  std::vector<int32> featureIdSlice(sliceSize);
+  std::vector<int32> cellPhaseSlice(sliceSize);
+  std::vector<float32> quatSlice(quatSliceSize);
+  std::vector<float32> outputSlice(sliceSize, 0.0f);
+
   /* **************************************************************************
-   * Loop over all cells in the ImageGeometry
+   * Loop over all cells in the ImageGeometry, one Z-slice at a time.
+   * Each slice is bulk-read from the DataStore, processed, and the output
+   * is bulk-written back.
    */
   for(int64 plane = 0; plane < zPoints; plane++)
   {
@@ -108,17 +129,23 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     {
       return {};
     }
+    const usize sliceOffset = static_cast<usize>(plane) * sliceSize;
+
+    // Bulk-read this Z-slice of input cell data
+    featureIdsStore.copyIntoBuffer(sliceOffset, nonstd::span<int32>(featureIdSlice.data(), sliceSize));
+    cellPhasesStore.copyIntoBuffer(sliceOffset, nonstd::span<int32>(cellPhaseSlice.data(), sliceSize));
+    quatsStore.copyIntoBuffer(sliceOffset * numQuatComps, nonstd::span<float32>(quatSlice.data(), quatSliceSize));
 
     for(int64 row = 0; row < yPoints; row++)
     {
       for(int64 col = 0; col < xPoints; col++)
       {
-        int64 cellIdx = (plane * xPoints * yPoints) + (row * xPoints) + col;
-        const usize quatTupleIndex = cellIdx * numQuatComps;
-        const uint32 crystalStructureType = crystalStructures[cellPhases[cellIdx]];
+        const usize localIdx = static_cast<usize>(row * xPoints + col);
+        const usize quatLocalIdx = localIdx * numQuatComps;
+        const int32 cellFeatureId = featureIdSlice[localIdx];
+        const int32 cellPhase = cellPhaseSlice[localIdx];
+        const uint32 crystalStructureType = crystalStructuresLocal[cellPhase];
         const bool isHex = crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_High || crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_Low;
-        int32_t cellFeatureId = featureIds[cellIdx];
-        int32_t cellPhase = cellPhases[cellIdx];
 
         // Make sure the cell is Hexagonal Laue class, the featureId and phases are valid
         // INVALID featureIds have a value of ZERO
@@ -127,7 +154,7 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
         {
           // Create the OrientationMatrix from the Quaternion
           ebsdlib::OrientationMatrixDType oMatrix =
-              ebsdlib::QuaternionDType(quats[quatTupleIndex], quats[quatTupleIndex + 1], quats[quatTupleIndex + 2], quats[quatTupleIndex + 3]).toOrientationMatrix();
+              ebsdlib::QuaternionDType(quatSlice[quatLocalIdx], quatSlice[quatLocalIdx + 1], quatSlice[quatLocalIdx + 2], quatSlice[quatLocalIdx + 3]).toOrientationMatrix();
           // Transpose the OM and multiply by cAxis to rotate cAxis
           Eigen::Vector3d c1 = oMatrix.transpose() * cAxis;
 
@@ -135,7 +162,8 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
           c1.normalize();
 
           // normalize the features average C-Axis
-          Eigen::Vector3d avgCAxisMis = {avgCAxes[3 * cellFeatureId], avgCAxes[3 * cellFeatureId + 1], avgCAxes[3 * cellFeatureId + 2]};
+          const usize avgCAxesIdx = static_cast<usize>(cellFeatureId) * 3;
+          Eigen::Vector3d avgCAxisMis = {avgCAxesLocal[avgCAxesIdx], avgCAxesLocal[avgCAxesIdx + 1], avgCAxesLocal[avgCAxesIdx + 2]};
           avgCAxisMis.normalize();
 
           // Calculate the angle between the current C-Axis and the Feature's Average C-Axis
@@ -148,16 +176,19 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
             w = 180.0 - w;
           }
 
-          cellRefCAxisMis.setValue(cellIdx, static_cast<float32>(w));
+          outputSlice[localIdx] = static_cast<float32>(w);
           counts[cellFeatureId]++;
           avgMisorientations[cellFeatureId] += static_cast<float32>(w);
         }
         else
         {
-          cellRefCAxisMis.setValue(cellIdx, 0.0f);
+          outputSlice[localIdx] = 0.0f;
         }
       }
     }
+
+    // Bulk-write this Z-slice of output cell data
+    cellRefCAxisMisStore.copyFromBuffer(sliceOffset, nonstd::span<const float32>(outputSlice.data(), sliceSize));
   }
 
   // Per-feature average. Explicit NaN when no hex cells contributed (counts == 0); without this
@@ -183,18 +214,26 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     }
   }
 
-  // Population standard deviation. Per-cell accumulate (diff^2) then per-feature sqrt(sum/count).
+  // Compute the population standard deviation of misorientations per feature. Re-read cell data one
+  // Z-slice at a time (sequential OOC access), accumulating (diff^2) per cell, then taking
+  // sqrt(sum/count) per feature.
   std::vector<double> stdevs(totalFeatures, 0.0);
-  for(usize cellIdx = 0; cellIdx < totalPoints; cellIdx++)
+  for(int64 plane = 0; plane < zPoints; plane++)
   {
     if(m_ShouldCancel)
     {
       return {};
     }
+    const usize sliceOffset = static_cast<usize>(plane) * sliceSize;
+    featureIdsStore.copyIntoBuffer(sliceOffset, nonstd::span<int32>(featureIdSlice.data(), sliceSize));
+    cellRefCAxisMisStore.copyIntoBuffer(sliceOffset, nonstd::span<float32>(outputSlice.data(), sliceSize));
 
-    const int32 featureId = featureIds[cellIdx];
-    double diff = cellRefCAxisMis.getValue(cellIdx) - featAvgCAxisMis.getValue(featureId);
-    stdevs[featureId] += (diff * diff);
+    for(usize localIdx = 0; localIdx < sliceSize; localIdx++)
+    {
+      const int32 featureId = featureIdSlice[localIdx];
+      double diff = outputSlice[localIdx] - featAvgCAxisMis.getValue(featureId);
+      stdevs[featureId] += (diff * diff);
+    }
   }
 
   for(usize featureId = 1; featureId < totalFeatures; featureId++)
