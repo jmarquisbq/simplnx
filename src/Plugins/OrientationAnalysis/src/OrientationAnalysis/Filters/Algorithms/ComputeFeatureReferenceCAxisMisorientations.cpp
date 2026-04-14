@@ -37,13 +37,29 @@ ComputeFeatureReferenceCAxisMisorientations::ComputeFeatureReferenceCAxisMisorie
 ComputeFeatureReferenceCAxisMisorientations::~ComputeFeatureReferenceCAxisMisorientations() noexcept = default;
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Computes each cell's c-axis misorientation relative to its feature's
+ * average c-axis (hexagonal phases only). Also computes per-feature mean and
+ * standard deviation of these misorientations.
+ *
+ * OOC strategy: Uses Z-slice-based bulk I/O. For each Z-plane, all cell-level
+ * input arrays are read in one copyIntoBuffer call per array, processed, and
+ * the per-cell output is written back with copyFromBuffer. Feature-level arrays
+ * (avgCAxes, crystalStructures) are cached entirely in local vectors since
+ * they are accessed randomly by featureId/phase index. A second Z-slice pass
+ * re-reads the output to compute the standard deviation.
+ */
 Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
 {
 
-  // Preflight: every ensemble index must resolve to a Hex Laue class for the filter to do anything.
-  // We need to know both whether any phase is hex (else hard error) and whether all phases are hex
-  // (else warn the user that non-hex phases will be skipped). Cache ensemble-level crystalStructures
-  // locally (tiny array, avoids per-element OOC overhead during the main cell loop).
+  /* **************************************************************************
+   * Preflight: every ensemble index must resolve to a Hex Laue class for the
+   * filter to do anything. We need to know both whether any phase is hex (else
+   * hard error) and whether all phases are hex (else warn the user that non-hex
+   * phases will be skipped). Bulk-read the ensemble-level crystalStructures into
+   * local memory (tiny array); this avoids per-element OOC virtual dispatch
+   * during the main cell loop.
+   */
   const auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
   const usize numCrystalStructures = crystalStructures.getNumberOfTuples();
   std::vector<uint32> crystalStructuresLocal(numCrystalStructures);
@@ -74,21 +90,22 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
   }
 
   /* **************************************************************************
-   * Get DataStore references for bulk I/O
+   * Obtain DataStore references for cell-level bulk I/O. All cell reads go
+   * through copyIntoBuffer (one Z-slice at a time) rather than operator[].
    */
-  // Input Cell Data (DataStore refs for copyIntoBuffer)
   const auto& featureIdsStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
   const auto& quatsStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath).getDataStoreRef();
   const auto& cellPhasesStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath).getDataStoreRef();
 
-  // Input Feature Data — cache avgCAxes locally (feature-level, small)
+  // Cache avgCAxes locally — accessed randomly by featureId in the cell loop.
+  // Feature count is O(thousands) so this fits comfortably in RAM.
   const auto& avgCAxes = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->AvgCAxesArrayPath);
   const usize totalFeatures = avgCAxes.getNumberOfTuples();
   const usize avgCAxesSize = totalFeatures * 3;
   std::vector<float32> avgCAxesLocal(avgCAxesSize);
   avgCAxes.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(avgCAxesLocal.data(), avgCAxesSize));
 
-  // Output Cell Data (DataStore ref for copyFromBuffer)
+  // Output cell DataStore — written one Z-slice at a time via copyFromBuffer
   auto& cellRefCAxisMisStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureReferenceCAxisMisorientationsArrayPath).getDataStoreRef();
 
   // Output Feature Data
@@ -112,7 +129,8 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
 
   const Eigen::Vector3d cAxis{0.0, 0.0, 1.0};
 
-  // Z-slice buffers for cell-level arrays (avoids per-element OOC access)
+  // Z-slice buffers: one slice of each cell-level array is read/written per
+  // Z-plane iteration. This converts random 3D access into sequential slice I/O.
   std::vector<int32> featureIdSlice(sliceSize);
   std::vector<int32> cellPhaseSlice(sliceSize);
   std::vector<float32> quatSlice(quatSliceSize);
@@ -214,9 +232,9 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     }
   }
 
-  // Compute the population standard deviation of misorientations per feature. Re-read cell data one
-  // Z-slice at a time (sequential OOC access), accumulating (diff^2) per cell, then taking
-  // sqrt(sum/count) per feature.
+  // Compute the population standard deviation of misorientations per feature.
+  // This requires a second pass over cell data. We re-read featureIds and the
+  // just-written output array one Z-slice at a time (sequential OOC access).
   std::vector<double> stdevs(totalFeatures, 0.0);
   for(int64 plane = 0; plane < zPoints; plane++)
   {

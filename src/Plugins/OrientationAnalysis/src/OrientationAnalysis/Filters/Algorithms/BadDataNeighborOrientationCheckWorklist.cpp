@@ -30,10 +30,39 @@ BadDataNeighborOrientationCheckWorklist::~BadDataNeighborOrientationCheckWorklis
 
 // -----------------------------------------------------------------------------
 /**
- * @brief Flips bad voxels to good using a worklist-based propagation algorithm.
- * In-core path: Phase 1 counts matching good neighbors per bad voxel.
- * Phase 2 iteratively flips eligible voxels using a deque worklist,
- * propagating new eligibility to neighbors immediately.
+ * @brief In-core bad-voxel flipping using two-phase worklist propagation.
+ *
+ * This algorithm exploits random-access O(1) DataArray subscript access (safe for
+ * in-core stores) to achieve O(flipped) amortized cost instead of the O(N * passes)
+ * cost of the Scanline variant's full-volume rescans.
+ *
+ * **Phase 1 -- Initial neighbor counting** (single linear scan, O(N)):
+ *   For every bad voxel, iterate over its 6 face-neighbors. For each good neighbor
+ *   with the same phase and misorientation within tolerance, increment the voxel's
+ *   neighborCount. This produces a baseline count before any flips occur.
+ *
+ * **Phase 2 -- Worklist-driven propagation** (per level, O(flipped)):
+ *   For each level (6 down to NumberOfNeighbors):
+ *     1. Seed a deque with all bad voxels whose neighborCount >= currentLevel.
+ *     2. Pop the front voxel. If it has already been flipped (by a neighbor cascade)
+ *        or its count has dropped below the threshold (impossible in practice but
+ *        checked defensively), skip it.
+ *     3. Flip the voxel's mask to true.
+ *     4. For each still-bad face-neighbor of the newly-flipped voxel: check if the
+ *        neighbor has a matching orientation (same phase, misorientation < tolerance).
+ *        If so, increment its neighborCount. If the count now meets the threshold,
+ *        enqueue the neighbor for processing.
+ *     5. Repeat until the deque drains, then move to the next level.
+ *
+ * This is essentially a breadth-first flood-fill constrained by crystallographic
+ * misorientation. The cascade effect means that flipping one voxel can immediately
+ * enable its neighbors to flip, propagating outward from high-confidence seeds.
+ *
+ * **Why this is not suitable for OOC**: The deque pops voxels in arbitrary spatial
+ * order (BFS wavefront). Each pop accesses the popped voxel's quaternion, phase,
+ * and mask, plus all 6 neighbors' data -- all random-access lookups. On OOC stores,
+ * each such lookup could trigger a disk-chunk load/evict, creating catastrophic
+ * chunk thrashing for large datasets.
  */
 Result<> BadDataNeighborOrientationCheckWorklist::operator()()
 {
@@ -71,6 +100,9 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
 
   const int64 xyStride = dims[0] * dims[1];
 
+  // Precompute the face-neighbor index offsets (-X, +X, -Y, +Y, -Z, +Z) relative
+  // to a voxel's linear index in the flat array. These are constant for any given
+  // volume geometry.
   // VoxelNeighbors<Image3D>::k_FaceNeighborCount = 6 is the maximum possible face-neighbor count.
   // computeValidFaceNeighbors() runtime-skips +/-Z neighbors when dims[2] == 1 (2D images), so this
   // 3D-typed array correctly handles 2D images without any change here.
@@ -99,12 +131,16 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
   // Per-voxel running count of within-tolerance face-neighbors. Allocated proportional to the
   // input geometry size: 4 bytes per voxel (~4 GB for a 1B-voxel dataset). Cannot be in-place
   // on the mask array because the algorithm needs to distinguish "newly flipped" from "still bad".
+  // This O(N) array is the trade-off: the Worklist variant uses O(N) memory to achieve O(flipped)
+  // propagation speed, while the Scanline variant uses O(slice) memory but O(N * passes).
   std::vector<int32> neighborCount(totalPoints, 0);
 
   MessageHelper messageHelper(m_MessageHandler);
   ThrottledMessenger throttledMessenger = messageHelper.createThrottledMessenger();
 
   // ===== Phase 1: Count matching good neighbors for each bad voxel =====
+  // Single linear scan over all voxels. For each bad voxel, check its 6 face-neighbors
+  // for good voxels with matching phase and orientation within tolerance.
   for(usize voxelIndex = 0; voxelIndex < totalPoints; voxelIndex++)
   {
     if(m_ShouldCancel)
@@ -115,6 +151,7 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
     // "Bad" voxels are those whose mask value is false; only these get processed.
     if(!maskCompare->isTrue(voxelIndex))
     {
+      // Build the target voxel's quaternion for misorientation comparisons.
       ebsdlib::QuatD quat1(quats[voxelIndex * 4], quats[voxelIndex * 4 + 1], quats[voxelIndex * 4 + 2], quats[voxelIndex * 4 + 3]);
       quat1.positiveOrientation();
       const uint32 laueClassIndex = crystalStructures[cellPhases[voxelIndex]];
@@ -126,6 +163,7 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
         continue;
       }
 
+      // Decompose the linear index into (x, y, z) coordinates for boundary checks.
       const int64 xIdx = static_cast<int64>(voxelIndex) % dims[0];
       const int64 yIdx = (static_cast<int64>(voxelIndex) / dims[0]) % dims[1];
       const int64 zIdx = static_cast<int64>(voxelIndex) / xyStride;
@@ -139,6 +177,8 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
         }
         const int64 neighborPoint = static_cast<int64>(voxelIndex) + neighborVoxelIndexOffsets[faceIndex];
 
+        // Only count good neighbors (mask == true) with the same phase and a
+        // misorientation below the tolerance.
         if(maskCompare->isTrue(neighborPoint))
         {
           if(cellPhases[voxelIndex] == cellPhases[neighborPoint] && cellPhases[voxelIndex] > 0)
@@ -158,6 +198,8 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
   }
 
   // ===== Phase 2: Iteratively flip bad voxels using worklist =====
+  // Iterate from the strictest level (all face-neighbors must agree) down to the user's minimum.
+  // At each level, seed the worklist with all eligible voxels, then drain it with propagation.
   // The convergence sweep starts at the maximum possible face-neighbor count (6 in 3D; 2D images
   // simply never reach the top levels because no voxel can have count > 4). Tying this to
   // k_NumFaceNeighbors keeps the upper bound consistent if VoxelNeighbors ever changes.
@@ -171,6 +213,7 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
       return {};
     }
 
+    // Seed the worklist with all bad voxels that already meet this level's threshold.
     std::deque<usize> worklist;
     for(usize voxelIndex = 0; voxelIndex < totalPoints; voxelIndex++)
     {
@@ -180,6 +223,8 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
       }
     }
 
+    // Process the worklist. When a voxel is flipped, its still-bad neighbors may
+    // gain a new matching good neighbor and become eligible, creating a cascade.
     while(!worklist.empty())
     {
       if(m_ShouldCancel)
@@ -191,13 +236,18 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
       const usize voxelIndex = worklist.front();
       worklist.pop_front();
 
+      // Defensive check: skip if already flipped (by a prior cascade) or if the
+      // count dropped below threshold (should not happen, but guards correctness).
       if(maskCompare->isTrue(voxelIndex) || neighborCount[voxelIndex] < currentLevel)
       {
         continue;
       }
 
+      // Flip this voxel from bad to good.
       maskCompare->setValue(voxelIndex, true);
 
+      // Now propagate: for each still-bad face-neighbor, check if the newly-flipped
+      // voxel constitutes a new matching good neighbor for that neighbor.
       ebsdlib::QuatD quat1(quats[voxelIndex * 4], quats[voxelIndex * 4 + 1], quats[voxelIndex * 4 + 2], quats[voxelIndex * 4 + 3]);
       quat1.positiveOrientation();
       const uint32 laueClassIndex = crystalStructures[cellPhases[voxelIndex]];
@@ -235,7 +285,12 @@ Result<> BadDataNeighborOrientationCheckWorklist::operator()()
             ebsdlib::AxisAngleDType axisAngle = orientationOps[laueClassIndex]->calculateMisorientation(quat1, quat2);
             if(axisAngle[3] < misorientationTolerance)
             {
+              // Increment the neighbor's count because the just-flipped voxel is
+              // now a new good neighbor for it.
               neighborCount[neighborPoint]++;
+              // If the neighbor now meets the threshold, enqueue it for processing.
+              // It may be enqueued multiple times as different neighbors flip, but
+              // the defensive check at the top of the while loop handles duplicates.
               if(neighborCount[neighborPoint] >= currentLevel)
               {
                 worklist.push_back(static_cast<usize>(neighborPoint));
