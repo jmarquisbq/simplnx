@@ -3,6 +3,7 @@
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Common/StringLiteralFormatting.hpp"
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/Core/Preferences.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/SIMPLNXVersion.hpp"
 #include "simplnx/SimplnxPython.hpp"
@@ -11,8 +12,10 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <ostream>
 #include <string>
 
@@ -53,6 +56,8 @@ constexpr StringLiteral k_ExecuteParamShort = "-e";
 constexpr StringLiteral k_PreflightParamShort = "-p";
 constexpr StringLiteral k_LogFileParamShort = "-l";
 constexpr StringLiteral k_ConvertParamShort = "-c";
+constexpr StringLiteral k_MemoryBudgetParamLong = "--memory-budget";
+constexpr StringLiteral k_MemoryBudgetParamShort = "-b";
 
 void LoadApp()
 {
@@ -143,7 +148,8 @@ enum class ArgumentType
   Preflight,
   Help,
   Logfile,
-  Convert
+  Convert,
+  MemoryBudget
 };
 
 struct Argument
@@ -236,6 +242,11 @@ Result<CliArguments> ParseParameters(int argc, char* argv[])
     {
       std::string argStr = ParseArgument(argc, argv, index);
       args.emplace_back(ArgumentType::Convert, argStr);
+    }
+    else if(arg == k_MemoryBudgetParamLong || arg == k_MemoryBudgetParamShort)
+    {
+      std::string argStr = ParseArgument(argc, argv, index);
+      args.emplace_back(ArgumentType::MemoryBudget, argStr);
     }
     else
     {
@@ -446,6 +457,8 @@ void DisplayDefaultHelp()
   cliOut << fmt::format("  {}|{} <pipeline filepath>  [{}|{} <log filepath>]\t", k_ConvertParamLong, k_ConvertParamShort, k_LogFileParamLong, k_LogFileParamShort)
          << "  Convert the SIMPL pipeline at the target filepath. Optionally, create a log file at the specified path.";
   cliOut << fmt::format("  <operand [argument]>  [{}|{} <log filepath>]\t", k_LogFileParamLong, k_LogFileParamShort) << "  Creates a log file at the specified path.";
+  cliOut << fmt::format("  {}|{} <gigabytes>\t", k_MemoryBudgetParamLong, k_MemoryBudgetParamShort)
+         << "  Override the OOC memory budget for this run (decimal GB, e.g. 8 or 1.5). Does not modify saved preferences.\n";
   cliOut.endline();
 }
 
@@ -480,6 +493,14 @@ void DisplayLogfileHelp()
   cliOut.endline();
 }
 
+void DisplayMemoryBudgetHelp()
+{
+  cliOut << "To override the OOC memory budget for this run:\n\t";
+  cliOut << fmt::format("  {}|{} <gigabytes>\t", k_MemoryBudgetParamLong, k_MemoryBudgetParamShort)
+         << "  Override the OOC memory budget for this run only (decimal gigabytes, e.g. 8 or 1.5). Does not modify saved preferences.";
+  cliOut.endline();
+}
+
 Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
 {
   if(arguments.size() == 1)
@@ -503,6 +524,10 @@ Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
   }
   case ArgumentType::Logfile: {
     DisplayLogfileHelp();
+    return {};
+  }
+  case ArgumentType::MemoryBudget: {
+    DisplayMemoryBudgetHelp();
     return {};
   }
   case ArgumentType::Invalid: {
@@ -550,6 +575,8 @@ int main(int argc, char* argv[])
   CliArguments arguments = parsingResult.value();
   std::vector<Result<>> results;
 
+  std::optional<uint64> overrideMemoryBudgetBytes;
+
   // Set log file and check for parsing errors
   for(const Argument& argument : arguments)
   {
@@ -561,6 +588,28 @@ int main(int argc, char* argv[])
     }
     case ArgumentType::Logfile: {
       results.push_back(SetLogFile(argument));
+      break;
+    }
+    case ArgumentType::MemoryBudget: {
+      if(argument.value.empty())
+      {
+        results.push_back(nx::core::MakeErrorResult(k_InvalidArgumentError, "--memory-budget requires a value in gigabytes (e.g. 8 or 1.5)"));
+        break;
+      }
+      try
+      {
+        usize parsedChars = 0;
+        double gb = std::stod(argument.value, &parsedChars);
+        if(parsedChars != argument.value.size() || !std::isfinite(gb) || gb <= 0.0)
+        {
+          results.push_back(nx::core::MakeErrorResult(k_InvalidArgumentError, fmt::format("Invalid value for --memory-budget: '{}' (must be a finite, positive number of gigabytes)", argument.value)));
+          break;
+        }
+        overrideMemoryBudgetBytes = static_cast<uint64>(gb * 1024.0 * 1024.0 * 1024.0);
+      } catch(const std::exception&)
+      {
+        results.push_back(nx::core::MakeErrorResult(k_InvalidArgumentError, fmt::format("Invalid value for --memory-budget: '{}' (expected a positive number of gigabytes)", argument.value)));
+      }
       break;
     }
     case ArgumentType::Convert: {
@@ -580,6 +629,45 @@ int main(int argc, char* argv[])
 
   // Load the Simplnx Application instance and load the plugins
   auto app = nx::core::Application::GetOrCreateInstance();
+
+  struct PreferencesBudgetRestorer
+  {
+    Preferences* prefs = nullptr;
+    bool wasPresent = false;
+    uint64 originalValue = 0;
+    ~PreferencesBudgetRestorer()
+    {
+      if(prefs == nullptr)
+      {
+        return;
+      }
+      if(wasPresent)
+      {
+        prefs->setMemoryBudgetBytes(originalValue);
+      }
+      else
+      {
+        prefs->removeValue(Preferences::k_MemoryBudgetBytes_Key);
+      }
+    }
+  };
+  PreferencesBudgetRestorer budgetRestorer;
+
+  if(overrideMemoryBudgetBytes.has_value())
+  {
+    Preferences* preferences = app->getPreferences();
+    if(preferences != nullptr)
+    {
+      budgetRestorer.prefs = preferences;
+      budgetRestorer.wasPresent = preferences->contains(std::string(Preferences::k_MemoryBudgetBytes_Key));
+      if(budgetRestorer.wasPresent)
+      {
+        budgetRestorer.originalValue = preferences->memoryBudgetBytes();
+      }
+      preferences->setMemoryBudgetBytes(*overrideMemoryBudgetBytes);
+    }
+  }
+
   LoadApp();
 
 #if SIMPLNX_EMBED_PYTHON
