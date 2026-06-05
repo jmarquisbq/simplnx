@@ -1139,10 +1139,31 @@ Result<> DatasetIO::createEmptyDataset(const DimsType& dims)
     return MakeErrorResult(-1021, "createEmptyDataset error: Unable to create dataspace.");
   }
 
+  // Build the dataset creation property list so that a compression-requesting
+  // write (m_CompressionLevel > 0) produces a chunked + deflated dataset, matching
+  // the single-shot writeSpan() path. BuildChunkedDeflateDcpl falls through to
+  // H5P_DEFAULT (contiguous) for compression level 0 and for arrays below the
+  // small-array threshold. This is what lets the two-step OOC streaming write
+  // honor compression: without it the dataset was always created contiguous, so
+  // large OOC arrays were written uncompressed even when WriteOptions requested
+  // compression.
+  auto dcplResult = BuildChunkedDeflateDcpl(dims, sizeof(T), m_CompressionLevel);
+  if(dcplResult.invalid())
+  {
+    H5Sclose(dataspaceId);
+    return MakeErrorResult(dcplResult.errors().front().code, fmt::format("createEmptyDataset error: unable to build dataset creation property list for dataset '{}' in file '{}': {}", getNamePath(),
+                                                                         getFilePath().string(), dcplResult.errors().front().message));
+  }
+  const hid_t dcpl = dcplResult.value();
+
   // Create (or reopen) the dataset. The dataset is left empty; data will
   // be written later via writeSpanHyperslab().
-  auto datasetId = createOrOpenDataset<T>(dataspaceId);
+  auto datasetId = createOrOpenDataset<T>(dataspaceId, dcpl);
   H5Sclose(dataspaceId);
+  if(dcpl != H5P_DEFAULT)
+  {
+    H5Pclose(dcpl);
+  }
   if(datasetId < 0)
   {
     return MakeErrorResult(-1022, "createEmptyDataset error: Unable to create dataset.");
