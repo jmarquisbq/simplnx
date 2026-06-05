@@ -74,11 +74,16 @@ if(SIMPLNX_USE_OOC)
       "Set -DSIMPLNX_OOC_SOURCE_DIR=/path/to/SimplnxOoc/SimplnxOoc")
   endif()
 else()
-  # With OOC compiled out there are no out-of-core algorithm paths to exercise,
-  # so pin the test path to InCoreOnly. Forcing it avoids a stale cached 0/1
-  # (Both/OocOnly) producing tests that can never run.
-  if(NOT SIMPLNX_TEST_ALGORITHM_PATH STREQUAL "2")
-    message(STATUS "SIMPLNX_USE_OOC=OFF: forcing SIMPLNX_TEST_ALGORITHM_PATH=2 (InCoreOnly).")
+  # With OOC compiled out there are no out-of-core data stores, so a pure OocOnly (1)
+  # run would execute tests against data that is never actually out-of-core. Coerce
+  # that to InCoreOnly. Both (0) remains meaningful: the Direct/Scanline dispatch
+  # classes are always compiled into the plugins, and forcing the Scanline (OOC) path
+  # exercises it against in-core data via copyIntoBuffer (a plain std::copy here), which
+  # stays fast while verifying the OOC algorithm produces identical results to the
+  # in-core algorithm. This is the only configuration where Both runs quickly, since a
+  # real OOC build would run the unoptimized Direct path against disk-backed chunks.
+  if(SIMPLNX_TEST_ALGORITHM_PATH STREQUAL "1")
+    message(STATUS "SIMPLNX_USE_OOC=OFF: coercing SIMPLNX_TEST_ALGORITHM_PATH=1 (OocOnly) to 2 (InCoreOnly).")
     set(SIMPLNX_TEST_ALGORITHM_PATH "2" CACHE STRING "Algorithm paths to test: 0=Both, 1=OocOnly, 2=InCoreOnly" FORCE)
   endif()
 endif()
