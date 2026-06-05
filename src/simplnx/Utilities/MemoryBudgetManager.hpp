@@ -49,9 +49,21 @@ public:
   static MemoryBudgetManager& instance();
 
   /**
-   * @brief Returns a default budget of 50% of system RAM, clamped to a minimum of 1 GB.
+   * @brief Returns a default budget of 50% of system RAM, clamped to a minimum of 1 GiB.
    */
   static uint64 defaultBudgetBytes();
+
+  /**
+   * @brief Returns the maximum budget this machine should allow, reserving
+   * headroom for the OS and the application itself.
+   *
+   * cap = max( min(totalRAM - 6 GiB, 0.95 * totalRAM), 1 GiB )
+   *
+   * The 6 GiB reserve binds on machines below ~120 GiB; the 95% fraction binds
+   * above that; the 1 GiB floor protects very small machines. Returns the 1 GiB
+   * floor if total RAM cannot be determined.
+   */
+  static uint64 maxBudgetBytes();
 
   /**
    * @brief Allocates a tracked entry. Evicts oldest entries if needed to stay within budget.
@@ -76,9 +88,13 @@ public:
   void release(AllocationHandle handle);
 
   /**
-   * @brief Sets the memory budget in bytes.
+   * @brief Sets the memory budget in bytes, clamped to maxBudgetBytes().
+   *
+   * Only the UPPER bound is clamped — a caller may still set a budget smaller
+   * than the 1 GiB floor (tests rely on this to exercise eviction).
+   * @return true if the requested value exceeded the cap and was reduced.
    */
-  void setBudgetBytes(uint64 bytes);
+  bool setBudgetBytes(uint64 bytes);
 
   /**
    * @brief Returns the current memory budget in bytes.
@@ -124,6 +140,14 @@ private:
    * @return List of evicted handles
    */
   std::vector<AllocationHandle> makeRoom(uint64 needed);
+
+  /**
+   * @brief Returns total physical system RAM in bytes (0 if it cannot be read).
+   *
+   * Delegates directly to the OS via Memory::GetTotalMemory(); it is not cached,
+   * so do not call it on hot paths.
+   */
+  static uint64 totalSystemRamBytes();
 
   mutable std::mutex m_Mutex;
   std::unordered_map<AllocationHandle, Entry> m_Entries;

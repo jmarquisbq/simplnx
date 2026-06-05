@@ -1,22 +1,22 @@
 #include "simplnx/Utilities/MemoryBudgetManager.hpp"
 
 #include <algorithm>
-#include <limits>
-#include <stdexcept>
 
-#ifdef __APPLE__
-#include <sys/sysctl.h>
-#include <sys/types.h>
-#elif defined(__linux__)
-#include <fstream>
-#include <string>
-#elif defined(_WIN32)
-#define NOMINMAX
-#include <windows.h>
-#endif
+#include "simplnx/Utilities/MemoryUtilities.hpp"
 
 namespace nx::core
 {
+
+namespace
+{
+constexpr uint64 k_MinBudget = uint64{1} * 1024 * 1024 * 1024;          // 1 GiB
+constexpr uint64 k_BudgetReserveBytes = uint64{6} * 1024 * 1024 * 1024; // 6 GiB OS/app headroom
+} // namespace
+
+uint64 MemoryBudgetManager::totalSystemRamBytes()
+{
+  return nx::core::Memory::GetTotalMemory();
+}
 
 MemoryBudgetManager::MemoryBudgetManager()
 : m_BudgetBytes(defaultBudgetBytes())
@@ -31,59 +31,28 @@ MemoryBudgetManager& MemoryBudgetManager::instance()
 
 uint64 MemoryBudgetManager::defaultBudgetBytes()
 {
-  static constexpr uint64 k_MinBudget = uint64{1} * 1024 * 1024 * 1024; // 1 GB
-
-  uint64 totalRam = 0;
-
-#ifdef __APPLE__
-  int mib[2] = {CTL_HW, HW_MEMSIZE};
-  uint64 memsize = 0;
-  size_t len = sizeof(memsize);
-  if(sysctl(mib, 2, &memsize, &len, nullptr, 0) == 0)
-  {
-    totalRam = memsize;
-  }
-#elif defined(__linux__)
-  std::ifstream meminfo("/proc/meminfo");
-  std::string line;
-  while(std::getline(meminfo, line))
-  {
-    if(line.find("MemTotal:") == 0)
-    {
-      // Format: "MemTotal:       12345678 kB"
-      uint64 kb = 0;
-      // Skip "MemTotal:" prefix and parse the number
-      auto pos = line.find_first_of("0123456789");
-      if(pos != std::string::npos)
-      {
-        try
-        {
-          kb = std::stoull(line.substr(pos));
-        } catch(const std::exception&)
-        {
-          return k_MinBudget;
-        }
-      }
-      totalRam = kb * 1024;
-      break;
-    }
-  }
-#elif defined(_WIN32)
-  MEMORYSTATUSEX memStatus;
-  memStatus.dwLength = sizeof(memStatus);
-  if(GlobalMemoryStatusEx(&memStatus))
-  {
-    totalRam = memStatus.ullTotalPhys;
-  }
-#endif
-
+  const uint64 totalRam = totalSystemRamBytes();
   if(totalRam == 0)
   {
     return k_MinBudget;
   }
+  return std::max(totalRam / 2, k_MinBudget);
+}
 
-  uint64 halfRam = totalRam / 2;
-  return std::max(halfRam, k_MinBudget);
+uint64 MemoryBudgetManager::maxBudgetBytes()
+{
+  const uint64 totalRam = totalSystemRamBytes();
+  if(totalRam == 0)
+  {
+    return k_MinBudget;
+  }
+  // Reserve a fixed 6 GiB headroom, but never allow more than 95% of RAM.
+  // 0.95 * total computed as (total - total/20) to stay in integer math and
+  // avoid overflow.
+  const uint64 reserved = (totalRam > k_BudgetReserveBytes) ? (totalRam - k_BudgetReserveBytes) : 0;
+  const uint64 fraction95 = totalRam - totalRam / 20;
+  const uint64 cap = std::min(reserved, fraction95);
+  return std::max(cap, k_MinBudget);
 }
 
 std::pair<MemoryBudgetManager::AllocationHandle, std::vector<MemoryBudgetManager::AllocationHandle>> MemoryBudgetManager::allocate(const std::string& subsystem, const std::string& key,
@@ -128,10 +97,21 @@ void MemoryBudgetManager::release(AllocationHandle handle)
   }
 }
 
-void MemoryBudgetManager::setBudgetBytes(uint64 bytes)
+bool MemoryBudgetManager::setBudgetBytes(uint64 bytes)
 {
+  // Clamp the UPPER bound only. maxBudgetBytes() takes no lock, so compute it
+  // before acquiring m_Mutex.
+  const uint64 maxAllowed = maxBudgetBytes();
+  bool clamped = false;
+  if(bytes > maxAllowed)
+  {
+    bytes = maxAllowed;
+    clamped = true;
+  }
+
   std::lock_guard<std::mutex> lock(m_Mutex);
   m_BudgetBytes = bytes;
+  return clamped;
 }
 
 uint64 MemoryBudgetManager::budgetBytes() const

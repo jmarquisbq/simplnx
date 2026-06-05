@@ -7,6 +7,7 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/SIMPLNXVersion.hpp"
 #include "simplnx/SimplnxPython.hpp"
+#include "simplnx/Utilities/MemoryBudgetManager.hpp"
 #include "simplnx/Utilities/StringUtilities.hpp"
 #include "simplnx/Utilities/TimeUtilities.hpp"
 
@@ -665,6 +666,12 @@ int main(int argc, char* argv[])
         budgetRestorer.originalValue = preferences->memoryBudgetBytes();
       }
       preferences->setMemoryBudgetBytes(*overrideMemoryBudgetBytes);
+      // Apply the override to the running budget manager as well. setBudgetBytes
+      // clamps to the machine-safe maximum. Without this, the OOC chunk/stride
+      // caches would run at the manager's default budget and the override would
+      // be silently ignored in headless runs. (Clamping is silent here, matching
+      // the GUI-only-logging design decision.)
+      nx::core::MemoryBudgetManager::instance().setBudgetBytes(*overrideMemoryBudgetBytes);
     }
   }
 

@@ -115,3 +115,31 @@ TEST_CASE("MemoryBudgetManager cross-subsystem eviction", "[MemoryBudgetManager]
   mgr.release(handlePartition);
   REQUIRE(mgr.usedBytes() == 0);
 }
+
+TEST_CASE("MemoryBudgetManager cap and clamping", "[MemoryBudgetManager]")
+{
+  auto& mgr = MemoryBudgetManager::instance();
+
+  const uint64 oneGiB = uint64{1} * 1024 * 1024 * 1024;
+  const uint64 maxAllowed = MemoryBudgetManager::maxBudgetBytes();
+
+  // The cap is always at least the 1 GiB floor.
+  REQUIRE(maxAllowed >= oneGiB);
+
+  // The 50%-of-RAM default never exceeds the cap.
+  REQUIRE(MemoryBudgetManager::defaultBudgetBytes() <= maxAllowed);
+
+  // An over-cap request is clamped to the cap and reported as clamped.
+  const bool clampedHigh = mgr.setBudgetBytes(maxAllowed + oneGiB);
+  REQUIRE(clampedHigh);
+  REQUIRE(mgr.budgetBytes() == maxAllowed);
+
+  // A tiny budget is accepted verbatim (NOT raised to any floor), so the
+  // existing eviction tests that set 1000-byte / 16-KiB budgets keep working.
+  const bool clampedLow = mgr.setBudgetBytes(1000);
+  REQUIRE_FALSE(clampedLow);
+  REQUIRE(mgr.budgetBytes() == 1000);
+
+  // Restore a sane budget for any later test that shares this singleton.
+  mgr.setBudgetBytes(MemoryBudgetManager::defaultBudgetBytes());
+}
