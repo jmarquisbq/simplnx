@@ -5,6 +5,7 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 
 #include <catch2/catch.hpp>
 #include <filesystem>
@@ -288,6 +289,10 @@ void ValidateRectGridDataStructure(const DataStructure& dataStructure)
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image 2D", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::Create2DImageDataStructure();
 
   {
@@ -328,6 +333,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image 2D", "[SimplnxCore][Co
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image 2D with Element Sizes", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::Create2DImageDataStructure();
 
   {
@@ -368,6 +377,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image 2D with Element Sizes"
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image Stack 3D", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::Create3DImageDataStructure();
 
   {
@@ -408,6 +421,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image Stack 3D", "[SimplnxCo
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image Stack 3D with Element Size", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::Create3DImageDataStructure();
 
   {
@@ -448,6 +465,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Image Stack 3D with Element 
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Rectilinear Grid", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::CreateRectGridDataStructure();
 
   {
@@ -488,6 +509,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Rectilinear Grid", "[Simplnx
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Rectilinear Grid with Element Size", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Run every assertion against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::CreateRectGridDataStructure();
 
   {
@@ -528,6 +553,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Valid: Rectilinear Grid with Elemen
 
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Invalid: Execution Failure", "[SimplnxCore][ComputeFeatureSizes]")
 {
+  // Both the in-core (Direct) and out-of-core (Scanline) paths must surface the same execution error.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
+
   DataStructure dataStructure = Test::Create3DImageDataStructure();
   auto& featureIds = dataStructure.getDataRefAs<Int32Array>(Test::k_FeatureIdsPath);
 
@@ -650,6 +679,10 @@ TEST_CASE("SimplnxCore::ComputeFeatureSizes: Invalid: Preflight Failure", "[Simp
 TEST_CASE("SimplnxCore::ComputeFeatureSizes: Legacy: Small IN100 Test", "[SimplnxCore][ComputeFeatureSizes]")
 {
   UnitTest::LoadPlugins();
+
+  // Run the exemplar comparison against both the in-core (Direct) and out-of-core (Scanline) algorithm paths.
+  const bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
+  const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_stats_test_v2.tar.gz", "6_6_stats_test_v2.dream3d");
 

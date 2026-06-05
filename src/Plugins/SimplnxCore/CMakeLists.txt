@@ -208,6 +208,8 @@ set(AlgorithmList
   ComputeFeaturePhasesBinary
   ComputeFeatureRect
   ComputeFeatureSizes
+  ComputeFeatureSizesDirect
+  ComputeFeatureSizesScanline
   ComputeGroupingDensity
   ComputeKMeans
   ComputeKMedoids

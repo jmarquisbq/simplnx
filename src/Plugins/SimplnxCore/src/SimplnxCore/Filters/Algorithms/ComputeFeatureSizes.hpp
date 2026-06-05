@@ -31,19 +31,28 @@ struct SIMPLNXCORE_EXPORT ComputeFeatureSizesInputValues
 
 /**
  * @class ComputeFeatureSizes
- * @brief Computes the volume (or area in 2D), equivalent diameter, and voxel count
- * for each feature in an Image Geometry or Rectilinear Grid Geometry.
+ * @brief Dispatcher that selects between the in-core (Direct) and out-of-core (Scanline)
+ * feature-size algorithms at runtime.
  *
- * @section ooc_optimization Out-of-Core Optimization
- * The original implementation iterated over all voxels using per-element getValue()
- * calls on the FeatureIds and element-sizes DataStores. For OOC data this caused
- * chunk thrashing on every voxel access.
+ * This class contains no algorithm logic itself. Its operator()() inspects the storage
+ * backing of the FeatureIds array and calls
+ * `DispatchAlgorithm<ComputeFeatureSizesDirect, ComputeFeatureSizesScanline>(...)`.
  *
- * The optimized implementation reads FeatureIds (and element sizes for RectGrid)
- * in fixed-size chunks (64K tuples) via copyIntoBuffer(), processing each chunk
- * from a local buffer. Accumulation uses plain std::vectors, and Kahan summation
- * for RectGrid volumes is performed on the local buffer data rather than through
- * virtual DataStore dispatch.
+ * **Algorithm overview**: For each feature in an Image Geometry or Rectilinear Grid
+ * Geometry, compute its volume (or area in 2D), equivalent spherical/circular diameter,
+ * and voxel count.
+ *
+ * **Dispatch rules** (see AlgorithmDispatch.hpp):
+ * - If the FeatureIds array is backed by in-memory DataStore, the Direct variant is used.
+ *   It parallelizes the per-voxel counting/summation across Z-slices with thread-local
+ *   accumulators.
+ * - If the FeatureIds array uses out-of-core (chunked) storage, the Scanline variant is
+ *   used. It streams FeatureIds (and element sizes for RectGrid) in fixed-size chunks via
+ *   copyIntoBuffer() to avoid per-voxel chunk thrashing.
+ * - Global test-override flags (ForceOocAlgorithm, ForceInCoreAlgorithm) can override the
+ *   automatic detection for unit testing.
+ *
+ * @see ComputeFeatureSizesDirect, ComputeFeatureSizesScanline, DispatchAlgorithm
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureSizes
 {
@@ -57,7 +66,8 @@ public:
   ComputeFeatureSizes& operator=(ComputeFeatureSizes&&) noexcept = delete;
 
   /**
-   * @brief Executes the feature size computation using chunked bulk I/O.
+   * @brief Dispatches to the Direct (in-core) or Scanline (out-of-core) variant based on
+   * whether the FeatureIds array uses out-of-core storage.
    * @return Result<> indicating success or error.
    */
   Result<> operator()();
