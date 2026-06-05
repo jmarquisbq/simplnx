@@ -421,8 +421,10 @@ TEST_CASE("Dream3dLoadingApi: Recovery file with all in-core data")
   DataStructure srcDs = CreateSimpleTestDataStructure();
   fs::path filePath = GetTestOutputDir() / "Dream3dLoadingApiTest_Recovery.dream3d";
 
-  // Write as a recovery file — with OOC not compiled in (SIMPLNX_USE_OOC undefined
-  // for this build), this behaves like WriteFile but exercises the recovery write path
+  // WriteRecoveryFile writes in-core stores' full data inline (only OOC stores
+  // are written as lightweight placeholders pointing at their backing files).
+  // This DataStructure is entirely in-core, so all array data is stored inline
+  // in the recovery file.
   Result<> writeResult = DREAM3D::WriteRecoveryFile(filePath, srcDs);
   SIMPLNX_RESULT_REQUIRE_VALID(writeResult);
   REQUIRE(fs::exists(filePath));
@@ -435,14 +437,18 @@ TEST_CASE("Dream3dLoadingApi: Recovery file with all in-core data")
   const auto& smallPath = k_SmallArrayPath;
   const auto& largePath = k_LargeArrayPath;
 
-  // All arrays should be in-core since OOC is not compiled in (SIMPLNX_USE_OOC undefined)
+  // The recovered store type follows the active large-data preferences: under
+  // forceOocData the arrays load as out-of-core stores backed by the recovery
+  // file itself (its inline data is read on demand); otherwise they load
+  // in-core. RequireExpectedStoreType asserts whichever the preferences dictate.
+  // Either way the data round-trips intact (verified below).
   auto* smallArray = ds.getDataAs<IDataArray>(smallPath);
   REQUIRE(smallArray != nullptr);
-  CHECK(smallArray->getStoreType() == IDataStore::StoreType::InMemory);
+  UnitTest::RequireExpectedStoreType(*smallArray);
 
   auto* largeArray = ds.getDataAs<IDataArray>(largePath);
   REQUIRE(largeArray != nullptr);
-  CHECK(largeArray->getStoreType() == IDataStore::StoreType::InMemory);
+  UnitTest::RequireExpectedStoreType(*largeArray);
 
   // Verify data integrity through the recovery round-trip
   const auto& smallStore = ds.getDataRefAs<Int32Array>(smallPath).getDataStoreRef();
