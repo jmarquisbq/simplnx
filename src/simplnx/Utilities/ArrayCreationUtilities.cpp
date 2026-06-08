@@ -51,3 +51,14 @@ bool ArrayCreationUtilities::CheckMemoryRequirement(const DataStructure& dataStr
   const uint64 memoryUsage = dataStructure.memoryUsage() + requiredMemory;
   return memoryUsage < k_AvailableMemory;
 }
+
+//-----------------------------------------------------------------------------
+bool ArrayCreationUtilities::WouldExceedAvailableMemory(uint64 currentUsageBytes, uint64 requiredMemory, uint64 availableBytes)
+{
+  // Overflow-safe form of (currentUsageBytes + requiredMemory) > availableBytes.
+  if(requiredMemory > availableBytes)
+  {
+    return true;
+  }
+  return currentUsageBytes > (availableBytes - requiredMemory);
+}

@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
+#include <new>
 #include <sstream>
 #include <vector>
 
@@ -221,7 +222,35 @@ IFilter::ExecuteResult IFilter::execute(DataStructure& dataStructure, const Argu
   // We can discard the warnings since they're already reported in preflight
   auto [resolvedArgs, warnings] = GetResolvedArgs(filterArgs, params, *this, executionContext);
 
-  Result<> executeImplResult = executeImpl(dataStructure, resolvedArgs, pipelineFilter, messageHandler, shouldCancel, executionContext);
+  Result<> executeImplResult;
+  try
+  {
+    executeImplResult = executeImpl(dataStructure, resolvedArgs, pipelineFilter, messageHandler, shouldCancel, executionContext);
+  } catch(const std::bad_alloc&)
+  {
+    // Memory-safety net: convert an allocation failure into a clean pipeline error
+    // instead of crashing the application. We are already out of memory, so building
+    // the message (fmt::format and humanName() both allocate) is guarded by a nested
+    // fallback — otherwise a nested std::bad_alloc would escape this handler and crash.
+    //
+    // Caveats: on Linux under the default heuristic overcommit, new() typically
+    // succeeds and the kernel OOM-killer SIGKILLs the process with no catchable
+    // exception; this net engages reliably on Windows/macOS and strict-overcommit
+    // Linux (vm.overcommit_memory=2). Output arrays created earlier by applyRegular
+    // remain in dataStructure (possibly uninitialized); the pipeline executor is
+    // responsible for discarding/rolling back dataStructure on error.
+    std::string message;
+    try
+    {
+      message = fmt::format("Filter '{}' ran out of memory while executing. "
+                            "Consider enabling out-of-core storage or reducing the data size.",
+                            humanName());
+    } catch(...)
+    {
+      message = "A filter ran out of memory while executing.";
+    }
+    return {MakeErrorResult(-272, std::move(message))};
+  }
   if(shouldCancel)
   {
     return {MakeErrorResult(-1, "Filter cancelled")};

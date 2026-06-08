@@ -150,10 +150,27 @@ public:
    *   implementation) that should be used for execution.
    *
    * @return std::string The data format identifier
+   * @note The virtual getDataFormat() (from the base store) intentionally returns "" for an
+   *       EmptyDataStore — do NOT override it here. See memoryUsage() for the rationale.
    */
   std::string dataFormat() const
   {
     return m_DataFormat;
+  }
+
+  /**
+   * @brief Returns the in-core RAM this placeholder represents: the logical byte size for an
+   * in-core array, or 0 for an out-of-core array (whose primary storage lives on disk), mirroring
+   * AbstractOocStore::memoryUsage(). CreateArray stamps a non-empty format only for OOC arrays, so
+   * an empty m_DataFormat means in-core.
+   *
+   * NOTE: do NOT add a getDataFormat() override here — it would change which store ~12 filters
+   * request for their outputs in execute (they propagate inputArray.getDataFormat() into a
+   * CreateArrayAction during preflight, and the base getDataFormat() intentionally returns "").
+   */
+  uint64 memoryUsage() const override
+  {
+    return m_DataFormat.empty() ? (sizeof(T) * this->getSize()) : 0;
   }
 
   /**

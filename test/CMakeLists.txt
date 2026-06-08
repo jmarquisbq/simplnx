@@ -41,6 +41,7 @@ add_executable(simplnx_test
   IOFormat.cpp
   IParallelAlgorithmTest.cpp
   MemoryBudgetManagerTest.cpp
+  MemorySafetyTest.cpp
   MontageTest.cpp
   NeighborUtilitiesTest.cpp
   PluginTest.cpp
