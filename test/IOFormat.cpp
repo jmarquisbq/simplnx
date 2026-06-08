@@ -31,82 +31,57 @@ TEST_CASE("Memory Check", "IOTest")
 // =============================================================================
 // Data Format Preference Tests
 //
-// These verify the in-core build's large-data-format preference behavior. They
-// are compiled only when OOC is NOT built in: when SIMPLNX_USE_OOC is defined,
-// Preferences seeds the default large-data format to "HDF5-OOC" (so "not
-// configured" resolves to OOC rather than in-memory), and that OOC-build
-// behavior is covered separately by SimplnxOoc's DataFormatPreferenceTest.
+// These verify the OOC-free build's storage behavior driven by the canonical
+// DataStorageMode preference. With no OOC manager registered, the only available
+// store is in-memory, so every mode produces an InMemory store; useOocData() still
+// reports the user intent (true unless ForceInCore). The OOC-build counterpart
+// (where ForceOutOfCore/Adaptive map onto "HDF5-OOC") is covered separately by the
+// OOC plugin's own DataFormatPreferenceTest, built only when OOC is compiled in.
 // =============================================================================
-#ifndef SIMPLNX_USE_OOC
 
-TEST_CASE("Data Format: Not configured defaults to InMemory store", "[IOTest][DataFormat]")
+TEST_CASE("Data Format: ForceInCore keeps useOocData false and stores in memory", "[IOTest][DataFormat]")
 {
   auto* prefs = Application::GetOrCreateInstance()->getPreferences();
 
-  // With OOC not compiled in and no format explicitly configured,
-  // setLargeDataFormat("") clears the key so the seeded default applies. In the
-  // in-core build that default is k_InMemoryFormat, so useOocData() is false.
-  std::string savedFormat = prefs->largeDataFormat();
-  prefs->setLargeDataFormat("");
-  REQUIRE(prefs->largeDataFormat() == Preferences::k_InMemoryFormat);
+  const DataStorageMode savedMode = prefs->dataStorageMode();
+  prefs->setDataStorageMode(DataStorageMode::ForceInCore);
+
+  // ForceInCore is the only mode for which OOC is "not in use".
   REQUIRE_FALSE(prefs->useOocData());
 
-  // The resolver-aware CreateDataStore should produce an InMemory store: with no
-  // OOC compiled in, the resolver is bypassed and storage is always in-memory.
+  // CreateDataStore should produce an InMemory store regardless of size.
   DataStructure ds;
   DataPath dp({"TestArray"});
   auto store = DataStoreUtilities::CreateDataStore<float32>(ds, dp, {100, 100, 100}, {1}, IDataAction::Mode::Execute);
   REQUIRE(store != nullptr);
   REQUIRE(store->getStoreType() == IDataStore::StoreType::InMemory);
 
-  prefs->setLargeDataFormat(savedFormat);
+  prefs->setDataStorageMode(savedMode);
 }
 
-TEST_CASE("Data Format: Explicit InMemory format prevents OOC", "[IOTest][DataFormat]")
+TEST_CASE("Data Format: Adaptive and ForceOutOfCore report useOocData true", "[IOTest][DataFormat]")
 {
   auto* prefs = Application::GetOrCreateInstance()->getPreferences();
 
-  std::string savedFormat = prefs->largeDataFormat();
-  prefs->setLargeDataFormat(std::string(Preferences::k_InMemoryFormat));
+  const DataStorageMode savedMode = prefs->dataStorageMode();
 
-  // k_InMemoryFormat is non-empty but should NOT enable OOC
-  REQUIRE_FALSE(prefs->largeDataFormat().empty());
-  REQUIRE(prefs->largeDataFormat() == Preferences::k_InMemoryFormat);
-  REQUIRE_FALSE(prefs->useOocData());
+  // OOC is "in use" for both size-driven and always-out-of-core intents.
+  prefs->setDataStorageMode(DataStorageMode::Adaptive);
+  REQUIRE(prefs->useOocData());
 
-  // The resolver-aware CreateDataStore should still produce InMemory even for
-  // large arrays: the resolver either returns "" or k_InMemoryFormat, both of
-  // which route to the built-in in-memory factory.
+  prefs->setDataStorageMode(DataStorageMode::ForceOutOfCore);
+  REQUIRE(prefs->useOocData());
+
+  // With no OOC manager registered in this build, even ForceOutOfCore can only
+  // produce an in-memory store — the resolver has no disk-backed format to return.
   DataStructure ds;
   DataPath dp({"TestArray"});
   auto store = DataStoreUtilities::CreateDataStore<float32>(ds, dp, {100, 100, 100}, {1}, IDataAction::Mode::Execute);
   REQUIRE(store != nullptr);
   REQUIRE(store->getStoreType() == IDataStore::StoreType::InMemory);
 
-  prefs->setLargeDataFormat(savedFormat);
+  prefs->setDataStorageMode(savedMode);
 }
-
-TEST_CASE("Data Format: checkUseOoc returns false for empty string", "[IOTest][DataFormat]")
-{
-  auto* prefs = Application::GetOrCreateInstance()->getPreferences();
-
-  std::string savedFormat = prefs->largeDataFormat();
-  prefs->setLargeDataFormat("");
-  REQUIRE_FALSE(prefs->useOocData());
-  prefs->setLargeDataFormat(savedFormat);
-}
-
-TEST_CASE("Data Format: checkUseOoc returns false for InMemory format", "[IOTest][DataFormat]")
-{
-  auto* prefs = Application::GetOrCreateInstance()->getPreferences();
-
-  std::string savedFormat = prefs->largeDataFormat();
-  prefs->setLargeDataFormat(std::string(Preferences::k_InMemoryFormat));
-  REQUIRE_FALSE(prefs->useOocData());
-  prefs->setLargeDataFormat(savedFormat);
-}
-
-#endif // !SIMPLNX_USE_OOC
 
 TEST_CASE("Data Format: Cannot register IO manager with reserved InMemory name", "[IOTest][DataFormat]")
 {

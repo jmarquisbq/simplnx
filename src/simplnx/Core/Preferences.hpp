@@ -15,6 +15,31 @@ namespace nx::core
 class AbstractPlugin;
 
 /**
+ * @enum DataStorageMode
+ * @brief Tri-state user preference describing how the application decides
+ *        whether a newly created DataArray is backed by in-core (RAM) or
+ *        out-of-core (disk) storage.
+ *
+ * - Adaptive:       Choose per-array by comparing the array's byte size against
+ *                   a configurable threshold. Arrays at or above the threshold
+ *                   are routed to out-of-core storage; smaller arrays stay
+ *                   in-core. Arrays of unknown size stay in-core.
+ * - ForceInCore:    Always use in-core (RAM) storage regardless of size.
+ * - ForceOutOfCore: Always use out-of-core (disk) storage regardless of size.
+ *
+ * @note This enum is OOC-vocabulary-free on purpose: simplnx core defines the
+ *       user intent, and the OOC-enabled build maps ForceOutOfCore/Adaptive
+ *       onto a concrete on-disk format. The integer values are persisted in the
+ *       preferences JSON, so their order must remain stable.
+ */
+enum class DataStorageMode : int
+{
+  Adaptive,
+  ForceInCore,
+  ForceOutOfCore
+};
+
+/**
  * @class Preferences
  * @brief Manages application and plugin-specific preferences with support for default values and file persistence.
  * Handles both global application preferences and plugin-specific settings, including out-of-core data management.
@@ -34,13 +59,15 @@ public:
   /// and may be written to an OOC-capable format instead of in-memory storage.
   static inline constexpr StringLiteral k_LargeDataSize_Key = "large_data_size";
 
-  /// Name of the preferred storage format for large DataArrays (e.g., "HDF5-OOC").
-  /// An empty string means "not yet configured by the user or the compiled-in default".
+  /// Legacy large-data-format key. Retained solely so dataStorageMode() can migrate
+  /// older preference files (written before k_DataStorageMode_Key existed) to the
+  /// canonical data_storage_mode value. New code never writes this key.
   static inline constexpr StringLiteral k_PreferredLargeDataFormat_Key = "large_data_format";
 
-  /// Sentinel value for k_PreferredLargeDataFormat_Key that explicitly requests
-  /// in-memory storage. This is distinct from an empty string, which means
-  /// "not configured" and falls back to the compiled-in default.
+  /// Sentinel value that an older preference file may carry for
+  /// k_PreferredLargeDataFormat_Key to mean "explicit in-memory storage".
+  /// Retained so dataStorageMode()'s migration branch can recognize that value and
+  /// map it to DataStorageMode::ForceInCore.
   static inline constexpr StringLiteral k_InMemoryFormat = "Simplnx-Default-In-Memory";
 
   /// Byte-size threshold for the entire DataStructure. When total memory usage
@@ -48,9 +75,15 @@ public:
   /// The default is computed dynamically by updateMemoryDefaults() based on system RAM.
   static inline constexpr StringLiteral k_LargeDataStructureSize_Key = "large_datastructure_size";
 
-  /// Boolean flag that, when true, forces all new DataArrays to use OOC storage
-  /// regardless of their size. Only takes effect when an OOC format is active.
+  /// Legacy force-OOC key. Retained solely so dataStorageMode() can migrate older
+  /// preference files (written before k_DataStorageMode_Key existed) to the canonical
+  /// data_storage_mode value. New code never writes this key.
   static inline constexpr StringLiteral k_ForceOocData_Key = "force_ooc_data";
+
+  /// Canonical tri-state preference describing how new DataArrays choose between
+  /// in-core and out-of-core storage. Persisted as the integer value of the
+  /// DataStorageMode enum. See DataStorageMode for the per-mode semantics.
+  static inline constexpr StringLiteral k_DataStorageMode_Key = "data_storage_mode";
 
   /// Filesystem path to the directory where OOC temporary files (chunk stores,
   /// backing HDF5 files) are created during filter execution.
@@ -231,46 +264,43 @@ public:
   Result<> loadFromFile(const std::filesystem::path& filepath);
 
   /**
-   * @brief Gets the default format for large data storage.
-   * @return String representing the default large data format
-   */
-  std::string defaultLargeDataFormat() const;
-
-  /**
-   * @brief Sets the default format for large data storage.
-   * @param dataFormat The format to use as default for large data
-   */
-  void setDefaultLargeDataFormat(std::string dataFormat);
-
-  /**
-   * @brief Gets the current format for large data storage.
-   * @return String representing the current large data format
-   */
-  std::string largeDataFormat() const;
-
-  /**
-   * @brief Sets the format for large data storage.
-   * @param dataFormat The format to use for large data
-   */
-  void setLargeDataFormat(std::string dataFormat);
-
-  /**
-   * @brief Checks if out-of-core (OOC) data mode is being used.
-   * @return True if OOC data mode is enabled, false otherwise
+   * @brief Reports whether out-of-core storage is in use, derived from the
+   *        canonical DataStorageMode preference.
+   *
+   * OOC is considered "in use" unless the user has forced in-core storage, so
+   * both Adaptive and ForceOutOfCore report true. This is a convenience view over
+   * dataStorageMode() for callers that only need the binary in-core/OOC answer.
+   *
+   * @return true unless dataStorageMode() is DataStorageMode::ForceInCore.
    */
   bool useOocData() const;
 
   /**
-   * @brief Checks if out-of-core (OOC) data mode is forced.
-   * @return True if OOC data mode is forced, false otherwise
+   * @brief Returns the canonical storage-mode preference (Adaptive, ForceInCore,
+   *        or ForceOutOfCore) that drives the per-array in-core vs out-of-core
+   *        decision.
+   *
+   * This is the single source of truth for storage intent. When the user has an
+   * explicit data_storage_mode saved it is returned directly. For preferences
+   * files written before this key existed, the value is derived once from the
+   * older force-OOC / large-data-format keys so existing installs keep their
+   * behavior. A fresh install with no relevant saved values reports the seeded
+   * default of Adaptive.
+   *
+   * @return The active DataStorageMode.
    */
-  bool forceOocData() const;
+  DataStorageMode dataStorageMode() const;
 
   /**
-   * @brief Sets whether to force out-of-core (OOC) data mode.
-   * @param forceOoc True to force OOC mode, false otherwise
+   * @brief Persists the canonical storage-mode preference.
+   *
+   * Writes only the data_storage_mode key; the older force-OOC / large-data-format
+   * keys are intentionally left untouched so that no OOC-specific vocabulary is
+   * introduced from simplnx core.
+   *
+   * @param mode The storage mode to persist.
    */
-  void setForceOocData(bool forceOoc);
+  void setDataStorageMode(DataStorageMode mode);
 
   /**
    * @brief Recomputes the default value for k_LargeDataStructureSize_Key based
@@ -364,20 +394,8 @@ protected:
    */
   void addDefaultValues(std::string pluginName, std::string valueName, const nlohmann::json& value);
 
-  /**
-   * @brief Recomputes the cached m_UseOoc flag based on the current value of
-   *        k_PreferredLargeDataFormat_Key.
-   *
-   * OOC mode is considered active when the resolved format string is non-empty
-   * and is not the sentinel value k_InMemoryFormat. This method is called after
-   * any operation that could change the format: construction, loadFromFile(),
-   * setLargeDataFormat(), and setDefaultLargeDataFormat().
-   */
-  void checkUseOoc();
-
 private:
   nlohmann::json m_DefaultValues;
   nlohmann::json m_Values;
-  bool m_UseOoc = false;
 };
 } // namespace nx::core

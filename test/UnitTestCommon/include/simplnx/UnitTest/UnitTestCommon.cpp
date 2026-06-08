@@ -275,19 +275,17 @@ std::error_code TestFileSentinel::decompress()
   return {};
 }
 
-PreferencesSentinel::PreferencesSentinel(std::string largeDataFormat, int64 largeDataSize, bool forceOocData)
+PreferencesSentinel::PreferencesSentinel(nx::core::DataStorageMode mode, int64 largeDataSize)
 {
   auto* prefs = nx::core::Application::Instance()->getPreferences();
 
   // Save current preference values
-  m_OriginalFormat = prefs->largeDataFormat();
+  m_OriginalMode = prefs->dataStorageMode();
   m_OriginalSize = prefs->valueAs<int64>(nx::core::Preferences::k_LargeDataSize_Key);
-  m_OriginalForceOoc = prefs->forceOocData();
 
-  // Set new preference values
-  prefs->setLargeDataFormat(std::move(largeDataFormat));
+  // Apply the test-specific values
+  prefs->setDataStorageMode(mode);
   prefs->setValue(nx::core::Preferences::k_LargeDataSize_Key, largeDataSize);
-  prefs->setForceOocData(forceOocData);
 }
 
 PreferencesSentinel::~PreferencesSentinel()
@@ -295,9 +293,8 @@ PreferencesSentinel::~PreferencesSentinel()
   auto* prefs = nx::core::Application::Instance()->getPreferences();
 
   // Restore original preference values
-  prefs->setLargeDataFormat(m_OriginalFormat);
+  prefs->setDataStorageMode(m_OriginalMode);
   prefs->setValue(nx::core::Preferences::k_LargeDataSize_Key, m_OriginalSize);
-  prefs->setForceOocData(m_OriginalForceOoc);
 
   // Save preferences to disk
   nx::core::Application::Instance()->savePreferences();

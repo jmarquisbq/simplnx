@@ -177,7 +177,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceFeaturesFilter: 3D", "[SimplnxCore][Comput
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_test_data_1_v2.tar.gz", "6_5_test_data_1_v2");
 
   // Read the Small IN100 Data set
@@ -231,7 +231,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceFeaturesFilter: 2D(XY Plane)", "[SimplnxCo
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
 
   test_impl(std::vector<uint64>({100, 100, 1}), k_FeatureIds2DFileName, k_SurfaceFeatures2DExemplaryFileName);
 }
@@ -242,7 +242,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceFeaturesFilter: 2D(XZ Plane)", "[SimplnxCo
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
 
   test_impl(std::vector<uint64>({100, 1, 100}), k_FeatureIds2DFileName, k_SurfaceFeatures2DExemplaryFileName);
 }
@@ -253,7 +253,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceFeaturesFilter: 2D(YZ Plane)", "[SimplnxCo
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
 
   test_impl(std::vector<uint64>({1, 100, 100}), k_FeatureIds2DFileName, k_SurfaceFeatures2DExemplaryFileName);
 }
@@ -278,7 +278,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceFeaturesFilter: 200x200x200 block features
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   DataStructure dataStructure;
   BuildBlockFeatureIds(dataStructure);

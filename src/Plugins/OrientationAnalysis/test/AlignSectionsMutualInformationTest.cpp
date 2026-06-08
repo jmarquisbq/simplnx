@@ -19,7 +19,7 @@ using namespace nx::core;
 TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformationFilter: Valid filter execution")
 {
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -78,7 +78,7 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformationFilter: Valid filt
 TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformationFilter: InValid filter execution")
 {
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -122,7 +122,7 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformationFilter: InValid fi
 TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformationFilter: output test", "[Reconstruction][AlignSectionsMutualInformationFilter]")
 {
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -199,7 +199,7 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMutualInformation: Benchmark 200x20
 {
   UnitTest::LoadPlugins();
   // 200x200x200, Quats float32 4-comp => 200*200*4*4 = 640,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 640000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 640000);
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);

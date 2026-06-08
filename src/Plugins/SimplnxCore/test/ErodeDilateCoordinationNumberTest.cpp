@@ -111,7 +111,7 @@ TEST_CASE("SimplnxCore::ErodeDilateCoordinationNumberFilter: Small Correctness",
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // 20x20x20, EulerAngles (float32, 3-comp) => 20*20*3*4 = 4,800 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 4800, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 4800);
 
   DYNAMIC_SECTION("forceOoc: " << forceOocAlgo)
   {
@@ -174,7 +174,7 @@ TEST_CASE("SimplnxCore::ErodeDilateCoordinationNumberFilter: 200x200x200 Large O
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // 200x200x200, EulerAngles (float32, 3-comp) => 200*200*3*4 = 480,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 480000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 480000);
 
   DYNAMIC_SECTION("forceOoc: " << forceOocAlgo)
   {

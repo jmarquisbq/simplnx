@@ -97,7 +97,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test01_SingleSmallDefect", "[Core][FillBadD
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true); // 100 bytes - force very small arrays to OOC
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100); // 100 bytes - force very small arrays to OOC
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -141,7 +141,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test02_SingleLargeDefect", "[Core][FillBadD
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -185,7 +185,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test03_ThresholdBoundary", "[Core][FillBadD
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -224,7 +224,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test04_MultipleSmallDefects", "[Core][FillB
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 500, true); // Slightly larger for 10x10x10
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 500); // Slightly larger for 10x10x10
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -263,7 +263,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test05_MixedSmallAndLarge", "[Core][FillBad
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 500, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 500);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -302,7 +302,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test06_SingleVoxelDefects", "[Core][FillBad
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -341,7 +341,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test07_DefectsAtBoundaries", "[Core][FillBa
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -378,7 +378,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test11_NeighborTieBreaking", "[Core][FillBa
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 50, true); // Very small for 3x3x3
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 50); // Very small for 3x3x3
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -420,7 +420,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test13_StoreAsNewPhase", "[Core][FillBadDat
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
 
   // Configure out-of-core settings (automatically restored on scope exit)
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 100, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 100);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -461,7 +461,7 @@ TEST_CASE("SimplnxCore::FillBadData: 200x200x200 Correctness", "[Core][FillBadDa
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // int32 1-comp => 200*200*4 = 160,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_ExemplarFile);
@@ -514,7 +514,7 @@ TEST_CASE("SimplnxCore::FillBadData: 200x200x200 Ignored Arrays", "[Core][FillBa
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // int32 1-comp => 200*200*4 = 160,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   constexpr int32 k_Sentinel = -999;
 

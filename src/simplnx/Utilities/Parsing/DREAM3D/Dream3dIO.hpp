@@ -19,6 +19,7 @@ class FileIO;
 namespace nx::core
 {
 class DataStructure;
+class IDataStoreFormatResolver;
 
 namespace DREAM3D
 {
@@ -57,15 +58,32 @@ SIMPLNX_EXPORT PipelineVersionType GetPipelineVersion(const nx::core::HDF5::File
  * @brief Loads a complete DataStructure from a .dream3d file with all arrays
  * receiving real data stores (in-core or OOC).
  *
- * Supports both v8.0 and legacy v7.0 file formats. In an OOC-enabled build
- * (compiled in under SIMPLNX_USE_OOC) the OOC import path decides whether each
- * array becomes an in-core DataStore or a lazy OOC store backed by the HDF5
- * file; in a non-OOC build every array is eager-loaded in-core.
+ * Supports both v8.0 and legacy v7.0 file formats. When a registered IO manager
+ * finalizes imports (the out-of-core manager) the import is deferred to that
+ * manager, which decides whether each array becomes an in-core DataStore or a
+ * lazy disk-backed store; otherwise every array is eager-loaded in-core.
  *
  * @param path Filesystem path to the .dream3d file
  * @return Result containing the fully loaded DataStructure, or errors on failure
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructure(const std::filesystem::path& path);
+
+/**
+ * @brief Loads a complete DataStructure from a .dream3d file, stamping a per-DataStructure
+ * store-format resolver before import finalization runs.
+ *
+ * Identical to the no-resolver overload except that @p resolver is installed on the
+ * DataStructure before the IO-manager finalize pass. This allows callers (e.g. read-only
+ * visualization loads) to supply a resolver that directs each array to a disk-backed out-of-core
+ * store rather than loading data into memory, enabling fast first-show without eager
+ * in-core allocation. Passing nullptr uses the process-level default resolver, which
+ * matches the behavior of the no-resolver overload.
+ *
+ * @param path     Filesystem path to the .dream3d file
+ * @param resolver Per-DataStructure store-format policy; nullptr = process default
+ * @return Result containing the fully loaded DataStructure, or errors on failure
+ */
+SIMPLNX_EXPORT Result<DataStructure> LoadDataStructure(const std::filesystem::path& path, std::shared_ptr<const IDataStoreFormatResolver> resolver);
 
 /**
  * @brief Loads specific arrays from a .dream3d file with real data stores,
@@ -80,6 +98,23 @@ SIMPLNX_EXPORT Result<DataStructure> LoadDataStructure(const std::filesystem::pa
  * @return Result containing the pruned DataStructure with only requested arrays
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureArrays(const std::filesystem::path& path, const std::vector<DataPath>& dataPaths);
+
+/**
+ * @brief Loads specific arrays from a .dream3d file, stamping a per-DataStructure
+ * store-format resolver before import finalization runs, then pruning unrequested objects.
+ *
+ * Identical to the no-resolver overload except that @p resolver is installed on the
+ * DataStructure before the IO-manager finalize pass. This lets callers supply a resolver
+ * that attaches disk-backed out-of-core stores for the requested arrays — useful when a read-only
+ * visualization load wants to stream only certain arrays from disk without loading any
+ * unneeded data in-core. Passing nullptr uses the process-level default resolver.
+ *
+ * @param path      Filesystem path to the .dream3d file
+ * @param dataPaths The specific DataPaths to load from the file
+ * @param resolver  Per-DataStructure store-format policy; nullptr = process default
+ * @return Result containing the pruned DataStructure with only requested arrays
+ */
+SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureArrays(const std::filesystem::path& path, const std::vector<DataPath>& dataPaths, std::shared_ptr<const IDataStoreFormatResolver> resolver);
 
 /**
  * @brief Loads the topology (metadata skeleton) of a .dream3d file without

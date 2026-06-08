@@ -2,12 +2,6 @@
 
 #include "simplnx/simplnx_export.hpp"
 
-#include "simplnx/Common/SimplnxConfig.hpp"
-#ifdef SIMPLNX_USE_OOC
-#include "SimplnxOoc/OocDataIOManager.hpp" // SimplnxOoc::resolveFormat
-#include "SimplnxOoc/StoreFactory.hpp"     // SimplnxOoc::createChunkedStore, k_OocFormatName
-#endif
-
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Core/Preferences.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
@@ -34,6 +28,44 @@ namespace nx::core::ArrayCreationUtilities
  * @return true if the combined memory requirement fits within available memory, false otherwise
  */
 SIMPLNX_EXPORT bool CheckMemoryRequirement(const DataStructure& dataStructure, uint64 requiredMemory);
+
+/**
+ * @brief Returns false (=> the array MUST be in-core) iff an unstructured/poly geometry
+ * (Vertex/Edge/Triangle/Quad/Tetrahedral/Hexahedral) is an ancestor of @p arrayPath. Returns true
+ * for arrays under an Image/RectGrid geometry or with no geometry ancestor. This is the resolver- and
+ * format-independent rule that keeps unstructured-geometry arrays in-core (their OOC stores do not
+ * exist). It walks the path's ancestor containers, so the array itself need not yet exist.
+ *
+ * Note: this answers only whether OOC is structurally permitted for the array's location; it is
+ * separate from size/preference-based resolution. Passing this check means the array CAN be OOC,
+ * not that it WILL be.
+ */
+SIMPLNX_EXPORT bool ParentGeometrySupportsOoc(const DataStructure& dataStructure, const DataPath& arrayPath);
+
+/**
+ * @brief Resolves the storage format for an array/list about to be created, applying the standard order:
+ *  (1) unstructured/poly geometry ancestor => "" (in-core, overrides everything);
+ *  (2) explicit requestedFormat (non-empty) => use it;
+ *  (3) otherwise => the DataStructure's format resolver.
+ *
+ * Note: the unstructured/poly geometry gate is AUTHORITATIVE — it returns in-core ("") even when
+ * requestedFormat is a non-empty explicit format. Arrays under unstructured/poly geometries have no OOC
+ * store implementation, so they are always in-core regardless of any explicit per-filter format request.
+ *
+ * This is the single decision point shared by every array-creation call site (CreateArray here,
+ * CreateDataStore/CreateListStore, and CreateNeighborListAction). The resolver is an interface
+ * (IDataStoreFormatResolver) so the rule stays OOC-agnostic: the in-memory default always returns "",
+ * and an OOC-aware resolver (registered by the OOC plugin) returns a disk-backed format name when its
+ * size/preference policy fires.
+ *
+ * @param dataStructure  The DataStructure that contains (or will contain) the array
+ * @param path           The DataPath where the array lives/will be created
+ * @param numericType    The element data type
+ * @param dataSizeBytes  Total array size in bytes (0 when unknown, e.g. an unpopulated NeighborList)
+ * @param requestedFormat An explicit per-filter format override, or "" to defer to the resolver
+ * @return A registered format name, or "" for the in-memory default
+ */
+SIMPLNX_EXPORT std::string ResolveStorageFormat(const DataStructure& dataStructure, const DataPath& path, DataType numericType, uint64 dataSizeBytes, const std::string& requestedFormat);
 
 /**
  * @brief Creates a DataArray with the given properties
@@ -88,38 +120,14 @@ Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, 
   const usize numTuples = std::accumulate(tupleShape.cbegin(), tupleShape.cend(), static_cast<usize>(1), std::multiplies<>());
   uint64 requiredMemory = numTuples * numComponents * sizeof(T);
 
-  // Resolve the storage format. When OOC is compiled in (SIMPLNX_USE_OOC), this
-  // is a direct call to SimplnxOoc::resolveFormat, the single decision point for
-  // whether an array uses in-core or OOC storage; it considers parent geometry
-  // type, user preferences, and data size. When OOC is not compiled in, the
-  // call is gated out and all arrays default to in-core.
-  //
-  // SimplnxOoc::resolveFormat always returns in-core for arrays under
-  // unstructured/poly geometries because OOC support for those geometry types
-  // has been deferred. See SimplnxOoc::resolveFormat for the full rationale.
+  // Resolve the storage format through the shared decision helper: an unstructured-geometry
+  // ancestor forces in-core (""), else an explicit per-filter override wins, else the
+  // DataStructure's format resolver decides (in-memory default returns "", an OOC-aware
+  // resolver may return a disk-backed format name).
   std::string resolvedFormat;
   if(mode == IDataAction::Mode::Execute)
   {
-    if(!dataFormat.empty())
-    {
-      // User explicitly chose a format via the filter UI — skip format resolution.
-      // Both k_InMemoryFormat and any other registered format name (e.g., "HDF5-OOC")
-      // pass through unchanged; the DataStore factory in DataIOCollection routes
-      // k_InMemoryFormat to the built-in core manager directly.
-      resolvedFormat = dataFormat;
-    }
-    else
-    {
-      // No per-filter override — call SimplnxOoc::resolveFormat directly (it consults
-      // user preferences, size thresholds, and geometry type). It returns either "" for
-      // "default in-memory" or a format name like "HDF5-OOC". When OOC is not compiled
-      // in, the call is gated out and everything stays in-core.
-#ifdef SIMPLNX_USE_OOC
-      resolvedFormat = SimplnxOoc::resolveFormat(dataStructure, path, GetDataType<T>(), requiredMemory);
-#else
-      resolvedFormat = "";
-#endif
-    }
+    resolvedFormat = ResolveStorageFormat(dataStructure, path, GetDataType<T>(), requiredMemory, dataFormat);
 
     // Only check RAM availability for in-core arrays. OOC arrays go to disk
     // and do not consume RAM for their primary storage. "In-core" means either
@@ -139,10 +147,7 @@ Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, 
   }
 
   // Preflight: never allocate; emit an EmptyDataStore that carries shape metadata only.
-  // Execute: hand the resolved format directly to the IO collection's typed factory.
-  // The action layer is the canonical "I've already resolved" caller, so we dispatch
-  // to createDataStoreWithType ourselves rather than going through any helper that
-  // would re-resolve.
+  // Execute: hand the already-resolved format directly to the IO collection's typed factory.
   std::shared_ptr<AbstractDataStore<T>> store;
   switch(mode)
   {
@@ -151,22 +156,10 @@ Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, 
     break;
   }
   case IDataAction::Mode::Execute: {
-#ifdef SIMPLNX_USE_OOC
-    // OOC compiled in: the OOC store factory is NOT registered with the
-    // IOCollection (the compile-time switch replaced the runtime-hook
-    // registration), so the OOC format must be intercepted and constructed
-    // directly here. Any other format falls through to the core factory.
-    if(resolvedFormat == SimplnxOoc::k_OocFormatName)
-    {
-      store = SimplnxOoc::createChunkedStore<T>(tupleShape, compShape);
-    }
-    else
-    {
-      store = DataStoreUtilities::GetIOCollection().createDataStoreWithType<T>(resolvedFormat, tupleShape, compShape);
-    }
-#else
+    // Route through the registered IO managers. The built-in core manager serves the
+    // in-memory default ("" / k_InMemoryFormat); any other registered format (e.g. the
+    // OOC manager's disk-backed format) is served by its manager when that plugin is loaded.
     store = DataStoreUtilities::GetIOCollection().createDataStoreWithType<T>(resolvedFormat, tupleShape, compShape);
-#endif
     break;
   }
   default: {

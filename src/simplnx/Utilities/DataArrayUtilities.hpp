@@ -146,10 +146,13 @@ bool ConvertIDataArray(const std::shared_ptr<IDataArray>& dataArray, const std::
  * @param tupleShape The Tuple Dimensions
  * @param path The DataPath to where the list  will be stored.
  * @param mode The mode to assume: PREFLIGHT or EXECUTE. Preflight will NOT allocate any storage. EXECUTE will allocate the memory/storage
+ * @param dataFormat An explicit per-filter storage format override, or "" to defer to the format
+ *                   resolver. Threaded through to CreateListStore so a filter can force a specific
+ *                   backing store format; empty means "Automatic" (let the resolver decide).
  * @return
  */
 template <class T>
-Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleShape, const DataPath& path, IDataAction::Mode mode)
+Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleShape, const DataPath& path, IDataAction::Mode mode, const std::string& dataFormat = "")
 {
   static constexpr StringLiteral prefix = "CreateNeighborListAction: ";
   auto parentPath = path.getParent();
@@ -172,8 +175,9 @@ Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleSha
   std::string name = path[last];
   // Route through the format resolver so NeighborLists get OOC-backed storage
   // when the OOC plugin is loaded and the array is eligible (the geometry walk
-  // in the resolver still forces in-core for unstructured/poly geometries).
-  auto listStore = DataStoreUtilities::CreateListStore<T>(dataStructure, path, tupleShape, mode);
+  // in the resolver still forces in-core for unstructured/poly geometries). An
+  // explicit per-filter dataFormat override, when supplied, wins over the resolver.
+  auto listStore = DataStoreUtilities::CreateListStore<T>(dataStructure, path, tupleShape, mode, dataFormat);
   NeighborList<T>* neighborList = NeighborList<T>::Create(dataStructure, name, listStore, dataObjectId);
 
   if(neighborList == nullptr)

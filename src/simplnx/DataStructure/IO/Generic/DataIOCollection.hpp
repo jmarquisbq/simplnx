@@ -9,11 +9,20 @@
 #include "simplnx/Common/Types.hpp"
 #include "simplnx/Common/TypesUtility.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+namespace nx::core::HDF5
+{
+class DataStructureWriter;
+class FileIO;
+class GroupIO;
+} // namespace nx::core::HDF5
 
 namespace nx::core
 {
@@ -150,15 +159,44 @@ public:
   /**
    * @brief Finalizes all stores after pipeline execution.
    *
-   * Called after a pipeline finishes executing. When built with
-   * SIMPLNX_USE_OOC, this forwards to SimplnxOoc::finalizeStores, which walks
-   * the DataStructure and transitions OOC stores from write mode to read-only
-   * mode (e.g., closing HDF5 write handles and re-opening as read handles). It
-   * is a no-op for in-core builds and for in-memory stores.
+   * Called after a pipeline finishes executing. Fans out to each registered IO manager's
+   * onFinalizeStores() lifecycle hook. The out-of-core manager uses this to transition its stores
+   * from write mode to read-only (close HDF5 write handles and re-open as read handles); the
+   * in-memory core manager's hook is a no-op.
    *
    * @param dataStructure The DataStructure whose stores should be finalized
    */
   void finalizeStores(DataStructure& dataStructure);
+
+  /**
+   * @brief Returns true if any registered IO manager finalizes .dream3d imports (overrides
+   * finalizesImport). The importer uses this to decide whether to defer data loading to a finalizer
+   * (e.g. the OOC manager) or eager-load everything in-core.
+   */
+  bool anyManagerFinalizesImport() const;
+
+  /**
+   * @brief Dispatches import finalization to the first registered manager that finalizes imports.
+   * Returns std::nullopt when no manager finalizes (the caller then eager-loads in-core). The chosen
+   * manager replaces the placeholders it owns and leaves the rest as Empty placeholders for the caller.
+   */
+  std::optional<Result<>> onImportFinalize(DataStructure& dataStructure, const std::vector<DataPath>& paths, const nx::core::HDF5::FileIO& fileReader);
+
+  /**
+   * @brief Offers a recovery-write override to each registered manager; the first that returns a value
+   * (non-nullopt) handles the write. Returns std::nullopt if none handle it (caller uses the normal path).
+   */
+  std::optional<Result<>> onRecoveryWrite(nx::core::HDF5::DataStructureWriter& writer, const DataObject* dataObject, nx::core::HDF5::GroupIO& parentGroup);
+
+  /**
+   * @brief Fans a base-directory update out to all registered managers (no-op for those that don't use it).
+   */
+  void setBaseDirectory(const std::filesystem::path& path);
+
+  /**
+   * @brief Fans a shutdown call out to all registered managers (flush/clear caches before temp cleanup).
+   */
+  void shutdownManagers();
 
   /**
    * @brief Returns an iterator to the beginning of the manager collection.

@@ -68,7 +68,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Valid filter execution", "[C
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 65536, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 65536);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_find_boundary_cells.tar.gz", "6_6_FindBoundaryCellsExemplar.dream3d");
 
@@ -158,7 +158,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: 200x200x200 octant features"
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   DataStructure dataStructure;
   BuildOctantFeatureIds(dataStructure);

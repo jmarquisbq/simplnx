@@ -288,14 +288,14 @@ class PreferencesSentinel
 {
 public:
   /**
-   * @brief Construct a Preferences Sentinel that saves current preferences, sets new values,
-   * and restores original values on destruction.
+   * @brief Construct a Preferences Sentinel that saves the current storage-mode and
+   * large-data-size preferences, applies the test-specific values, and restores the
+   * originals on destruction (even if the test fails).
    *
-   * @param largeDataFormat The large data format to use (e.g., "Zarr", "FileStore")
-   * @param largeDataSize The large data size threshold in bytes
-   * @param forceOocData Whether to force out-of-core data storage
+   * @param mode The DataStorageMode to apply for the test (Adaptive / ForceInCore / ForceOutOfCore)
+   * @param largeDataSize The large-data size threshold in bytes
    */
-  PreferencesSentinel(std::string largeDataFormat, int64 largeDataSize, bool forceOocData);
+  PreferencesSentinel(nx::core::DataStorageMode mode, int64 largeDataSize);
 
   ~PreferencesSentinel();
 
@@ -305,27 +305,27 @@ public:
   PreferencesSentinel& operator=(PreferencesSentinel&&) = delete;      // Move Assignment Not Implemented
 
 private:
-  std::string m_OriginalFormat;
+  nx::core::DataStorageMode m_OriginalMode;
   int64 m_OriginalSize;
-  bool m_OriginalForceOoc;
 };
 
 /**
- * @brief Returns the expected IDataStore::StoreType based on current preferences
- * and whether the OOC plugin is loaded. When forceOocData is true AND the
- * large data format is registered, expects OutOfCore. Otherwise expects InMemory.
+ * @brief Returns the expected IDataStore::StoreType based on the current
+ * DataStorageMode preference and whether an out-of-core manager is registered.
+ *
+ * Out-of-core storage is expected only when the user has forced it
+ * (DataStorageMode::ForceOutOfCore) AND a build with an out-of-core manager is
+ * actually loaded. anyManagerFinalizesImport() is the OOC-vocabulary-free signal
+ * for that: only the out-of-core manager defers .dream3d imports to disk-backed
+ * placeholders. With no out-of-core manager registered (the OOC-free build),
+ * every array is in-memory regardless of the requested mode.
  */
 inline IDataStore::StoreType ExpectedStoreType()
 {
   auto* prefs = Application::GetOrCreateInstance()->getPreferences();
-  if(prefs->forceOocData())
+  if(prefs->dataStorageMode() == nx::core::DataStorageMode::ForceOutOfCore && DataStoreUtilities::GetIOCollection().anyManagerFinalizesImport())
   {
-    auto& ioCollection = DataStoreUtilities::GetIOCollection();
-    auto manager = ioCollection.getManager(prefs->largeDataFormat());
-    if(manager != nullptr)
-    {
-      return IDataStore::StoreType::OutOfCore;
-    }
+    return IDataStore::StoreType::OutOfCore;
   }
   return IDataStore::StoreType::InMemory;
 }

@@ -90,7 +90,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceAreaToVolume", "[SimplnxCore][ComputeSurfa
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 25600, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 25600);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_stats_test_v2.tar.gz", "6_6_stats_test_v2.dream3d");
 
@@ -167,7 +167,7 @@ TEST_CASE("SimplnxCore::ComputeSurfaceAreaToVolumeFilter: 200x200x200 octant fea
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   DataStructure dataStructure;
   BuildOctantWithNumCells(dataStructure);

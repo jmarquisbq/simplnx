@@ -6,12 +6,15 @@
 #include "simplnx/DataStructure/Geometry/IGeometry.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/DataStructure/INeighborList.hpp"
+#include "simplnx/DataStructure/IO/Generic/IDataStoreFormatResolver.hpp"
+#include "simplnx/DataStructure/IO/Generic/InMemoryFormatResolver.hpp"
 #include "simplnx/DataStructure/LinkedPath.hpp"
 #include "simplnx/DataStructure/Messaging/DataAddedMessage.hpp"
 #include "simplnx/DataStructure/Messaging/DataRemovedMessage.hpp"
 #include "simplnx/DataStructure/Messaging/DataReparentedMessage.hpp"
 #include "simplnx/DataStructure/Observers/AbstractDataStructureObserver.hpp"
 #include "simplnx/Filter/ValueParameter.hpp"
+#include "simplnx/Utilities/ArrayCreationUtilities.hpp"
 #include "simplnx/Utilities/DataArrayUtilities.hpp"
 #include "simplnx/Utilities/DataGroupUtilities.hpp"
 
@@ -24,7 +27,15 @@
 namespace
 {
 const std::string k_Delimiter = "|--";
+
+// Process-wide default resolver. Lazily initialized to InMemoryFormatResolver so a DataStructure
+// created before app startup still resolves sanely (in-core). Replaced once at startup.
+std::shared_ptr<const nx::core::IDataStoreFormatResolver>& DefaultFormatResolverRef()
+{
+  static std::shared_ptr<const nx::core::IDataStoreFormatResolver> s_Default = std::make_shared<nx::core::InMemoryFormatResolver>();
+  return s_Default;
 }
+} // namespace
 
 namespace nx::core
 {
@@ -38,6 +49,7 @@ DataStructure::DataStructure(const DataStructure& dataStructure)
 , m_RootGroup(dataStructure.m_RootGroup)
 , m_IsValid(dataStructure.m_IsValid)
 , m_NextId(dataStructure.m_NextId)
+, m_FormatResolver(dataStructure.m_FormatResolver)
 {
   // Hold a shared_ptr copy of the DataObjects long enough for
   // m_RootGroup.setDataStructure(this) to operate.
@@ -62,6 +74,7 @@ DataStructure::DataStructure(DataStructure&& dataStructure) noexcept
 , m_RootGroup(std::move(dataStructure.m_RootGroup))
 , m_IsValid(dataStructure.m_IsValid)
 , m_NextId(dataStructure.m_NextId)
+, m_FormatResolver(std::move(dataStructure.m_FormatResolver))
 {
   m_RootGroup.setDataStructure(this);
 }
@@ -78,6 +91,28 @@ DataStructure::~DataStructure()
         sharedDataPtr->setDataStructure(nullptr);
       }
     }
+  }
+}
+
+void DataStructure::setFormatResolver(std::shared_ptr<const IDataStoreFormatResolver> resolver)
+{
+  m_FormatResolver = std::move(resolver);
+}
+
+const IDataStoreFormatResolver& DataStructure::formatResolver() const
+{
+  if(m_FormatResolver != nullptr)
+  {
+    return *m_FormatResolver;
+  }
+  return *DefaultFormatResolverRef();
+}
+
+void DataStructure::setDefaultFormatResolver(std::shared_ptr<const IDataStoreFormatResolver> resolver)
+{
+  if(resolver != nullptr)
+  {
+    DefaultFormatResolverRef() = std::move(resolver);
   }
 }
 
@@ -737,6 +772,7 @@ DataStructure& DataStructure::operator=(const DataStructure& rhs)
   m_RootGroup = rhs.m_RootGroup;
   m_IsValid = rhs.m_IsValid;
   m_NextId = rhs.m_NextId;
+  m_FormatResolver = rhs.m_FormatResolver;
 
   // Hold a shared_ptr copy of the DataObjects long enough for
   // m_RootGroup.setDataStructure(this) to operate.
@@ -763,6 +799,7 @@ DataStructure& DataStructure::operator=(DataStructure&& rhs) noexcept
   m_RootGroup = std::move(rhs.m_RootGroup);
   m_IsValid = std::move(rhs.m_IsValid);
   m_NextId = std::move(rhs.m_NextId);
+  m_FormatResolver = std::move(rhs.m_FormatResolver);
 
   applyAllDataStructure();
   return *this;
@@ -983,14 +1020,13 @@ uint64 DataStructure::memoryUsage() const
 
 Result<> DataStructure::transferDataArraysOoc()
 {
-  auto* preferences = Application::GetOrCreateInstance()->getPreferences();
-  if(!preferences->useOocData())
-  {
-    return MakeErrorResult(-3567, "Out-of-core not available");
-  }
-
   Result<> result;
-  std::string targetFormat = preferences->largeDataFormat();
+
+  // Route each array through the SAME decision used at array creation:
+  // ArrayCreationUtilities::ResolveStorageFormat applies the unstructured-geometry
+  // gate, then the explicit-format override, then this DataStructure's format
+  // resolver. This keeps the spill-to-disk path consistent with creation and keeps
+  // core OOC-free — the resolver (not core) names any concrete on-disk format.
   for(const auto& dataIter : m_DataObjects)
   {
     auto dataPtr = dataIter.second.lock();
@@ -999,7 +1035,24 @@ Result<> DataStructure::transferDataArraysOoc()
     {
       continue;
     }
-    if(!ConvertIDataArray(dataArrayPtr, targetFormat))
+
+    // Use the first path as the array's representative location for the geometry gate;
+    // an array linked under multiple geometries is not a supported configuration here.
+    const std::vector<DataPath> paths = getDataPathsForId(dataIter.first);
+    if(paths.empty())
+    {
+      continue;
+    }
+
+    const std::string resolvedFormat = ArrayCreationUtilities::ResolveStorageFormat(*this, paths.front(), dataArrayPtr->getDataType(), dataArrayPtr->memoryUsage(), "");
+
+    // An empty format means the resolver chose in-core for this array; leave it as-is.
+    if(resolvedFormat.empty())
+    {
+      continue;
+    }
+
+    if(!ConvertIDataArray(dataArrayPtr, resolvedFormat))
     {
       result.warnings().emplace_back(Warning{-3570, fmt::format("Cannot convert DataArray: '{}' to out-of-core", dataArrayPtr->getName())});
     }

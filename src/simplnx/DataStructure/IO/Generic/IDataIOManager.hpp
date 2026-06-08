@@ -1,6 +1,8 @@
 #pragma once
 
+#include "simplnx/Common/Result.hpp"
 #include "simplnx/DataStructure/DataObject.hpp"
+#include "simplnx/DataStructure/DataPath.hpp"
 #include "simplnx/DataStructure/IDataStore.hpp"
 #include "simplnx/DataStructure/IListStore.hpp"
 #include "simplnx/DataStructure/IO/Generic/IDataFactory.hpp"
@@ -8,10 +10,19 @@
 
 #include "simplnx/Common/Types.hpp"
 
+#include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+namespace nx::core::HDF5
+{
+class DataStructureWriter;
+class FileIO;
+class GroupIO;
+} // namespace nx::core::HDF5
 
 namespace nx::core
 {
@@ -155,6 +166,61 @@ public:
    * @return The registered StringStoreCreateFnc, or nullptr if none is registered
    */
   StringStoreCreateFnc stringStoreCreationFnc(const std::string& type) const;
+
+  /**
+   * @brief Returns true if this manager finalizes .dream3d imports (provides a real onImportFinalize).
+   * The base returns false. The importer uses DataIOCollection::anyManagerFinalizesImport() to decide
+   * whether to defer data loading to a finalizer (OOC) or eager-load everything in-core.
+   */
+  virtual bool finalizesImport() const
+  {
+    return false;
+  }
+
+  /**
+   * @brief Finalizes placeholder stores after a .dream3d import. An overriding manager replaces the
+   * placeholders it is responsible for (e.g. OOC read-only reference stores, recovery reattachment) and
+   * LEAVES every other placeholder as an Empty store for the importer to eager-load in-core afterward.
+   * Default no-op (returns success); only an OOC-capable manager overrides it.
+   * @param dataStructure The DataStructure containing placeholder stores
+   * @param paths Top-level imported paths (descendants are walked by the implementation)
+   * @param fileReader Open HDF5 reader for the source .dream3d file
+   */
+  virtual Result<> onImportFinalize(DataStructure& /*dataStructure*/, const std::vector<DataPath>& /*paths*/, const HDF5::FileIO& /*fileReader*/)
+  {
+    return {};
+  }
+
+  /**
+   * @brief Intercepts a DataObject write to emit a recovery placeholder instead of full data. Returns
+   * std::nullopt to fall through to the normal write path. Default no-op (std::nullopt).
+   */
+  virtual std::optional<Result<>> onRecoveryWrite(HDF5::DataStructureWriter& /*writer*/, const DataObject* /*dataObject*/, HDF5::GroupIO& /*parentGroup*/)
+  {
+    return std::nullopt;
+  }
+
+  /**
+   * @brief Transitions this manager's stores from write to read-only after pipeline execution. Default no-op.
+   */
+  virtual void onFinalizeStores(DataStructure& /*dataStructure*/)
+  {
+  }
+
+  /**
+   * @brief Sets the base directory for this manager's session working files. Default no-op.
+   */
+  virtual void setBaseDirectory(const std::filesystem::path& /*path*/)
+  {
+  }
+
+  /**
+   * @brief Flushes/clears this manager's caches before shutdown so dirty data is written before temp
+   * cleanup. Default no-op.
+   */
+  virtual void shutdownManager()
+  {
+  }
 
 protected:
   /**

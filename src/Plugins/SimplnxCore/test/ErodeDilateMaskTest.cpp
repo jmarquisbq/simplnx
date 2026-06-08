@@ -94,7 +94,7 @@ TEST_CASE("SimplnxCore::ErodeDilateMaskFilter: Small Correctness", "[SimplnxCore
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // 20x20x20, Mask (bool, 1-comp) => 20*20*1 = 400 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 400, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 400);
 
   auto operation = GENERATE(k_Erode, k_Dilate);
   std::string operationName = (operation == k_Erode) ? "Erode" : "Dilate";
@@ -169,7 +169,7 @@ TEST_CASE("SimplnxCore::ErodeDilateMaskFilter: 200x200x200 Large OOC", "[Simplnx
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // 200x200x200, Mask (bool, 1-comp) => 200*200*1 = 40,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
 
   DYNAMIC_SECTION("forceOoc: " << forceOocAlgo)
   {

@@ -51,6 +51,8 @@ add_executable(simplnx_test
   StringUtilitiesTest.cpp
   FilterValidationTest.cpp
   SimplJsonConversionTest.cpp
+  DataStoreFormatResolverTest.cpp
+  DataStorageModeMigrationTest.cpp
 )
 
 target_link_libraries(simplnx_test

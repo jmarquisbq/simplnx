@@ -1,9 +1,6 @@
 #include "DataIOCollection.hpp"
 
-#include "simplnx/Common/SimplnxConfig.hpp"
-#ifdef SIMPLNX_USE_OOC
-#include "SimplnxOoc/OocDataIOManager.hpp"
-#endif
+#include <cassert>
 
 #include "simplnx/Core/Preferences.hpp"
 #include "simplnx/DataStructure/AbstractStringStore.hpp"
@@ -28,15 +25,9 @@ DataIOCollection::DataIOCollection()
   // HDF5 format name is not reserved, so this cannot fail.
   (void)addIOManager(std::make_shared<nx::core::HDF5::DataIOManager>());
 
-#ifdef SIMPLNX_USE_OOC
-  // Register the out-of-core format ("HDF5-OOC"). Compile-time analog of the
-  // former SimplnxOoc plugin's initialize(), which added the OocDataIOManager
-  // via addIOManager when the plugin loaded. This makes getManager("HDF5-OOC")
-  // resolve so the format is recognized as available (e.g., the unit-test
-  // ExpectedStoreType() check); OOC stores themselves are created through the
-  // StoreFactory entry points, not this manager.
-  SimplnxOoc::registerIOManager(*this);
-#endif
+  // The out-of-core IO manager (format "HDF5-OOC") is NOT registered here. Core does not know
+  // about out-of-core storage; when the out-of-core plugin is present it registers its manager
+  // via addIOManager() at application startup.
 }
 DataIOCollection::~DataIOCollection() noexcept = default;
 
@@ -57,6 +48,23 @@ Result<> DataIOCollection::addIOManager(std::shared_ptr<IDataIOManager> manager)
   }
 
   m_ManagerMap[name] = manager;
+
+  // Invariant: at most one registered manager finalizes .dream3d imports (the OOC manager). The
+  // onImportFinalize fan-out dispatches to the first such manager, so a second would be silently ignored.
+#ifndef NDEBUG
+  {
+    int finalizerCount = 0;
+    for(const auto& [ioType, ioManager] : m_ManagerMap)
+    {
+      if(ioManager->finalizesImport())
+      {
+        ++finalizerCount;
+      }
+    }
+    assert(finalizerCount <= 1 && "DataIOCollection: more than one IO manager reports finalizesImport()==true");
+  }
+#endif
+
   return {};
 }
 
@@ -153,11 +161,70 @@ std::unique_ptr<AbstractStringStore> DataIOCollection::createStringStore(const s
 
 void DataIOCollection::finalizeStores(DataStructure& dataStructure)
 {
-#ifdef SIMPLNX_USE_OOC
-  // Transition OOC stores from write mode to read-only after pipeline execution
-  // (close HDF5 write handles, reopen as read handles). No-op for in-core stores.
-  SimplnxOoc::finalizeStores(dataStructure);
-#endif
+  // Fan out to every registered manager's lifecycle hook. The out-of-core manager uses this to
+  // transition its stores from write mode to read-only (close write handles, reopen as read
+  // handles); the in-memory core manager's hook is a no-op.
+  for(const auto& [ioType, manager] : m_ManagerMap)
+  {
+    manager->onFinalizeStores(dataStructure);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate lifecycle fan-out methods
+// ---------------------------------------------------------------------------
+
+bool DataIOCollection::anyManagerFinalizesImport() const
+{
+  for(const auto& [ioType, ioManager] : m_ManagerMap)
+  {
+    if(ioManager->finalizesImport())
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<Result<>> DataIOCollection::onImportFinalize(DataStructure& dataStructure, const std::vector<DataPath>& paths, const nx::core::HDF5::FileIO& fileReader)
+{
+  for(const auto& [ioType, ioManager] : m_ManagerMap)
+  {
+    if(ioManager->finalizesImport())
+    {
+      return ioManager->onImportFinalize(dataStructure, paths, fileReader);
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<Result<>> DataIOCollection::onRecoveryWrite(nx::core::HDF5::DataStructureWriter& writer, const DataObject* dataObject, nx::core::HDF5::GroupIO& parentGroup)
+{
+  for(const auto& [ioType, ioManager] : m_ManagerMap)
+  {
+    auto overrideResult = ioManager->onRecoveryWrite(writer, dataObject, parentGroup);
+    if(overrideResult.has_value())
+    {
+      return overrideResult;
+    }
+  }
+  return std::nullopt;
+}
+
+void DataIOCollection::setBaseDirectory(const std::filesystem::path& path)
+{
+  for(const auto& [ioType, ioManager] : m_ManagerMap)
+  {
+    ioManager->setBaseDirectory(path);
+  }
+}
+
+void DataIOCollection::shutdownManagers()
+{
+  for(const auto& [ioType, ioManager] : m_ManagerMap)
+  {
+    ioManager->shutdownManager();
+  }
 }
 
 std::vector<std::string> DataIOCollection::getFormatNames() const

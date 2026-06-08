@@ -21,7 +21,7 @@ TEST_CASE("SimplnxCore::AlignSectionsFeatureCentroidFilter: Algorithm Test", "[R
   const DataPath k_ExemplarShiftsPath = Constants::k_ExemplarDataContainerPath.createChildPath("Exemplar Shifts");
 
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -70,7 +70,7 @@ TEST_CASE("SimplnxCore::AlignSectionsFeatureCentroidFilter: output test", "[Reco
   const std::string k_CentroidsName = "Centroids";
 
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -149,7 +149,7 @@ TEST_CASE("SimplnxCore::AlignSectionsFeatureCentroid: Benchmark 200x200x200", "[
 {
   UnitTest::LoadPlugins();
   // 200x200x200, largest cell array is EulerAngles float32 3-comp => 200*200*3*4 = 480,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 480000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 480000);
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);

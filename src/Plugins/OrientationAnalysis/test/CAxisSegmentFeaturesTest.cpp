@@ -74,7 +74,7 @@ TEST_CASE("OrientationAnalysis::CAxisSegmentFeatures: Small Correctness", "[Orie
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // Quats float32 4-comp => 15*15*4*4 = 3,600 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 3600, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 3600);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_SmallExemplarFile);
@@ -131,7 +131,7 @@ TEST_CASE("OrientationAnalysis::CAxisSegmentFeatures: 200x200x200 Large OOC", "[
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // Quats float32 4-comp => 200*200*4*4 = 640,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 640000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 640000);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_LargeExemplarFile);

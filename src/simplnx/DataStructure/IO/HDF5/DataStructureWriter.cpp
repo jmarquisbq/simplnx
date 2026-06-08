@@ -1,10 +1,5 @@
 #include "DataStructureWriter.hpp"
 
-#include "simplnx/Common/SimplnxConfig.hpp"
-#ifdef SIMPLNX_USE_OOC
-#include "SimplnxOoc/OocDataIOManager.hpp"
-#endif
-
 #include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/INeighborList.hpp"
 #include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
@@ -155,24 +150,18 @@ Result<> DataStructureWriter::writeDataObject(const DataObject* dataObject, nx::
   }
 
   // -----------------------------------------------------------------------
-  // OOC recovery-file support
+  // Recovery-write override
   // -----------------------------------------------------------------------
-  // During a recovery WriteFile (a SimplnxOoc::RecoveryWriteGuard is on the
-  // stack), OOC-backed arrays are written as a zero-byte placeholder dataset
-  // annotated with OocBackingFilePath / OocBackingDatasetPath / OocChunkShape
-  // attributes, so the recovery file stays small while preserving enough
-  // metadata to reattach to the backing file on reload (see handleImport).
-  //
-  // maybeWriteRecoveryArray returns std::nullopt when not in recovery mode or
-  // the object is in-core, in which case we fall through to the normal write
-  // path below. When OOC is not compiled in, none of this exists.
-#ifdef SIMPLNX_USE_OOC
-  auto overrideResult = SimplnxOoc::maybeWriteRecoveryArray(*this, dataObject, parentGroup);
-  if(overrideResult.has_value())
+  // Offer each registered IO manager a chance to override how this object is serialized.
+  // During a recovery WriteFile the out-of-core manager intercepts its disk-backed arrays and
+  // writes a zero-byte placeholder dataset annotated with backing-file metadata (so the recovery
+  // file stays small while preserving enough to reattach on reload). A value means the manager
+  // handled the write; std::nullopt means fall through to the normal write path below. With no
+  // out-of-core manager registered, the fan-out always returns std::nullopt.
+  if(auto overrideResult = Application::GetOrCreateInstance()->getIOCollection().onRecoveryWrite(*this, dataObject, parentGroup); overrideResult.has_value())
   {
     return overrideResult.value();
   }
-#endif
 
   // Normal write path
   auto factory = m_IOManager->getFactoryAs<IDataIO>(dataObject->getTypeName());

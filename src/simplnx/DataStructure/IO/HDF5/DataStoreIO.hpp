@@ -81,7 +81,7 @@ inline Result<std::shared_ptr<AbstractDataStore<T>>> ReadDataStoreIntoMemory(con
     Result<std::shared_ptr<AbstractDataStore<T>>> result;
     result.warnings().push_back(Warning{-89200, fmt::format("Unable to read dataset '{}' at path '{}': the file contains {} elements but the shape "
                                                             "attributes indicate {} elements. This typically means the dataset is an out-of-core placeholder whose "
-                                                            "data is not stored inline; reading its full contents requires an out-of-core-enabled (SIMPLNX_USE_OOC) build.",
+                                                            "data is not stored inline; reading its full contents requires an out-of-core-enabled build.",
                                                             datasetReader.getName(), datasetReader.getObjectPath(), physicalElements, expectedElements)});
     return result;
   }

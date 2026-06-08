@@ -68,7 +68,7 @@ TEST_CASE("SimplnxCore::ScalarSegmentFeatures: Small Correctness", "[SimplnxCore
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // int32 1-comp => 15*15*4 = 900 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 900, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 900);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_SmallExemplarFile);
@@ -162,7 +162,7 @@ TEST_CASE("SimplnxCore::ScalarSegmentFeatures: 200x200x200 Large OOC", "[Simplnx
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // int32 1-comp => 200*200*4 = 160,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 160000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 160000);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_LargeExemplarFile);

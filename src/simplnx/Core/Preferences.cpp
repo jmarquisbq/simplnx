@@ -1,11 +1,8 @@
 #include "Preferences.hpp"
 
 #include "simplnx/Common/SimplnxConfig.hpp"
-#ifdef SIMPLNX_USE_OOC
-#include "SimplnxOoc/OocDataIOManager.hpp"
-#endif
-
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
 #include "simplnx/Utilities/MemoryBudgetManager.hpp"
 #include "simplnx/Utilities/MemoryUtilities.hpp"
 
@@ -71,7 +68,6 @@ std::filesystem::path Preferences::DefaultFilePath(const std::string& applicatio
 Preferences::Preferences()
 {
   setDefaultValues();
-  checkUseOoc();
 }
 
 Preferences::~Preferences() noexcept = default;
@@ -91,63 +87,11 @@ void Preferences::setDefaultValues()
 
   updateMemoryDefaults();
 
-#ifdef SIMPLNX_FORCE_OUT_OF_CORE_DATA
-  m_DefaultValues[k_ForceOocData_Key] = true;
-#else
-  m_DefaultValues[k_ForceOocData_Key] = false;
-#endif
-
-  // Seed the default large-data format. When OOC is compiled in (SIMPLNX_USE_OOC),
-  // default to the HDF5 out-of-core backend so large arrays spill to disk
-  // automatically. When OOC is not compiled in, default to explicit in-memory
-  // storage.
-#ifdef SIMPLNX_USE_OOC
-  m_DefaultValues[k_PreferredLargeDataFormat_Key] = "HDF5-OOC";
-#else
-  m_DefaultValues[k_PreferredLargeDataFormat_Key] = k_InMemoryFormat.str();
-#endif
+  // Seed the canonical storage-mode default to Adaptive: choose per-array by size.
+  // An OOC-enabled build maps Adaptive/ForceOutOfCore onto a concrete on-disk format.
+  m_DefaultValues[k_DataStorageMode_Key] = static_cast<int>(DataStorageMode::Adaptive);
 
   m_DefaultValues[k_AutoRangeComputation_Key] = k_AutoRangeComputationDefault;
-}
-
-std::string Preferences::defaultLargeDataFormat() const
-{
-  return m_DefaultValues[k_PreferredLargeDataFormat_Key].get<std::string>();
-}
-
-void Preferences::setDefaultLargeDataFormat(std::string dataFormat)
-{
-  m_DefaultValues[k_PreferredLargeDataFormat_Key] = dataFormat;
-  checkUseOoc();
-}
-
-std::string Preferences::largeDataFormat() const
-{
-  auto formatJson = value(k_PreferredLargeDataFormat_Key);
-  if(formatJson.is_null() || !formatJson.is_string())
-  {
-    return {};
-  }
-  return formatJson.get<std::string>();
-}
-void Preferences::setLargeDataFormat(std::string dataFormat)
-{
-  if(dataFormat.empty())
-  {
-    // Remove the key so the compiled-in default can take effect.
-    // An empty string means "not configured", not "in-core". To explicitly
-    // request in-core storage, pass k_InMemoryFormat instead. This distinction
-    // matters because an OOC-enabled build seeds a default OOC format
-    // (see setDefaultValues), and erasing the user value lets that default
-    // take effect.
-    m_Values.erase(k_PreferredLargeDataFormat_Key);
-  }
-  else
-  {
-    m_Values[k_PreferredLargeDataFormat_Key] = dataFormat;
-  }
-  // Recompute the cached m_UseOoc flag after any format change
-  checkUseOoc();
 }
 
 void Preferences::addDefaultValues(std::string pluginName, std::string valueName, const nlohmann::json& value)
@@ -296,14 +240,11 @@ Result<> Preferences::loadFromFile(const std::filesystem::path& filepath)
 
   m_Values = parsedResult;
 
-  // Migrate legacy format strings from saved preferences files that were
-  // written before the OOC architecture was finalized. Two legacy values
-  // need cleanup:
-  //   - Empty string (""):   Old "not configured" state. Removing the key
-  //     lets the compiled-in default (e.g., "HDF5-OOC") take effect.
-  //   - "In-Memory":         Old explicit in-core sentinel. Replaced by
-  //     k_InMemoryFormat ("Simplnx-Default-In-Memory"). Removing the key
-  //     avoids confusion with the new sentinel value.
+  // Drop an old "not configured" empty large-data-format value left by a preference
+  // file written before data_storage_mode existed. Erasing it ensures the
+  // dataStorageMode() migration branch does not treat an empty string as an
+  // explicit in-core choice. The k_InMemoryFormat sentinel and any real format
+  // string are preserved so that branch can still derive the equivalent mode.
   if(m_Values.contains(k_PreferredLargeDataFormat_Key) && m_Values[k_PreferredLargeDataFormat_Key].is_string())
   {
     const std::string savedFormat = m_Values[k_PreferredLargeDataFormat_Key].get<std::string>();
@@ -313,55 +254,71 @@ Result<> Preferences::loadFromFile(const std::filesystem::path& filepath)
     }
   }
 
-  // Recompute derived state from the loaded (and possibly migrated) values
-  checkUseOoc();
   updateMemoryDefaults();
   return {};
 }
 
-void Preferences::checkUseOoc()
-{
-  // Resolve the format from user values first, then default values (via value())
-  auto formatJson = value(k_PreferredLargeDataFormat_Key);
-
-  // If no format is configured (null/non-string), OOC is not active
-  if(formatJson.is_null() || !formatJson.is_string())
-  {
-    m_UseOoc = false;
-    return;
-  }
-
-  // OOC is active when the format is a non-empty string that is NOT the
-  // explicit in-memory sentinel. This means an OOC-enabled build has
-  // seeded a real OOC format like "HDF5-OOC".
-  const std::string format = formatJson.get<std::string>();
-  m_UseOoc = !format.empty() && format != k_InMemoryFormat;
-}
-
 bool Preferences::useOocData() const
 {
-  return m_UseOoc;
+  // OOC is "in use" for both Adaptive and ForceOutOfCore; only an explicit
+  // in-core choice disables it.
+  return dataStorageMode() != DataStorageMode::ForceInCore;
 }
 
-bool Preferences::forceOocData() const
+DataStorageMode Preferences::dataStorageMode() const
 {
-  // The force_ooc_data flag is an independent user preference. It must not
-  // be gated on m_UseOoc — the whole point of force_ooc_data is to override
-  // the "in-memory format" choice when the user wants every eligible array
-  // routed to OOC anyway. The OocDataIOManager format resolver explicitly
-  // handles the (forceOoc=true, userChoseInMemory=true) case by returning
-  // "HDF5-OOC". Gating here defeats that design and silently makes the
-  // preference checkbox useless whenever the large-data format is set to
-  // in-memory.
-  return valueAs<bool>(k_ForceOocData_Key);
+  // data_storage_mode is the canonical tri-state storage preference. Resolve it
+  // in three steps so the meaning is unambiguous for both new and existing users:
+  //
+  //  1. If the user has an explicit data_storage_mode saved, honor it directly.
+  //  2. Otherwise, if a preferences file pre-dates this key but carries the older
+  //     force-OOC / large-data-format values, derive the equivalent mode once so
+  //     the install keeps its prior behavior.
+  //  3. Otherwise (fresh install, no relevant saved values) return the seeded
+  //     default, which is Adaptive.
+  if(m_Values.contains(k_DataStorageMode_Key))
+  {
+    // Treat an unrecognized persisted value (e.g. a mode written by a newer build)
+    // as the safe Adaptive default rather than producing an out-of-range enum.
+    const int raw = valueAs<int>(k_DataStorageMode_Key);
+    if(raw < static_cast<int>(DataStorageMode::Adaptive) || raw > static_cast<int>(DataStorageMode::ForceOutOfCore))
+    {
+      return DataStorageMode::Adaptive;
+    }
+    return static_cast<DataStorageMode>(raw);
+  }
+
+  if(m_Values.contains(k_ForceOocData_Key) || m_Values.contains(k_PreferredLargeDataFormat_Key))
+  {
+    // A saved force-OOC flag maps to always-out-of-core regardless of format.
+    if(m_Values.contains(k_ForceOocData_Key) && m_Values[k_ForceOocData_Key].is_boolean() && m_Values[k_ForceOocData_Key].get<bool>())
+    {
+      return DataStorageMode::ForceOutOfCore;
+    }
+
+    // An empty or explicit in-memory format means the user wanted in-core; any
+    // other (real) format means size-driven Adaptive selection.
+    std::string format;
+    if(m_Values.contains(k_PreferredLargeDataFormat_Key) && m_Values[k_PreferredLargeDataFormat_Key].is_string())
+    {
+      format = m_Values[k_PreferredLargeDataFormat_Key].get<std::string>();
+    }
+    if(format.empty() || format == k_InMemoryFormat)
+    {
+      return DataStorageMode::ForceInCore;
+    }
+    return DataStorageMode::Adaptive;
+  }
+
+  return static_cast<DataStorageMode>(m_DefaultValues[k_DataStorageMode_Key].get<int>());
 }
 
-void Preferences::setForceOocData(bool forceOoc)
+void Preferences::setDataStorageMode(DataStorageMode mode)
 {
-  // See forceOocData() — the m_UseOoc gate is intentionally absent so a
-  // user toggling the Force OOC checkbox in the Preferences dialog always
-  // persists, regardless of the currently-selected large-data format.
-  setValue(k_ForceOocData_Key, forceOoc);
+  // Persist only the canonical key. The older force-OOC / large-data-format keys
+  // are intentionally NOT synced here: writing a concrete OOC format string would
+  // leak OOC-specific vocabulary into OOC-free simplnx core.
+  setValue(k_DataStorageMode_Key, static_cast<int>(mode));
 }
 
 void Preferences::updateMemoryDefaults()
@@ -396,12 +353,10 @@ std::string Preferences::oocTempDirectory() const
 void Preferences::setOocTempDirectory(const std::string& path)
 {
   setValue(k_OoCTempDirectory_ID, path);
-#ifdef SIMPLNX_USE_OOC
-  // Route the temp directory straight to the OOC subsystem so session working
-  // files are created there. When OOC is not compiled in, the preference is
-  // simply persisted.
-  SimplnxOoc::setBaseDirectory(std::filesystem::path(path));
-#endif
+  // Fan the temp directory out to every registered IO manager so session working files are created
+  // there. The out-of-core manager uses it as its backing-file base directory; with no out-of-core
+  // manager registered this is a no-op (the preference is simply persisted above).
+  Application::GetOrCreateInstance()->getIOCollection().setBaseDirectory(std::filesystem::path(path));
 }
 
 bool Preferences::autoRangeComputation() const

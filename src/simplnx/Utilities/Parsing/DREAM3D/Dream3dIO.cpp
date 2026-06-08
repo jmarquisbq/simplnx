@@ -1,11 +1,7 @@
 #include "Dream3dIO.hpp"
 
-#include "simplnx/Common/SimplnxConfig.hpp"
-#ifdef SIMPLNX_USE_OOC
-#include "SimplnxOoc/OocDataIOManager.hpp"
-#endif
-
 #include "simplnx/Common/Aliases.hpp"
+#include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
 #include "simplnx/DataStructure/BaseGroup.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
@@ -13,6 +9,7 @@
 #include "simplnx/DataStructure/DataStore.hpp"
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/DataStructure/EmptyDataStore.hpp"
+#include "simplnx/DataStructure/EmptyListStore.hpp"
 #include "simplnx/DataStructure/Geometry/EdgeGeom.hpp"
 #include "simplnx/DataStructure/Geometry/HexahedralGeom.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
@@ -21,7 +18,11 @@
 #include "simplnx/DataStructure/Geometry/TetrahedralGeom.hpp"
 #include "simplnx/DataStructure/Geometry/TriangleGeom.hpp"
 #include "simplnx/DataStructure/Geometry/VertexGeom.hpp"
+#include "simplnx/DataStructure/IDataArray.hpp"
+#include "simplnx/DataStructure/IDataStore.hpp"
+#include "simplnx/DataStructure/INeighborList.hpp"
 #include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
+#include "simplnx/DataStructure/IO/Generic/IDataStoreFormatResolver.hpp"
 #include "simplnx/DataStructure/IO/HDF5/DataStructureReader.hpp"
 #include "simplnx/DataStructure/IO/HDF5/DataStructureWriter.hpp"
 #include "simplnx/DataStructure/IO/HDF5/IDataStoreIO.hpp"
@@ -30,6 +31,7 @@
 #include "simplnx/DataStructure/StringArray.hpp"
 #include "simplnx/DataStructure/StringStore.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
+#include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/Parsing/HDF5/IO/FileIO.hpp"
 
 #include <nlohmann/json.hpp>
@@ -2407,13 +2409,11 @@ Result<> DREAM3D::WriteRecoveryFile(const fs::path& path, const DataStructure& d
     return fileWriter.writeStringAttribute(k_UserDataFilePathTag.str(), absUserPath.string());
   }
 
-  // Standard recovery variant: drive WriteFile with recovery-write mode active
-  // so OOC stores write a placeholder + recovery metadata instead of full data.
-  // When OOC is not compiled in there are no OOC stores, so the guard is
-  // unnecessary and WriteFile serializes everything normally.
-#ifdef SIMPLNX_USE_OOC
-  SimplnxOoc::RecoveryWriteGuard guard;
-#endif
+  // Standard recovery variant: serialize the DataStructure to the recovery file. A registered IO
+  // manager with disk-backed stores activates its own recovery-write mode (so those stores emit a
+  // zero-byte placeholder plus recovery metadata via the onRecoveryWrite fan-out in DataStructureWriter)
+  // around this write; core does not own that bracket. With no such manager registered every array is
+  // in-core, so WriteFile serializes everything normally.
   return WriteFile(path, dataStructure, pipeline, false);
 }
 
@@ -2582,10 +2582,11 @@ Result<> LoadDataObjectFromHDF5(DataStructure& importStructure, DataStructure& d
  *
  * Unlike LoadDataObjectFromHDF5, this does NOT insert the object — it only
  * reads the HDF5 data for an object that is already present in dataStructure.
- * Used as the eagerLoad callback when the OOC handler decides an array should
- * be loaded in-core (below the size threshold).
+ * Used by the core Empty-placeholder sweep (EagerLoadEmptyPlaceholders) to
+ * materialize placeholders in-core, and as the eager-load callback an import
+ * finalizer invokes when it decides an array should be loaded in-core.
  */
-[[maybe_unused]] Result<> EagerLoadDataFromHDF5(DataStructure& dataStructure, const DataPath& dataPath, const nx::core::HDF5::FileIO& fileReader)
+Result<> EagerLoadDataFromHDF5(DataStructure& dataStructure, const DataPath& dataPath, const nx::core::HDF5::FileIO& fileReader)
 {
   const auto dataPtr = dataStructure.getSharedData(dataPath);
   if(dataPtr == nullptr)
@@ -2655,18 +2656,103 @@ void PruneDataStructure(DataStructure& ds, const std::vector<DataPath>& keepPath
 }
 
 /**
+ * @brief Type-dispatched predicate: true iff @p neighborList is still backed by an EmptyListStore<T>.
+ *
+ * EmptyListStore<T> is templated, so detecting the placeholder requires resolving T from the list's
+ * runtime DataType. The deferred-import Empty-sweep and an import finalizer must agree on what counts
+ * as an unmaterialized NeighborList placeholder; both key off this same EmptyListStore<T> check.
+ */
+struct IsEmptyListStoreFunctor
+{
+  template <typename T>
+  bool operator()(INeighborList* neighborList) const
+  {
+    auto* typedList = dynamic_cast<NeighborList<T>*>(neighborList);
+    if(typedList == nullptr)
+    {
+      return false;
+    }
+    return dynamic_cast<EmptyListStore<T>*>(typedList->getIListStore()) != nullptr;
+  }
+};
+
+/**
+ * @brief Eager-loads any array still backed by an Empty placeholder after a deferred import.
+ *
+ * When a registered IO manager finalizes the import (anyManagerFinalizesImport()==true), it materializes
+ * the arrays it cares about (e.g. attaches disk-backed stores, eager-loads small ones) but leaves the
+ * remainder as the in-core Empty placeholders inserted during the metadata pass. This sweep is the
+ * core-owned safety net that materializes those leftovers in-core so the returned DataStructure never
+ * contains an unusable Empty store. It only touches Empty placeholders, so already-materialized in-core
+ * arrays and disk-backed stores left by the finalizer are not disturbed.
+ *
+ * Placeholder detection per object kind:
+ *  - DataArray:    IDataStore::StoreType::Empty
+ *  - NeighborList: still backed by EmptyListStore<T> (type-dispatched)
+ *  - StringArray:  store reports isPlaceholder() (EmptyStringStore)
+ *
+ * Materialization reuses EagerLoadDataFromHDF5, which dispatches through the per-type HDF5 IO factory and
+ * therefore covers DataArray, NeighborList, and StringArray uniformly.
+ */
+Result<> EagerLoadEmptyPlaceholders(DataStructure& dataStructure, const nx::core::HDF5::FileIO& dataFileReader)
+{
+  for(const auto& dataPath : dataStructure.getAllDataPaths())
+  {
+    auto* dataObj = dataStructure.getData(dataPath);
+    if(dataObj == nullptr)
+    {
+      continue;
+    }
+
+    bool isPlaceholder = false;
+    if(const auto* dataArray = dynamic_cast<const IDataArray*>(dataObj); dataArray != nullptr)
+    {
+      const auto* store = dataArray->getIDataStore();
+      isPlaceholder = (store != nullptr && store->getStoreType() == IDataStore::StoreType::Empty);
+    }
+    else if(auto* neighborList = dynamic_cast<INeighborList*>(dataObj); neighborList != nullptr)
+    {
+      isPlaceholder = ExecuteNeighborFunction(IsEmptyListStoreFunctor{}, neighborList->getDataType(), neighborList);
+    }
+    else if(const auto* stringArray = dynamic_cast<const StringArray*>(dataObj); stringArray != nullptr)
+    {
+      // An EmptyStringStore placeholder records the tuple count (so empty() is false for a non-empty
+      // array); isPlaceholder() is the correct "not yet materialized" signal.
+      isPlaceholder = stringArray->isPlaceholder();
+    }
+
+    if(isPlaceholder)
+    {
+      auto result = EagerLoadDataFromHDF5(dataStructure, dataPath, dataFileReader);
+      if(result.invalid())
+      {
+        return result;
+      }
+    }
+  }
+  return {};
+}
+
+/**
  * @brief Shared logic for LoadDataStructure and LoadDataStructureArrays.
- * Builds a metadata skeleton, then in an OOC-enabled build (SIMPLNX_USE_OOC)
- * defers loading to SimplnxOoc::handleImport; otherwise eager-loads everything
- * in-core.
+ *
+ * Builds a metadata skeleton, then either eager-loads everything in-core (the default) or, when a
+ * registered IO manager declares it finalizes imports (the out-of-core manager), defers loading to that
+ * manager via the DataIOCollection::onImportFinalize fan-out followed by a core Empty-sweep that
+ * materializes any placeholders the finalizer left behind.
+ *
+ * When @p resolver is non-null it is stamped onto the DataStructure immediately after construction and
+ * BEFORE the finalize pass runs, so the finalizer can consult dataStructure.formatResolver() to decide
+ * per-array storage — e.g. attaching disk-backed out-of-core stores for read-only visualization loads. A null
+ * resolver leaves the process-level default in place, preserving the original behavior.
  *
  * Follows the same pattern as ImportH5ObjectPathsAction::apply:
  * 1. Preflight-import to get the metadata skeleton (importStructure)
  * 2. Expand paths to include ancestors, sorted shortest-first
  * 3. Insert each object via LoadDataObjectFromHDF5 (shallow copy + insert + optional data load)
- * 4. When OOC is compiled in, run SimplnxOoc::handleImport for deferred loading
+ * 4. When a finalizer is registered, run onImportFinalize, then sweep remaining Empty placeholders in-core
  */
-Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, const std::vector<DataPath>& paths)
+Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, const std::vector<DataPath>& paths, std::shared_ptr<const IDataStoreFormatResolver> resolver = nullptr)
 {
   auto fileReader = nx::core::HDF5::FileIO::ReadFile(filePath);
   if(!fileReader.isValid())
@@ -2685,13 +2771,11 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
   // Reopen file for data reading
   auto dataFileReader = nx::core::HDF5::FileIO::ReadFile(filePath);
 
-  // When OOC is compiled in, arrays are imported as placeholders and finalized
-  // by SimplnxOoc::handleImport (deferred load). In-core builds load eagerly.
-#ifdef SIMPLNX_USE_OOC
-  const bool useDeferredLoad = true;
-#else
-  const bool useDeferredLoad = false;
-#endif
+  // Defer loading only when a registered IO manager (the out-of-core manager) finalizes imports.
+  // Otherwise load eagerly: arrays are inserted with their data already read during the
+  // LoadDataObjectFromHDF5 pass.
+  DataIOCollection& ioCollection = Application::GetOrCreateInstance()->getIOCollection();
+  const bool useDeferredLoad = ioCollection.anyManagerFinalizesImport();
 
   // Expand to include ancestor containers, sorted shortest-first
   auto allPaths = DREAM3D::ExpandSelectedPathsToAncestors(paths);
@@ -2701,6 +2785,9 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
   // When deferring, pass preflight=true to insert placeholders without loading data.
   // When not deferring, pass preflight=false to insert and load data immediately.
   DataStructure dataStructure;
+  // Stamp the per-DataStructure store-format resolver before the finalize pass so the IO manager
+  // can consult dataStructure.formatResolver() when deciding which arrays become disk-backed stores.
+  dataStructure.setFormatResolver(resolver);
   for(const auto& objectPath : allPaths)
   {
     auto result = LoadDataObjectFromHDF5(importStructure, dataStructure, objectPath, dataFileReader, useDeferredLoad);
@@ -2710,21 +2797,29 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
     }
   }
 
-  // When deferring (OOC compiled in), let SimplnxOoc finalize loading: attach
-  // read-only OOC reference stores, reattach recovery stores, and eager-load
-  // in-core arrays via the callback.
   std::vector<Warning> handlerWarnings;
   if(useDeferredLoad)
   {
-#ifdef SIMPLNX_USE_OOC
-    auto eagerLoad = [&dataFileReader](DataStructure& ds, const DataPath& path) -> Result<> { return EagerLoadDataFromHDF5(ds, path, dataFileReader); };
-    auto handlerResult = SimplnxOoc::handleImport(dataStructure, paths, dataFileReader, eagerLoad);
-    if(handlerResult.invalid())
+    // Hand finalization to the registered manager: it attaches disk-backed reference stores, reattaches
+    // recovery stores, and eager-loads small arrays in-core via the callback. onImportFinalize returns
+    // std::nullopt only if no finalizer is registered, which cannot happen here (useDeferredLoad gated on it).
+    auto handlerResult = ioCollection.onImportFinalize(dataStructure, paths, dataFileReader);
+    if(handlerResult.has_value())
     {
-      return ConvertInvalidResult<DataStructure>(std::move(handlerResult));
+      if(handlerResult->invalid())
+      {
+        return ConvertInvalidResult<DataStructure>(std::move(*handlerResult));
+      }
+      handlerWarnings = std::move(handlerResult->warnings());
     }
-    handlerWarnings = std::move(handlerResult.warnings());
-#endif
+
+    // Core Empty-sweep: materialize any DataArray/NeighborList/StringArray the finalizer left as an
+    // Empty placeholder so the returned DataStructure never holds an unusable Empty store.
+    auto sweepResult = EagerLoadEmptyPlaceholders(dataStructure, dataFileReader);
+    if(sweepResult.invalid())
+    {
+      return ConvertInvalidResult<DataStructure>(std::move(sweepResult));
+    }
   }
 
   Result<DataStructure> finalResult{std::move(dataStructure)};
@@ -2749,18 +2844,30 @@ Result<DataStructure> DREAM3D::LoadDataStructureMetadata(const fs::path& path)
 
 Result<DataStructure> DREAM3D::LoadDataStructure(const fs::path& path)
 {
+  // Delegate to the resolver-aware overload with no resolver, which uses the process default.
+  return DREAM3D::LoadDataStructure(path, nullptr);
+}
+
+Result<DataStructure> DREAM3D::LoadDataStructure(const fs::path& path, std::shared_ptr<const IDataStoreFormatResolver> resolver)
+{
   auto metadataResult = DREAM3D::LoadDataStructureMetadata(path);
   if(metadataResult.invalid())
   {
     return metadataResult;
   }
   std::vector<DataPath> allPaths = metadataResult.value().getAllDataPaths();
-  return LoadDataStructureWithHandler(path, allPaths);
+  return LoadDataStructureWithHandler(path, allPaths, std::move(resolver));
 }
 
 Result<DataStructure> DREAM3D::LoadDataStructureArrays(const fs::path& path, const std::vector<DataPath>& dataPaths)
 {
-  auto result = LoadDataStructureWithHandler(path, dataPaths);
+  // Delegate to the resolver-aware overload with no resolver, which uses the process default.
+  return DREAM3D::LoadDataStructureArrays(path, dataPaths, nullptr);
+}
+
+Result<DataStructure> DREAM3D::LoadDataStructureArrays(const fs::path& path, const std::vector<DataPath>& dataPaths, std::shared_ptr<const IDataStoreFormatResolver> resolver)
+{
+  auto result = LoadDataStructureWithHandler(path, dataPaths, std::move(resolver));
   if(result.invalid())
   {
     return result;

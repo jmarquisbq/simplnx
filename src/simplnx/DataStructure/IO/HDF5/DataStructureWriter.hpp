@@ -143,11 +143,11 @@ public:
    * 1. **Deduplication** -- If the DataObject has already been written to
    *    this file, an HDF5 hard link is created instead of a duplicate copy.
    *
-   * 2. **OOC recovery write** -- When built with SIMPLNX_USE_OOC and a
-   *    recovery write is active, SimplnxOoc::maybeWriteRecoveryArray is given
-   *    a chance to write OOC-backed arrays as lightweight placeholder
-   *    datasets. If it declines (the object is not OOC-backed), the normal
-   *    write path is used.
+   * 2. **Recovery-write override** -- Each registered IO manager is offered a
+   *    chance (via DataIOCollection::onRecoveryWrite) to override serialization.
+   *    The out-of-core manager uses this during a recovery write to emit its
+   *    disk-backed arrays as lightweight placeholder datasets. If no manager
+   *    handles it, the normal write path is used.
    *
    * If the process encounters an error, the error code is returned. Otherwise,
    * this method returns 0.

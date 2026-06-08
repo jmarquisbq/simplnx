@@ -29,7 +29,7 @@ using namespace nx::core;
 TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation Small IN100 Pipeline", "[OrientationAnalysis][AlignSectionsMisorientation]")
 {
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -100,7 +100,7 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation Small IN100 Pipeline
 TEST_CASE("OrientationAnalysis::AlignSectionsMisorientationFilter: output test", "[Reconstruction][AlignSectionsMisorientationFilter]")
 {
   UnitTest::LoadPlugins();
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
@@ -190,7 +190,7 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation: Benchmark 200x200x2
 {
   UnitTest::LoadPlugins();
   // 200x200x200, Quats float32 4-comp => 200*200*4*4 = 640,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 640000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 640000);
   // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
   bool forceOoc = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOoc);

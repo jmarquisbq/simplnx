@@ -437,11 +437,12 @@ TEST_CASE("Dream3dLoadingApi: Recovery file with all in-core data")
   const auto& smallPath = k_SmallArrayPath;
   const auto& largePath = k_LargeArrayPath;
 
-  // The recovered store type follows the active large-data preferences: under
-  // forceOocData the arrays load as out-of-core stores backed by the recovery
-  // file itself (its inline data is read on demand); otherwise they load
-  // in-core. RequireExpectedStoreType asserts whichever the preferences dictate.
-  // Either way the data round-trips intact (verified below).
+  // The recovered store type follows the active DataStorageMode preference: under
+  // ForceOutOfCore (with an out-of-core build loaded) the arrays load as
+  // out-of-core stores backed by the recovery file itself (its inline data is read
+  // on demand); otherwise they load in-core. RequireExpectedStoreType asserts
+  // whichever the preferences dictate. Either way the data round-trips intact
+  // (verified below).
   auto* smallArray = ds.getDataAs<IDataArray>(smallPath);
   REQUIRE(smallArray != nullptr);
   UnitTest::RequireExpectedStoreType(*smallArray);

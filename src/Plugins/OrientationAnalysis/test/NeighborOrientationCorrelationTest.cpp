@@ -45,7 +45,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Small IN10
 {
   UnitTest::LoadPlugins();
   // 1 Z-slice of quats (largest array): 189*201*4*4 = 607824 bytes
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 600000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 600000);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "neighbor_orientation_correlation.tar.gz", "neighbor_orientation_correlation.dream3d");
 
@@ -313,7 +313,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: 200x200x20
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // 200x200x200, Quats (float32, 4-comp) => 200*200*4*4 = 640,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 640000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 640000);
 
   DYNAMIC_SECTION("forceOoc: " << forceOocAlgo)
   {

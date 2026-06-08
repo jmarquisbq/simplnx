@@ -239,7 +239,7 @@ TEST_CASE("SimplnxCore::IdentifySampleFilter: 200x200x200 Exemplar Comparison", 
   bool forceOocAlgo = static_cast<bool>(GENERATE(from_range(nx::core::k_ForceOocTestValues)));
   const nx::core::ForceOocAlgorithmGuard guard(forceOocAlgo);
   // uint8 1-comp => 200*200*1 = 40,000 bytes/slice
-  const UnitTest::PreferencesSentinel prefsSentinel("HDF5-OOC", 40000, true);
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 40000);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, k_ArchiveName, k_DataDirName);
   DataStructure exemplarDS = UnitTest::LoadDataStructure(k_ExemplarFile);
