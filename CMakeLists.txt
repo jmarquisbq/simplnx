@@ -253,6 +253,9 @@ if(MSVC)
   target_compile_options(simplnx
     PRIVATE
       /MP
+      # Dream3dIO.cpp exceeds the default COMDAT section limit (C1128) in Debug
+      # after the out-of-core resolver refactor; /bigobj raises the limit.
+      /bigobj
   )
 endif()
 
