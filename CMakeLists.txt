@@ -561,6 +561,7 @@ set(SIMPLNX_HDRS
   ${SIMPLNX_SOURCE_DIR}/Plugin/PluginLoader.hpp
 
   ${SIMPLNX_SOURCE_DIR}/Utilities/ArrayCreationUtilities.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/SliceBufferedTransfer.hpp
   ${SIMPLNX_SOURCE_DIR}/Utilities/AlignSections.hpp
   ${SIMPLNX_SOURCE_DIR}/Utilities/ArrayThreshold.hpp
   ${SIMPLNX_SOURCE_DIR}/Utilities/DataArrayUtilities.hpp

@@ -18,8 +18,7 @@ include(Catch)
 add_subdirectory(UnitTestCommon)
 add_subdirectory(ConversionTest)
 
-add_executable(simplnx_test
-  ${SIMPLNX_TEST_DIRS_HEADER}
+set(SIMPLNX_TEST_SRCS
   simplnx_test_main.cpp
   AppTest.cpp
   ArgumentsTest.cpp
@@ -55,6 +54,16 @@ add_executable(simplnx_test
   DataStoreFormatResolverTest.cpp
   DataStorageModeMigrationTest.cpp
 )
+
+add_executable(simplnx_test
+  ${SIMPLNX_TEST_DIRS_HEADER}
+  ${SIMPLNX_TEST_SRCS}
+)
+
+# Organize the unit-test sources into IDE folders, mirroring the plugin-test
+# convention in cmake/Plugin.cmake (source_group "test" + "Generated").
+source_group("test" FILES ${SIMPLNX_TEST_SRCS})
+source_group("Generated" FILES ${SIMPLNX_TEST_DIRS_HEADER})
 
 target_link_libraries(simplnx_test
   PRIVATE

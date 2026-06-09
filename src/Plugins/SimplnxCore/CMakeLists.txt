@@ -425,6 +425,9 @@ set(PLUGIN_EXTRA_SOURCES
     # "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMGeometryOBJ.h"
     "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMSurfaceNet.cpp"
     "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMSurfaceNet.h"
+    # Shared header for the IdentifySample BFS/CCL variants (no .cpp, so the
+    # AlgorithmList stem-expansion does not pick it up).
+    "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/Filters/Algorithms/IdentifySampleCommon.hpp"
 
 )
 
