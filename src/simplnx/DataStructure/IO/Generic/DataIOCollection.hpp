@@ -50,6 +50,15 @@ public:
    */
   using EagerLoadFnc = std::function<Result<>(DataStructure& dataStructure, const DataPath& path)>;
 
+  /**
+   * @brief Human-readable display labels for the two built-in entries that
+   * getFormatDisplayNames() always provides: the empty "" sentinel (let the format
+   * resolver decide) and the reserved in-memory format. A plugin registers its own
+   * format's label via registerFormatDisplayName().
+   */
+  static inline constexpr const char* k_AutomaticDisplayName = "Automatic";
+  static inline constexpr const char* k_InMemoryDisplayName = "In Memory";
+
   DataIOCollection();
   ~DataIOCollection() noexcept;
 

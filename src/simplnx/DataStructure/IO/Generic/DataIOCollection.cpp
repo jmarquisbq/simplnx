@@ -250,8 +250,8 @@ std::vector<std::pair<std::string, std::string>> DataIOCollection::getFormatDisp
 {
   std::vector<std::pair<std::string, std::string>> result;
   // Always include the two built-in entries first
-  result.emplace_back("", "Automatic");
-  result.emplace_back(std::string(Preferences::k_InMemoryFormat), "In Memory");
+  result.emplace_back("", k_AutomaticDisplayName);
+  result.emplace_back(std::string(Preferences::k_InMemoryFormat), k_InMemoryDisplayName);
   // Append any additionally registered display names
   for(const auto& [formatName, displayName] : m_FormatDisplayNames)
   {
@@ -287,7 +287,7 @@ std::string DataIOCollection::generateManagerListString() const
     std::string displayName;
     if(fn == Preferences::k_InMemoryFormat)
     {
-      displayName = "In Memory";
+      displayName = k_InMemoryDisplayName;
     }
     else
     {
