@@ -21,6 +21,10 @@ TEST_CASE("SimplnxCore::ComputeFeaturePhasesFilter(Valid Parameters)", "[Simplnx
   UnitTest::LoadPlugins();
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_stats_test_v2.tar.gz", "6_6_stats_test_v2.dream3d");
+  // Request disk-backed stores: in the OOC build (where the unit-test bootstrap has
+  // registered the OOC IO manager) the loaded arrays are HDF5-backed, exercising the
+  // filter against out-of-core data; in-core builds ignore the request.
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceOutOfCore, 65536);
   // Read the Small IN100 Data set
   auto baseDataFilePath = fs::path(fmt::format("{}/6_6_stats_test_v2.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
@@ -43,6 +47,8 @@ TEST_CASE("SimplnxCore::ComputeFeaturePhasesFilter(Valid Parameters)", "[Simplnx
 
     auto preflightResult = ffpFilter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
+
+    UnitTest::RequireExpectedStoreType(dataStructure.getDataRefAs<IDataArray>(featureIdsPath));
 
     auto result = ffpFilter.execute(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(result.result);
