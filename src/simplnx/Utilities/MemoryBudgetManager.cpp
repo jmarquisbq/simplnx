@@ -36,7 +36,11 @@ uint64 MemoryBudgetManager::defaultBudgetBytes()
   {
     return k_MinBudget;
   }
-  return std::max(totalRam / 2, k_MinBudget);
+  // 50% of RAM raised to the 1 GiB floor, then clamped to maxBudgetBytes() so
+  // the default never exceeds the cap on low-RAM machines (below 12 GiB the
+  // 6 GiB reserve makes the cap smaller than half of RAM). The cap is never
+  // below the floor, so the result stays within [1 GiB, cap].
+  return std::min(std::max(totalRam / 2, k_MinBudget), maxBudgetBytes());
 }
 
 uint64 MemoryBudgetManager::maxBudgetBytes()

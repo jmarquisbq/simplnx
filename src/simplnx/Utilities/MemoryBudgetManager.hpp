@@ -49,7 +49,8 @@ public:
   static MemoryBudgetManager& instance();
 
   /**
-   * @brief Returns a default budget of 50% of system RAM, clamped to a minimum of 1 GiB.
+   * @brief Returns a default budget of 50% of system RAM, raised to a minimum of
+   * 1 GiB and clamped to maxBudgetBytes() so the default never exceeds the cap.
    */
   static uint64 defaultBudgetBytes();
 
