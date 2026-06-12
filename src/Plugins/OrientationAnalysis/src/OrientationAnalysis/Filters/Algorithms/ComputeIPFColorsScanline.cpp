@@ -191,7 +191,7 @@ Result<> ComputeIPFColorsScanline::operator()()
       // an OOC store via bulk I/O instead of accessed through random AbstractDataStore calls.
       if(phase < numPhases && calcIPF && crystalStructures[phase] < ebsdlib::CrystalStructure::LaueGroupEnd)
       {
-        Rgba argb = ops[crystalStructures[phase]]->generateIPFColor(dEuler.data(), refDir.data(), false);
+        Rgba argb = ops[crystalStructures[phase]]->generateIPFColor(dEuler.data(), refDir.data(), false, m_InputValues->colorKey);
         colorBuf[ci] = static_cast<uint8>(RgbColor::dRed(argb));
         colorBuf[ci + 1] = static_cast<uint8>(RgbColor::dGreen(argb));
         colorBuf[ci + 2] = static_cast<uint8>(RgbColor::dBlue(argb));

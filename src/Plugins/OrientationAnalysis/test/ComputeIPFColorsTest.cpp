@@ -160,10 +160,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: ColorKey choice reaches 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "so3_cubic_high_ipf_001.tar.gz", "so3_cubic_high_ipf_001.dream3d");
 
   auto exemplarFilePath = fs::path(fmt::format("{}/so3_cubic_high_ipf_001.dream3d", unit_test::k_TestFilesDir));
-  REQUIRE(fs::exists(exemplarFilePath));
-  auto importResult = DREAM3D::ImportDataStructureFromFile(exemplarFilePath, false);
-  REQUIRE(importResult.valid());
-  DataStructure dataStructure = importResult.value();
+  DataStructure dataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
   const DataPath cellEulerAnglesPath({Constants::k_ImageDataContainer, Constants::k_CellData, Constants::k_EulerAngles});
   const DataPath cellPhasesArrayPath({Constants::k_ImageDataContainer, Constants::k_CellData, Constants::k_Phases});

@@ -2515,7 +2515,6 @@ namespace
 
 /**
  * @brief Builds a metadata-only (preflight) DataStructure from an open HDF5 file.
- * This is a copy of DREAM3D::ImportDataStructureFromFile with preflight hardcoded to true.
  */
 Result<DataStructure> LoadDataStructureMetadataInternal(const nx::core::HDF5::FileIO& fileReader)
 {
