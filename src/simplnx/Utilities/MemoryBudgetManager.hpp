@@ -16,11 +16,11 @@ namespace nx::core
 {
 
 /**
- * @brief Unified memory budget manager for cache subsystems across simplnx and visualization code.
+ * @brief Unified memory budget manager for cache subsystems.
  *
- * All cache subsystems (ChunkCache, stride cache, partition cache) register their
- * allocations with this singleton. When memory pressure exceeds the budget, the
- * manager evicts the globally-oldest entry regardless of which subsystem owns it.
+ * Cache subsystems register their allocations with this singleton. When memory
+ * pressure exceeds the budget, the manager evicts the globally-oldest entry
+ * regardless of which subsystem owns it.
  *
  * Thread-safe: allocate/touch/release can be called from any thread.
  *

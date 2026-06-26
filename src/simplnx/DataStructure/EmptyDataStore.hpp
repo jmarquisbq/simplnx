@@ -160,9 +160,9 @@ public:
 
   /**
    * @brief Returns the in-core RAM this placeholder represents: the logical byte size for an
-   * in-core array, or 0 for an out-of-core array (whose primary storage lives on disk), mirroring
-   * AbstractOocStore::memoryUsage(). CreateArray stamps a non-empty format only for OOC arrays, so
-   * an empty m_DataFormat means in-core.
+   * in-core array, or 0 for a disk-backed array (whose primary storage lives on disk, so it
+   * consumes no in-core RAM). CreateArray stamps a non-empty format only for disk-backed arrays,
+   * so an empty m_DataFormat means in-core.
    *
    * NOTE: do NOT add a getDataFormat() override here — it would change which store ~12 filters
    * request for their outputs in execute (they propagate inputArray.getDataFormat() into a
