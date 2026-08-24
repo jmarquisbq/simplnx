@@ -22,10 +22,13 @@ struct SIMPLNXCORE_EXPORT WriteVtkStructuredPointsInputValues
 };
 
 /**
- * @class VtkRectilinearGridWriter
- * @brief This filter ...
+ * @class WriteVtkStructuredPoints
+ * @brief Streams selected Image Geometry cell arrays to a legacy VTK structured-points file.
+ *
+ * In-memory arrays use a direct bounded writer. Out-of-core arrays use sequential
+ * copyIntoBuffer() chunks. Binary byte swapping is confined to the chunk buffer,
+ * so the source DataStore is never modified.
  */
-
 class SIMPLNXCORE_EXPORT WriteVtkStructuredPoints
 {
 public:

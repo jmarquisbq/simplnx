@@ -14,6 +14,10 @@ where \f$ a \f$ is the average distance between point \f$ i \f$ and all other po
 
 The silhouette can be used to determine how well a particular clustering has performed, such as k means or k medoids.
 
+## Algorithm
+
+For in-memory arrays, the filter retains the original direct pairwise implementation. For out-of-core or mixed-storage inputs, it dispatches to a bounded Scanline implementation. The Scanline path reads clustering values, feature IDs, and the optional Bool or UInt8 mask in fixed tuple tiles with bulk `copyIntoBuffer()` calls. It densifies sparse positive feature IDs into feature-scale state, accumulates exact pair distances for one bounded outer tile against bounded inner tiles, and bulk-writes the resulting silhouette tile. It never creates an all-true cell mask or resident cell-sized membership, distance, or output scratch arrays. Feature-zero, self-distance, denominator, and distance-metric behavior follow the direct implementation.
+
 ### Distance Metric
 
 The *Distance Metric* parameter controls how the distance between two points is calculated when computing silhouette values:

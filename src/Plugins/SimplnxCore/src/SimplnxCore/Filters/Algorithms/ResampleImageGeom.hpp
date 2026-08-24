@@ -26,7 +26,9 @@ struct SIMPLNXCORE_EXPORT ResampleImageGeomInputValues
 };
 
 /**
- * @class
+ * @class ResampleImageGeom
+ * @brief Resamples an Image Geometry's cell data onto a new grid (different spacing/dimensions, same
+ * origin) by nearest-source-cell lookup, optionally renumbering Feature Ids afterward.
  */
 class SIMPLNXCORE_EXPORT ResampleImageGeom
 {

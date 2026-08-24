@@ -15,9 +15,11 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <set>
@@ -161,6 +163,81 @@ void SetAvgQuat(FixtureData& td, usize featureIdx, const std::array<float32, 4>&
 void SetNeighbors(FixtureData& td, int32 featureIdx, std::vector<int32> neighbors)
 {
   td.neighborList->setList(featureIdx, std::make_shared<std::vector<int32>>(std::move(neighbors)));
+}
+
+// Builds a cell-dense, feature-sparse fixture. The 16 real features form one connected chain
+// with identical c-axes, so every feature must receive the same parent id. Each Z slice maps to
+// one feature, ensuring the filter's final cell remap visits all 8,000,000 cells.
+FixtureData BuildLargeBenchmarkFixture(usize dimension)
+{
+  constexpr usize k_RealFeatureCount = 16;
+  const usize numFeatures = k_RealFeatureCount + 1;
+  const ShapeType cellTupleShape = {dimension, dimension, dimension};
+
+  FixtureData td;
+  td.geom = ImageGeom::Create(td.ds, k_GeomName);
+  td.geom->setSpacing({1.0f, 1.0f, 1.0f});
+  td.geom->setOrigin({0.0f, 0.0f, 0.0f});
+  td.geom->setDimensions({dimension, dimension, dimension});
+
+  td.cellAM = AttributeMatrix::Create(td.ds, "CellData", cellTupleShape, td.geom->getId());
+  td.featureAM = AttributeMatrix::Create(td.ds, "CellFeatureData", ShapeType{numFeatures}, td.geom->getId());
+  td.ensembleAM = AttributeMatrix::Create(td.ds, "CellEnsembleData", ShapeType{2}, td.geom->getId());
+
+  auto featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(td.ds, k_FeatureIdsPath, cellTupleShape, {1}, IDataAction::Mode::Execute);
+  td.featureIds = Int32Array::Create(td.ds, k_FeatureIdsName, featureIdsStore, td.cellAM->getId());
+
+  auto featurePhasesStore = DataStoreUtilities::CreateDataStore<int32>(td.ds, k_FeaturePhasesPath, {numFeatures}, {1}, IDataAction::Mode::Execute);
+  td.featurePhases = Int32Array::Create(td.ds, k_FeaturePhasesName, featurePhasesStore, td.featureAM->getId());
+
+  auto volumesStore = DataStoreUtilities::CreateDataStore<float32>(td.ds, k_VolumesPath, {numFeatures}, {1}, IDataAction::Mode::Execute);
+  td.volumes = Float32Array::Create(td.ds, k_VolumesName, volumesStore, td.featureAM->getId());
+
+  auto avgQuatsStore = DataStoreUtilities::CreateDataStore<float32>(td.ds, k_AvgQuatsPath, {numFeatures}, {4}, IDataAction::Mode::Execute);
+  td.avgQuats = Float32Array::Create(td.ds, k_AvgQuatsName, avgQuatsStore, td.featureAM->getId());
+
+  td.neighborList = NeighborList<int32>::Create(td.ds, k_ContigNeighborListName, ShapeType{numFeatures}, td.featureAM->getId());
+
+  auto crystalStructuresStore = DataStoreUtilities::CreateDataStore<uint32>(td.ds, k_CrystalStructuresPath, {2}, {1}, IDataAction::Mode::Execute);
+  td.crystalStructures = UInt32Array::Create(td.ds, k_CrystalStructuresName, crystalStructuresStore, td.ensembleAM->getId());
+
+  const usize sliceSize = dimension * dimension;
+  std::vector<int32> featureIdsSlice(sliceSize);
+  for(usize z = 0; z < dimension; z++)
+  {
+    const int32 featureId = static_cast<int32>((z % k_RealFeatureCount) + 1);
+    std::fill(featureIdsSlice.begin(), featureIdsSlice.end(), featureId);
+    const Result<> writeResult = featureIdsStore->copyFromBuffer(z * sliceSize, nonstd::span<const int32>(featureIdsSlice.data(), featureIdsSlice.size()));
+    SIMPLNX_RESULT_REQUIRE_VALID(writeResult);
+  }
+
+  (*td.featurePhases)[0] = 0;
+  (*td.volumes)[0] = 1.0f;
+  for(usize f = 1; f < numFeatures; f++)
+  {
+    (*td.featurePhases)[f] = 1;
+    (*td.volumes)[f] = 1.0f;
+  }
+
+  for(usize f = 0; f < numFeatures; f++)
+  {
+    SetAvgQuat(td, f, QuatFromPhiDeg(0.0f));
+    std::vector<int32> neighbors;
+    if(f > 1)
+    {
+      neighbors.push_back(static_cast<int32>(f - 1));
+    }
+    if(f < k_RealFeatureCount)
+    {
+      neighbors.push_back(static_cast<int32>(f + 1));
+    }
+    SetNeighbors(td, static_cast<int32>(f), std::move(neighbors));
+  }
+
+  (*td.crystalStructures)[0] = 999u;
+  (*td.crystalStructures)[1] = static_cast<uint32>(ebsdlib::CrystalStructure::Hexagonal_High);
+
+  return td;
 }
 
 // Build the canonical 5-feature pure-Phi Bunge fixture used by both the Pure-Phi Class 1 test

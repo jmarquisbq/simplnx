@@ -12,6 +12,8 @@
 #include "simplnx/Parameters/VectorParameter.hpp"
 #include "simplnx/Utilities/SampleSurfaceMesh.hpp"
 
+#include <random>
+
 namespace nx::core
 {
 struct SIMPLNXCORE_EXPORT UncertainRegularGridSampleSurfaceMeshInputValues
@@ -27,7 +29,15 @@ struct SIMPLNXCORE_EXPORT UncertainRegularGridSampleSurfaceMeshInputValues
 };
 
 /**
- * @class ConditionalSetValueFilter
+ * @class UncertainRegularGridSampleSurfaceMesh
+ * @brief Samples a TriangleGeometry onto a regular grid whose sample points are
+ * jittered by a per-axis "uncertainty" offset drawn from a seeded pseudo-random
+ * generator. Unlike RegularGridSampleSurfaceMesh's deterministic slice-plane
+ * rasterization, the jittered point positions require an actual
+ * point-in-polyhedron test per sample (the base SampleSurfaceMesh class), so
+ * this class only supplies the streaming point generation: one Z-slice of
+ * jittered points at a time, continuing the same generator across slices so
+ * the draw sequence exactly matches a single monolithic full-volume pass.
  */
 class SIMPLNXCORE_EXPORT UncertainRegularGridSampleSurfaceMesh : public SampleSurfaceMesh
 {
@@ -46,12 +56,23 @@ public:
   const std::atomic_bool& getCancel();
 
 protected:
-  void generatePoints(std::vector<Point3Df>& points) override;
+  SizeVec3 getGridDimensions() const override;
+  void generateSlicePoints(usize zSlice, std::vector<Point3Df>& slicePoints) override;
 
 private:
   DataStructure& m_DataStructure;
   const UncertainRegularGridSampleSurfaceMeshInputValues* m_InputValues = nullptr;
   const std::atomic_bool& m_ShouldCancel;
   const IFilter::MessageHandler& m_MessageHandler;
+
+  // Persistent pseudo-random state, advanced one Z-slice at a time by
+  // generateSlicePoints(). This must not be reset or re-seeded between
+  // slices: the base class calls generateSlicePoints() once per Z-slice in
+  // increasing order, and the resulting draw sequence (one Z draw per slice,
+  // one Y draw per row, one X draw per point) must reproduce exactly the
+  // sequence a single monolithic full-volume generation pass would have
+  // produced, so results stay identical for a given seed.
+  std::mt19937 m_Generator;
+  std::uniform_real_distribution<float32> m_Distribution{0.0F, 1.0F};
 };
 } // namespace nx::core

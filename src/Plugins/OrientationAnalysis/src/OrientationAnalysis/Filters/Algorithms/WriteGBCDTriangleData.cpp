@@ -25,6 +25,33 @@ const std::atomic_bool& WriteGBCDTriangleData::getCancel()
 }
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Writes GBCD triangle data (grain boundary character distribution) to an ASCII file.
+ *
+ * Each line contains the Euler angles of the two grains adjacent to a triangle,
+ * the triangle normal, and the surface area.
+ *
+ * @section ooc_strategy OOC Strategy
+ * Three triangle-level arrays (faceLabels, faceNormals, faceAreas) are potentially
+ * very large (millions of triangles). Rather than reading each element via operator[]
+ * (which triggers chunk load/evict cycles on OOC stores), we:
+ *
+ *   1. Cache the Euler angles array locally via copyIntoBuffer(). This is feature-level
+ *      data (one tuple per grain, typically thousands) and is small enough to hold entirely
+ *      in memory. Grain IDs from faceLabels can map to arbitrary features, so caching
+ *      the full array avoids random OOC lookups.
+ *
+ *   2. Process triangles in chunks of k_ChunkSize (8192). For each chunk:
+ *      a. Bulk-read the chunk of faceLabels, faceNormals, and faceAreas via copyIntoBuffer().
+ *      b. Format all lines into a fmt::memory_buffer (pure in-memory string building).
+ *      c. Write the entire buffer to disk in one outStream.write() call.
+ *
+ * This reduces OOC I/O from O(numTriangles) random accesses to O(numTriangles / k_ChunkSize)
+ * sequential bulk reads, and reduces file I/O from O(numTriangles) fprintf calls to
+ * O(numTriangles / k_ChunkSize) write calls.
+ *
+ * @return Result<> indicating success or an error if the output file cannot be opened.
+ */
 Result<> WriteGBCDTriangleData::operator()()
 {
   auto& faceLabels = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->SurfaceMeshFaceLabelsArrayPath);
@@ -33,52 +60,64 @@ Result<> WriteGBCDTriangleData::operator()()
   auto& eulerAngles = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureEulerAnglesArrayPath);
   usize numTriangles = faceAreas.getNumberOfTuples();
 
-  FILE* f = fopen(m_InputValues->OutputFile.string().c_str(), "wb");
-  if(nullptr == f)
+  // Cache eulerAngles locally -- feature-level (indexed by grain ID, typically thousands).
+  // This is small enough to hold entirely in memory and avoids random OOC lookups when
+  // grain IDs from faceLabels index into arbitrary positions.
+  const usize numEulerElements = eulerAngles.getSize();
+  std::vector<float32> eulerCache(numEulerElements);
+  eulerAngles.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(eulerCache.data(), numEulerElements));
+
+  std::ofstream outStream(m_InputValues->OutputFile, std::ios_base::out | std::ios_base::binary);
+  if(!outStream.is_open())
   {
     return MakeErrorResult(-87000, fmt::format("Error opening output file '{}'", m_InputValues->OutputFile.string()));
   }
 
-  // fprintf(f, "# Triangles Produced from DREAM3D version %s\n", ImportExport::Version::Package().toLatin1().data());
-  fprintf(f, "# Column 1-3:    right hand average orientation (phi1, PHI, phi2 in RADIANS)\n");
-  fprintf(f, "# Column 4-6:    left hand average orientation (phi1, PHI, phi2 in RADIANS)\n");
-  fprintf(f, "# Column 7-9:    triangle normal\n");
-  fprintf(f, "# Column 8:      surface area\n");
+  outStream << "# Column 1-3:    right hand average orientation (phi1, PHI, phi2 in RADIANS)\n"
+            << "# Column 4-6:    left hand average orientation (phi1, PHI, phi2 in RADIANS)\n"
+            << "# Column 7-9:    triangle normal\n"
+            << "# Column 8:      surface area\n";
 
-  int32 gid0 = 0; // Feature identifier 0
-  int32 gid1 = 0; // Feature identifier 1
-  for(int64 t = 0; t < numTriangles; ++t)
+  // Process triangles in chunks: bulk-read arrays into local buffers, format into a
+  // string buffer, write once per chunk. This batches both OOC reads and file writes.
+  constexpr usize k_ChunkSize = 8192;
+  const auto& labelsStore = faceLabels.getDataStoreRef();
+  const auto& normalsStore = faceNormals.getDataStoreRef();
+  const auto& areasStore = faceAreas.getDataStoreRef();
+
+  std::vector<int32> labelsBuf(k_ChunkSize * 2);
+  std::vector<float64> normalsBuf(k_ChunkSize * 3);
+  std::vector<float64> areasBuf(k_ChunkSize);
+  fmt::memory_buffer writeBuf;
+
+  for(usize chunkStart = 0; chunkStart < numTriangles; chunkStart += k_ChunkSize)
   {
-    // Get the Feature Ids for the triangle
-    gid0 = faceLabels[t * 2];
-    gid1 = faceLabels[t * 2 + 1];
-
-    if(gid0 < 0)
+    if(m_ShouldCancel)
     {
-      continue;
+      return {};
     }
-    if(gid1 < 0)
+    usize count = std::min(k_ChunkSize, numTriangles - chunkStart);
+
+    labelsStore.copyIntoBuffer(chunkStart * 2, nonstd::span<int32>(labelsBuf.data(), count * 2));
+    normalsStore.copyIntoBuffer(chunkStart * 3, nonstd::span<float64>(normalsBuf.data(), count * 3));
+    areasStore.copyIntoBuffer(chunkStart, nonstd::span<float64>(areasBuf.data(), count));
+
+    writeBuf.clear();
+    for(usize i = 0; i < count; i++)
     {
-      continue;
+      int32 gid0 = labelsBuf[i * 2];
+      int32 gid1 = labelsBuf[i * 2 + 1];
+
+      if(gid0 < 0 || gid1 < 0)
+      {
+        continue;
+      }
+
+      fmt::format_to(std::back_inserter(writeBuf), "{:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f} {:0.4f}\n", eulerCache[gid0 * 3], eulerCache[gid0 * 3 + 1],
+                     eulerCache[gid0 * 3 + 2], eulerCache[gid1 * 3], eulerCache[gid1 * 3 + 1], eulerCache[gid1 * 3 + 2], normalsBuf[i * 3], normalsBuf[i * 3 + 1], normalsBuf[i * 3 + 2], areasBuf[i]);
     }
-
-    // Now get the Euler Angles for that feature identifier
-    float32 euAngRightHand0 = eulerAngles[gid0 * 3];
-    float32 euAngRightHand1 = eulerAngles[gid0 * 3 + 1];
-    float32 euAngRightHand2 = eulerAngles[gid0 * 3 + 2];
-    float32 euAngLeftHand0 = eulerAngles[gid1 * 3];
-    float32 euAngLeftHand1 = eulerAngles[gid1 * 3 + 1];
-    float32 euAngLeftHand2 = eulerAngles[gid1 * 3 + 2];
-
-    // Get the Triangle Normal
-    float64 tNorm0 = faceNormals[t * 3];
-    float64 tNorm1 = faceNormals[t * 3 + 1];
-    float64 tNorm2 = faceNormals[t * 3 + 2];
-
-    fprintf(f, "%0.4f %0.4f %0.4f %0.4f %0.4f %0.4f %0.4f %0.4f %0.4f %0.4f\n", euAngRightHand0, euAngRightHand1, euAngRightHand2, euAngLeftHand0, euAngLeftHand1, euAngLeftHand2, tNorm0, tNorm1,
-            tNorm2, faceAreas.getValue(t));
+    outStream.write(writeBuf.data(), static_cast<std::streamsize>(writeBuf.size()));
   }
 
-  fclose(f);
   return {};
 }

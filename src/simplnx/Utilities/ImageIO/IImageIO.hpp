@@ -7,6 +7,7 @@
 #include "simplnx/Utilities/ImageIO/ImageMetadata.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <set>
 #include <span>
 
@@ -28,6 +29,16 @@ namespace nx::core
 class SIMPLNX_EXPORT IImageIO
 {
 public:
+  /**
+   * @brief Receives one contiguous segment of a decoded image row.
+   *
+   * `pixels` contains `pixelCount` packed pixels beginning at `columnOffset` in
+   * `row`. Backends may emit a full row at once or multiple non-overlapping row
+   * segments (for example, one segment per TIFF tile). The callback is invoked
+   * synchronously and must not retain the span.
+   */
+  using ReadRowCallback = std::function<Result<>(usize row, usize columnOffset, usize pixelCount, std::span<const uint8> pixels)>;
+
   virtual ~IImageIO() noexcept = default;
 
   IImageIO() = default;
@@ -56,6 +67,16 @@ public:
    * @return Empty Result on success, or error Result with library-provided message
    */
   virtual Result<> readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const = 0;
+
+  /**
+   * @brief Decodes pixel data and delivers bounded row segments to a callback.
+   *
+   * This avoids requiring the caller to allocate an entire image buffer. TIFF
+   * implementations stream scanlines or tiles. Backends whose decoder owns a
+   * whole-image allocation may retain that decoder allocation for the duration
+   * of this call, but do not create a second full-image staging buffer.
+   */
+  virtual Result<> readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const = 0;
 
   /**
    * @brief Writes a 2D image from a raw byte buffer.

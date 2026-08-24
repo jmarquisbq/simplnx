@@ -7,7 +7,6 @@
 #include "simplnx/DataStructure/DataPath.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/Filter/Actions/CreateArrayAction.hpp"
-#include "simplnx/Filter/Actions/DeleteDataAction.hpp"
 #include "simplnx/Parameters/ArrayCreationParameter.hpp"
 #include "simplnx/Parameters/ArraySelectionParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
@@ -16,11 +15,6 @@
 #include "simplnx/Utilities/SIMPLConversion.hpp"
 
 using namespace nx::core;
-
-namespace
-{
-const std::string k_MaskName = "temp_mask";
-}
 
 namespace nx::core
 {
@@ -116,17 +110,6 @@ IFilter::PreflightResult SilhouetteFilter::preflightImpl(const DataStructure& da
                                                        clusterIds->getName(), clusterIds->getNumberOfTuples()));
   }
 
-  if(!pUseMaskValue)
-  {
-    DataPath tempPath = DataPath({k_MaskName});
-    {
-      auto createAction = std::make_unique<CreateArrayAction>(DataType::boolean, clusterArray->getTupleShape(), std::vector<usize>{1}, tempPath, CreateArrayAction::k_DefaultDataFormat, "true");
-      resultOutputActions.value().appendAction(std::move(createAction));
-    }
-
-    resultOutputActions.value().appendDeferredAction(std::make_unique<DeleteDataAction>(tempPath));
-  }
-
   {
     auto createAction = std::make_unique<CreateArrayAction>(DataType::float64, clusterArray->getTupleShape(), std::vector<usize>{1}, pSilhouetteArrayPathValue);
     resultOutputActions.value().appendAction(std::move(createAction));
@@ -140,17 +123,12 @@ IFilter::PreflightResult SilhouetteFilter::preflightImpl(const DataStructure& da
 Result<> SilhouetteFilter::executeImpl(DataStructure& dataStructure, const Arguments& filterArgs, const PipelineFilter* pipelineNode, const MessageHandler& messageHandler,
                                        const std::atomic_bool& shouldCancel, const ExecutionContext& executionContext) const
 {
-  auto maskPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
-  if(!filterArgs.value<bool>(k_UseMask_Key))
-  {
-    maskPath = DataPath({k_MaskName});
-  }
-
   SilhouetteInputValues inputValues;
 
   inputValues.DistanceMetric = static_cast<ClusterUtilities::DistanceMetric>(filterArgs.value<ChoicesParameter::ValueType>(k_DistanceMetric_Key));
+  inputValues.UseMask = filterArgs.value<bool>(k_UseMask_Key);
   inputValues.ClusteringArrayPath = filterArgs.value<DataPath>(k_SelectedArrayPath_Key);
-  inputValues.MaskArrayPath = maskPath;
+  inputValues.MaskArrayPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
   inputValues.FeatureIdsArrayPath = filterArgs.value<DataPath>(k_FeatureIdsArrayPath_Key);
   inputValues.SilhouetteArrayPath = filterArgs.value<DataPath>(k_SilhouetteArrayPath_Key);
 

@@ -52,6 +52,7 @@ namespace
 constexpr int32 k_RbrFileTooSmall = -1010;
 
 // -----------------------------------------------------------------------------
+/** @brief Compares payload bytes after the skipped header with the exact destination byte count. */
 int32 SanityCheckFileSizeVersusAllocatedSize(usize allocatedBytes, usize fileSize, usize skipHeaderBytes)
 {
   if(fileSize - skipHeaderBytes < allocatedBytes)
@@ -67,6 +68,12 @@ int32 SanityCheckFileSizeVersusAllocatedSize(usize allocatedBytes, usize fileSiz
 }
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Validates one typed binary payload and imports it through bounded pages.
+ *
+ * Endian conversion is performed within each local page before the checked
+ * destination write; the destination need not be resident.
+ */
 template <typename T>
 Result<> ReadBinaryFile(IDataArray* dataArrayPtr, const std::string& filename, uint64 skipHeaderBytes, ChoicesParameter::ValueType endian)
 {
@@ -83,18 +90,8 @@ Result<> ReadBinaryFile(IDataArray* dataArrayPtr, const std::string& filename, u
     return MakeErrorResult(k_RbrFileTooSmall, "The file size is smaller than the allocated size");
   }
 
-  Result<> result = ImportFromBinaryFile(std::filesystem::path(filename), *dataArray, skipHeaderBytes, k_DefaultBlockSize);
-  if(result.invalid())
-  {
-    return result;
-  }
-
-  if(endian != static_cast<ChoicesParameter::ValueType>(nx::core::endian::native))
-  {
-    dataArray->byteSwapElements();
-  }
-
-  return result;
+  const bool swapEndian = endian != static_cast<ChoicesParameter::ValueType>(nx::core::endian::native);
+  return ImportFromBinaryFile(std::filesystem::path(filename), *dataArray, skipHeaderBytes, k_DefaultBlockSize, swapEndian);
 }
 } // namespace
 

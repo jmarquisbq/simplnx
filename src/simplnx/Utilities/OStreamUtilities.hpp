@@ -31,7 +31,10 @@ enum class Delimiter : uint64
 SIMPLNX_EXPORT std::string DelimiterToString(uint64 delim);
 
 /**
- * @brief [BINARY CAPABLE, unless neighborlist][Multiple File Output] | Writes out to multiple files | !!!!endianess must be addressed in calling class!!!!
+ * @brief Writes each selected data object to its own text or binary file.
+ *
+ * Numeric arrays are streamed through bounded buffers so this API works for
+ * both resident and out-of-core stores without materializing a full copy.
  * @param objectPaths The vector of datapaths for respective dataObjects to be written out
  * @param dataStructure The simplnx datastructure where *objectPaths* datacontainers are stored
  * @param directoryPath The path to the directory to write files to | used to create outputStrm paths for ofstream
@@ -44,11 +47,15 @@ SIMPLNX_EXPORT std::string DelimiterToString(uint64 delim);
  * @param includeIndex The boolean that determines if "Feature_IDs" are printed | leave blank if binary is end output
  * @param includeHeaders The boolean that determines if headers are printed | leave blank if binary is end output
  * @param componentsPerLine The amount of elements to be inserted before newline character | leave blank if binary is end output
+ * @param swapEndian Byte-swaps numeric values in the temporary output page when
+ * exporting binary data; the source array is never modified.
+ * @return The first storage or file-writing failure, or success after every
+ * selected object has been written.
  */
 SIMPLNX_EXPORT Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, DataStructure& dataStructure, const std::string& directoryPath,
                                                      const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const std::string& fileExtension = ".txt",
                                                      bool exportToBinary = false, const std::string& delimiter = "", bool includeIndex = false, bool includeHeaders = false,
-                                                     size_t componentsPerLine = 0);
+                                                     size_t componentsPerLine = 0, bool swapEndian = false);
 
 /**
  * @brief [Single Output][Custom OStream] | Writes one IArray child to some OStream

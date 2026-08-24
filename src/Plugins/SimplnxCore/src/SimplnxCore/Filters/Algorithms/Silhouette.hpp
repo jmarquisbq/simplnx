@@ -15,6 +15,7 @@ namespace nx::core
 struct SIMPLNXCORE_EXPORT SilhouetteInputValues
 {
   ClusterUtilities::DistanceMetric DistanceMetric;
+  bool UseMask = false;
   DataPath ClusteringArrayPath;
   DataPath MaskArrayPath;
   DataPath FeatureIdsArrayPath;

@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <functional>
+#include <mutex>
 
 namespace
 {
@@ -45,15 +46,20 @@ void CloseFaplId(hid_t faplId)
   }
 }
 } // namespace
-
 namespace nx::core::HDF5
 {
 FileIO FileIO::ReadFile(const std::filesystem::path& filepath)
 {
   s_ReadOpenCount++;
-  hid_t faplId = MakeFaplId();
-  hid_t fileId = H5Fopen(filepath.string().c_str(), H5F_ACC_RDONLY, faplId);
-  CloseFaplId(faplId);
+  // Serialize the property-list lifecycle and file open on the process-wide HDF5 lock.
+  // The FileIO constructor below touches no HDF5, so it stays outside the lock.
+  hid_t fileId = H5I_INVALID_HID;
+  {
+    std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+    hid_t faplId = MakeFaplId();
+    fileId = H5Fopen(filepath.string().c_str(), H5F_ACC_RDONLY, faplId);
+    CloseFaplId(faplId);
+  }
   return FileIO(filepath, fileId);
 }
 
@@ -69,11 +75,14 @@ void FileIO::ResetReadOpenCount()
 
 void FileIO::SetFaplConfigurator(std::function<void(hid_t)> configurator)
 {
+  std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
   s_FaplConfigurator = std::move(configurator);
 }
 
 FileIO FileIO::WriteFile(const std::filesystem::path& filepath)
 {
+  // The filesystem existence check and removal are pure OS calls (no HDF5), so they run
+  // outside the lock; only the bare H5Fcreate leaf call is serialized on the ApiLock.
   if(std::filesystem::exists(filepath))
   {
     try
@@ -86,9 +95,13 @@ FileIO FileIO::WriteFile(const std::filesystem::path& filepath)
     }
   }
 
-  hid_t faplId = MakeFaplId();
-  hid_t fileId = H5Fcreate(filepath.string().c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, faplId);
-  CloseFaplId(faplId);
+  hid_t fileId = H5I_INVALID_HID;
+  {
+    std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+    hid_t faplId = MakeFaplId();
+    fileId = H5Fcreate(filepath.string().c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, faplId);
+    CloseFaplId(faplId);
+  }
   if(fileId > 0)
   {
     return FileIO(filepath, fileId);
@@ -98,7 +111,12 @@ FileIO FileIO::WriteFile(const std::filesystem::path& filepath)
 
 FileIO FileIO::AppendFile(const std::filesystem::path& filepath)
 {
-  hid_t fileId = H5Fopen(filepath.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+  // Self-locks the bare H5Fopen leaf call; the FileIO constructor touches no HDF5.
+  hid_t fileId = H5I_INVALID_HID;
+  {
+    std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+    fileId = H5Fopen(filepath.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+  }
   return FileIO(filepath, fileId);
 }
 
@@ -120,16 +138,31 @@ hid_t FileIO::open() const
   {
     return getId();
   }
-  hid_t id = H5Fopen(getFilePath().string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+  // Self-locks the bare H5Fopen leaf call. getFilePath() touches no HDF5, so the path
+  // string is resolved before the lock.
+  const std::string pathStr = getFilePath().string();
+  hid_t id = H5I_INVALID_HID;
+  {
+    std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+    id = H5Fopen(pathStr.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+  }
   setId(id);
   return id;
 }
 
 void FileIO::close()
 {
+  // Self-locks the bare H5Fclose leaf call. Invoked by ~FileIO, so destruction of a
+  // FileIO on any thread serializes its close against every other HDF5 C call. The id is
+  // captured before the lock (isOpen() already guarantees it is open) so nothing
+  // lock-taking runs inside the leaf scope.
   if(isOpen())
   {
-    H5Fclose(getId());
+    const hid_t selfId = getId();
+    {
+      std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+      H5Fclose(selfId);
+    }
     setId(0);
   }
 }

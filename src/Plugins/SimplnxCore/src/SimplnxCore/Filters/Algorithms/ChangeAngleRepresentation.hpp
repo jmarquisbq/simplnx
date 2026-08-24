@@ -8,18 +8,12 @@
 #include "simplnx/Parameters/ArraySelectionParameter.hpp"
 #include "simplnx/Parameters/ChoicesParameter.hpp"
 
-/**
-* This is example code to put in the Execute Method of the filter.
-  ChangeAngleRepresentationInputValues inputValues;
-  inputValues.AnglesArrayPath = filterArgs.value<ArraySelectionParameter::ValueType>(angles_array_path);
-  inputValues.ConversionTypeIndex = filterArgs.value<ChoicesParameter::ValueType>(conversion_type_index);
-  return ChangeAngleRepresentation(dataStructure, messageHandler, shouldCancel, &inputValues)();
-
-*/
-
 namespace nx::core
 {
 
+/**
+ * @brief Runtime values used by ChangeAngleRepresentation.
+ */
 struct SIMPLNXCORE_EXPORT ChangeAngleRepresentationInputValues
 {
   ArraySelectionParameter::ValueType AnglesArrayPath;
@@ -28,7 +22,10 @@ struct SIMPLNXCORE_EXPORT ChangeAngleRepresentationInputValues
 
 /**
  * @class ChangeAngleRepresentation
- * @brief This algorithm implements support code for the ChangeAngleRepresentationFilter
+ * @brief Converts float32 angle values in place using storage-aware execution.
+ *
+ * Contiguous in-memory stores use direct parallel multiplication. Out-of-core
+ * stores stream through a fixed-size buffer using bulk datastore I/O.
  */
 
 class SIMPLNXCORE_EXPORT ChangeAngleRepresentation

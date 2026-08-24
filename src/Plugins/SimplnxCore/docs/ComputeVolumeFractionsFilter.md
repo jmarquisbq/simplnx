@@ -8,6 +8,10 @@ Statistics (Morphological)
 
 This **Filter** determines the volume fraction of each **Ensemble**. The **Filter** counts the number of **Cells** belonging to each **Ensemble** and stores the number fraction.
 
+## Algorithm
+
+Cell phase IDs are read in fixed-size sequential batches. Only one count per ensemble and one output value per ensemble are retained in memory, so working memory does not scale with the number of **Cells**. The resulting ensemble array is written with one checked bulk transfer. This same path is used for in-memory and disk-backed arrays and propagates all storage failures.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

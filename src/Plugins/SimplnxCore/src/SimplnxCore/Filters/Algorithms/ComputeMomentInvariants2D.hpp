@@ -24,8 +24,11 @@ struct SIMPLNXCORE_EXPORT ComputeMomentInvariants2DInputValues
 
 /**
  * @class ComputeMomentInvariants2D
- * @brief This filter computes the 2D Omega-1 and Omega 2 values from the Central Moments matrix and optionally will normalize the values to a unit circle and also optionally save the Central Moments
- * matrix as a DataArray to the Cell Feature Attribute Matrix.
+ * @brief Computes 2D Omega moment invariants and optional central moments for each feature.
+ *
+ * The algorithm retains the direct, parallel in-core path and dispatches to a
+ * bounded streaming path for out-of-core feature-id arrays. The streaming path
+ * accumulates only per-feature moments while bulk-reading fixed-size cell chunks.
  */
 
 class SIMPLNXCORE_EXPORT ComputeMomentInvariants2D

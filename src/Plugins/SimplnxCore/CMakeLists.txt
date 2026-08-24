@@ -192,30 +192,53 @@ set(AlgorithmList
   ComputeArrayStatistics
   ComputeBiasedFeatures
   ComputeBoundaryCells
+  ComputeBoundaryCellsDirect
+  ComputeBoundaryCellsScanline
   ComputeBoundingBoxStats
+  ComputeBoundingBoxStatsDirect
+  ComputeBoundingBoxStatsScanline
   ComputeCoordinatesImageGeom
   ComputeCoordinateThreshold
+  ComputeCoordinateThresholdDirect
+  ComputeCoordinateThresholdScanline
   ComputeBoundaryElementFractions
   ComputeDifferencesMap
   ComputeEuclideanDistMap
+  ComputeEuclideanDistMapScanline
   ComputeFeatureBounds
+  ComputeFeatureBoundsDirect
+  ComputeFeatureBoundsScanline
   ComputeFeatureCentroids
   ComputeFeatureClustering
   ComputeFeatureNeighbors
+  ComputeFeatureNeighborsDirect
+  ComputeFeatureNeighborsScanline
   ComputeFeaturePhases
   ComputeFeaturePhasesBinary
   ComputeFeatureRect
   ComputeFeatureSizes
+  ComputeFeatureSizesDirect
+  ComputeFeatureSizesScanline
   ComputeGroupingDensity
   ComputeKMeans
+  ComputeKMeansDirect
+  ComputeKMeansScanline
   ComputeKMedoids
+  ComputeKMedoidsDirect
+  ComputeKMedoidsScanline
   ComputeLargestCrossSections
+  ComputeLargestCrossSectionsDirect
+  ComputeLargestCrossSectionsScanline
   ComputeMomentInvariants2D
   ComputeNeighborhoods
   ComputeNeighborListStatistics
 #  ComputeNumFeatures
   ComputeSurfaceAreaToVolume
+  ComputeSurfaceAreaToVolumeDirect
+  ComputeSurfaceAreaToVolumeScanline
   ComputeSurfaceFeatures
+  ComputeSurfaceFeaturesDirect
+  ComputeSurfaceFeaturesScanline
 #  ComputeTriangleAreas
   ComputeTriangleGeomCentroids
   ComputeTriangleGeomVolumes
@@ -228,9 +251,13 @@ set(AlgorithmList
   ConvertData
  # CopyDataObject
   CopyFeatureArrayToElementArray
+  CopyFeatureArrayToElementArrayDirect
+  CopyFeatureArrayToElementArrayScanline
   CreateAMScanPaths
  # CreateAttributeMatrix
   CreateColorMap
+  CreateColorMapDirect
+  CreateColorMapScanline
  # CreateDataArray
 #  CreateDataArrayAdvanced
 #  CreateDataGroup
@@ -242,6 +269,8 @@ set(AlgorithmList
   CropImageGeometry
   CropVertexGeometry
   DBSCAN
+  DBSCANDirect
+  DBSCANScanline
  # DeleteData
   ErodeDilateBadData
   ErodeDilateCoordinationNumber
@@ -253,11 +282,16 @@ set(AlgorithmList
   ExtractVertexGeometry
   FeatureFaceCurvature
   FillBadData
+  FillBadDataBFS
+  FillBadDataCCL
+  FillBadVoxels
   FindNRingNeighbors
   FlyingEdges3D
   HierarchicalSmooth
   IdentifyDuplicateVertices
   IdentifySample
+  IdentifySampleBFS
+  IdentifySampleCCL
   InitializeData
   InitializeImageGeomCellData
   InterpolatePointCloudToRegularGrid
@@ -269,13 +303,21 @@ set(AlgorithmList
   MapPointCloudToRegularGrid
 #  MoveData
   MultiThresholdObjects
+  MultiThresholdObjectsDirect
+  MultiThresholdObjectsScanline
   NearestPointFuseRegularGrids
+  NearestPointFuseRegularGridsDirect
+  NearestPointFuseRegularGridsScanline
   PadImageGeometry
   PartitionGeometry
+  PartitionGeometryDirect
+  PartitionGeometryScanline
   PointSampleEdgeGeometry
   ExtractFeatureBoundaries2D
   PointSampleTriangleGeometry
   QuickSurfaceMesh
+  QuickSurfaceMeshDirect
+  QuickSurfaceMeshScanline
   ReadBinaryCTNorthstar
   ReadCSVFile
   ReadDeformKeyFileV12
@@ -295,6 +337,8 @@ set(AlgorithmList
   RegularizeZSpacing
   RemoveFlaggedEdges
   RemoveFlaggedFeatures
+  RemoveFlaggedFeaturesDirect
+  RemoveFlaggedFeaturesScanline
   RemoveFlaggedTriangles
   RemoveFlaggedVertices
  # RenameDataObject
@@ -311,10 +355,14 @@ set(AlgorithmList
  # SetImageGeomOriginScaling
   SharedFeatureFace
   Silhouette
+  SilhouetteDirect
+  SilhouetteScanline
   SliceTriangleGeometry
   SplitDataArrayByComponent
   SplitDataArrayByTuple
   SurfaceNets
+  SurfaceNetsDirect
+  SurfaceNetsScanline
   TriangleCentroid
   TriangleDihedralAngle
   TriangleNormal
@@ -405,6 +453,9 @@ set(PLUGIN_EXTRA_SOURCES
     # "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMGeometryOBJ.h"
     "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMSurfaceNet.cpp"
     "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/SurfaceNets/MMSurfaceNet.h"
+    # Shared header for the IdentifySample BFS/CCL variants (no .cpp, so the
+    # AlgorithmList stem-expansion does not pick it up).
+    "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/Filters/Algorithms/IdentifySampleCommon.hpp"
 
 )
 

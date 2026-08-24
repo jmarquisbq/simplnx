@@ -19,6 +19,7 @@
 #include <fmt/format.h>
 
 #include <filesystem>
+#include <memory>
 
 namespace fs = std::filesystem;
 
@@ -27,6 +28,7 @@ using namespace nx::core;
 namespace nx::core
 {
 
+/** @brief Builds the delegated ReadImageFilter arguments while preserving stack-level origin/spacing policy. */
 Arguments BuildReadImageFilterArgs(const ReadImageSubFilterConfig& config)
 {
   Arguments args;
@@ -59,66 +61,92 @@ const ChoicesParameter::ValueType k_NoResampleModeIndex = 0;
 const ChoicesParameter::ValueType k_ScalingModeIndex = 1;
 const ChoicesParameter::ValueType k_ExactDimensionsModeIndex = 2;
 
+/** @brief Reverses tuple order within each image row using one bounded typed row buffer. */
 template <class T>
-void FlipAboutYAxis(DataArray<T>& dataArray, const Vec3<usize>& dims)
+Result<> FlipAboutYAxis(DataArray<T>& dataArray, const Vec3<usize>& dims)
 {
   AbstractDataStore<T>& dataStoreRef = dataArray.getDataStoreRef();
 
-  usize numComp = dataStoreRef.getNumberOfComponents();
-  std::vector<T> currentRowBuffer(dims[0] * dataArray.getNumberOfComponents());
+  const usize numComp = dataStoreRef.getNumberOfComponents();
+  const usize rowElements = dims[0] * numComp;
+  auto currentRowBuffer = std::make_unique<T[]>(rowElements);
 
   for(usize row = 0; row < dims[1]; row++)
   {
-    // Copy the current row into a temp buffer
-    typename AbstractDataStore<T>::Iterator startIter = dataStoreRef.begin() + (dims[0] * numComp * row);
-    typename AbstractDataStore<T>::Iterator endIter = startIter + dims[0] * numComp;
-    std::copy(startIter, endIter, currentRowBuffer.begin());
-
-    // Starting at the last tuple in the buffer
-    usize bufferIndex = (dims[0] - 1) * numComp;
-    usize dataStoreIndex = row * dims[0] * numComp;
-
-    for(usize tupleIdx = 0; tupleIdx < dims[0]; tupleIdx++)
+    const usize rowOffset = row * rowElements;
+    Result<> readResult = dataStoreRef.copyIntoBuffer(rowOffset, nonstd::span<T>(currentRowBuffer.get(), rowElements));
+    if(readResult.invalid())
     {
-      for(usize cIdx = 0; cIdx < numComp; cIdx++)
+      return readResult;
+    }
+
+    for(usize leftTuple = 0, rightTuple = dims[0] - 1; leftTuple < rightTuple; leftTuple++, rightTuple--)
+    {
+      for(usize component = 0; component < numComp; component++)
       {
-        dataStoreRef.setValue(dataStoreIndex, currentRowBuffer[bufferIndex + cIdx]);
-        dataStoreIndex++;
+        std::swap(currentRowBuffer[leftTuple * numComp + component], currentRowBuffer[rightTuple * numComp + component]);
       }
-      bufferIndex = bufferIndex - numComp;
+    }
+
+    Result<> writeResult = dataStoreRef.copyFromBuffer(rowOffset, nonstd::span<const T>(currentRowBuffer.get(), rowElements));
+    if(writeResult.invalid())
+    {
+      return writeResult;
     }
   }
+  return {};
 }
 
+/** @brief Swaps mirrored image rows through two bounded buffers, leaving an odd middle row untouched. */
 template <class T>
-void FlipAboutXAxis(DataArray<T>& dataArray, const Vec3<usize>& dims)
+Result<> FlipAboutXAxis(DataArray<T>& dataArray, const Vec3<usize>& dims)
 {
   AbstractDataStore<T>& dataStoreRef = dataArray.getDataStoreRef();
-  usize numComp = dataStoreRef.getNumberOfComponents();
+  const usize numComp = dataStoreRef.getNumberOfComponents();
+  const usize rowElements = dims[0] * numComp;
+  auto topRowBuffer = std::make_unique<T[]>(rowElements);
+  auto bottomRowBuffer = std::make_unique<T[]>(rowElements);
   // Only iterate half the rows; the inner swap pairs each top row with its bottom mirror.
   // Odd height leaves the middle row untouched.
   const usize rowSwapCount = dims[1] / 2;
-  usize bottomRow = dims[1] - 1;
 
-  for(usize row = 0; row < rowSwapCount; row++)
+  for(usize topRow = 0; topRow < rowSwapCount; topRow++)
   {
-    // Copy the "top" row into a temp buffer
-    usize topStartIter = 0 + (dims[0] * numComp * row);
-    usize topEndIter = topStartIter + dims[0] * numComp;
-    usize bottomStartIter = 0 + (dims[0] * numComp * bottomRow);
+    const usize bottomRow = dims[1] - 1 - topRow;
+    const usize topOffset = topRow * rowElements;
+    const usize bottomOffset = bottomRow * rowElements;
 
-    // Copy from bottom to top and then temp to bottom
-    for(usize eleIndex = topStartIter; eleIndex < topEndIter; eleIndex++)
+    Result<> topReadResult = dataStoreRef.copyIntoBuffer(topOffset, nonstd::span<T>(topRowBuffer.get(), rowElements));
+    if(topReadResult.invalid())
     {
-      T value = dataStoreRef.getValue(eleIndex);
-      dataStoreRef[eleIndex] = dataStoreRef[bottomStartIter];
-      dataStoreRef[bottomStartIter] = value;
-      bottomStartIter++;
+      return topReadResult;
     }
-    bottomRow--;
+    Result<> bottomReadResult = dataStoreRef.copyIntoBuffer(bottomOffset, nonstd::span<T>(bottomRowBuffer.get(), rowElements));
+    if(bottomReadResult.invalid())
+    {
+      return bottomReadResult;
+    }
+    Result<> topWriteResult = dataStoreRef.copyFromBuffer(topOffset, nonstd::span<const T>(bottomRowBuffer.get(), rowElements));
+    if(topWriteResult.invalid())
+    {
+      return topWriteResult;
+    }
+    Result<> bottomWriteResult = dataStoreRef.copyFromBuffer(bottomOffset, nonstd::span<const T>(topRowBuffer.get(), rowElements));
+    if(bottomWriteResult.invalid())
+    {
+      return bottomWriteResult;
+    }
   }
+  return {};
 }
 
+/**
+ * @brief Reads, optionally converts/resamples/flips, and appends stack slices for one destination value type.
+ *
+ * Each decoded slice is consumed before the next file is opened. Final flips
+ * and slice copies use row/slice bulk transfers, so no complete stack copy is
+ * created even when the destination store is disk-backed.
+ */
 template <class T>
 Result<> ReadImageStackImpl(DataStructure& dataStructure, const ReadImageStackInputValues& inputValues, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
 {
@@ -316,11 +344,19 @@ Result<> ReadImageStackImpl(DataStructure& dataStructure, const ReadImageStackIn
 
     if(transformType == ImageFlipTransform::FlipAboutYAxis)
     {
-      FlipAboutYAxis<T>(srcData, destDims);
+      Result<> flipResult = FlipAboutYAxis<T>(srcData, destDims);
+      if(flipResult.invalid())
+      {
+        return flipResult;
+      }
     }
     else if(transformType == ImageFlipTransform::FlipAboutXAxis)
     {
-      FlipAboutXAxis<T>(srcData, destDims);
+      Result<> flipResult = FlipAboutXAxis<T>(srcData, destDims);
+      if(flipResult.invalid())
+      {
+        return flipResult;
+      }
     }
 
     // When grayscale conversion is requested, the preflight creates the destination array with a
@@ -347,8 +383,10 @@ Result<> ReadImageStackImpl(DataStructure& dataStructure, const ReadImageStackIn
   return outputResult;
 }
 
+/** @brief Dispatches the destination image scalar type to the bounded stack reader. */
 struct ReadImageStackDispatchFunctor
 {
+  /** @brief Invokes the complete stack reader for the runtime-selected destination type. */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const ReadImageStackInputValues& inputValues, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
   {

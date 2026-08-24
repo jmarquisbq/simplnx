@@ -3,15 +3,35 @@
 #include "OrientationAnalysis/Filters/WriteINLFileFilter.hpp"
 #include "OrientationAnalysis/OrientationAnalysis_test_dirs.hpp"
 
+#include "simplnx/Common/ScopeGuard.hpp"
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
+#include "simplnx/DataStructure/StringArray.hpp"
 #include "simplnx/Parameters/FileSystemPathParameter.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
-#include <fstream>
+#include <EbsdLib/Core/EbsdLibConstants.h>
+#include <EbsdLib/IO/TSL/AngConstants.h>
 
+#include <array>
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <nonstd/span.hpp>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+
 namespace fs = std::filesystem;
 
 using namespace nx::core;
@@ -70,6 +90,10 @@ TEST_CASE("OrientationAnalysis::WriteINLFileFilter: Valid Filter Execution", "[O
 {
   UnitTest::LoadPlugins();
 
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
+
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "INL_writer.tar.gz", "INL_writer");
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
@@ -92,7 +116,7 @@ TEST_CASE("OrientationAnalysis::WriteINLFileFilter: Valid Filter Execution", "[O
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   ::CompareResults();

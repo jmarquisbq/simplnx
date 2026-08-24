@@ -20,6 +20,14 @@ This **Filter** calculates the distance of each **Cell** from the nearest **Feat
 
 4. If the option *Calculate Manhattan Distance* is *false*, then the "city-block" distances are overwritten with the *Euclidean Distance* from the **Cell** to its internally tracked *nearest neighbor* **Cell** and stored in a *float* array instead of an *integer* array.
 
+### Performance
+
+The bounded-memory scanline implementation is used for every out-of-core array and for most in-memory workloads. Boundary seeds are identified with rolling previous/current/next Z-slices of Feature IDs. On volumes without non-positive Feature IDs, exact Manhattan distances are computed with one forward and one backward sweep per enabled map. If non-positive Feature IDs are present, an exact layer-synchronous fallback preserves their behavior as non-traversable cells. Every store access is a bulk Z-slice transfer.
+
+One measured in-memory case uses the direct parallel implementation: all three distance maps are enabled and the Feature IDs contain non-positive, non-traversable cells. The direct implementation is faster for that combination, but requires full-volume temporary arrays. Out-of-core execution always uses the scanline implementation so resident memory remains bounded.
+
+Resident scratch is proportional to one XY slice, not the volume. Euclidean mode also needs a nearest-seed value for every cell; that scratch is held in a DataStore selected by the active storage policy, so it is disk-backed during OOC execution instead of consuming full-volume RAM.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

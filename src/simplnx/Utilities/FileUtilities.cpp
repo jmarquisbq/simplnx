@@ -272,6 +272,33 @@ const int32 k_FileNotOpen = -108;
 const int32 k_CannotSkipToLine = -115;
 const int32 k_EmptyLine = -119;
 
+namespace
+{
+Result<> FlushParsersImpl(const ParsersVector& dataParsers)
+{
+  std::vector<Result<>> flushResults;
+  flushResults.reserve(dataParsers.size());
+  for(const auto& dataParser : dataParsers)
+  {
+    if(dataParser == nullptr)
+    {
+      continue;
+    }
+
+    Result<> flushResult = dataParser->flush();
+    if(flushResult.invalid())
+    {
+      for(Error& error : flushResult.errors())
+      {
+        error.message = fmt::format("Array \"{}\": ", dataParser->columnName()) + error.message;
+      }
+    }
+    flushResults.push_back(std::move(flushResult));
+  }
+  return MergeResults(std::move(flushResults));
+}
+} // namespace
+
 AbstractDataParser::AbstractDataParser(IArray& array, const std::string& columnName, usize columnIndex)
 : m_Array(array)
 , m_ColumnName(columnName)
@@ -383,8 +410,13 @@ Result<ParsersVector> CreateParsers(const std::vector<CSVType>& dataTypes, const
   return {std::move(dataParsers)};
 }
 
+Result<> FlushParsers(const ParsersVector& dataParsers)
+{
+  return FlushParsersImpl(dataParsers);
+}
+
 Result<> ParseLine(std::fstream& inStream, const ParsersVector& dataParsers, const std::vector<std::string>& headers, const std::vector<char>& delimiters, bool consecutiveDelimiters, usize lineNumber,
-                   usize beginIndex)
+                   usize beginIndex, bool& flushRequired)
 {
   std::string line;
   std::getline(inStream, line);
@@ -414,7 +446,7 @@ Result<> ParseLine(std::fstream& inStream, const ParsersVector& dataParsers, con
 
     usize index = dataParser->columnIndex();
 
-    Result<> result = dataParser->parse(tokens[index], lineNumber - beginIndex);
+    Result<> result = dataParser->parse(tokens[index], lineNumber - beginIndex, flushRequired);
     if(result.invalid())
     {
       for(Error& error : result.errors())

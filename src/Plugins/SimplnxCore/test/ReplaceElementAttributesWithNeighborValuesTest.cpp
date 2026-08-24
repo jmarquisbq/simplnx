@@ -1,7 +1,7 @@
-#include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 #include <catch2/catch.hpp>
 
 #include "SimplnxCore/Filters/ReplaceElementAttributesWithNeighborValuesFilter.hpp"
+#include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 
 #include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
@@ -11,14 +11,123 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <filesystem>
-namespace fs = std::filesystem;
+#include <fstream>
 
+namespace fs = std::filesystem;
 using namespace nx::core;
+using namespace nx::core::Constants;
+using namespace nx::core::UnitTest;
 
 namespace
 {
+// ---- branch OOC test helpers ----
+const std::string k_GeomName("DataContainer");
+const std::string k_CellDataName("CellData");
+
+const DataPath k_GeomPath({k_GeomName});
+const DataPath k_CellDataPath = k_GeomPath.createChildPath(k_CellDataName);
+const DataPath k_ConfidencePath = k_CellDataPath.createChildPath("Confidence Index");
+
+void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize dimZ)
+{
+  const ShapeType cellTupleShape = {dimZ, dimY, dimX};
+  const usize sliceSize = dimX * dimY;
+
+  auto* imageGeom = ImageGeom::Create(dataStructure, k_GeomName);
+  imageGeom->setDimensions({dimX, dimY, dimZ});
+  imageGeom->setSpacing({1.0f, 1.0f, 1.0f});
+  imageGeom->setOrigin({0.0f, 0.0f, 0.0f});
+
+  auto* cellAM = AttributeMatrix::Create(dataStructure, k_CellDataName, cellTupleShape, imageGeom->getId());
+  imageGeom->setCellData(*cellAM);
+
+  auto confDataStore = DataStoreUtilities::CreateDataStore<float32>(dataStructure, k_ConfidencePath, cellTupleShape, {1}, IDataAction::Mode::Execute);
+  auto* confArray = DataArray<float32>::Create(dataStructure, "Confidence Index", confDataStore, cellAM->getId());
+  auto& confStore = confArray->getDataStoreRef();
+
+  auto eulerDataStore = DataStoreUtilities::CreateDataStore<float32>(dataStructure, k_CellDataPath.createChildPath("EulerAngles"), cellTupleShape, {3}, IDataAction::Mode::Execute);
+  auto* eulerArray = DataArray<float32>::Create(dataStructure, "EulerAngles", eulerDataStore, cellAM->getId());
+  auto& eulerStore = eulerArray->getDataStoreRef();
+
+  auto phasesDataStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, k_CellDataPath.createChildPath("Phases"), cellTupleShape, {1}, IDataAction::Mode::Execute);
+  auto* phasesArray = DataArray<int32>::Create(dataStructure, "Phases", phasesDataStore, cellAM->getId());
+  auto& phasesStore = phasesArray->getDataStoreRef();
+
+  std::vector<float32> confBuf(sliceSize);
+  std::vector<float32> eulerBuf(sliceSize * 3);
+  std::vector<int32> phasesBuf(sliceSize);
+
+  for(usize z = 0; z < dimZ; z++)
+  {
+    for(usize y = 0; y < dimY; y++)
+    {
+      for(usize x = 0; x < dimX; x++)
+      {
+        const usize inSlice = y * dimX + x;
+        phasesBuf[inSlice] = 1;
+
+        confBuf[inSlice] = static_cast<float32>((x * 3 + y * 7 + z * 11) % 100) / 100.0f;
+
+        const usize eIdx = inSlice * 3;
+        eulerBuf[eIdx] = static_cast<float32>(x) / static_cast<float32>(dimX);
+        eulerBuf[eIdx + 1] = static_cast<float32>(y) / static_cast<float32>(dimY);
+        eulerBuf[eIdx + 2] = static_cast<float32>(z) / static_cast<float32>(dimZ);
+      }
+    }
+    const usize zOffset = z * sliceSize;
+    confStore.copyFromBuffer(zOffset, nonstd::span<const float32>(confBuf.data(), sliceSize));
+    eulerStore.copyFromBuffer(zOffset * 3, nonstd::span<const float32>(eulerBuf.data(), sliceSize * 3));
+    phasesStore.copyFromBuffer(zOffset, nonstd::span<const int32>(phasesBuf.data(), sliceSize));
+  }
+}
+
+usize CountVoxelsBelowThreshold(const DataStructure& dataStructure, float32 threshold, usize dimX, usize dimY, usize dimZ)
+{
+  const auto& conf = dataStructure.getDataRefAs<Float32Array>(k_ConfidencePath).getDataStoreRef();
+  const usize sliceSize = dimX * dimY;
+  std::vector<float32> buf(sliceSize);
+  usize count = 0;
+  for(usize z = 0; z < dimZ; z++)
+  {
+    conf.copyIntoBuffer(z * sliceSize, nonstd::span<float32>(buf.data(), sliceSize));
+    for(usize i = 0; i < sliceSize; i++)
+    {
+      if(buf[i] < threshold)
+      {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+usize CountVoxelsAboveThreshold(const DataStructure& dataStructure, float32 threshold, usize dimX, usize dimY, usize dimZ)
+{
+  const auto& conf = dataStructure.getDataRefAs<Float32Array>(k_ConfidencePath).getDataStoreRef();
+  const usize sliceSize = dimX * dimY;
+  std::vector<float32> buf(sliceSize);
+  usize count = 0;
+  for(usize z = 0; z < dimZ; z++)
+  {
+    conf.copyIntoBuffer(z * sliceSize, nonstd::span<float32>(buf.data(), sliceSize));
+    for(usize i = 0; i < sliceSize; i++)
+    {
+      if(buf[i] > threshold)
+      {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+// ---- develop synthetic/exemplar test helpers ----
+const DataPath k_ConfidenceIndexPath = k_CellAttributeMatrix.createChildPath(Constants::k_Confidence_Index);
+const std::string k_ExemplarDataContainer2("DataContainer");
+
 // Names for the self-contained synthetic test below.
 const std::string k_SyntheticImageGeomName("Image3D");
 const std::string k_SyntheticCellAMName("CellData");
@@ -57,6 +166,74 @@ DataStructure BuildSyntheticDataStructure(float32 goodValue, float32 badValue, c
   return dataStructure;
 }
 } // namespace
+
+// ============================ Branch OOC tests ============================
+
+TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Generate Test Data", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter][.GenerateTestData]")
+{
+  const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "replace_element_attributes";
+  fs::create_directories(outputDir);
+
+  // Small input data (20x20x20)
+  {
+    DataStructure buildDS;
+    BuildTestData(buildDS, 20, 20, 20);
+    UnitTest::WriteTestDataStructure(buildDS, outputDir / "small_input.dream3d");
+  }
+
+  // Large input data (200x200x200)
+  {
+    DataStructure buildDS;
+    BuildTestData(buildDS, 200, 200, 200);
+    UnitTest::WriteTestDataStructure(buildDS, outputDir / "large_input.dream3d");
+  }
+}
+
+// ==================== Develop synthetic / backwards-compat tests ====================
+TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter]")
+{
+  UnitTest::LoadPlugins();
+
+  const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_replace_element_attributes_with_neighbor.tar.gz",
+                                                              "6_6_replace_element_attributes_with_neighbor");
+
+  // Read Exemplar DREAM3D File Filter
+  auto exemplarFilePath = fs::path(fmt::format("{}/TestFiles/6_6_replace_element_attributes_with_neighbor/6_6_replace_element_attributes_with_neighbor.dream3d", unit_test::k_DREAM3DDataDir));
+  DataStructure exemplarDataStructure = nx::core::UnitTest::LoadDataStructure(exemplarFilePath);
+
+  // Read the Test Data set
+  auto baseDataFilePath = fs::path(fmt::format("{}/TestFiles/6_6_replace_element_attributes_with_neighbor/6_6_replace_element_attributes_with_neighbor.dream3d", unit_test::k_DREAM3DDataDir));
+  DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
+
+  {
+    // Instantiate the filter, a DataStructure object and an Arguments Object
+    ReplaceElementAttributesWithNeighborValuesFilter filter;
+    Arguments args;
+
+    // Create default Parameters for the filter.
+    args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_MinConfidence_Key, std::make_any<float32>(0.1F));
+    args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_SelectedComparison_Key, std::make_any<ChoicesParameter::ValueType>(0));
+    args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_Loop_Key, std::make_any<bool>(true));
+    args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_ComparisonDataPath, std::make_any<DataPath>(k_ConfidenceIndexPath));
+    args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_SelectedImageGeometryPath_Key, std::make_any<DataPath>(k_DataContainerPath));
+
+    // Preflight the filter and check result
+    auto preflightResult = filter.preflight(dataStructure, args);
+    SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
+
+    // Execute the filter and check the result
+    auto executeResult = filter.execute(dataStructure, args);
+    SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
+  }
+
+  UnitTest::CompareExemplarToGeneratedData(dataStructure, exemplarDataStructure, k_CellAttributeMatrix, k_ExemplarDataContainer2);
+
+#ifdef SIMPLNX_WRITE_TEST_OUTPUT
+  WriteTestDataStructure(dataStructure, fmt::format("{}/7_0_replace_element_attributes_with_neighbor.dream3d", unit_test::k_BinaryTestOutputDir));
+#endif
+
+  UnitTest::CheckArraysInheritTupleDims(dataStructure);
+}
 
 TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthetic neighbor replacement", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter]")
 {

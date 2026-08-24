@@ -20,7 +20,10 @@ struct SIMPLNXCORE_EXPORT ComputeDifferencesMapInputValues
 
 /**
  * @class ComputeDifferencesMap
- * @brief This algorithm implements support code for the ComputeDifferencesMapFilter
+ * @brief Computes the component-wise absolute difference between two arrays.
+ *
+ * Input and output values are streamed through bounded, component-aligned buffers so
+ * out-of-core stores use bulk I/O without allocating memory proportional to the array.
  */
 
 class SIMPLNXCORE_EXPORT ComputeDifferencesMap

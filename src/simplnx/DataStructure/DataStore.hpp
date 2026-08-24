@@ -11,10 +11,12 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace nx::core
@@ -58,8 +60,8 @@ public:
   : parent_type()
   , m_ComponentShape(componentShape)
   , m_TupleShape(tupleShape)
-  , m_NumComponents(std::accumulate(m_ComponentShape.cbegin(), m_ComponentShape.cend(), static_cast<size_t>(1), std::multiplies<>()))
-  , m_NumTuples(std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<size_t>(1), std::multiplies<>()))
+  , m_NumComponents(std::accumulate(m_ComponentShape.cbegin(), m_ComponentShape.cend(), static_cast<usize>(1), std::multiplies<>()))
+  , m_NumTuples(std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<usize>(1), std::multiplies<>()))
   , m_InitValue(initValue)
   {
     resizeTuples(m_TupleShape);
@@ -80,8 +82,8 @@ public:
   , m_ComponentShape(std::move(componentShape))
   , m_TupleShape(std::move(tupleShape))
   , m_Data(std::move(buffer))
-  , m_NumComponents(std::accumulate(m_ComponentShape.cbegin(), m_ComponentShape.cend(), static_cast<size_t>(1), std::multiplies<>()))
-  , m_NumTuples(std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<size_t>(1), std::multiplies<>()))
+  , m_NumComponents(std::accumulate(m_ComponentShape.cbegin(), m_ComponentShape.cend(), static_cast<usize>(1), std::multiplies<>()))
+  , m_NumTuples(std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<usize>(1), std::multiplies<>()))
   {
     // Because no init value is passed into the constructor, we will use a "mudflap" style value that is easy to debug.
     m_InitValue = GetMudflap<T>();
@@ -209,6 +211,25 @@ public:
   }
 
   /**
+   * @brief Returns recovery metadata for an in-memory store.
+   *
+   * In-memory DataStores have no backing file or external state, so the
+   * recovery file's HDF5 dataset for this array contains all the data
+   * needed to reconstruct the store. No extra key-value attributes are
+   * required, so this returns an empty map.
+   *
+   * Out-of-core store subclasses override this to return the file path,
+   * dataset path, chunk shape, etc. needed to reattach to their backing
+   * storage after a crash.
+   *
+   * @return std::map<std::string, std::string> Empty map.
+   */
+  std::map<std::string, std::string> getRecoveryMetadata() const override
+  {
+    return {};
+  }
+
+  /**
    * @brief This method copies a value to the member variable m_InitValue
    */
   void setInitValue(T value)
@@ -240,7 +261,7 @@ public:
     auto oldSize = this->getSize();
     // Calculate the total number of values in the new array
     m_TupleShape = tupleShape;
-    m_NumTuples = std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<size_t>(1), std::multiplies<>());
+    m_NumTuples = std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<usize>(1), std::multiplies<>());
 
     usize newSize = getNumberOfComponents() * m_NumTuples;
 
@@ -297,6 +318,352 @@ public:
   void setValue(usize index, value_type value) override
   {
     m_Data.get()[index] = value;
+  }
+
+  /**
+   * @brief Copies a contiguous range of values from this in-memory data store
+   * into the caller-provided buffer. For the in-memory DataStore this is a
+   * simple bounds-checked std::copy from the raw backing array.
+   *
+   * @param startIndex The starting flat element index to read from
+   * @param buffer A span to receive the copied values; its size determines how
+   *               many elements are read
+   * @return Result<> valid on success; invalid if `[startIndex, startIndex + buffer.size())`
+   *         exceeds getSize().
+   */
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
+  {
+    const usize count = buffer.size();
+
+    // Bounds check: ensure the requested range fits within the store
+    if(startIndex + count > this->getSize())
+    {
+      return MakeErrorResult(-6020, fmt::format("DataStore bulk read failed: requested range [{}, {}) exceeds store size ({}). Requested {} elements starting at index {}.", startIndex,
+                                                startIndex + count, this->getSize(), count, startIndex));
+    }
+
+    // Direct memory copy from the contiguous backing array into the caller's buffer
+    std::copy(m_Data.get() + startIndex, m_Data.get() + startIndex + count, buffer.data());
+    return {};
+  }
+
+  /**
+   * @brief Copies values from the caller-provided buffer into a contiguous
+   * range of this in-memory data store. For the in-memory DataStore this is
+   * a simple bounds-checked std::copy into the raw backing array.
+   *
+   * @param startIndex The starting flat element index to write to
+   * @param buffer A span containing the values to write; its size determines
+   *               how many elements are written
+   * @return Result<> valid on success; invalid if `[startIndex, startIndex + buffer.size())`
+   *         exceeds getSize().
+   */
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
+  {
+    const usize count = buffer.size();
+
+    // Bounds check: ensure the requested range fits within the store
+    if(startIndex + count > this->getSize())
+    {
+      return MakeErrorResult(-6021, fmt::format("DataStore bulk write failed: requested range [{}, {}) exceeds store size ({}). Requested {} elements starting at index {}.", startIndex,
+                                                startIndex + count, this->getSize(), count, startIndex));
+    }
+
+    // Direct memory copy from the caller's buffer into the contiguous backing array
+    std::copy(buffer.begin(), buffer.end(), m_Data.get() + startIndex);
+    return {};
+  }
+
+  /**
+   * @brief Reads the values contained in the given N-dimensional extent.
+   *
+   * Provides a dedicated 3D fast path (the visualization hot path) that
+   * memcpys each contiguous X span when stride[2]==1 and falls back to a
+   * per-tuple copy when X is strided, plus a 1D strided fast path and a generic
+   * N-dimensional fallback. The extent axes are in tuple-space dimension order
+   * — the same order as getTupleShape().
+   *
+   * @param extent The N-dimensional extent to read (min/max/stride per axis in
+   *               tuple-space dimension order — same order as getTupleShape()).
+   * @return std::vector<T> of length extent.totalElements() * numComponents,
+   *         row-major with components as the fastest-varying dimension.
+   *         Returns an empty vector if the extent does not match the tuple shape.
+   */
+  std::vector<T> readExtent(const Extent& extent) const override
+  {
+    const ShapeType& tupleShape = getTupleShape();
+    const usize tupleDimensions = tupleShape.size();
+
+    if(extent.dimensions() != tupleDimensions)
+    {
+      return {};
+    }
+    for(usize dimension = 0; dimension < tupleDimensions; ++dimension)
+    {
+      if(extent.stride[dimension] == 0 || extent.min[dimension] > extent.max[dimension] || extent.max[dimension] >= tupleShape[dimension])
+      {
+        return {};
+      }
+    }
+
+    const usize totalValues = static_cast<usize>(extent.totalElements()) * getNumberOfComponents();
+    std::vector<T> result(totalValues);
+    if constexpr(std::is_same_v<T, bool>)
+    {
+      // std::vector<bool> does not expose contiguous bool storage, so write its
+      // packed proxy elements directly instead of allocating an output-sized
+      // temporary bool array.
+      const usize numComponents = getNumberOfComponents();
+      const usize outputTupleCount = static_cast<usize>(extent.totalElements());
+      for(usize outputTupleIndex = 0; outputTupleIndex < outputTupleCount; ++outputTupleIndex)
+      {
+        uint64 remainingOutputIndex = static_cast<uint64>(outputTupleIndex);
+        uint64 sourceTupleIndex = 0;
+        uint64 sourceDimensionStride = 1;
+        for(usize dimension = tupleDimensions; dimension-- > 0;)
+        {
+          const uint64 extentDimensionSize = extent.size(dimension);
+          const uint64 extentCoordinate = remainingOutputIndex % extentDimensionSize;
+          remainingOutputIndex /= extentDimensionSize;
+          const uint64 sourceCoordinate = extent.min[dimension] + extentCoordinate * extent.stride[dimension];
+          sourceTupleIndex += sourceCoordinate * sourceDimensionStride;
+          sourceDimensionStride *= static_cast<uint64>(tupleShape[dimension]);
+        }
+
+        const usize sourceValueIndex = static_cast<usize>(sourceTupleIndex) * numComponents;
+        const usize destinationValueIndex = outputTupleIndex * numComponents;
+        for(usize componentIndex = 0; componentIndex < numComponents; ++componentIndex)
+        {
+          result[destinationValueIndex + componentIndex] = m_Data[sourceValueIndex + componentIndex];
+        }
+      }
+      return result;
+    }
+    else
+    {
+      readExtentIntoBuffer(extent, nonstd::span<T>(result.data(), result.size()));
+      return result;
+    }
+  }
+
+  /**
+   * @brief Reads an N-dimensional extent directly into caller-owned storage.
+   *
+   * The 3D path copies contiguous X rows with std::memcpy and handles strided
+   * X coordinates tuple by tuple. The 1D path performs a strided tuple copy;
+   * every other dimensionality uses a generic row-major index mapping.
+   *
+   * @param extent N-dimensional tuple-space extent to read.
+   * @param destination Exact-sized output span in row-major,
+   *        component-fastest order.
+   * @throws std::invalid_argument If the extent or destination size is invalid.
+   */
+  void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
+  {
+    const ShapeType& tupleShape = getTupleShape();
+    const usize tupleDimensions = tupleShape.size();
+    const usize numComponents = getNumberOfComponents();
+
+    if(extent.dimensions() != tupleDimensions)
+    {
+      throw std::invalid_argument(fmt::format("DataStore::readExtentIntoBuffer: extent dimensions ({}) do not match tuple-shape dimensions ({})", extent.dimensions(), tupleDimensions));
+    }
+    for(usize dimension = 0; dimension < tupleDimensions; ++dimension)
+    {
+      if(extent.stride[dimension] == 0 || extent.min[dimension] > extent.max[dimension] || extent.max[dimension] >= tupleShape[dimension])
+      {
+        throw std::invalid_argument(fmt::format("DataStore::readExtentIntoBuffer: extent dimension {} has min {}, max {}, stride {}, and tuple bound {}", dimension, extent.min[dimension],
+                                                extent.max[dimension], extent.stride[dimension], tupleShape[dimension]));
+      }
+    }
+
+    const usize requiredValues = static_cast<usize>(extent.totalElements()) * numComponents;
+    if(destination.size() != requiredValues)
+    {
+      throw std::invalid_argument(fmt::format("DataStore::readExtentIntoBuffer: destination has {} values; expected {}", destination.size(), requiredValues));
+    }
+    if(requiredValues == 0 || m_Data.get() == nullptr)
+    {
+      return;
+    }
+
+    const T* source = m_Data.get();
+    if(tupleDimensions == 3)
+    {
+      const uint64 dimY = tupleShape[1];
+      const uint64 dimX = tupleShape[2];
+      const uint64 xMin = extent.min[2];
+      const uint64 xStride = extent.stride[2];
+      const uint64 xCount = extent.size(2);
+
+      usize outputIndex = 0;
+      for(uint64 z = extent.min[0]; z <= extent.max[0]; z += extent.stride[0])
+      {
+        for(uint64 y = extent.min[1]; y <= extent.max[1]; y += extent.stride[1])
+        {
+          const usize sourceRowStart = static_cast<usize>((z * dimY + y) * dimX + xMin) * numComponents;
+          if constexpr(!std::is_same_v<T, bool>)
+          {
+            if(xStride == 1)
+            {
+              const usize rowValues = static_cast<usize>(xCount) * numComponents;
+              std::memcpy(destination.data() + outputIndex, source + sourceRowStart, rowValues * sizeof(T));
+              outputIndex += rowValues;
+              continue;
+            }
+          }
+
+          for(uint64 xIndex = 0; xIndex < xCount; ++xIndex)
+          {
+            const usize sourceOffset = sourceRowStart + static_cast<usize>(xIndex * xStride) * numComponents;
+            for(usize componentIndex = 0; componentIndex < numComponents; ++componentIndex)
+            {
+              destination[outputIndex + componentIndex] = source[sourceOffset + componentIndex];
+            }
+            outputIndex += numComponents;
+          }
+        }
+      }
+      return;
+    }
+
+    if(tupleDimensions == 1)
+    {
+      const uint64 startTuple = extent.min[0];
+      const uint64 tupleCount = extent.size(0);
+      const uint64 tupleStride = extent.stride[0];
+      usize outputIndex = 0;
+      for(uint64 tupleOffset = 0; tupleOffset < tupleCount; ++tupleOffset)
+      {
+        const usize sourceIndex = static_cast<usize>(startTuple + tupleOffset * tupleStride) * numComponents;
+        for(usize componentIndex = 0; componentIndex < numComponents; ++componentIndex)
+        {
+          destination[outputIndex + componentIndex] = source[sourceIndex + componentIndex];
+        }
+        outputIndex += numComponents;
+      }
+      return;
+    }
+
+    const usize outputTupleCount = static_cast<usize>(extent.totalElements());
+    for(usize outputTupleIndex = 0; outputTupleIndex < outputTupleCount; ++outputTupleIndex)
+    {
+      uint64 remainingOutputIndex = static_cast<uint64>(outputTupleIndex);
+      uint64 sourceTupleIndex = 0;
+      uint64 sourceDimensionStride = 1;
+      for(usize dimension = tupleDimensions; dimension-- > 0;)
+      {
+        const uint64 extentDimensionSize = extent.size(dimension);
+        const uint64 extentCoordinate = remainingOutputIndex % extentDimensionSize;
+        remainingOutputIndex /= extentDimensionSize;
+        const uint64 sourceCoordinate = extent.min[dimension] + extentCoordinate * extent.stride[dimension];
+        sourceTupleIndex += sourceCoordinate * sourceDimensionStride;
+        sourceDimensionStride *= static_cast<uint64>(tupleShape[dimension]);
+      }
+
+      const usize sourceValueIndex = static_cast<usize>(sourceTupleIndex) * numComponents;
+      const usize destinationValueIndex = outputTupleIndex * numComponents;
+      for(usize componentIndex = 0; componentIndex < numComponents; ++componentIndex)
+      {
+        destination[destinationValueIndex + componentIndex] = source[sourceValueIndex + componentIndex];
+      }
+    }
+  }
+
+  /**
+   * @brief Writes data within the given N-dimensional extent.
+   *
+   * Write-side counterpart of readExtent: same dimension order, same
+   * row-major layout with components as the fastest-varying dimension.
+   * Implements the 3D fast path via std::memcpy for contiguous X spans;
+   * falls back to 1D strided iteration otherwise. 2D/>3D are silently
+   * ignored (callers should validate extent.dimensions()).
+   *
+   * @param extent The N-dimensional extent to write
+   * @param data Span containing the data (extent.totalElements() * numComp
+   *             elements, row-major).
+   */
+  void writeExtent(const Extent& extent, nonstd::span<const T> data) override
+  {
+    const ShapeType& tupleShape = getTupleShape();
+    const usize tupleDims = tupleShape.size();
+    const usize numComp = getNumberOfComponents();
+
+    if(extent.dimensions() != tupleDims)
+    {
+      return;
+    }
+    for(usize d = 0; d < tupleDims; ++d)
+    {
+      if(extent.max[d] >= tupleShape[d])
+      {
+        return;
+      }
+    }
+
+    const usize totalIn = static_cast<usize>(extent.totalElements()) * numComp;
+    if(totalIn == 0 || data.size() < totalIn || m_Data.get() == nullptr)
+    {
+      return;
+    }
+
+    T* destBase = m_Data.get();
+
+    if(tupleDims == 3)
+    {
+      const uint64 dimY = tupleShape[1];
+      const uint64 dimX = tupleShape[2];
+      const uint64 xMin = extent.min[2];
+      const uint64 xStride = extent.stride[2];
+      const uint64 xCountStrided = extent.size(2);
+
+      usize srcIdx = 0;
+      for(uint64 z = extent.min[0]; z <= extent.max[0]; z += extent.stride[0])
+      {
+        for(uint64 y = extent.min[1]; y <= extent.max[1]; y += extent.stride[1])
+        {
+          const usize destRowStart = static_cast<usize>((z * dimY + y) * dimX + xMin) * numComp;
+          if constexpr(!std::is_same_v<T, bool>)
+          {
+            if(xStride == 1)
+            {
+              const usize elements = static_cast<usize>(xCountStrided) * numComp;
+              std::memcpy(destBase + destRowStart, data.data() + srcIdx, elements * sizeof(T));
+              srcIdx += elements;
+              continue;
+            }
+          }
+          // Per-tuple fallback (stride > 1 OR T=bool).
+          for(uint64 xi = 0; xi < xCountStrided; ++xi)
+          {
+            const usize destOff = destRowStart + static_cast<usize>(xi * xStride) * numComp;
+            for(usize c = 0; c < numComp; ++c)
+            {
+              destBase[destOff + c] = data[srcIdx + c];
+            }
+            srcIdx += numComp;
+          }
+        }
+      }
+      return;
+    }
+
+    if(tupleDims == 1)
+    {
+      const uint64 startTuple = extent.min[0];
+      const uint64 count = extent.size(0);
+      const uint64 stride = extent.stride[0];
+      usize srcIdx = 0;
+      for(uint64 i = 0; i < count; ++i)
+      {
+        const usize destIdx = static_cast<usize>(startTuple + i * stride) * numComp;
+        for(usize c = 0; c < numComp; ++c)
+        {
+          destBase[destIdx + c] = data[srcIdx + c];
+        }
+        srcIdx += numComp;
+      }
+    }
   }
 
   /**
@@ -579,80 +946,12 @@ public:
     return dataset.writeSpan(dims, span);
   }
 
-  /**
-   * @brief Creates and returns an in-memory AbstractDataStore from a copy of the data
-   * from the specified chunk.
-   * @param flatChunkIndex
-   */
-  std::unique_ptr<AbstractDataStore<T>> convertChunkToDataStore(uint64 flatChunkIndex) const override
-  {
-    if(flatChunkIndex >= this->getNumberOfChunks())
-    {
-      return nullptr;
-    }
-
-    std::unique_ptr<value_type[]> dataWrapper = std::make_unique_for_overwrite<value_type[]>(this->getSize());
-    std::copy(this->begin(), this->end(), dataWrapper.get());
-
-    return std::make_unique<DataStore<T>>(std::move(dataWrapper), this->getTupleShape(), this->getComponentShape());
-  }
-
-  /**
-   * @brief Returns the number of chunks used to store the data.
-   * For in-memory DataStore, this is always 1.
-   * @return uint64 The number of chunks (always 1 for in-memory storage)
-   */
-  uint64 getNumberOfChunks() const override
-  {
-    return 1;
-  }
-
-  /**
-   * @brief Returns the Smallest N-Dimensional tuple position included in the
-   * specified chunk.
-   * @param flatChunkIndex
-   * @return ShapeType
-   */
-  ShapeType getChunkLowerBounds(uint64 flatChunkIndex) const override
-  {
-    if(flatChunkIndex >= getNumberOfChunks())
-    {
-      return ShapeType();
-    }
-    usize tupleDims = getTupleShape().size();
-
-    ShapeType lowerBounds(tupleDims);
-    std::fill(lowerBounds.begin(), lowerBounds.end(), 0);
-    return lowerBounds;
-  }
-
-  /**
-   * @brief Returns the largest N-Dimensional tuple position included in the
-   * specified chunk.
-   * @param flatChunkIndex
-   * @return ShapeType
-   */
-  ShapeType getChunkUpperBounds(uint64 flatChunkIndex) const override
-  {
-    if(flatChunkIndex >= getNumberOfChunks())
-    {
-      return ShapeType();
-    }
-
-    ShapeType upperBounds(getTupleShape());
-    for(auto& value : upperBounds)
-    {
-      value -= 1;
-    }
-    return upperBounds;
-  }
-
 private:
   ShapeType m_ComponentShape;
   ShapeType m_TupleShape;
   std::unique_ptr<value_type[]> m_Data = nullptr;
-  size_t m_NumComponents = {0};
-  size_t m_NumTuples = {0};
+  usize m_NumComponents = {0};
+  usize m_NumTuples = {0};
   std::optional<T> m_InitValue;
 };
 

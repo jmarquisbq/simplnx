@@ -4,18 +4,26 @@
 #include "simplnx/DataStructure/AbstractDataStore.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 
+#include <nonstd/span.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <limits>
+#include <memory>
 #include <random>
+#include <vector>
 
 using namespace nx::core;
 
 namespace
 {
 using RangeType = std::pair<float64, float64>;
+constexpr usize k_InitializationChunkValues = 65536;
 
+/** @brief Internal initialization mode used after validating the user-facing choice index. */
 enum class InitType : uint64
 {
   Manual = 0,
@@ -23,6 +31,7 @@ enum class InitType : uint64
   RandomWithRange = 2
 };
 
+/** @brief Converts the persisted choice index to an initialization mode and rejects unknown values. */
 InitType ConvertIndexToInitType(uint64 index)
 {
   switch(index)
@@ -42,6 +51,7 @@ InitType ConvertIndexToInitType(uint64 index)
   }
 }
 
+/** @brief Creates the seeded integral or floating distribution used by one typed target array. */
 template <class T>
 auto CreateRandomGenerator(T rangeMin, T rangeMax, uint64 seed)
 {
@@ -61,11 +71,19 @@ auto CreateRandomGenerator(T rangeMin, T rangeMax, uint64 seed)
   }
 }
 
+/**
+ * @brief Initializes one typed image-cell subvolume through bounded contiguous row segments.
+ *
+ * Values are generated in the original X/Y/Z and component order so seeded
+ * random output remains reproducible. Each row segment is written once rather
+ * than mutating individual values in a potentially disk-backed store.
+ */
 struct InitializeArrayFunctor
 {
+  /** @brief Generates and writes the selected inclusive subvolume for one runtime value type. */
   template <class T>
-  void operator()(IDataArray& dataArray, const std::array<usize, 3>& dims, uint64 xMin, uint64 xMax, uint64 yMin, uint64 yMax, uint64 zMin, uint64 zMax, InitType initType, float64 initValue,
-                  const RangeType& initRange, uint64 seed)
+  Result<> operator()(IDataArray& dataArray, const std::array<usize, 3>& dims, uint64 xMin, uint64 xMax, uint64 yMin, uint64 yMax, uint64 zMin, uint64 zMax, InitType initType, float64 initValue,
+                      const RangeType& initRange, uint64 seed, const std::atomic_bool& shouldCancel)
   {
     T rangeMin;
     T rangeMax;
@@ -83,28 +101,72 @@ struct InitializeArrayFunctor
     auto& dataStore = dataArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
 
     auto&& [distribution, generator] = CreateRandomGenerator(rangeMin, rangeMax, seed);
-
-    for(uint64 k = zMin; k < zMax + 1; k++)
+    const usize numComponents = dataStore.getNumberOfComponents();
+    if(numComponents == 0)
     {
-      for(uint64 j = yMin; j < yMax + 1; j++)
-      {
-        for(uint64 i = xMin; i < xMax + 1; i++)
-        {
-          usize index = (k * dims[0] * dims[1]) + (j * dims[0]) + i;
+      return MakeErrorResult(-27490, "InitializeImageGeomCellData cannot initialize an array with zero components.");
+    }
+    if(dims[0] == 0 || dims[1] == 0 || dims[2] == 0 || dims[1] > std::numeric_limits<usize>::max() / dims[0])
+    {
+      return MakeErrorResult(-27491, "InitializeImageGeomCellData encountered image dimensions that overflow the data store index type.");
+    }
+    const usize sliceTupleCount = dims[0] * dims[1];
+    const usize tuplesPerChunk = std::max<usize>(1, k_InitializationChunkValues / numComponents);
+    auto values = std::make_unique<T[]>(tuplesPerChunk * numComponents);
+    const T manualValue = static_cast<T>(initValue);
 
-          if(initType == InitType::Manual)
+    for(uint64 k = zMin;; k++)
+    {
+      for(uint64 j = yMin;; j++)
+      {
+        for(uint64 i = xMin;;)
+        {
+          if(shouldCancel)
           {
-            T num = static_cast<T>(initValue);
-            dataStore.fillTuple(index, num);
+            return {};
           }
-          else
+
+          const usize tupleCount = std::min<usize>(tuplesPerChunk, xMax - i + 1);
+          for(usize tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++)
           {
-            T randNum = distribution(generator);
-            dataStore.fillTuple(index, randNum);
+            const T value = initType == InitType::Manual ? manualValue : distribution(generator);
+            std::fill_n(values.get() + (tupleIndex * numComponents), numComponents, value);
           }
+
+          if(k > std::numeric_limits<usize>::max() / sliceTupleCount || j > (std::numeric_limits<usize>::max() - (k * sliceTupleCount)) / dims[0] ||
+             i > std::numeric_limits<usize>::max() - ((k * sliceTupleCount) + (j * dims[0])))
+          {
+            return MakeErrorResult(-27491, "InitializeImageGeomCellData encountered image dimensions that overflow the data store index type.");
+          }
+          const usize tupleIndex = (k * sliceTupleCount) + (j * dims[0]) + i;
+          if(tupleIndex > std::numeric_limits<usize>::max() / numComponents)
+          {
+            return MakeErrorResult(-27492, "InitializeImageGeomCellData encountered an array offset that overflows the data store index type.");
+          }
+          auto writeResult = dataStore.copyFromBuffer(tupleIndex * numComponents, nonstd::span<const T>(values.get(), tupleCount * numComponents));
+          if(writeResult.invalid())
+          {
+            return writeResult;
+          }
+
+          if(tupleCount == xMax - i + 1)
+          {
+            break;
+          }
+          i += tupleCount;
+        }
+        if(j == yMax)
+        {
+          break;
         }
       }
+      if(k == zMax)
+      {
+        break;
+      }
     }
+
+    return {};
   }
 };
 } // namespace
@@ -156,6 +218,17 @@ Result<> InitializeImageGeomCellData::operator()()
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(imageGeomPath);
 
   std::array<usize, 3> dims = imageGeom.getDimensions().toArray();
+  std::vector<const IArray*> arrayTargets;
+  arrayTargets.reserve(cellArrayPaths.size());
+  for(const DataPath& path : cellArrayPaths)
+  {
+    arrayTargets.push_back(&m_DataStructure.getDataRefAs<IDataArray>(path));
+  }
+
+  const AlgorithmArrayTargets dispatchTargets(std::move(arrayTargets));
+  const bool usesOutOfCoreStore = AnyOutOfCore(dispatchTargets);
+  const bool useOutOfCorePath = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCorePath ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
 
   for(const DataPath& path : cellArrayPaths)
   {
@@ -165,7 +238,12 @@ Result<> InitializeImageGeomCellData::operator()()
     }
     auto& iDataArray = m_DataStructure.getDataRefAs<IDataArray>(path);
 
-    ExecuteNeighborFunction(InitializeArrayFunctor{}, iDataArray.getDataType(), iDataArray, dims, xMin, xMax, yMin, yMax, zMin, zMax, initType, initValue, initRange, seed); // NO BOOL
+    auto initializeResult = ExecuteNeighborFunction(InitializeArrayFunctor{}, iDataArray.getDataType(), iDataArray, dims, xMin, xMax, yMin, yMax, zMin, zMax, initType, initValue, initRange, seed,
+                                                    m_ShouldCancel); // NO BOOL
+    if(initializeResult.invalid())
+    {
+      return initializeResult;
+    }
 
     // Avoid the exact same seeding for each array
     seed++;

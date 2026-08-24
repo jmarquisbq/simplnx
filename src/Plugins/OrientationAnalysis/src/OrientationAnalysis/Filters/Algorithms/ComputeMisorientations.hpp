@@ -25,7 +25,10 @@ constexpr ChoicesParameter::ValueType k_UseReferenceAxesIndex = 1;
 } // namespace compute_misorientations_constants
 
 /**
- * @brief
+ * @brief Input paths and computation settings consumed by ComputeMisorientations.
+ *
+ * Keeping these values separate from the algorithm object allows the filter to pass
+ * validated arguments without coupling the implementation to parameter extraction.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeMisorientationsInputValues
 {
@@ -39,12 +42,17 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeMisorientationsInputValues
 };
 
 /**
- * @brief
+ * @brief Computes an axis-angle misorientation for every input orientation tuple.
+ *
+ * Cell-level arrays are processed through bounded bulk-I/O buffers so the same
+ * implementation remains efficient for in-core stores and avoids per-cell datastore
+ * access for out-of-core stores. Ensemble crystal structures are cached locally because
+ * they are small and repeatedly referenced by the cell loop.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeMisorientations
 {
 public:
-  ComputeMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeMisorientationsInputValues* inputValues);
+  ComputeMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, ComputeMisorientationsInputValues* inputValues);
   ~ComputeMisorientations() noexcept;
 
   ComputeMisorientations(const ComputeMisorientations&) = delete;

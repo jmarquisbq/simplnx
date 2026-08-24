@@ -3,16 +3,20 @@
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Common/StringLiteralFormatting.hpp"
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/Core/Preferences.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/SIMPLNXVersion.hpp"
 #include "simplnx/SimplnxPython.hpp"
+#include "simplnx/Utilities/CacheMemoryBudgetManager.hpp"
 #include "simplnx/Utilities/StringUtilities.hpp"
 #include "simplnx/Utilities/TimeUtilities.hpp"
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <ostream>
 #include <string>
 
@@ -53,6 +57,7 @@ constexpr StringLiteral k_ExecuteParamShort = "-e";
 constexpr StringLiteral k_PreflightParamShort = "-p";
 constexpr StringLiteral k_LogFileParamShort = "-l";
 constexpr StringLiteral k_ConvertParamShort = "-c";
+constexpr StringLiteral k_CacheMemoryBudgetParamLong = "--cache-memory-budget";
 
 void LoadApp()
 {
@@ -143,7 +148,8 @@ enum class ArgumentType
   Preflight,
   Help,
   Logfile,
-  Convert
+  Convert,
+  CacheMemoryBudget
 };
 
 struct Argument
@@ -236,6 +242,11 @@ Result<CliArguments> ParseParameters(int argc, char* argv[])
     {
       std::string argStr = ParseArgument(argc, argv, index);
       args.emplace_back(ArgumentType::Convert, argStr);
+    }
+    else if(arg == k_CacheMemoryBudgetParamLong)
+    {
+      std::string argStr = ParseArgument(argc, argv, index);
+      args.emplace_back(ArgumentType::CacheMemoryBudget, argStr);
     }
     else
     {
@@ -446,6 +457,8 @@ void DisplayDefaultHelp()
   cliOut << fmt::format("  {}|{} <pipeline filepath>  [{}|{} <log filepath>]\t", k_ConvertParamLong, k_ConvertParamShort, k_LogFileParamLong, k_LogFileParamShort)
          << "  Convert the SIMPL pipeline at the target filepath. Optionally, create a log file at the specified path.";
   cliOut << fmt::format("  <operand [argument]>  [{}|{} <log filepath>]\t", k_LogFileParamLong, k_LogFileParamShort) << "  Creates a log file at the specified path.";
+  cliOut << fmt::format("  {} <gigabytes>\t", k_CacheMemoryBudgetParamLong)
+         << "  Override the cache memory budget for this run (decimal GB, e.g. 8 or 1.5). This does not cap total process memory or modify saved preferences.\n";
   cliOut.endline();
 }
 
@@ -480,6 +493,14 @@ void DisplayLogfileHelp()
   cliOut.endline();
 }
 
+void DisplayCacheMemoryBudgetHelp()
+{
+  cliOut << "To override the cache memory budget for this run:\n\t";
+  cliOut << fmt::format("  {} <gigabytes>\t", k_CacheMemoryBudgetParamLong)
+         << "  Override the cache memory budget for this run only (decimal gigabytes, e.g. 8 or 1.5). This does not cap total process memory or modify saved preferences.";
+  cliOut.endline();
+}
+
 Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
 {
   if(arguments.size() == 1)
@@ -503,6 +524,10 @@ Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
   }
   case ArgumentType::Logfile: {
     DisplayLogfileHelp();
+    return {};
+  }
+  case ArgumentType::CacheMemoryBudget: {
+    DisplayCacheMemoryBudgetHelp();
     return {};
   }
   case ArgumentType::Invalid: {
@@ -550,6 +575,8 @@ int main(int argc, char* argv[])
   CliArguments arguments = parsingResult.value();
   std::vector<Result<>> results;
 
+  std::optional<uint64> overrideCacheMemoryBudgetBytes;
+
   // Set log file and check for parsing errors
   for(const Argument& argument : arguments)
   {
@@ -561,6 +588,29 @@ int main(int argc, char* argv[])
     }
     case ArgumentType::Logfile: {
       results.push_back(SetLogFile(argument));
+      break;
+    }
+    case ArgumentType::CacheMemoryBudget: {
+      if(argument.value.empty())
+      {
+        results.push_back(nx::core::MakeErrorResult(k_InvalidArgumentError, "--cache-memory-budget requires a value in gigabytes (e.g. 8 or 1.5)"));
+        break;
+      }
+      try
+      {
+        usize parsedChars = 0;
+        double gb = std::stod(argument.value, &parsedChars);
+        if(parsedChars != argument.value.size() || !std::isfinite(gb) || gb <= 0.0)
+        {
+          results.push_back(
+              nx::core::MakeErrorResult(k_InvalidArgumentError, fmt::format("Invalid value for --cache-memory-budget: '{}' (must be a finite, positive number of gigabytes)", argument.value)));
+          break;
+        }
+        overrideCacheMemoryBudgetBytes = static_cast<uint64>(gb * 1024.0 * 1024.0 * 1024.0);
+      } catch(const std::exception&)
+      {
+        results.push_back(nx::core::MakeErrorResult(k_InvalidArgumentError, fmt::format("Invalid value for --cache-memory-budget: '{}' (expected a positive number of gigabytes)", argument.value)));
+      }
       break;
     }
     case ArgumentType::Convert: {
@@ -580,6 +630,51 @@ int main(int argc, char* argv[])
 
   // Load the Simplnx Application instance and load the plugins
   auto app = nx::core::Application::GetOrCreateInstance();
+
+  struct PreferencesCacheBudgetRestorer
+  {
+    Preferences* prefs = nullptr;
+    bool wasPresent = false;
+    uint64 originalValue = 0;
+    ~PreferencesCacheBudgetRestorer()
+    {
+      if(prefs == nullptr)
+      {
+        return;
+      }
+      if(wasPresent)
+      {
+        prefs->setCacheMemoryBudgetBytes(originalValue);
+      }
+      else
+      {
+        prefs->removeValue(Preferences::k_CacheMemoryBudgetBytes_Key);
+      }
+    }
+  };
+  PreferencesCacheBudgetRestorer cacheBudgetRestorer;
+
+  if(overrideCacheMemoryBudgetBytes.has_value())
+  {
+    Preferences* preferences = app->getPreferences();
+    if(preferences != nullptr)
+    {
+      cacheBudgetRestorer.prefs = preferences;
+      cacheBudgetRestorer.wasPresent = preferences->contains(std::string(Preferences::k_CacheMemoryBudgetBytes_Key));
+      if(cacheBudgetRestorer.wasPresent)
+      {
+        cacheBudgetRestorer.originalValue = preferences->cacheMemoryBudgetBytes();
+      }
+      preferences->setCacheMemoryBudgetBytes(*overrideCacheMemoryBudgetBytes);
+      // Apply the override to the running budget manager as well. setBudgetBytes
+      // clamps to the machine-safe maximum. Without this, the OOC chunk/stride
+      // caches would run at the manager's default budget and the override would
+      // be silently ignored in headless runs. (Clamping is silent here, matching
+      // the GUI-only-logging design decision.)
+      nx::core::CacheMemoryBudgetManager::instance().setBudgetBytes(*overrideCacheMemoryBudgetBytes);
+    }
+  }
+
   LoadApp();
 
 #if SIMPLNX_EMBED_PYTHON

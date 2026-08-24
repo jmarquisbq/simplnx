@@ -9,15 +9,12 @@
 #include "simplnx/Parameters/BoolParameter.hpp"
 #include "simplnx/Parameters/StringParameter.hpp"
 
-/**
-* This is example code to put in the Execute Method of the filter.
-
-
-*/
-
 namespace nx::core
 {
 
+/**
+ * @brief Runtime values used by ConditionalSetValue.
+ */
 struct SIMPLNXCORE_EXPORT ConditionalSetValueInputValues
 {
   ArraySelectionParameter::ValueType ConditionalArrayPath;
@@ -30,12 +27,18 @@ struct SIMPLNXCORE_EXPORT ConditionalSetValueInputValues
 
 /**
  * @class ConditionalSetValue
- * @brief This algorithm implements support code for the ConditionalSetValueFilter
+ * @brief Replaces selected array values using either value comparison or a conditional mask.
+ *
+ * In-memory arrays use contiguous pointers to avoid virtual per-value access and staging-copy overhead.
+ * If the target or conditional array is out-of-core, the algorithm dispatches to a bounded streaming
+ * path that type-dispatches both arrays and performs sequential bulk transfers instead of per-cell OOC I/O.
  */
-
 class SIMPLNXCORE_EXPORT ConditionalSetValue
 {
 public:
+  /**
+   * @brief Constructs the algorithm with its data, message, cancellation, and parameter inputs.
+   */
   ConditionalSetValue(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ConditionalSetValueInputValues* inputValues);
   ~ConditionalSetValue() noexcept;
 
@@ -44,6 +47,10 @@ public:
   ConditionalSetValue& operator=(const ConditionalSetValue&) = delete;
   ConditionalSetValue& operator=(ConditionalSetValue&&) noexcept = delete;
 
+  /**
+   * @brief Executes the direct or bounded streaming replacement path.
+   * @return A valid result on success or cancellation, otherwise the datastore or conversion error.
+   */
   Result<> operator()();
 
 private:

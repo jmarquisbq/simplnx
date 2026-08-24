@@ -1,5 +1,6 @@
 #include "FlyingEdges3D.hpp"
 
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/FlyingEdges.hpp"
 
@@ -7,21 +8,36 @@ using namespace nx::core;
 
 namespace
 {
+/** @brief Type-dispatch adapter that runs and validates the four Flying Edges passes. */
 struct ExecuteFlyingEdgesFunctor
 {
+  /**
+   * @brief Executes classification, prefix allocation, and output generation for
+   * the input scalar type, propagating any bounded source-read failure.
+   */
   template <typename T>
-  void operator()(const ImageGeom& image, const IDataArray* iDataArray, float64 isoVal, TriangleGeom& triangleGeom, Float32AbstractDataStore& normals, AttributeMatrix& normAM)
+  Result<> operator()(const ImageGeom& image, const IDataArray* iDataArray, float64 isoVal, TriangleGeom& triangleGeom, Float32AbstractDataStore& normals, AttributeMatrix& normAM)
   {
     FlyingEdgesAlgorithm flyingEdges = FlyingEdgesAlgorithm<T>(image, iDataArray->template getIDataStoreRefAs<AbstractDataStore<T>>(), static_cast<T>(isoVal), triangleGeom, normals);
-    flyingEdges.pass1();
-    flyingEdges.pass2();
+    if(Result<> result = flyingEdges.pass1(); result.invalid())
+    {
+      return result;
+    }
+    if(Result<> result = flyingEdges.pass2(); result.invalid())
+    {
+      return result;
+    }
     flyingEdges.pass3();
 
     // pass 3 resized normals so be sure to resize parent AM
     normAM.resizeTuples(normals.getTupleShape());
 
-    flyingEdges.pass4();
+    if(Result<> result = flyingEdges.pass4(); result.invalid())
+    {
+      return result;
+    }
     triangleGeom.getFaceAttributeMatrix()->resizeTuples({triangleGeom.getNumberOfFaces()});
+    return {};
   }
 };
 } // namespace
@@ -58,7 +74,9 @@ Result<> FlyingEdges3D::operator()()
 
   auto& normAM = m_DataStructure.getDataRefAs<AttributeMatrix>(normAMPath);
 
-  ExecuteNeighborFunction(ExecuteFlyingEdgesFunctor{}, iDataArray->getDataType(), image, iDataArray, isoVal, triangleGeom, normalsStore, normAM);
+  const bool usesOutOfCoreStore = IsOutOfCore(*iDataArray);
+  const bool useOutOfCoreAlgorithm = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCoreAlgorithm ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
 
-  return {};
+  return ExecuteNeighborFunction(ExecuteFlyingEdgesFunctor{}, iDataArray->getDataType(), image, iDataArray, isoVal, triangleGeom, normalsStore, normAM);
 }

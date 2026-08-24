@@ -41,7 +41,11 @@ struct SIMPLNXCORE_EXPORT ComputeBoundingBoxStatsInputValues
 };
 
 /**
- * @class
+ * @class ComputeBoundingBoxStats
+ * @brief Dispatches bounding-box statistics to the direct in-core or bounded scanline implementation.
+ *
+ * Keeping the storage-specific implementations separate preserves the original fast in-memory
+ * traversal while avoiding per-voxel store I/O and volume-sized scratch for out-of-core data.
  */
 class SIMPLNXCORE_EXPORT ComputeBoundingBoxStats
 {

@@ -5,12 +5,15 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 #include "simplnx/Utilities/StringInterpretationUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 using namespace nx::core;
@@ -93,6 +96,9 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Missing/Empty DataPaths", "[C
 
 TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm Bool", "[ConditionalSetValueFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = UnitTest::CreateDataStructure();
@@ -127,7 +133,7 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm Bool", "[Condi
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   REQUIRE(RequireDataArrayEqualZero(*ciDataArray));
@@ -142,6 +148,9 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm Bool", "[Condi
 
 TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm UInt8", "[ConditionalSetValueFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = UnitTest::CreateDataStructure();
@@ -173,7 +182,7 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm UInt8", "[Cond
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   REQUIRE(RequireDataArrayEqualZero(float32DataArray));
@@ -183,6 +192,9 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm UInt8", "[Cond
 
 TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm Int8", "[ConditionalSetValueFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = UnitTest::CreateDataStructure();
@@ -214,7 +226,7 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Algorithm Int8", "[Condi
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   REQUIRE(RequireDataArrayEqualZero(float32DataArray));
@@ -319,6 +331,9 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Overflow/Underflow", "[Condit
 
 TEST_CASE("SimplnxCore::ConditionalSetValueFilter: No Conditional", "[ConditionalSetValueFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   ConditionalSetValueFilter filter;
@@ -349,7 +364,7 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: No Conditional", "[Conditiona
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   const auto& alteredArray = dataStructure.getDataRefAs<Float32Array>(ciDataPath);
@@ -364,6 +379,9 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: No Conditional", "[Conditiona
 
 TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Inverted Mask Algorithm Bool", "[ConditionalSetValueFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = UnitTest::CreateDataStructure();
@@ -396,7 +414,7 @@ TEST_CASE("SimplnxCore::ConditionalSetValueFilter: Test Inverted Mask Algorithm 
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   REQUIRE(RequireDataArrayEqualZero(float32DataArray));

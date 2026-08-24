@@ -43,6 +43,24 @@ SIMPLNX_EXPORT Result<> RepairTriangleWinding(INodeGeometry2D::SharedFaceList::s
                                               const Int32AbstractDataStore& idsStore, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
 
 /**
+ * @brief Attempts to make triangle winding consistent without materializing mesh-sized face, label,
+ * connectivity, traversal-state, or queue arrays in memory.
+ *
+ * This storage-neutral variant reconstructs the same triangle-neighbor order as the legacy
+ * connectivity path through bounded external sorts. Mutable traversal state and the FIFO queue are
+ * held in temporary record stores, while face and ID DataStores are accessed through bounded page
+ * caches. A registered I/O manager that provides external sorting and temporary record storage is
+ * required.
+ *
+ * @param triangles The SharedFaceList that may be modified.
+ * @param idsStore Face labels (2 components) or region IDs (1 component).
+ * @param shouldCancel Cooperative cancellation flag.
+ * @param mesgHandler Progress-message callback.
+ */
+SIMPLNX_EXPORT Result<> RepairTriangleWindingExternal(INodeGeometry2D::SharedFaceList::store_type& triangles, const Int32AbstractDataStore& idsStore, const std::atomic_bool& shouldCancel,
+                                                      const IFilter::MessageHandler& mesgHandler);
+
+/**
  * @brief The CalculateAreasImpl class implements a threaded algorithm that computes the normal of each
  * triangle for a set of triangles
  */

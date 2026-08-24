@@ -10,6 +10,16 @@ DREAM3D Review (Clustering)
 
 This **Filter** applies the k means algorithm to an **Attribute Array**.  K means is a *clustering algorithm* that assigns to each point of the **Attribute Array** a *cluster Id*.  The user must specify the number of clusters in which to partition the array.  Specifically, a k means partitioning is a *Voronoi tesselation*; an optimal solution to the k means problem is such that each point in the data set is associated with the cluster that has the closest mean.  This partitioning is the one that minimizes the within cluster variance (i.e., minimizes the within cluster sum of squares differences).  The user may select from several distance metrics: *Euclidean*, *Squared Euclidean*, *Manhattan*, *Cosine*, *Pearson*, and *Squared Pearson*.
 
+## Algorithm
+
+### In-Core Path
+
+When the selected array, mask, cluster IDs, and means are in memory, the **Filter** uses the direct Lloyd iteration. It selects the initial centroids from the seeded random sequence, assigns every selected tuple to the first centroid with the strictly smallest distance, and recomputes the means until they stop changing.
+
+### Out-of-Core Path
+
+When any of those arrays is disk-backed, the **Filter** uses a streaming implementation. It reads the input, mask, and cluster IDs in fixed-size blocks and writes changed IDs in matching blocks. Centroids, counts, and accumulated means are feature-sized state; no full **Cell** array is copied into memory. The same seed, candidate draw order, strict distance tie rule, and tuple-order accumulation are retained. A mask with no selected tuples reports an error instead of attempting an unbounded centroid-selection loop.
+
 ### Distance Metric
 
 The *Distance Metric* parameter determines how distances between data points are measured when assigning points to clusters:

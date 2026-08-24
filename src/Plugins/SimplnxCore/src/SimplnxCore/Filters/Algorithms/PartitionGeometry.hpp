@@ -37,25 +37,18 @@ struct SIMPLNXCORE_EXPORT PartitionGeometryInputValues
 
 /**
  * @class PartitionGeometry
- * @brief This algorithm generates the image geometry information necessary to
- * split a given geometry into partitions, using one of the three partitioning modes.
- *
- * In the Basic partitioning mode, it calculates the dimensions, origin, and spacing
- * of the partitioning scheme using the input geometry and the number of partitions per axis.
- *
- * In the Advanced mode, it uses the number of partitions per axis, partitioning scheme
- * origin, and length per partition inputs as the dimensions, origin, and spacing, respectively.
- *
- * In the Bounding Box mode, it calculates the dimensions, origin, and spacing of the
- * partitioning scheme using the input geometry, the number of partitions per axis, and
- * a set of bounding box points.
+ * @brief Dispatches geometry partitioning to an in-memory parallel implementation
+ * or a bounded bulk-I/O implementation based on the participating array stores.
  */
-
 class SIMPLNXCORE_EXPORT PartitionGeometry
 {
 public:
   using VertexStore = AbstractDataStore<IGeometry::SharedVertexList::value_type>;
 
+  /**
+   * @brief Constructs the dispatcher with the shared inputs required by both
+   * storage-specific implementations.
+   */
   PartitionGeometry(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, PartitionGeometryInputValues* inputValues);
   ~PartitionGeometry() noexcept;
 
@@ -72,56 +65,17 @@ public:
     IGeometry::LengthUnit geometryUnits;
   };
 
+  /**
+   * @brief Selects Direct for in-memory arrays and Scanline when any relevant
+   * input/output array is out-of-core or OOC execution is forced by a test.
+   */
   Result<> operator()();
-
-  const std::atomic_bool& getCancel();
 
 private:
   DataStructure& m_DataStructure;
-  const PartitionGeometryInputValues* m_InputValues = nullptr;
+  PartitionGeometryInputValues* m_InputValues = nullptr;
   const std::atomic_bool& m_ShouldCancel;
   const IFilter::MessageHandler& m_MessageHandler;
-
-  /**
-   * @brief Partitions a cell-based input geometry according to the partitioning
-   * scheme geometry provided, and stores the partition ids in the partitionIds array.
-   *
-   * If a given cell is outside the partitioning scheme bounds and an out of bounds value
-   * is provided, the cell will be labeled with the out of bounds value.  Otherwise,
-   * the function will return an invalid Result with an error message.
-   *
-   * @param inputGeometry The cell-based input geometry that is being partitioned.
-   * @param partitionIdsStore The partition ids array that stores the results.
-   * @param psImageGeom The partitioning scheme image geometry that is used
-   * to partition the cell-based input geometry.
-   * @param outOfBoundsValue Value that out-of-bounds cells will be
-   * labeled with
-   * @return The result of the partitioning algorithm.  Valid if successful, invalid
-   * if there was an error.
-   */
-  Result<> partitionCellBasedGeometry(const IGridGeometry& inputGeometry, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue);
-
-  /**
-   * @brief Partitions a vertex list (typically from a node-based geometry) according to
-   * the partitioning scheme geometry provided, and stores the partition ids in the
-   * partitionIds array.
-   *
-   * If a given vertex is outside the partitioning scheme bounds and an out of bounds value
-   * is provided, the vertex will be labeled with the out of bounds value.  Otherwise,
-   * the function will return an invalid Result with an error message.
-   *
-   * @param vertexListStore The list of vertices from the node-based geometry
-   * @param partitionIdsStore The partition ids array that stores the results.
-   * @param psImageGeom The partitioning scheme image geometry that is used
-   * to partition the vertex list.
-   * @param outOfBoundsValue Value that out-of-bounds vertices will be
-   * labeled with
-   * @param maskArrayOpt Optional mask array
-   * @return The result of the partitioning algorithm.  Valid if successful, invalid
-   * if there was an error.
-   */
-  Result<> partitionNodeBasedGeometry(const VertexStore& vertexListStore, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue,
-                                      const std::optional<const BoolArray>& maskArrayOpt);
 };
 
 } // namespace nx::core

@@ -3,11 +3,19 @@
 #include "simplnx/Common/TypeTraits.hpp"
 #include "simplnx/DataStructure/AbstractDataStore.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/StringInterpretationUtilities.hpp"
 
+#include <nonstd/span.hpp>
+
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <limits>
+#include <memory>
+#include <random>
+#include <vector>
 
 using namespace nx::core;
 
@@ -16,6 +24,7 @@ namespace
 
 // At the current time this code could be simplified with a bool in the incremental template, HOWEVER,
 // it was done this way to allow for expansion of operations down the line multiplication, division, etc.
+/** @brief Compile-time selection of addition or subtraction for the incremental generator. */
 template <bool UseAddition, bool UseSubtraction>
 struct IncrementalOptions
 {
@@ -26,211 +35,202 @@ struct IncrementalOptions
 using AdditionT = IncrementalOptions<true, false>;
 using SubtractionT = IncrementalOptions<false, true>;
 
-template <typename T>
-void ValueFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& stringValues)
+constexpr usize k_InitializationChunkValues = 65536;
+
+/**
+ * @brief Generates typed values in tuple/component order and writes fixed chunks to a DataStore.
+ *
+ * All initialization modes share this sink so none of them allocate or mutate
+ * an array-sized resident buffer, including Bool stores.
+ */
+template <typename T, typename ValueGenerator>
+Result<> WriteGeneratedValues(AbstractDataStore<T>& dataStore, ValueGenerator&& generateValue, const std::atomic_bool& shouldCancel)
 {
-  usize numComp = dataStore.getNumberOfComponents(); // We checked that the values string is greater than max comps size so proceed check free
-
-  if(numComp > 1)
+  const usize numComponents = dataStore.getNumberOfComponents();
+  const usize numTuples = dataStore.getNumberOfTuples();
+  if(numComponents == 0 || numTuples == 0)
   {
-    std::vector<T> values;
+    return {};
+  }
 
-    for(const auto& str : stringValues)
+  const usize tuplesPerChunk = std::max<usize>(1, k_InitializationChunkValues / numComponents);
+  auto buffer = std::make_unique<T[]>(tuplesPerChunk * numComponents);
+  for(usize tupleOffset = 0; tupleOffset < numTuples; tupleOffset += tuplesPerChunk)
+  {
+    if(shouldCancel)
     {
-      values.emplace_back(StringInterpretationUtilities::Convert<T>(str).value());
+      return {};
     }
-
-    usize numTup = dataStore.getNumberOfTuples();
-
-    for(usize tup = 0; tup < numTup; tup++)
+    const usize tupleCount = std::min(tuplesPerChunk, numTuples - tupleOffset);
+    for(usize localTuple = 0; localTuple < tupleCount; localTuple++)
     {
-      for(usize comp = 0; comp < numComp; comp++)
+      const usize tupleIndex = tupleOffset + localTuple;
+      for(usize component = 0; component < numComponents; component++)
       {
-        dataStore[tup * numComp + comp] = values[comp];
+        buffer[localTuple * numComponents + component] = generateValue(tupleIndex, component);
       }
     }
-  }
-  else
-  {
-    Result<T> result = StringInterpretationUtilities::Convert<T>(stringValues[0]);
-    T value = result.value();
-    dataStore.fill(value);
-  }
-}
-
-template <typename T, class IncrementalOptions = AdditionT>
-void IncrementalFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& startValues, const std::vector<std::string>& stepValues)
-{
-  usize numComp = dataStore.getNumberOfComponents(); // We checked that the values string is greater than max comps size so proceed check free
-
-  std::vector<T> values(numComp);
-  std::vector<T> steps(numComp);
-
-  for(usize comp = 0; comp < numComp; comp++)
-  {
-    Result<T> result = StringInterpretationUtilities::Convert<T>(startValues[comp]);
-    values[comp] = result.value();
-    if constexpr(!std::is_same_v<T, bool>)
+    auto writeResult = dataStore.copyFromBuffer(tupleOffset * numComponents, nonstd::span<const T>(buffer.get(), tupleCount * numComponents));
+    if(writeResult.invalid())
     {
-      result = StringInterpretationUtilities::Convert<T>(stepValues[comp]);
-      steps[comp] = result.value();
+      return writeResult;
     }
   }
+  return {};
+}
 
-  usize numTup = dataStore.getNumberOfTuples();
+/** @brief Parses one fill value per component and repeats it through the bounded generator sink. */
+template <typename T>
+Result<> ValueFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& stringValues, const std::atomic_bool& shouldCancel)
+{
+  const usize numComponents = dataStore.getNumberOfComponents();
+  std::vector<T> values;
+  values.reserve(numComponents);
+  for(const auto& stringValue : stringValues)
+  {
+    values.push_back(StringInterpretationUtilities::Convert<T>(stringValue).value());
+  }
+  return WriteGeneratedValues<T>(dataStore, [&values](usize, usize component) { return values[component]; }, shouldCancel);
+}
+
+/** @brief Produces the original component-wise incremental sequence without retaining generated tuples. */
+template <typename T, class IncrementalOptions = AdditionT>
+Result<> IncrementalFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& startValues, const std::vector<std::string>& stepValues, const std::atomic_bool& shouldCancel)
+{
+  const usize numComponents = dataStore.getNumberOfComponents();
+
+  std::vector<T> values(numComponents);
+  std::vector<T> steps(numComponents);
+
+  for(usize component = 0; component < numComponents; component++)
+  {
+    values[component] = StringInterpretationUtilities::Convert<T>(startValues[component]).value();
+    steps[component] = StringInterpretationUtilities::Convert<T>(stepValues[component]).value();
+  }
 
   if constexpr(std::is_same_v<T, bool>)
   {
-    for(usize comp = 0; comp < numComp; comp++)
-    {
-      dataStore[comp] = values[comp];
-
-      if constexpr(IncrementalOptions::UsingAddition)
-      {
-        values[comp] = StringInterpretationUtilities::Convert<T>(stepValues[comp]).value() != 0 ? true : values[comp];
-      }
-      if constexpr(IncrementalOptions::UsingSubtraction)
-      {
-        values[comp] = StringInterpretationUtilities::Convert<T>(stepValues[comp]).value() != 0 ? false : values[comp];
-      }
-    }
-
-    for(usize tup = 1; tup < numTup; tup++)
-    {
-      for(usize comp = 0; comp < numComp; comp++)
-      {
-        dataStore[tup * numComp + comp] = values[comp];
-      }
-    }
+    return WriteGeneratedValues<T>(
+        dataStore,
+        [&values, &steps](usize tupleIndex, usize component) {
+          const bool value = values[component];
+          if(tupleIndex == 0 && steps[component])
+          {
+            values[component] = IncrementalOptions::UsingAddition;
+          }
+          return value;
+        },
+        shouldCancel);
   }
-
-  if constexpr(!std::is_same_v<T, bool>)
+  else
   {
-    for(usize tup = 0; tup < numTup; tup++)
-    {
-      for(usize comp = 0; comp < numComp; comp++)
-      {
-        dataStore[tup * numComp + comp] = values[comp];
-
-        if constexpr(IncrementalOptions::UsingAddition)
-        {
-          values[comp] += steps[comp];
-        }
-        if constexpr(IncrementalOptions::UsingSubtraction)
-        {
-          values[comp] -= steps[comp];
-        }
-      }
-    }
+    return WriteGeneratedValues<T>(
+        dataStore,
+        [&values, &steps](usize, usize component) {
+          const T value = values[component];
+          if constexpr(IncrementalOptions::UsingAddition)
+          {
+            values[component] += steps[component];
+          }
+          if constexpr(IncrementalOptions::UsingSubtraction)
+          {
+            values[component] -= steps[component];
+          }
+          return value;
+        },
+        shouldCancel);
   }
 }
 
+/** @brief Produces seeded random values from component-scale generators and bounded output chunks. */
 template <typename T, bool Ranged, class DistributionT>
-void RandomFill(std::vector<DistributionT>& dist, AbstractDataStore<T>& dataStore, const uint64 seed, const bool standardizeSeed)
+Result<> RandomFill(std::vector<DistributionT>& distributions, AbstractDataStore<T>& dataStore, const uint64 seed, const bool standardizeSeed, const std::atomic_bool& shouldCancel)
 {
-  usize numComp = dataStore.getNumberOfComponents(); // We checked that the values string is greater than max comps size so proceed check free
+  const usize numComponents = dataStore.getNumberOfComponents();
 
-  std::vector<std::mt19937_64> generators(numComp, std::mt19937_64{});
+  std::vector<std::mt19937_64> generators(numComponents, std::mt19937_64{});
 
-  for(usize comp = 0; comp < numComp; comp++)
+  for(usize component = 0; component < numComponents; component++)
   {
-    generators[comp].seed((standardizeSeed ? seed : seed + comp)); // If standardizing seed all generators use the same else, use modified seeds
+    generators[component].seed(standardizeSeed ? seed : seed + component);
   }
 
-  usize numTup = dataStore.getNumberOfTuples();
-
-  for(usize tup = 0; tup < numTup; tup++)
-  {
-    for(usize comp = 0; comp < numComp; comp++)
-    {
-      if constexpr(std::is_floating_point_v<T>)
-      {
-        if constexpr(Ranged)
+  return WriteGeneratedValues<T>(
+      dataStore,
+      [&distributions, &generators](usize, usize component) -> T {
+        if constexpr(std::is_floating_point_v<T>)
         {
-          dataStore[tup * numComp + comp] = static_cast<T>(dist[comp](generators[comp]));
-        }
-        if constexpr(!Ranged)
-        {
-          if constexpr(std::is_signed_v<T>)
+          if constexpr(Ranged)
           {
-            dataStore[tup * numComp + comp] = static_cast<T>(dist[comp](generators[comp]) * (std::numeric_limits<T>::max() - 1) * (((rand() & 1) == 0) ? 1 : -1));
+            return static_cast<T>(distributions[component](generators[component]));
           }
-          if constexpr(!std::is_signed_v<T>)
+          else if constexpr(std::is_signed_v<T>)
           {
-            dataStore[tup * numComp + comp] = static_cast<T>(dist[comp](generators[comp]) * std::numeric_limits<T>::max());
+            return static_cast<T>(distributions[component](generators[component]) * (std::numeric_limits<T>::max() - 1) * (((rand() & 1) == 0) ? 1 : -1));
+          }
+          else
+          {
+            return static_cast<T>(distributions[component](generators[component]) * std::numeric_limits<T>::max());
           }
         }
-      }
-      if constexpr(!std::is_floating_point_v<T>)
-      {
-        dataStore[tup * numComp + comp] = static_cast<T>(dist[comp](generators[comp]));
-      }
-    }
-  }
+        else
+        {
+          return static_cast<T>(distributions[component](generators[component]));
+        }
+      },
+      shouldCancel);
 }
 
+/** @brief Dispatches the requested incremental operation to its compile-time generator specialization. */
 template <typename T, class... ArgsT>
-void FillIncForwarder(const StepType& stepType, ArgsT&&... args)
+Result<> FillIncForwarder(const StepType& stepType, ArgsT&&... args)
 {
   switch(stepType)
   {
   case StepType::Addition: {
-    ::IncrementalFill<T, AdditionT>(std::forward<ArgsT>(args)...);
-    return;
+    return ::IncrementalFill<T, AdditionT>(std::forward<ArgsT>(args)...);
   }
   case StepType::Subtraction: {
-    ::IncrementalFill<T, SubtractionT>(std::forward<ArgsT>(args)...);
-    return;
+    return ::IncrementalFill<T, SubtractionT>(std::forward<ArgsT>(args)...);
   }
   }
+  return MakeErrorResult(-11620, "InitializeData received an invalid incremental operation.");
 }
 
+/** @brief Builds type-appropriate component distributions and forwards them to the bounded random generator. */
 template <typename T, bool Ranged, class... ArgsT>
-void FillRandomForwarder(const std::vector<T>& range, usize numComp, ArgsT&&... args)
+Result<> FillRandomForwarder(const std::vector<T>& range, usize numComponents, ArgsT&&... args)
 {
   if constexpr(std::is_same_v<T, bool>)
   {
-    std::vector<std::uniform_int_distribution<int64>> dists;
-    for(usize comp = 0; comp < numComp * 2; comp += 2)
+    std::vector<std::uniform_int_distribution<int64>> distributions;
+    for(usize component = 0; component < numComponents * 2; component += 2)
     {
-      dists.emplace_back((range.at(comp) ? 1 : 0), (range.at(comp + 1) ? 1 : 0));
+      distributions.emplace_back((range.at(component) ? 1 : 0), (range.at(component + 1) ? 1 : 0));
     }
-    ::RandomFill<T, Ranged, std::uniform_int_distribution<int64>>(dists, std::forward<ArgsT>(args)...);
-    return;
+    return ::RandomFill<T, Ranged, std::uniform_int_distribution<int64>>(distributions, std::forward<ArgsT>(args)...);
   }
-  if constexpr(!std::is_floating_point_v<T>)
+  else if constexpr(!std::is_floating_point_v<T>)
   {
-    std::vector<std::uniform_int_distribution<int64>> dists;
-    for(usize comp = 0; comp < numComp * 2; comp += 2)
+    std::vector<std::uniform_int_distribution<int64>> distributions;
+    for(usize component = 0; component < numComponents * 2; component += 2)
     {
-      dists.emplace_back(range.at(comp), range.at(comp + 1));
+      distributions.emplace_back(range.at(component), range.at(component + 1));
     }
-    ::RandomFill<T, Ranged, std::uniform_int_distribution<int64>>(dists, std::forward<ArgsT>(args)...);
+    return ::RandomFill<T, Ranged, std::uniform_int_distribution<int64>>(distributions, std::forward<ArgsT>(args)...);
   }
-  if constexpr(std::is_floating_point_v<T>)
+  else
   {
-    if constexpr(Ranged)
+    std::vector<std::uniform_real_distribution<float64>> distributions;
+    for(usize component = 0; component < numComponents * 2; component += 2)
     {
-
-      std::vector<std::uniform_real_distribution<float64>> dists;
-      for(usize comp = 0; comp < numComp * 2; comp += 2)
-      {
-        dists.emplace_back(range.at(comp), range.at(comp + 1));
-      }
-      ::RandomFill<T, Ranged, std::uniform_real_distribution<float64>>(dists, std::forward<ArgsT>(args)...);
+      distributions.emplace_back(Ranged ? static_cast<float64>(range.at(component)) : 0.0, Ranged ? static_cast<float64>(range.at(component + 1)) : 1.0);
     }
-    if constexpr(!Ranged)
-    {
-      std::vector<std::uniform_real_distribution<float64>> dists;
-      for(usize comp = 0; comp < numComp * 2; comp += 2)
-      {
-        dists.emplace_back(0, 1);
-      }
-      ::RandomFill<T, Ranged, std::uniform_real_distribution<float64>>(dists, std::forward<ArgsT>(args)...);
-    }
+    return ::RandomFill<T, Ranged, std::uniform_real_distribution<float64>>(distributions, std::forward<ArgsT>(args)...);
   }
 }
 
+/** @brief Expands one user value to every component while preserving explicit per-component lists. */
 std::vector<std::string> standardizeMultiComponent(const usize numComps, const std::vector<std::string>& componentValues)
 {
   if(componentValues.size() == numComps)
@@ -248,21 +248,24 @@ std::vector<std::string> standardizeMultiComponent(const usize numComps, const s
   }
 }
 
+/** @brief Dispatches one runtime array type and initialization mode to the matching bounded generator. */
 struct FillArrayFunctor
 {
+  /** @brief Parses mode-specific values and initializes the complete typed target array. */
   template <typename T>
-  void operator()(IDataArray& iDataArray, const InitializeDataInputValues& inputValues)
+  Result<> operator()(IDataArray& iDataArray, const InitializeDataInputValues& inputValues, const std::atomic_bool& shouldCancel)
   {
     auto& dataStore = iDataArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
-    usize numComp = dataStore.getNumberOfComponents(); // We checked that the values string is greater than max comps size so proceed check free
+    const usize numComp = dataStore.getNumberOfComponents();
 
     switch(inputValues.initType)
     {
     case InitializeType::FillValue: {
-      return ::ValueFill<T>(dataStore, standardizeMultiComponent(numComp, inputValues.stringValues));
+      return ::ValueFill<T>(dataStore, standardizeMultiComponent(numComp, inputValues.stringValues), shouldCancel);
     }
     case InitializeType::Incremental: {
-      return ::FillIncForwarder<T>(inputValues.stepType, dataStore, standardizeMultiComponent(numComp, inputValues.startValues), standardizeMultiComponent(numComp, inputValues.stepValues));
+      return ::FillIncForwarder<T>(inputValues.stepType, dataStore, standardizeMultiComponent(numComp, inputValues.startValues), standardizeMultiComponent(numComp, inputValues.stepValues),
+                                   shouldCancel);
     }
     case InitializeType::Random: {
       std::vector<T> range;
@@ -282,7 +285,7 @@ struct FillArrayFunctor
           range.push_back(true);
         }
       }
-      return ::FillRandomForwarder<T, false>(range, numComp, dataStore, inputValues.seed, inputValues.standardizeSeed);
+      return ::FillRandomForwarder<T, false>(range, numComp, dataStore, inputValues.seed, inputValues.standardizeSeed, shouldCancel);
     }
     case InitializeType::RangedRandom: {
       auto randBegin = standardizeMultiComponent(numComp, inputValues.randBegin);
@@ -296,9 +299,10 @@ struct FillArrayFunctor
         result = StringInterpretationUtilities::Convert<T>(randEnd[comp]);
         range.push_back(result.value());
       }
-      return ::FillRandomForwarder<T, true>(range, numComp, dataStore, inputValues.seed, inputValues.standardizeSeed);
+      return ::FillRandomForwarder<T, true>(range, numComp, dataStore, inputValues.seed, inputValues.standardizeSeed, shouldCancel);
     }
     }
+    return MakeErrorResult(-11621, "InitializeData received an invalid initialization type.");
   }
 };
 
@@ -525,10 +529,10 @@ const std::atomic_bool& InitializeData::getCancel()
 // -----------------------------------------------------------------------------
 Result<> InitializeData::operator()()
 {
-
   auto& iDataArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->InputArrayPath);
-
-  ExecuteDataFunction(::FillArrayFunctor{}, iDataArray.getDataType(), iDataArray, *m_InputValues);
-
-  return {};
+  const AlgorithmArrayTargets targets({&iDataArray});
+  const bool usesOutOfCoreStore = AnyOutOfCore(targets);
+  const bool useOutOfCorePath = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCorePath ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+  return ExecuteDataFunction(::FillArrayFunctor{}, iDataArray.getDataType(), iDataArray, *m_InputValues, m_ShouldCancel);
 }

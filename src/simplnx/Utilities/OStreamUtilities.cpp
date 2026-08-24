@@ -1,11 +1,13 @@
 #include "OStreamUtilities.hpp"
 
 #include "simplnx/Common/AtomicFile.hpp"
+#include "simplnx/Common/Bit.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/MessageHelper.hpp"
 
 #include <chrono>
 #include <iomanip>
+#include <memory>
 #include <ostream>
 #include <string>
 
@@ -128,7 +130,12 @@ struct PrintNeighborList
 };
 
 /**
- * @brief implicit writing of **DataArray**'s elements to outputStrm
+ * @brief Writes a numeric DataArray as delimited text using bounded contiguous reads.
+ *
+ * The page size is derived from a fixed byte target so resident and disk-backed
+ * stores follow the same path without allocating storage proportional to the
+ * full array. Formatting still proceeds tuple by tuple to preserve the existing
+ * file layout and cancellation/progress behavior.
  * @tparam ScalarType The primitive type attached to **DataArray**
  * @param outputStrm the ostream to write to
  * @param inputDataArray The **DataArray** that will have its values translated into strings
@@ -156,45 +163,114 @@ struct PrintDataArray
 
     usize numComps = inputDataArray.getNumberOfComponents();
     int32 tuplesWritten = 0;
-    for(size_t tuple = 0; tuple < numTuples; tuple++)
+    constexpr usize k_TargetBufferBytes = 1024 * 1024;
+    const usize tuplesPerBuffer = std::max<usize>(1, k_TargetBufferBytes / (sizeof(ScalarType) * numComps));
+    const usize bufferElements = std::min(numTuples, tuplesPerBuffer) * numComps;
+    auto values = std::make_unique<ScalarType[]>(std::max<usize>(1, bufferElements));
+    for(usize tupleOffset = 0; tupleOffset < numTuples; tupleOffset += tuplesPerBuffer)
     {
-      throttledMessenger.sendThrottledMessage(
-          [&]() { return fmt::format("Processing {}: {}% completed", inputDataArray.getName(), static_cast<int32>(100 * static_cast<float>(tuple) / static_cast<float>(numTuples))); });
+      const usize tupleCount = std::min(tuplesPerBuffer, numTuples - tupleOffset);
+      Result<> readResult = dataStore.copyIntoBuffer(tupleOffset * numComps, nonstd::span<ScalarType>(values.get(), tupleCount * numComps));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+
+      for(usize localTuple = 0; localTuple < tupleCount; localTuple++)
+      {
+        const usize tuple = tupleOffset + localTuple;
+        throttledMessenger.sendThrottledMessage(
+            [&]() { return fmt::format("Processing {}: {}% completed", inputDataArray.getName(), static_cast<int32>(100 * static_cast<float>(tuple) / static_cast<float>(numTuples))); });
+        if(shouldCancel)
+        {
+          return {};
+        }
+
+        // Write out all the components for this tuple
+        for(size_t index = 0; index < numComps; index++)
+        {
+          const ScalarType value = values[localTuple * numComps + index];
+          if constexpr(std::is_same_v<ScalarType, int8> || std::is_same_v<ScalarType, uint8>)
+          {
+            outputStrm << static_cast<int32>(value);
+          }
+          else if constexpr(std::is_same_v<ScalarType, float32> || std::is_same_v<ScalarType, float64>)
+          {
+            outputStrm << fmt::format("{}", value);
+          }
+          else
+          {
+            outputStrm << value;
+          }
+          if(index != numComps - 1)
+          {
+            outputStrm << delimiter;
+          }
+        }
+        // Now figure out if we need a new line character or if we need the delimiter instead.
+        tuplesWritten++;
+        if(tuplesWritten == tuplesPerLine)
+        {
+          outputStrm << '\n';
+          tuplesWritten = 0;
+        }
+        else
+        {
+          outputStrm << delimiter;
+        }
+      }
+    }
+    return {};
+  }
+};
+
+/**
+ * @brief Writes a numeric DataArray in bounded contiguous pages. Byte swapping,
+ * when requested, is applied only to the caller-owned page and never mutates the
+ * source array.
+ */
+struct PrintBinaryDataArray
+{
+  /**
+   * @brief Streams one type-dispatched array to @p outputStrm in fixed-size pages.
+   * @param outputStrm Destination stream owned by the caller.
+   * @param inputDataArray Numeric array whose runtime type is @p ScalarType.
+   * @param shouldCancel Stops before the next page when set.
+   * @param swapEndian Whether each value should be byte-swapped in the temporary page.
+   * @return The first storage-read or stream-write failure, or success after all pages.
+   */
+  template <typename ScalarType>
+  Result<> operator()(std::ostream& outputStrm, const IDataArray& inputDataArray, const std::atomic_bool& shouldCancel, bool swapEndian)
+  {
+    const auto& dataStore = inputDataArray.template getIDataStoreRefAs<AbstractDataStore<ScalarType>>();
+    constexpr usize k_TargetBufferBytes = 1024 * 1024;
+    const usize totalElements = dataStore.getSize();
+    const usize bufferElements = std::max<usize>(1, std::min(totalElements, k_TargetBufferBytes / sizeof(ScalarType)));
+    auto buffer = std::make_unique<ScalarType[]>(bufferElements);
+
+    for(usize offset = 0; offset < totalElements; offset += bufferElements)
+    {
       if(shouldCancel)
       {
         return {};
       }
 
-      // Write out all the components for this tuple
-      for(size_t index = 0; index < numComps; index++)
+      const usize count = std::min(bufferElements, totalElements - offset);
+      Result<> readResult = dataStore.copyIntoBuffer(offset, nonstd::span<ScalarType>(buffer.get(), count));
+      if(readResult.invalid())
       {
-        if constexpr(std::is_same_v<ScalarType, int8> || std::is_same_v<ScalarType, uint8>)
-        {
-          outputStrm << static_cast<int32>(dataStore[tuple * numComps + index]);
-        }
-        else if constexpr(std::is_same_v<ScalarType, float32> || std::is_same_v<ScalarType, float64>)
-        {
-          outputStrm << fmt::format("{}", dataStore[tuple * numComps + index]);
-        }
-        else
-        {
-          outputStrm << dataStore[tuple * numComps + index];
-        }
-        if(index != numComps - 1)
-        {
-          outputStrm << delimiter;
-        }
+        return readResult;
       }
-      // Now figure out if we need a new line character or if we need the delimiter instead.
-      tuplesWritten++;
-      if(tuplesWritten == tuplesPerLine)
+
+      if(swapEndian)
       {
-        outputStrm << '\n';
-        tuplesWritten = 0;
+        std::transform(buffer.get(), buffer.get() + count, buffer.get(), [](ScalarType value) { return nx::core::byteswap(value); });
       }
-      else
+
+      outputStrm.write(reinterpret_cast<const char*>(buffer.get()), static_cast<std::streamsize>(sizeof(ScalarType) * count));
+      if(outputStrm.bad())
       {
-        outputStrm << delimiter;
+        return MakeErrorResult(-10175, fmt::format("Error writing binary data for array '{}'.", inputDataArray.getName()));
       }
     }
     return {};
@@ -235,20 +311,32 @@ Result<> PrintStringArray(std::ostream& outputStrm, const StringArray& inputStri
   return {};
 }
 
+/**
+ * @brief Type-erased interface used to interleave one tuple from each selected
+ * array into a shared ASCII row.
+ *
+ * Implementations retain only references to source arrays and any bounded read
+ * cache. They must not outlive the referenced DataStructure objects.
+ */
 class ITupleWriter
 {
 public:
   ITupleWriter() = default;
   virtual ~ITupleWriter() = default;
+  /** @brief Appends tuple @p tupleIndex to the caller-owned stream. */
   virtual void write(std::ostream& outputStrm, usize tupleIndex) const = 0;
+
+  /** @brief Appends this array's column name or component column names. */
   virtual void writeHeader(std::ostream& outputStrm) const = 0;
 };
 
+/** @brief Tuple writer for StringArray values, which require no numeric type dispatch. */
 class StringTupleWriter : public ITupleWriter
 {
   using DataArrayType = StringArray;
 
 public:
+  /** @brief Borrows the source StringArray and copies its surrounding delimiter. */
   StringTupleWriter(const StringArray& iDataArray, const std::string& delimiter)
   : m_DataArray(dynamic_cast<const StringArray&>(iDataArray))
   , m_Delimiter(delimiter)
@@ -262,11 +350,13 @@ public:
   StringTupleWriter& operator=(const StringTupleWriter&) = delete;
   StringTupleWriter& operator=(StringTupleWriter&&) noexcept = delete;
 
+  /** @brief Appends one quoted string tuple to the shared ASCII row. */
   void write(std::ostream& outputStrm, usize tupleIndex) const override
   {
     outputStrm << m_Delimiter << m_DataArray[tupleIndex] << m_Delimiter;
   }
 
+  /** @brief Appends the single StringArray column name. */
   void writeHeader(std::ostream& outputStrm) const override
   {
     outputStrm << m_DataArray.getName();
@@ -277,40 +367,75 @@ private:
   const std::string m_Delimiter = "'";
 };
 
+/**
+ * @brief Numeric tuple writer with a one-megabyte forward read cache.
+ *
+ * WriteASCIIData requests tuples in increasing order. Caching the surrounding
+ * page converts those requests into bulk store reads while keeping memory
+ * bounded independently of array size. A nonsequential request simply replaces
+ * the cache with a page beginning at that tuple.
+ */
 template <typename ScalarType>
 class TupleWriter : public ITupleWriter
 {
   using DataArrayType = DataArray<ScalarType>;
 
 public:
+  /**
+   * @brief Borrows one typed source store and allocates its fixed one-megabyte forward page.
+   * @param iDataArray Runtime-validated source array that must outlive this writer.
+   * @param delimiter Borrowed component delimiter that must outlive this writer.
+   */
   TupleWriter(const IDataArray& iDataArray, const std::string& delimiter)
   : m_Name(iDataArray.getName())
   , m_DataStore(iDataArray.template getIDataStoreRefAs<AbstractDataStore<ScalarType>>())
   , m_Delimiter(delimiter)
   {
     m_NumComps = m_DataStore.getNumberOfComponents();
+    constexpr usize k_TargetBufferBytes = 1024 * 1024;
+    m_TuplesPerBuffer = std::max<usize>(1, k_TargetBufferBytes / (sizeof(ScalarType) * m_NumComps));
+    m_Values = std::make_unique<ScalarType[]>(m_TuplesPerBuffer * m_NumComps);
   }
   ~TupleWriter() override = default;
 
+  /**
+   * @brief Appends one numeric tuple, refilling the bounded page only when necessary.
+   * @throws std::runtime_error When the source DataStore page cannot be read.
+   */
   void write(std::ostream& outputStrm, usize tupleIndex) const override
   {
+    if(tupleIndex < m_BufferStartTuple || tupleIndex >= m_BufferStartTuple + m_BufferTupleCount)
+    {
+      m_BufferStartTuple = tupleIndex;
+      m_BufferTupleCount = std::min(m_TuplesPerBuffer, m_DataStore.getNumberOfTuples() - tupleIndex);
+      // Refill only when the requested tuple falls outside the current forward
+      // page. Sequential ASCII export therefore performs one store read per page.
+      Result<> readResult = m_DataStore.copyIntoBuffer(tupleIndex * m_NumComps, nonstd::span<ScalarType>(m_Values.get(), m_BufferTupleCount * m_NumComps));
+      if(readResult.invalid())
+      {
+        throw std::runtime_error(fmt::format("Failed to bulk-read data array '{}' while writing tuple {}.", m_Name, tupleIndex));
+      }
+    }
+
+    const usize localTuple = tupleIndex - m_BufferStartTuple;
     for(usize comp = 0; comp < m_NumComps; comp++)
     {
+      const ScalarType value = m_Values[localTuple * m_NumComps + comp];
       if constexpr(std::is_same_v<ScalarType, int8> || std::is_same_v<ScalarType, uint8>)
       {
-        outputStrm << static_cast<int32>(m_DataStore[tupleIndex * m_NumComps + comp]);
+        outputStrm << static_cast<int32>(value);
       }
       else if constexpr(std::is_same_v<ScalarType, float32>)
       {
-        outputStrm << std::setprecision(8) << std::noshowpoint << m_DataStore[tupleIndex * m_NumComps + comp];
+        outputStrm << std::setprecision(8) << std::noshowpoint << value;
       }
       else if constexpr(std::is_same_v<ScalarType, float64>)
       {
-        outputStrm << std::setprecision(16) << std::noshowpoint << m_DataStore[tupleIndex * m_NumComps + comp];
+        outputStrm << std::setprecision(16) << std::noshowpoint << value;
       }
       else
       {
-        outputStrm << m_DataStore[tupleIndex * m_NumComps + comp];
+        outputStrm << value;
       }
       if(comp < m_NumComps - 1)
       {
@@ -319,6 +444,7 @@ public:
     }
   }
 
+  /** @brief Appends one column name per component using the configured delimiter. */
   void writeHeader(std::ostream& outputStrm) const override
   {
     // If there is only 1 component then write the name of the array and return
@@ -344,10 +470,16 @@ private:
   const AbstractDataStore<ScalarType>& m_DataStore;
   const std::string& m_Delimiter = ",";
   usize m_NumComps = 1;
+  usize m_TuplesPerBuffer = 1;
+  mutable std::unique_ptr<ScalarType[]> m_Values;
+  mutable usize m_BufferStartTuple = std::numeric_limits<usize>::max();
+  mutable usize m_BufferTupleCount = 0;
 };
 
+/** @brief Type-dispatch adapter that creates the matching numeric TupleWriter. */
 struct AddTupleWriter
 {
+  /** @brief Constructs and appends the numeric tuple writer selected by runtime type dispatch. */
   template <typename ScalarType>
   Result<> operator()(std::vector<std::shared_ptr<ITupleWriter>>& writers, const IDataArray& iDataArray, const std::string& delimiter)
   {
@@ -385,7 +517,7 @@ std::string DelimiterToString(uint64 delim)
  */
 Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, DataStructure& dataStructure, const std::string& directoryPath, const IFilter::MessageHandler& mesgHandler,
                                       const std::atomic_bool& shouldCancel, const std::string& fileExtension, bool exportToBinary, const std::string& delimiter, bool includeIndex, bool includeHeaders,
-                                      size_t tuplesPerLine)
+                                      size_t tuplesPerLine, bool swapEndian)
 {
   fs::path dirPath(directoryPath);
   if(!fs::is_directory(dirPath))
@@ -410,17 +542,17 @@ Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, 
     {
       std::ofstream outStrm(outputFilePath, std::ios_base::out | std::ios_base::binary);
 
-      std::pair<int32, std::string> result = {0, "PrintDataSetsToMultipleFiles default failure. If you are seeing this error something bad has happened."};
+      Result<> result;
       auto* dataArray = dataStructure.getDataAs<IDataArray>(dataPath);
       if(dataArray != nullptr)
       {
         if(exportToBinary)
         {
-          result = dataArray->getIDataStore()->writeBinaryFile(outputFilePath);
+          result = ExecuteDataFunction(PrintBinaryDataArray{}, dataArray->getDataType(), outStrm, *dataArray, shouldCancel, swapEndian);
         }
         else
         {
-          ExecuteDataFunction(PrintDataArray{}, dataArray->getDataType(), outStrm, *dataArray, mesgHandler, shouldCancel, delimiter, tuplesPerLine);
+          result = ExecuteDataFunction(PrintDataArray{}, dataArray->getDataType(), outStrm, *dataArray, mesgHandler, shouldCancel, delimiter, tuplesPerLine);
         }
       }
       auto* stringArray = dataStructure.getDataAs<StringArray>(dataPath);
@@ -438,9 +570,9 @@ Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, 
         }
         ExecuteNeighborFunction(PrintNeighborList{}, neighborList->getDataType(), outStrm, neighborList, mesgHandler, shouldCancel, delimiter, includeIndex, includeHeaders);
       }
-      if(result.first < 0)
+      if(result.invalid())
       {
-        mesgHandler(IFilter::Message::Type::Error, result.second);
+        return result;
       }
     }
     if(shouldCancel)

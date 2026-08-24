@@ -97,6 +97,32 @@ TEST_CASE("Dream3dPreflightCache: miss then hit with equivalent structure", "[Dr
   REQUIRE(floats->getComponentShape() == ShapeType{3});
 }
 
+TEST_CASE("Dream3dPreflightCache: fetch of a file containing a StringArray succeeds", "[Dream3dPreflightCache]")
+{
+  auto& cache = DREAM3D::Dream3dPreflightCache::Instance();
+  cache.clear();
+  cache.resetStats();
+
+  const fs::path filePath = WriteTestFile("preflight_cache_stringarray.dream3d");
+  const DataPath stringsPath({"TestGroup", "Strings"});
+
+  // Regression: RefreshStores isolated a handout's StringArray by rebuilding its store from
+  // StringArray::values(), which iterates the store element-by-element. Under the OOC model a
+  // preflight StringArray is backed by an EmptyStringStore placeholder whose element accessors
+  // throw ("EmptyStringStore::operator[] called on placeholder store - data not loaded yet"), so
+  // every fetch of a file with a StringArray threw. The miss path (first fetch) and the hit path
+  // (second fetch) both run RefreshStores, so exercise both.
+  REQUIRE_NOTHROW(cache.fetch(filePath));
+  Result<DataStructure> result = cache.fetch(filePath);
+  REQUIRE(result.valid());
+  REQUIRE(cache.hitCount() == 1);
+
+  const auto* strings = result.value().getDataAs<StringArray>(stringsPath);
+  REQUIRE(strings != nullptr);
+  REQUIRE(strings->isPlaceholder());
+  REQUIRE(strings->getNumberOfTuples() == 2);
+}
+
 TEST_CASE("Dream3dPreflightCache: missing file returns open error", "[Dream3dPreflightCache]")
 {
   auto& cache = DREAM3D::Dream3dPreflightCache::Instance();
@@ -144,22 +170,23 @@ TEST_CASE("Dream3dPreflightCache: handouts are isolated from master and each oth
   REQUIRE(arrayA->getIDataStore() != arrayC->getIDataStore());
   REQUIRE(arrayB->getIDataStore() != arrayC->getIDataStore());
 
-  // StringArrays are backed by a real, mutable StringStore (of placeholder
-  // empty strings under preflight), so isolation is proven behaviorally: an
-  // in-place edit to one handout's StringArray must not reach another handout
-  // or a later fetch. This exercises the StringStore deep copy directly —
-  // without it, stringsB would observe "mutated".
+  // Under the OOC model a preflight StringArray is backed by an EmptyStringStore placeholder
+  // whose element accessors throw, so isolation is proven via the one mutator a placeholder
+  // supports: resizing one handout's StringArray must not change another handout's tuple count.
+  // If the stores were shared, resizing stringsA would be observed through stringsB and stringsC.
   auto* stringsA = handoutA.getDataAs<StringArray>(stringsPath);
   auto* stringsB = handoutB.getDataAs<StringArray>(stringsPath);
   auto* stringsC = handoutC.getDataAs<StringArray>(stringsPath);
   REQUIRE(stringsA != nullptr);
   REQUIRE(stringsB != nullptr);
   REQUIRE(stringsC != nullptr);
-  const std::vector<std::string> stringsBBefore = stringsB->values();
-  const std::vector<std::string> stringsCBefore = stringsC->values();
-  stringsA->setValue(0, "mutated");
-  REQUIRE(stringsB->values() == stringsBBefore);
-  REQUIRE(stringsC->values() == stringsCBefore);
+  REQUIRE(stringsA->isPlaceholder());
+  REQUIRE(stringsB->isPlaceholder());
+  REQUIRE(stringsC->isPlaceholder());
+  stringsA->resizeTuples(ShapeType{5});
+  REQUIRE(stringsA->getNumberOfTuples() == 5);
+  REQUIRE(stringsB->getNumberOfTuples() == 2);
+  REQUIRE(stringsC->getNumberOfTuples() == 2);
 }
 
 TEST_CASE("Dream3dPreflightCache: modified file is detected and re-read", "[Dream3dPreflightCache]")

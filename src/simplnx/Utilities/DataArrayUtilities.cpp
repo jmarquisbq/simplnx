@@ -7,10 +7,13 @@
 #include "simplnx/Filter/Actions/CreateNeighborListAction.hpp"
 #include "simplnx/Filter/Actions/CreateStringArrayAction.hpp"
 #include "simplnx/Utilities/ArrayCreationUtilities.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/ParallelTaskAlgorithm.hpp"
 #include "simplnx/Utilities/StringInterpretationUtilities.hpp"
 #include "simplnx/Utilities/TemplateHelpers.hpp"
+
+#include <nonstd/span.hpp>
 
 using namespace nx::core;
 
@@ -44,13 +47,34 @@ struct CreateDefaultValueDataArrayFunctor
   Result<IArray*> operator()(DataStructure& destDataStructure, const std::string& name, const ShapeType& tupleShape, const ShapeType& componentShape, const std::string& defaultValue,
                              const std::optional<DataObject::IdType> parentId)
   {
-    auto newDataArray = DataArray<T>::template CreateWithStore<DataStore<T>>(destDataStructure, name, tupleShape, componentShape, parentId);
     auto result = StringInterpretationUtilities::Convert<T>(defaultValue);
     if(result.invalid())
     {
       return ConvertResultTo<IArray*>(ConvertResult(std::move(result)), {});
     }
-    std::fill(newDataArray->begin(), newDataArray->end(), result.value());
+
+    DataPath arrayPath({name});
+    if(parentId.has_value())
+    {
+      const std::vector<DataPath> parentPaths = destDataStructure.getDataPathsForId(*parentId);
+      if(parentPaths.empty())
+      {
+        return MakeErrorResult<IArray*>(-1053, fmt::format("Unable to resolve the parent path while creating default-initialized data array '{}'.", name));
+      }
+      arrayPath = parentPaths.front().createChildPath(name);
+    }
+
+    auto dataStore = DataStoreUtilities::CreateDataStore<T>(destDataStructure, arrayPath, tupleShape, componentShape);
+    if(dataStore == nullptr)
+    {
+      return MakeErrorResult<IArray*>(-1054, fmt::format("Unable to allocate storage for default-initialized data array '{}'.", name));
+    }
+    dataStore->fill(result.value());
+    auto* newDataArray = DataArray<T>::Create(destDataStructure, name, std::move(dataStore), parentId);
+    if(newDataArray == nullptr)
+    {
+      return MakeErrorResult<IArray*>(-1055, fmt::format("Unable to insert default-initialized data array '{}'.", name));
+    }
     return {newDataArray};
   }
 };
@@ -160,6 +184,13 @@ Result<> ResizeAndReplaceDataArray(DataStructure& dataStructure, const DataPath&
 Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
                                                             const IFilter::MessageHandler& messageHandler)
 {
+  return ValidateFeatureIdsToFeatureAttributeMatrixIndexing(dataStructure, sourceDataPath, featureIds, ignoreNegativeValues, messageHandler, nullptr);
+}
+
+//-----------------------------------------------------------------------------
+Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
+                                                            const IFilter::MessageHandler& messageHandler, const std::atomic_bool* shouldCancel)
+{
   messageHandler(IFilter::ProgressMessage{IFilter::ProgressMessage::Type::Info, fmt::format("Validating range of values within input array '{}'...", featureIds.getName())});
 
   usize numFeatures = 0;
@@ -180,11 +211,37 @@ Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure&
   auto& featureIdsStore = featureIds.getDataStoreRef();
   if(featureIdsStore.getNumberOfTuples() == 0)
   {
-    // Nothing to validate (and minmax_element over an empty store would dereference end())
+    // Nothing to validate.
     return {};
   }
 
-  auto [minFeatureId, maxFeatureId] = std::minmax_element(featureIdsStore.begin(), featureIdsStore.end());
+  // Use bulk I/O to find min/max instead of per-element iterators.
+  // Per-element iteration on OOC stores incurs ~50-100ns virtual dispatch per
+  // access; at 8M+ elements this takes minutes.  Bulk copyIntoBuffer reads
+  // are a single HDF5 hyperslab op per batch.
+  const usize totalTuples = featureIdsStore.getNumberOfTuples();
+  constexpr usize k_BatchSize = 40000; // roughly one 200x200 Z-slice
+  int32 globalMin = std::numeric_limits<int32>::max();
+  int32 globalMax = std::numeric_limits<int32>::lowest();
+  std::vector<int32> batch(k_BatchSize);
+  for(usize offset = 0; offset < totalTuples; offset += k_BatchSize)
+  {
+    if(shouldCancel != nullptr && *shouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(k_BatchSize, totalTuples - offset);
+    auto readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(batch.data(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    auto [batchMin, batchMax] = std::minmax_element(batch.begin(), batch.begin() + count);
+    globalMin = std::min(globalMin, *batchMin);
+    globalMax = std::max(globalMax, *batchMax);
+  }
+  const int32* minFeatureId = &globalMin;
+  const int32* maxFeatureId = &globalMax;
 
   if(!ignoreNegativeValues && *minFeatureId < 0)
   {

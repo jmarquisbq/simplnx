@@ -5,83 +5,61 @@
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 #include "simplnx/Utilities/GeometryUtilities.hpp"
-#include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
 
 #include <atomic>
+#include <memory>
+#include <utility>
 
 using namespace nx::core;
 
 namespace
 {
-// =============================================================================
-// WORKER CLASSES
-// =============================================================================
-// These classes encapsulate the boundary detection and edge creation logic.
-// Each class operates on a range of rows (Y indices) and processes all X
-// positions within those rows.
-//
-// The algorithm uses a two-pass approach:
-// 1. Count Pass: Count the total number of boundary edges (CountVerticalEdgesImpl,
-//    CountHorizontalEdgesImpl) so we can allocate the exact amount of memory needed.
-// 2. Populate Pass: Create the actual vertices and edges (PopulateVerticalEdgesImpl,
-//    PopulateHorizontalEdgesImpl).
-// =============================================================================
-
 /**
- * @brief Counts vertical boundary edges (edges between horizontally adjacent cells)
+ * @brief Counts both boundary orientations with one sequential pass over the feature IDs.
  *
- * A vertical edge exists between cell (x, y) and cell (x+1, y) when they have
- * different feature IDs. The edge is placed on the right side of the cell (x, y).
- *
- * Grid visualization (4x3 grid):
- *   +---+---+---+---+
- *   | 0 | 1 | 2 | 3 |  y=2
- *   +---+---+---+---+
- *   | 0 | 1 | 2 | 3 |  y=1
- *   +---+---+---+---+
- *   | 0 | 1 | 2 | 3 |  y=0
- *   +---+---+---+---+
- *     ^   ^   ^
- *     Vertical edges checked between adjacent cells in X direction
+ * Two rolling rows replace repeated per-cell datastore reads while keeping scratch memory
+ * bounded by the image width rather than the total cell count.
  */
-
-/**
- * @brief Counts horizontal boundary edges (edges between vertically adjacent cells)
- *
- * A horizontal edge exists between cell (x, y) and cell (x, y+1) when they have
- * different feature IDs. The edge is placed at the top side of the cell (x, y).
- *
- * Grid visualization (4x3 grid):
- *   +---+---+---+---+
- *   | 0 | 1 | 2 | 3 |  y=2
- *   +---+---+---+---+  <- Horizontal edges checked here (y=1 to y=2)
- *   | 0 | 1 | 2 | 3 |  y=1
- *   +---+---+---+---+  <- Horizontal edges checked here (y=0 to y=1)
- *   | 0 | 1 | 2 | 3 |  y=0
- *   +---+---+---+---+
- */
-
-template <typename T, usize XFactor = 0, usize YFactor = 0>
-void CountEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, usize& edgeCount, const std::atomic_bool& shouldCancel, const Range& range)
+template <typename T>
+Result<> CountEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, usize& verticalEdgeCount, usize& horizontalEdgeCount, nonstd::span<T> previousRow, nonstd::span<T> currentRow,
+                    const std::atomic_bool& shouldCancel)
 {
-  usize localCount = 0;
-  for(usize y = range.min(); y < range.max(); y++)
+  for(usize y = 0; y < dimY; y++)
   {
     if(shouldCancel)
     {
-      return;
+      return {};
     }
-    for(usize x = 0; x < dimX - XFactor; x++)
+
+    Result<> readResult = featureIds.copyIntoBuffer(y * dimX, currentRow);
+    if(readResult.invalid())
     {
-      usize idx1 = y * dimX + x;
-      usize idx2 = (y + YFactor) * dimX + (x + XFactor);
-      if(featureIds[idx1] != featureIds[idx2])
+      return readResult;
+    }
+
+    for(usize x = 0; x + 1 < dimX; x++)
+    {
+      if(currentRow[x] != currentRow[x + 1])
       {
-        localCount++;
+        verticalEdgeCount++;
       }
     }
+
+    if(y > 0)
+    {
+      for(usize x = 0; x < dimX; x++)
+      {
+        if(previousRow[x] != currentRow[x])
+        {
+          horizontalEdgeCount++;
+        }
+      }
+    }
+
+    std::swap(previousRow, currentRow);
   }
-  edgeCount += localCount;
+
+  return {};
 }
 
 /**
@@ -95,20 +73,24 @@ void CountEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, 
  * Each edge gets 2 vertices stored consecutively (v0, v1) in the vertex array.
  */
 template <typename T>
-void PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
-                           INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D::SharedEdgeList& edges, usize& currentEdge, const std::atomic_bool& shouldCancel, const Range& range)
+Result<> PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
+                               INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D::SharedEdgeList& edges, usize& currentEdge, nonstd::span<T> rowBuffer, const std::atomic_bool& shouldCancel)
 {
-  for(usize y = range.min(); y < range.max(); y++)
+  for(usize y = 0; y < dimY; y++)
   {
     if(shouldCancel)
     {
-      return;
+      return {};
     }
-    for(usize x = 0; x < dimX - 1; x++)
+
+    Result<> readResult = featureIds.copyIntoBuffer(y * dimX, rowBuffer);
+    if(readResult.invalid())
     {
-      usize idx1 = y * dimX + x;
-      usize idx2 = y * dimX + (x + 1);
-      if(featureIds[idx1] != featureIds[idx2])
+      return readResult;
+    }
+    for(usize x = 0; x + 1 < dimX; x++)
+    {
+      if(rowBuffer[x] != rowBuffer[x + 1])
       {
         const usize edgeIdx = currentEdge;
         currentEdge++;
@@ -137,6 +119,8 @@ void PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dimX, u
       }
     }
   }
+
+  return {};
 }
 
 /**
@@ -150,20 +134,31 @@ void PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dimX, u
  * Each edge gets 2 vertices stored consecutively (v0, v1) in the vertex array.
  */
 template <typename T>
-void PopulateHorizontalEdgesImpl(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
-                                 INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D::SharedEdgeList& edges, usize& currentEdge, const std::atomic_bool& shouldCancel, const Range& range)
+Result<> PopulateHorizontalEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
+                                 INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D::SharedEdgeList& edges, usize& currentEdge, nonstd::span<T> currentRow, nonstd::span<T> nextRow,
+                                 const std::atomic_bool& shouldCancel)
 {
-  for(usize y = range.min(); y < range.max(); y++)
+  Result<> readResult = featureIds.copyIntoBuffer(0, currentRow);
+  if(readResult.invalid())
+  {
+    return readResult;
+  }
+
+  for(usize y = 0; y + 1 < dimY; y++)
   {
     if(shouldCancel)
     {
-      return;
+      return {};
+    }
+
+    readResult = featureIds.copyIntoBuffer((y + 1) * dimX, nextRow);
+    if(readResult.invalid())
+    {
+      return readResult;
     }
     for(usize x = 0; x < dimX; x++)
     {
-      usize idx1 = y * dimX + x;
-      usize idx2 = (y + 1) * dimX + x;
-      if(featureIds[idx1] != featureIds[idx2])
+      if(currentRow[x] != nextRow[x])
       {
         const usize edgeIdx = currentEdge;
         currentEdge++;
@@ -191,7 +186,11 @@ void PopulateHorizontalEdgesImpl(const AbstractDataStore<T>& featureIds, usize d
         edges[edgeIdx * 2 + 1] = v1;
       }
     }
+
+    std::swap(currentRow, nextRow);
   }
+
+  return {};
 }
 
 // =============================================================================
@@ -218,9 +217,6 @@ struct ExtractFeatureBoundariesFunctor
   Result<> operator()(const DataStructure& dataStructure, const DataPath& featureIdsPath, const ImageGeom& imageGeom, EdgeGeom& edgeGeom, const std::atomic_bool& shouldCancel,
                       ExtractFeatureBoundaries2DInputValues::ZValueChoiceType zValueChoice, float32 customZValue, bool extractVirtualSampleEdges)
   {
-    // using CountVerticalEdgesImpl = CountEdgesImpl<T, 1, 0>;
-    // using CountHorizontalEdgesImpl = CountEdgesImpl<T, 0, 1>;
-
     // =========================================================================
     // SETUP: Extract geometry parameters and feature IDs
     // =========================================================================
@@ -230,12 +226,16 @@ struct ExtractFeatureBoundariesFunctor
     const FloatVec3 origin = imageGeom.getOrigin();
     const FloatVec3 spacing = imageGeom.getSpacing();
 
-    usize dimX = dims.getX();
-    usize dimY = dims.getY();
-    float32 originX = origin.getX();
-    float32 originY = origin.getY();
-    float32 spacingX = spacing.getX();
-    float32 spacingY = spacing.getY();
+    const usize dimX = dims.getX();
+    const usize dimY = dims.getY();
+    const float32 originX = origin.getX();
+    const float32 originY = origin.getY();
+    const float32 spacingX = spacing.getX();
+    const float32 spacingY = spacing.getY();
+
+    // Reused for every input pass so peak scratch remains two rows regardless of image height.
+    auto firstRow = std::make_unique<T[]>(dimX);
+    auto secondRow = std::make_unique<T[]>(dimX);
 
     // =========================================================================
     // Z VALUE CALCULATION: Determine the Z coordinate for all generated vertices
@@ -262,19 +262,11 @@ struct ExtractFeatureBoundariesFunctor
     usize verticalEdgeCount = 0;
     usize horizontalEdgeCount = 0;
 
-    // Count vertical edges (between horizontally adjacent cells)
-    CountEdges<T, 1, 0>(featureIdsStoreRef, dimX, dimY, verticalEdgeCount, shouldCancel, {0, dimY});
-
-    if(shouldCancel)
+    Result<> countResult =
+        CountEdges(featureIdsStoreRef, dimX, dimY, verticalEdgeCount, horizontalEdgeCount, nonstd::span<T>(firstRow.get(), dimX), nonstd::span<T>(secondRow.get(), dimX), shouldCancel);
+    if(countResult.invalid())
     {
-      return {};
-    }
-
-    // Count horizontal edges (between vertically adjacent cells)
-    // Note: We only check dimY-1 rows since we're comparing row y with row y+1
-    if(dimY > 1)
-    {
-      CountEdges<T, 0, 1>(featureIdsStoreRef, dimX, dimY, horizontalEdgeCount, shouldCancel, {0, dimY - 1});
+      return countResult;
     }
 
     if(shouldCancel)
@@ -291,7 +283,7 @@ struct ExtractFeatureBoundariesFunctor
       outerEdgeCount = 2 * dimX + 2 * dimY;
     }
 
-    usize totalEdgeCount = verticalEdgeCount + horizontalEdgeCount + outerEdgeCount;
+    const usize totalEdgeCount = verticalEdgeCount + horizontalEdgeCount + outerEdgeCount;
 
     // =========================================================================
     // EARLY EXIT: Handle case where no boundaries exist
@@ -309,7 +301,7 @@ struct ExtractFeatureBoundariesFunctor
     // MEMORY ALLOCATION: Resize geometry arrays based on counted edges
     // =========================================================================
     // Initially allocate 2 vertices per edge (duplicates will be removed later).
-    usize numVertices = totalEdgeCount * 2;
+    const usize numVertices = totalEdgeCount * 2;
     edgeGeom.resizeVertexList(numVertices);
     edgeGeom.resizeEdgeList(totalEdgeCount);
 
@@ -322,17 +314,22 @@ struct ExtractFeatureBoundariesFunctor
     usize currentEdge = 0;
 
     // Populate vertical edges
-    PopulateVerticalEdges<T>(featureIdsStoreRef, dimX, dimY, originX, originY, zValue, spacingX, spacingY, verticesRef, edgesRef, currentEdge, shouldCancel, {0, dimY});
-
-    if(shouldCancel)
+    Result<> populateResult =
+        PopulateVerticalEdges(featureIdsStoreRef, dimX, dimY, originX, originY, zValue, spacingX, spacingY, verticesRef, edgesRef, currentEdge, nonstd::span<T>(firstRow.get(), dimX), shouldCancel);
+    if(populateResult.invalid())
     {
-      return {};
+      return populateResult;
     }
 
     // Populate horizontal edges
     if(dimY > 1)
     {
-      PopulateHorizontalEdgesImpl<T>(featureIdsStoreRef, dimX, dimY, originX, originY, zValue, spacingX, spacingY, verticesRef, edgesRef, currentEdge, shouldCancel, {0, dimY - 1});
+      populateResult = PopulateHorizontalEdges(featureIdsStoreRef, dimX, dimY, originX, originY, zValue, spacingX, spacingY, verticesRef, edgesRef, currentEdge, nonstd::span<T>(firstRow.get(), dimX),
+                                               nonstd::span<T>(secondRow.get(), dimX), shouldCancel);
+      if(populateResult.invalid())
+      {
+        return populateResult;
+      }
     }
 
     if(shouldCancel)

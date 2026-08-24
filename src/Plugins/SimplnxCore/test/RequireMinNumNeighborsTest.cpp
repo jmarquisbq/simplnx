@@ -1,3 +1,4 @@
+#include "FeatureRemovalTestUtils.hpp"
 #include "SimplnxCore/Filters/ComputeFeatureNeighborsFilter.hpp"
 #include "SimplnxCore/Filters/RequireMinNumNeighborsFilter.hpp"
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
@@ -16,6 +17,7 @@
 #include <catch2/catch.hpp>
 
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -169,17 +171,17 @@ void PopulateDataStructure(DataStructure& dataStructure)
   imageGeom->setCellData(*cellAM);
   auto* featureAM = AttributeMatrix::Create(dataStructure, "FeatureData", {k_FeatureCount}, imageGeom->getId());
 
-  auto featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(cellShape, {1}, IDataAction::Mode::Execute);
+  auto featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "CellData", "FeatureIds"}), cellShape, {1}, IDataAction::Mode::Execute);
   auto* featureIds = DataArray<int32>::Create(dataStructure, "FeatureIds", featureIdsStore, cellAM->getId());
-  auto copiedScalarStore = DataStoreUtilities::CreateDataStore<int32>(cellShape, {1}, IDataAction::Mode::Execute);
+  auto copiedScalarStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "CellData", "CopiedScalar"}), cellShape, {1}, IDataAction::Mode::Execute);
   auto* copiedScalar = DataArray<int32>::Create(dataStructure, "CopiedScalar", copiedScalarStore, cellAM->getId());
-  auto copiedVectorStore = DataStoreUtilities::CreateDataStore<float32>(cellShape, {3}, IDataAction::Mode::Execute);
+  auto copiedVectorStore = DataStoreUtilities::CreateDataStore<float32>(dataStructure, DataPath({"ImageGeometry", "CellData", "CopiedVector"}), cellShape, {3}, IDataAction::Mode::Execute);
   auto* copiedVector = DataArray<float32>::Create(dataStructure, "CopiedVector", copiedVectorStore, cellAM->getId());
-  auto ignoredValuesStore = DataStoreUtilities::CreateDataStore<int32>(cellShape, {1}, IDataAction::Mode::Execute);
+  auto ignoredValuesStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "CellData", "IgnoredValues"}), cellShape, {1}, IDataAction::Mode::Execute);
   auto* ignoredValues = DataArray<int32>::Create(dataStructure, "IgnoredValues", ignoredValuesStore, cellAM->getId());
-  auto numNeighborsStore = DataStoreUtilities::CreateDataStore<int32>({k_FeatureCount}, {1}, IDataAction::Mode::Execute);
+  auto numNeighborsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "FeatureData", "NumNeighbors"}), {k_FeatureCount}, {1}, IDataAction::Mode::Execute);
   auto* numNeighbors = DataArray<int32>::Create(dataStructure, "NumNeighbors", numNeighborsStore, featureAM->getId());
-  auto phasesStore = DataStoreUtilities::CreateDataStore<int32>({k_FeatureCount}, {1}, IDataAction::Mode::Execute);
+  auto phasesStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "FeatureData", "Phases"}), {k_FeatureCount}, {1}, IDataAction::Mode::Execute);
   auto* phases = DataArray<int32>::Create(dataStructure, "Phases", phasesStore, featureAM->getId());
 
   for(usize z = 0; z < k_Dimension; z++)
@@ -809,10 +811,10 @@ TEST_CASE("SimplnxCore::RequireMinNumNeighborsFilter: Execute Error - no coarsen
   imageGeom->setCellData(*cellAM);
   auto* featureAM = AttributeMatrix::Create(dataStructure, "FeatureData", {2}, imageGeom->getId());
 
-  auto featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(cellShape, {1}, IDataAction::Mode::Execute);
+  auto featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "CellData", "FeatureIds"}), cellShape, {1}, IDataAction::Mode::Execute);
   auto* featureIds = DataArray<int32>::Create(dataStructure, "FeatureIds", featureIdsStore, cellAM->getId());
 
-  auto numNeighborsStore = DataStoreUtilities::CreateDataStore<int32>({2}, {1}, IDataAction::Mode::Execute);
+  auto numNeighborsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, DataPath({"ImageGeometry", "FeatureData", "NumNeighbors"}), {2}, {1}, IDataAction::Mode::Execute);
   auto* numNeighbors = DataArray<int32>::Create(dataStructure, "NumNeighbors", numNeighborsStore, featureAM->getId());
 
   featureIds->fill(-1);

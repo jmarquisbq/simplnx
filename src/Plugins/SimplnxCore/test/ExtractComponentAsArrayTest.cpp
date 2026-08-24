@@ -2,15 +2,21 @@
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/Parameters/ArrayCreationParameter.hpp"
 #include "simplnx/Parameters/NumberParameter.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <nonstd/span.hpp>
 
 namespace fs = std::filesystem;
 using namespace nx::core;
@@ -27,6 +33,9 @@ const fs::path k_BaseDataFilePath = fs::path(fmt::format("{}/6_6_find_feature_ce
 
 TEST_CASE("SimplnxCore::ExtractComponentAsArrayFilter: Valid filter execution", "[SimplnxCore][ExtractComponentAsArrayFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
@@ -51,7 +60,7 @@ TEST_CASE("SimplnxCore::ExtractComponentAsArrayFilter: Valid filter execution", 
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(alteredDs, args);
+  auto executeResult = scope.executeFilter(filter, alteredDs, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   // Load a clean copy of the datastructure prior to resize because original array is terminated after execution

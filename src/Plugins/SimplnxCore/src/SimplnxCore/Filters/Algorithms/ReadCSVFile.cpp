@@ -70,18 +70,29 @@ Result<> ReadCSVFile::readFile(DataStructure& dataStructure, const std::string& 
   {
     if(shouldCancel)
     {
-      return {};
+      return FileUtilities::CSV::FlushParsers(parsersResult.value());
     }
 
-    Result<> parsingResult = FileUtilities::CSV::ParseLine(in, parsersResult.value(), headers, delimiters, consecutiveDelimiters, lineNum, importStartingRow);
+    bool flushRequired = false;
+    Result<> parsingResult = FileUtilities::CSV::ParseLine(in, parsersResult.value(), headers, delimiters, consecutiveDelimiters, lineNum, importStartingRow, flushRequired);
     if(parsingResult.invalid())
     {
-      return std::move(parsingResult);
+      Result<> flushResult = FileUtilities::CSV::FlushParsers(parsersResult.value());
+      return MergeResults(std::move(parsingResult), std::move(flushResult));
+    }
+
+    if(flushRequired)
+    {
+      Result<> flushResult = FileUtilities::CSV::FlushParsers(parsersResult.value());
+      if(flushResult.invalid())
+      {
+        return flushResult;
+      }
     }
 
     notifyProgress(lineNum, numTuples, threshold, msgHandler);
     lineNum++;
   }
 
-  return {};
+  return FileUtilities::CSV::FlushParsers(parsersResult.value());
 }

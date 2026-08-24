@@ -4,10 +4,21 @@
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/DataGroup.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
+#include "simplnx/DataStructure/IO/Generic/IExternalSort.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 #include "simplnx/Utilities/StringUtilities.hpp"
 
+#include <nonstd/span.hpp>
+
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
+#include <limits>
+#include <memory>
+#include <type_traits>
 
 namespace fs = std::filesystem;
 
@@ -30,9 +41,9 @@ std::string format_duration(std::chrono::milliseconds ms)
   return ss.str();
 }
 
-std::vector<int64> getNodeIds(usize x, usize y, usize z, const usize* pDims)
+std::array<int64, 8> getNodeIds(usize x, usize y, usize z, const usize* pDims)
 {
-  std::vector<int64> nodeId(8, 0);
+  std::array<int64, 8> nodeId{};
 
   nodeId[0] = static_cast<int64>(1 + (pDims[0] * pDims[1] * z) + (pDims[0] * y) + x);
   nodeId[1] = static_cast<int64>(1 + (pDims[0] * pDims[1] * z) + (pDims[0] * y) + (x + 1));
@@ -155,7 +166,7 @@ int32 writeElems(WriteAbaqusHexahedron* filter, const std::string& fileName, con
     {
       for(usize x = 0; x < cDims[0]; x++)
       {
-        std::vector<int64> nodeId = getNodeIds(x, y, z, pDims);
+        const std::array<int64, 8> nodeId = getNodeIds(x, y, z, pDims);
         fprintf(f, "%llu, %lld, %lld, %lld, %lld, %lld, %lld, %lld, %lld\n", (_lli_t_)index, (_lli_t_)nodeId[5], (_lli_t_)nodeId[1], (_lli_t_)nodeId[0], (_lli_t_)nodeId[4], (_lli_t_)nodeId[7],
                 (_lli_t_)nodeId[3], (_lli_t_)nodeId[2], (_lli_t_)nodeId[6]);
         if(index % increment == 0)
@@ -190,82 +201,356 @@ int32 writeElems(WriteAbaqusHexahedron* filter, const std::string& fileName, con
   return err;
 }
 
-int32 writeElset(WriteAbaqusHexahedron* filter, const std::string& fileName, size_t totalPoints, const Int32AbstractDataStore& featureIds, const std::atomic_bool& shouldCancel)
+/** @brief Finds the maximum FeatureId in one bounded pass without requiring contiguous storage. */
+Result<int32> findMaximumGrainId(const Int32AbstractDataStore& featureIds, const std::atomic_bool& shouldCancel)
 {
-  int32 err = 0;
-  FILE* f = fopen(fileName.c_str(), "wb");
-  if(nullptr == f)
+  const usize totalElements = featureIds.getSize();
+  if(totalElements == 0)
   {
-    return -1;
+    return {int32{0}};
   }
 
-  fprintf(f, "** ----------------------------------------------------------------\n**\n** The element sets\n");
-  fprintf(f, "*Elset, elset=cube, generate\n");
-  fprintf(f, "1, %llu, 1\n", static_cast<unsigned long long int>(totalPoints));
-  fprintf(f, "**\n** Each Grain is made up of multiple elements\n**");
-
-  // find total number of Grain Ids
-  int32 maxGrainId = *std::max_element(std::begin(featureIds), std::end(featureIds));
-
-  auto increment = static_cast<int32>(maxGrainId * 0.1f);
-  if(increment == 0) // check to prevent divide by 0
+  constexpr usize k_ChunkSize = 65536;
+  auto buffer = std::make_unique<int32[]>(std::min(k_ChunkSize, totalElements));
+  int32 maximum = std::numeric_limits<int32>::lowest();
+  for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
   {
-    increment = 1;
+    if(shouldCancel)
+    {
+      return {int32{0}};
+    }
+    const usize count = std::min(k_ChunkSize, totalElements - offset);
+    if(Result<> result = featureIds.copyIntoBuffer(offset, nonstd::span<int32>(buffer.get(), count)); result.invalid())
+    {
+      return ConvertResultTo<int32>(std::move(result), int32{});
+    }
+    maximum = std::max(maximum, *std::max_element(buffer.get(), buffer.get() + count));
   }
+  return {maximum};
+}
+
+/**
+ * @brief Bucket every FeatureIds element into its owning grain's Abaqus element-id list.
+ *
+ * The Abaqus ELSET format requires every grain's element ids to be written together as
+ * one contiguous list, so *some* grouping by grain is unavoidable. The original
+ * implementation obtained that grouping by rescanning the entire FeatureIds array once
+ * per grain (`O(grains * cells)`), which on an out-of-core array meant re-issuing chunked
+ * HDF5 reads for every single grain -- for a real dataset with thousands of grains this
+ * amounted to thousands of full-volume passes.
+ *
+ * This is the in-core path. It performs the grouping with a single bounded-chunk pass over
+ * FeatureIds (`O(cells)` total), pushing each element's flat cell index into its grain's
+ * bucket. The OOC path below replaces these cell-sized resident buckets with an external
+ * sort and bounded record pages.
+ *
+ * @param filter Owning filter, used to emit throttled progress messages
+ * @param featureIds Cell-level FeatureIds store to read (may be in-memory or OOC-backed)
+ * @param maxGrainId Highest grain id present in featureIds (bucket count is maxGrainId + 1)
+ * @param shouldCancel Cancellation flag, checked once per chunk
+ * @return One bucket per grain id, each holding that grain's flat cell indices in ascending order;
+ *         empty if cancelled mid-read
+ */
+Result<std::vector<std::vector<usize>>> groupElementsByGrain(WriteAbaqusHexahedron* filter, const Int32AbstractDataStore& featureIds, int32 maxGrainId, const std::atomic_bool& shouldCancel)
+{
+  const usize elsetCount = maxGrainId > 0 ? static_cast<usize>(maxGrainId) + 1 : 0;
+  std::vector<std::vector<usize>> elementsByGrain(elsetCount);
+  if(elsetCount == 0)
+  {
+    return {std::move(elementsByGrain)};
+  }
+
+  constexpr usize k_ChunkSize = 65536;
+  const usize totalElements = featureIds.getSize();
+  auto chunkBuffer = std::make_unique<int32[]>(k_ChunkSize);
 
   auto initialTime = std::chrono::steady_clock::now();
-  int32 voxelId = 1;
-  while(voxelId <= maxGrainId)
+  for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
   {
-    usize elementPerLine = 0;
-    fprintf(f, "\n*Elset, elset=Grain%d_set\n", voxelId);
+    if(shouldCancel) // Filter has been cancelled
+    {
+      return {std::vector<std::vector<usize>>{}};
+    }
 
-    for(usize i = 0; i < featureIds.getSize(); i++)
+    const usize count = std::min(k_ChunkSize, totalElements - offset);
+    if(Result<> result = featureIds.copyIntoBuffer(offset, nonstd::span<int32>(chunkBuffer.get(), count)); result.invalid())
     {
-      if(featureIds[i] == voxelId)
+      return ConvertResultTo<std::vector<std::vector<usize>>>(std::move(result), {});
+    }
+    for(usize i = 0; i < count; i++)
+    {
+      const int32 grainId = chunkBuffer[i];
+      if(grainId > 0 && grainId <= maxGrainId)
       {
-        if(elementPerLine != 0) // no comma at start
-        {
-          if((elementPerLine % 16) != 0u) // 16 per line
-          {
-            fprintf(f, ", ");
-          }
-          else
-          {
-            fprintf(f, ",\n");
-          }
-        }
-        fprintf(f, "%llu", static_cast<unsigned long long int>(i + 1));
-        elementPerLine++;
+        elementsByGrain[static_cast<usize>(grainId)].push_back(offset + i);
       }
     }
-    if(voxelId % increment == 0)
+
+    const usize elementsProcessed = offset + count;
+    auto now = std::chrono::steady_clock::now();
+    int64 milliDiff = std::chrono::duration_cast<std::chrono::milliseconds>(now - initialTime).count();
+    if(milliDiff > 1000)
     {
-      auto now = std::chrono::steady_clock::now();
-      int64 milliDiff = std::chrono::duration_cast<std::chrono::milliseconds>(now - initialTime).count();
-      if(milliDiff > 1000)
-      {
-        std::string percentage =
-            "Writing Element Sets (File 4/5) " + StringUtilities::number(static_cast<int32>(static_cast<float32>(voxelId) / static_cast<float32>(maxGrainId) * 100.0f)) + "% Completed ";
-        float32 timeDiff = ((float32)voxelId / (float32)(milliDiff));
-        auto estimatedTime = static_cast<int64>((float32)(maxGrainId - voxelId) / timeDiff);
-        std::string timeRemaining = " || Est. Time Remain: " + format_duration(std::chrono::milliseconds(estimatedTime));
-        filter->sendMessage(percentage + timeRemaining);
-        initialTime = std::chrono::steady_clock::now();
-        if(shouldCancel) // Filter has been cancelled
-        {
-          fclose(f);
-          return 1;
-        }
-      }
+      std::string percentage =
+          "Writing Element Sets (File 4/5) " + StringUtilities::number(static_cast<int32>(static_cast<float32>(elementsProcessed) / static_cast<float32>(totalElements) * 100.0f)) + "% Grouped ";
+      float32 timeDiff = (float32)elementsProcessed / (float32)(milliDiff);
+      auto estimatedTime = static_cast<int64>((float32)(totalElements - elementsProcessed) / timeDiff);
+      std::string timeRemaining = " || Est. Time Remain: " + format_duration(std::chrono::milliseconds(estimatedTime));
+      filter->sendMessage(percentage + timeRemaining);
+      initialTime = std::chrono::steady_clock::now();
     }
-    voxelId++;
   }
-  fprintf(f, "\n**\n** ----------------------------------------------------------------\n**\n");
 
-  // Close the file
-  fclose(f);
-  return err;
+  return {std::move(elementsByGrain)};
+}
+
+/** @brief Appends one Abaqus element ID while enforcing the legacy 16-values-per-line layout. */
+void writeElementId(FILE* file, uint64 elementId, usize& elementsOnSet)
+{
+  if(elementsOnSet != 0)
+  {
+    fprintf(file, (elementsOnSet % 16) != 0u ? ", " : ",\n");
+  }
+  fprintf(file, "%llu", static_cast<unsigned long long int>(elementId));
+  elementsOnSet++;
+}
+
+/**
+ * @brief Resident path: groups element IDs in one input pass, then writes each ELSET.
+ * This removes the historical O(grains * cells) rescan at the cost of cell-scale RAM.
+ */
+Result<> writeDirectElsets(WriteAbaqusHexahedron* filter, FILE* file, const Int32AbstractDataStore& featureIds, int32 maxGrainId, const std::atomic_bool& shouldCancel)
+{
+  auto groupedResult = groupElementsByGrain(filter, featureIds, maxGrainId, shouldCancel);
+  if(groupedResult.invalid())
+  {
+    return ConvertResult(std::move(groupedResult));
+  }
+  if(shouldCancel)
+  {
+    return {};
+  }
+  const auto& elementsByGrain = groupedResult.value();
+  for(int32 grainId = 1; grainId <= maxGrainId; ++grainId)
+  {
+    fprintf(file, "\n*Elset, elset=Grain%d_set\n", grainId);
+    usize elementsOnSet = 0;
+    for(usize elementId : elementsByGrain[static_cast<usize>(grainId)])
+    {
+      writeElementId(file, elementId + 1, elementsOnSet);
+    }
+  }
+  return {};
+}
+
+/**
+ * @brief Exact bounded fallback that rescans FeatureIds once per grain.
+ * Used only for forced OOC over resident data when no external sorter exists;
+ * genuine OOC execution fails instead of accepting this severe I/O amplification.
+ */
+Result<> writeRepeatedScanElsets(FILE* file, const Int32AbstractDataStore& featureIds, int32 maxGrainId, const std::atomic_bool& shouldCancel)
+{
+  constexpr usize k_ChunkSize = 65536;
+  const usize totalElements = featureIds.getSize();
+  auto featurePage = std::make_unique<int32[]>(std::min(k_ChunkSize, totalElements));
+  for(int32 grainId = 1; grainId <= maxGrainId; ++grainId)
+  {
+    fprintf(file, "\n*Elset, elset=Grain%d_set\n", grainId);
+    usize elementsOnSet = 0;
+    for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
+    {
+      if(shouldCancel)
+      {
+        return {};
+      }
+      const usize count = std::min(k_ChunkSize, totalElements - offset);
+      if(Result<> result = featureIds.copyIntoBuffer(offset, nonstd::span<int32>(featurePage.get(), count)); result.invalid())
+      {
+        return result;
+      }
+      for(usize i = 0; i < count; ++i)
+      {
+        if(featurePage[i] == grainId)
+        {
+          writeElementId(file, offset + i + 1, elementsOnSet);
+        }
+      }
+    }
+  }
+  return {};
+}
+
+/**
+ * @brief Compact external-sort record keyed by grain then Abaqus element ID.
+ * Sorting these records produces contiguous ELSET runs without resident buckets.
+ */
+struct ElementGrainRecord
+{
+  int32 grainId = 0;
+  uint32 reserved = 0;
+  uint64 elementId = 0;
+};
+static_assert(std::is_trivially_copyable_v<ElementGrainRecord>);
+
+/**
+ * @brief OOC path: creates records in bounded FeatureId pages, externally sorts
+ * them by grain/element, then streams the ordered runs into ELSET sections.
+ */
+Result<> writeExternalSortedElsets(FILE* file, const Int32AbstractDataStore& featureIds, int32 maxGrainId, const std::atomic_bool& shouldCancel)
+{
+  constexpr usize k_ChunkSize = 65536;
+  ExternalSortConfig config;
+  config.recordSize = sizeof(ElementGrainRecord);
+  config.maxRecordsPerBatch = k_ChunkSize;
+  config.compare = [](nonstd::span<const std::byte> leftBytes, nonstd::span<const std::byte> rightBytes) {
+    ElementGrainRecord left;
+    ElementGrainRecord right;
+    std::memcpy(&left, leftBytes.data(), sizeof(left));
+    std::memcpy(&right, rightBytes.data(), sizeof(right));
+    if(left.grainId != right.grainId)
+    {
+      return left.grainId < right.grainId ? int32{-1} : int32{1};
+    }
+    if(left.elementId == right.elementId)
+    {
+      return int32{0};
+    }
+    return left.elementId < right.elementId ? int32{-1} : int32{1};
+  };
+
+  auto sortResult = DataStoreUtilities::GetIOCollection().createExternalSort(config);
+  if(sortResult.invalid())
+  {
+    return ConvertResult(std::move(sortResult));
+  }
+  std::unique_ptr<IExternalSort> externalSort = std::move(sortResult.value());
+  if(externalSort == nullptr)
+  {
+    return MakeErrorResult(-1119, "The external-sort provider returned a null sorter for Abaqus element sets.");
+  }
+
+  const usize totalElements = featureIds.getSize();
+  auto featurePage = std::make_unique<int32[]>(std::min(k_ChunkSize, totalElements));
+  std::vector<ElementGrainRecord> records;
+  records.reserve(std::min(k_ChunkSize, totalElements));
+  for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(k_ChunkSize, totalElements - offset);
+    if(Result<> result = featureIds.copyIntoBuffer(offset, nonstd::span<int32>(featurePage.get(), count)); result.invalid())
+    {
+      return result;
+    }
+    records.clear();
+    for(usize i = 0; i < count; ++i)
+    {
+      if(featurePage[i] > 0 && featurePage[i] <= maxGrainId)
+      {
+        records.push_back({featurePage[i], 0, offset + i + 1});
+      }
+    }
+    if(records.empty())
+    {
+      continue;
+    }
+    auto bytes = nonstd::span<const std::byte>(reinterpret_cast<const std::byte*>(records.data()), records.size() * sizeof(ElementGrainRecord));
+    if(Result<> result = externalSort->append(records.size(), bytes, shouldCancel, {}); result.invalid())
+    {
+      return result;
+    }
+  }
+  if(Result<> result = externalSort->finish(shouldCancel, {}); result.invalid())
+  {
+    return result;
+  }
+
+  int32 currentGrain = 1;
+  usize elementsOnSet = 0;
+  if(maxGrainId > 0)
+  {
+    fprintf(file, "\n*Elset, elset=Grain%d_set\n", currentGrain);
+  }
+  std::vector<ElementGrainRecord> sortedPage(k_ChunkSize);
+  for(uint64 offset = 0; offset < externalSort->recordCount(); offset += k_ChunkSize)
+  {
+    const uint64 count = std::min<uint64>(k_ChunkSize, externalSort->recordCount() - offset);
+    auto bytes = nonstd::span<std::byte>(reinterpret_cast<std::byte*>(sortedPage.data()), static_cast<usize>(count) * sizeof(ElementGrainRecord));
+    Result<uint64> readResult = externalSort->read(offset, count, bytes, shouldCancel);
+    if(readResult.invalid())
+    {
+      return ConvertResult(std::move(readResult));
+    }
+    if(readResult.value() != count)
+    {
+      return MakeErrorResult(-1117, "Abaqus element-set external sort returned a short read.");
+    }
+    for(uint64 i = 0; i < count; ++i)
+    {
+      const ElementGrainRecord& record = sortedPage[static_cast<usize>(i)];
+      while(currentGrain < record.grainId)
+      {
+        currentGrain++;
+        elementsOnSet = 0;
+        fprintf(file, "\n*Elset, elset=Grain%d_set\n", currentGrain);
+      }
+      writeElementId(file, record.elementId, elementsOnSet);
+    }
+  }
+  while(currentGrain < maxGrainId)
+  {
+    currentGrain++;
+    fprintf(file, "\n*Elset, elset=Grain%d_set\n", currentGrain);
+  }
+  return {};
+}
+
+/**
+ * @brief Opens the ELSET file and dispatches resident grouping, external sorting,
+ * or the bounded provider-free fallback according to storage residency.
+ * @param requireExternalSort True for real disk-backed input, where repeated
+ * full-volume scans would be an unacceptable silent regression.
+ */
+Result<> writeElset(WriteAbaqusHexahedron* filter, const std::string& fileName, size_t totalPoints, const Int32AbstractDataStore& featureIds, int32 maxGrainId, bool useOocAlgorithm,
+                    bool requireExternalSort, const std::atomic_bool& shouldCancel)
+{
+  FILE* file = fopen(fileName.c_str(), "wb");
+  if(nullptr == file)
+  {
+    return MakeErrorResult(-1116, fmt::format("Could not open Abaqus element-set output file '{}'.", fileName));
+  }
+
+  fprintf(file, "** ----------------------------------------------------------------\n**\n** The element sets\n");
+  fprintf(file, "*Elset, elset=cube, generate\n");
+  fprintf(file, "1, %llu, 1\n", static_cast<unsigned long long int>(totalPoints));
+  fprintf(file, "**\n** Each Grain is made up of multiple elements\n**");
+
+  Result<> result;
+  if(!useOocAlgorithm)
+  {
+    result = writeDirectElsets(filter, file, featureIds, maxGrainId, shouldCancel);
+  }
+  else if(DataStoreUtilities::GetIOCollection().hasExternalSortCapability())
+  {
+    result = writeExternalSortedElsets(file, featureIds, maxGrainId, shouldCancel);
+  }
+  else if(!requireExternalSort)
+  {
+    result = writeRepeatedScanElsets(file, featureIds, maxGrainId, shouldCancel);
+  }
+  else
+  {
+    result = MakeErrorResult(-1118, "The OOC Abaqus element-set algorithm requires a registered bounded external-sort provider.");
+  }
+
+  if(result.valid())
+  {
+    fprintf(file, "\n**\n** ----------------------------------------------------------------\n**\n");
+  }
+  fclose(file);
+  return result;
 }
 
 int32 writeMaster(const std::string& file, const std::string& jobName, const std::string& filePrefix)
@@ -293,7 +578,7 @@ int32 writeMaster(const std::string& file, const std::string& jobName, const std
   return err;
 }
 
-int32 writeSects(const std::string& file, const Int32AbstractDataStore& featureIds, int32 hourglassStiffness)
+int32 writeSects(const std::string& file, int32 maxGrainId, int32 hourglassStiffness)
 {
   int32 err = 0;
   FILE* f = fopen(file.c_str(), "wb");
@@ -302,9 +587,6 @@ int32 writeSects(const std::string& file, const Int32AbstractDataStore& featureI
     return -1;
   }
   fprintf(f, "** ----------------------------------------------------------------\n**\n** Each section is a separate grain\n");
-
-  // find total number of Grain Ids
-  int32 maxGrainId = *std::max_element(featureIds.cbegin(), featureIds.cend());
 
   // We are now defining the sections, which is for each grain
   int32 grain = 1;
@@ -371,6 +653,20 @@ Result<> WriteAbaqusHexahedron::operator()()
   Vec3<float32> spacing = imageGeom.getSpacing();
   usize totalPoints = imageGeom.getNumberOfCells();
 
+  Result<int32> maxGrainResult = findMaximumGrainId(featureIds, getCancel());
+  if(maxGrainResult.invalid())
+  {
+    return ConvertResult(std::move(maxGrainResult));
+  }
+  const int32 maxGrainId = maxGrainResult.value();
+  if(getCancel())
+  {
+    return {};
+  }
+  const bool usesOutOfCoreStore = featureIds.getStoreType() == IDataStore::StoreType::OutOfCore;
+  const bool useOocAlgorithm = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOocAlgorithm ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+
   // Create file names
   std::vector<Result<AtomicFile>> fileList;
   fileList.push_back(AtomicFile::Create(m_InputValues->OutputPath / fmt::format("{}_nodes.inp", m_InputValues->FilePrefix)));
@@ -411,7 +707,7 @@ Result<> WriteAbaqusHexahedron::operator()()
   }
   m_MessageHandler(IFilter::Message::Type::Info, "Writing Sections (File 2/5) Complete");
 
-  err = writeSects(fileList[2].value().tempFilePath().string(), featureIds, m_InputValues->HourglassStiffness); // Sections file
+  err = writeSects(fileList[2].value().tempFilePath().string(), maxGrainId, m_InputValues->HourglassStiffness); // Sections file
   if(err < 0)
   {
     return MakeErrorResult(-1115, fmt::format("Error writing output sects file '{}'", fileList[2].value().tempFilePath().string()));
@@ -423,10 +719,11 @@ Result<> WriteAbaqusHexahedron::operator()()
   }
   m_MessageHandler(IFilter::Message::Type::Info, "Writing Sections (File 3/5) Complete");
 
-  err = writeElset(this, fileList[3].value().tempFilePath().string(), totalPoints, featureIds, getCancel()); // Element set file
-  if(err < 0)
+  Result<> elsetResult = writeElset(this, fileList[3].value().tempFilePath().string(), totalPoints, featureIds, maxGrainId, useOocAlgorithm, usesOutOfCoreStore, getCancel()); // Element set file
+  if(elsetResult.invalid())
   {
-    return MakeErrorResult(-1116, fmt::format("Error writing output elset file '{}'", fileList[3].value().tempFilePath().string()));
+    DeleteFiles(fileList);
+    return elsetResult;
   }
   if(getCancel()) // Filter has been cancelled
   {

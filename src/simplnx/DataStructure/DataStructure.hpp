@@ -23,6 +23,7 @@ namespace nx::core
 class AbstractDataStructureMessage;
 class DataGroup;
 class DataPath;
+class IDataStoreFormatResolver;
 
 namespace Constants
 {
@@ -84,6 +85,31 @@ public:
    * @brief Destroys the DataStructure and all contained DataObjects.
    */
   ~DataStructure();
+
+  /**
+   * @brief Sets the store-format policy for arrays created/imported into THIS DataStructure.
+   * When unset (null), formatResolver() falls back to the process default. The resolver is a
+   * shared_ptr<const> so it is cheaply shared on copy and is safe to consult concurrently.
+   * It is intentionally NOT serialized — it is transient policy, not data-structure state.
+   * @param resolver The resolver to use, or nullptr to fall back to the process default
+   */
+  void setFormatResolver(std::shared_ptr<const IDataStoreFormatResolver> resolver);
+
+  /**
+   * @brief Returns the active store-format policy for this DataStructure: the per-instance resolver
+   * if set, otherwise the process default (InMemoryFormatResolver unless replaced at app startup).
+   * @return Reference to the active resolver (never null)
+   */
+  const IDataStoreFormatResolver& formatResolver() const;
+
+  /**
+   * @brief Installs the process-wide default store-format policy used by any DataStructure with no
+   * per-instance resolver. Call once at application startup. Defaults to InMemoryFormatResolver.
+   * @param resolver The new process default (ignored if null)
+   * @note The process default is global, non-atomic state. Install it once at application startup,
+   *       before any concurrent DataStructure use; it is not safe to replace concurrently with reads.
+   */
+  static void setDefaultFormatResolver(std::shared_ptr<const IDataStoreFormatResolver> resolver);
 
   /**
    * @brief Returns the number of unique DataObjects in the DataStructure.
@@ -1023,5 +1049,6 @@ private:
   DataMap m_RootGroup;
   bool m_IsValid = false;
   DataObject::IdType m_NextId = 1;
+  std::shared_ptr<const IDataStoreFormatResolver> m_FormatResolver; ///< null => process default (see formatResolver())
 };
 } // namespace nx::core

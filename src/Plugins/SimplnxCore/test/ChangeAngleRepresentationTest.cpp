@@ -8,10 +8,16 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
+#include <array>
 #include <catch2/catch.hpp>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <nonstd/span.hpp>
 
 using namespace nx::core;
 namespace fs = std::filesystem;
@@ -42,6 +48,9 @@ TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Invalid Execution", "[O
 
 TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Degrees To Radians")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
@@ -75,7 +84,7 @@ TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Degrees To Radians")
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   // Check the results
@@ -93,6 +102,9 @@ TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Degrees To Radians")
 
 TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Radians To Degrees")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
@@ -126,7 +138,7 @@ TEST_CASE("SimplnxCore::ChangeAngleRepresentationFilter: Radians To Degrees")
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   // Check the results

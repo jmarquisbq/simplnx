@@ -2,8 +2,10 @@
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
 #include "simplnx/DataStructure/Geometry/INodeGeometry0D.hpp"
 #include "simplnx/DataStructure/Geometry/INodeGeometry2D.hpp"
+#include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/DataStructure/Geometry/TriangleGeom.hpp"
 #include "simplnx/Parameters/ArrayCreationParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
@@ -11,10 +13,15 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
+#include <array>
 #include <catch2/catch.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
 
 using namespace nx::core;
 using namespace nx::core::UnitTest;
@@ -24,6 +31,10 @@ namespace fs = std::filesystem;
 TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMeshFilter]")
 {
   UnitTest::LoadPlugins();
+
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "QuickSurfaceMeshTest_v2.tar.gz", "QuickSurfaceMeshTest_v2");
 
@@ -51,6 +62,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMesh
     Arguments args;
     QuickSurfaceMeshFilter filter;
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath));
     auto voxelCellAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath);
     MultiArraySelectionParameter::ValueType selectedCellArrayPaths;
     for(const auto& child : voxelCellAttrMat)
@@ -58,6 +70,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMesh
       selectedCellArrayPaths.push_back(ebsdCellDataPath.createChildPath(child.second->getName()));
     }
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath));
     auto voxelFeatureAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath);
     MultiArraySelectionParameter::ValueType selectedFeatureArrayPaths;
     for(const auto& child : voxelFeatureAttrMat)
@@ -86,7 +99,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMesh
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
     // Execute the filter and check the result
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     // Write the DataStructure out to the file system
@@ -95,6 +108,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMesh
 #endif
   }
   // Check a few things about the generated data.
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
   IGeometry::SharedVertexList* vertices = triangleGeom.getVertices();
@@ -118,6 +132,10 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter", "[SimplnxCore][QuickSurfaceMesh
 TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSurfaceMeshFilter]")
 {
   UnitTest::LoadPlugins();
+
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "QuickSurfaceMeshTest_v2.tar.gz", "QuickSurfaceMeshTest_v2");
 
@@ -145,6 +163,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSu
     Arguments args;
     QuickSurfaceMeshFilter filter;
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath));
     auto voxelCellAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath);
     MultiArraySelectionParameter::ValueType selectedCellArrayPaths;
     for(const auto& child : voxelCellAttrMat)
@@ -152,6 +171,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSu
       selectedCellArrayPaths.push_back(ebsdCellDataPath.createChildPath(child.second->getName()));
     }
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath));
     auto voxelFeatureAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath);
     MultiArraySelectionParameter::ValueType selectedFeatureArrayPaths;
     for(const auto& child : voxelFeatureAttrMat)
@@ -180,7 +200,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSu
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
     // Execute the filter and check the result
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
 // Write the DataStructure out to the file system
@@ -189,6 +209,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSu
 #endif
   }
   // Check a few things about the generated data.
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
   IGeometry::SharedVertexList* vertices = triangleGeom.getVertices();
@@ -212,6 +233,10 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding", "[SimplnxCore][QuickSu
 TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][QuickSurfaceMeshFilter]")
 {
   UnitTest::LoadPlugins();
+
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "QuickSurfaceMeshTest_v2.tar.gz", "QuickSurfaceMeshTest_v2");
 
@@ -239,6 +264,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][
     Arguments args;
     QuickSurfaceMeshFilter filter;
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath));
     auto voxelCellAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath);
     MultiArraySelectionParameter::ValueType selectedCellArrayPaths;
     for(const auto& child : voxelCellAttrMat)
@@ -246,6 +272,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][
       selectedCellArrayPaths.push_back(ebsdCellDataPath.createChildPath(child.second->getName()));
     }
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath));
     auto voxelFeatureAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath);
     MultiArraySelectionParameter::ValueType selectedFeatureArrayPaths;
     for(const auto& child : voxelFeatureAttrMat)
@@ -274,7 +301,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
     // Execute the filter and check the result
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
 // Write the DataStructure out to the file system
@@ -283,6 +310,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][
 #endif
   }
   // Check a few things about the generated data.
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
   IGeometry::SharedVertexList* vertices = triangleGeom.getVertices();
@@ -306,6 +334,10 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Problem Voxels", "[SimplnxCore][
 TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding and Problem Voxels", "[SimplnxCore][QuickSurfaceMeshFilter]")
 {
   UnitTest::LoadPlugins();
+
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "QuickSurfaceMeshTest_v2.tar.gz", "QuickSurfaceMeshTest_v2");
 
@@ -333,6 +365,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding and Problem Voxels", "[S
     Arguments args;
     QuickSurfaceMeshFilter filter;
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath));
     auto voxelCellAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdCellDataPath);
     MultiArraySelectionParameter::ValueType selectedCellArrayPaths;
     for(const auto& child : voxelCellAttrMat)
@@ -340,6 +373,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding and Problem Voxels", "[S
       selectedCellArrayPaths.push_back(ebsdCellDataPath.createChildPath(child.second->getName()));
     }
 
+    REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath));
     auto voxelFeatureAttrMat = dataStructure.getDataRefAs<AttributeMatrix>(ebsdFeatureDataPath);
     MultiArraySelectionParameter::ValueType selectedFeatureArrayPaths;
     for(const auto& child : voxelFeatureAttrMat)
@@ -368,7 +402,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding and Problem Voxels", "[S
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
     // Execute the filter and check the result
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
 // Write the DataStructure out to the file system
@@ -377,6 +411,7 @@ TEST_CASE("SimplnxCore::QuickSurfaceMeshFilter: Winding and Problem Voxels", "[S
 #endif
   }
   // Check a few things about the generated data.
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
   IGeometry::SharedVertexList* vertices = triangleGeom.getVertices();

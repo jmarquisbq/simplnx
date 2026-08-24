@@ -24,7 +24,13 @@ struct SIMPLNXCORE_EXPORT ConvertColorToGrayScaleInputValues
 };
 
 /**
- * @class
+ * @class ConvertColorToGrayScale
+ * @brief Converts selected three-component uint8 RGB arrays to single-component grayscale arrays.
+ *
+ * Concrete in-memory stores use parallel contiguous-pointer conversion, with the abstract
+ * datastore implementation retained as a fallback. Out-of-core arrays use bounded chunk
+ * buffers and bulk I/O so conversion never performs per-tuple datastore access or allocates
+ * working memory proportional to the total tuple count.
  */
 class SIMPLNXCORE_EXPORT ConvertColorToGrayScale
 {

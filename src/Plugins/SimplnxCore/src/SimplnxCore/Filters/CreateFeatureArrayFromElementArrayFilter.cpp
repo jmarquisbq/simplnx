@@ -96,11 +96,11 @@ IFilter::PreflightResult CreateFeatureArrayFromElementArrayFilter::preflightImpl
   }
 
   Result<OutputActions> resultOutputActions;
-  auto* featureAttributeMatrixPtr = dataStructure.getDataAs<AttributeMatrix>(pCellFeatureAttributeMatrixPathValue);
+  const auto& featureAttributeMatrix = dataStructure.getDataRefAs<AttributeMatrix>(pCellFeatureAttributeMatrixPathValue);
   {
     DataType dataType = selectedCellArray.getDataType();
-    auto createArrayAction = std::make_unique<CreateArrayAction>(dataType, featureAttributeMatrixPtr->getShape(), selectedCellArrayStore.getComponentShape(),
-                                                                 pCellFeatureAttributeMatrixPathValue.createChildPath(pCreatedArrayNameValue), CreateArrayAction::k_DefaultDataFormat, "0");
+    auto createArrayAction = std::make_unique<CreateArrayAction>(dataType, featureAttributeMatrix.getShape(), selectedCellArrayStore.getComponentShape(),
+                                                                 pCellFeatureAttributeMatrixPathValue.createChildPath(pCreatedArrayNameValue), "", "0");
     resultOutputActions.value().appendAction(std::move(createArrayAction));
   }
 

@@ -22,7 +22,10 @@ struct SIMPLNXCORE_EXPORT CreateFeatureArrayFromElementArrayInputValues
 
 /**
  * @class CreateFeatureArrayFromElementArray
- * @brief This algorithm implements support code for the CreateFeatureArrayFromElementArrayFilter
+ * @brief Creates one feature value from the last matching element value.
+ *
+ * Streams element data in bounded chunks so the filter avoids random out-of-core
+ * access while retaining feature-level first values for inconsistency warnings.
  */
 
 class SIMPLNXCORE_EXPORT CreateFeatureArrayFromElementArray

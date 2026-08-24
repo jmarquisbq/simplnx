@@ -1,5 +1,6 @@
 #pragma once
 
+#include "simplnx/Common/Extent.hpp"
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Common/StringLiteralFormatting.hpp"
 #include "simplnx/Common/TypesUtility.hpp"
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <compare>
 #include <iterator>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace nx::core
@@ -411,6 +414,192 @@ public:
   virtual void setValue(usize index, value_type value) = 0;
 
   /**
+   * @brief Copies a contiguous range of values from this data store into the
+   * provided caller-owned buffer.
+   *
+   * This is the primary bulk-read API for algorithms that need to process data
+   * in contiguous blocks. It replaces the earlier chunk-based API and provides
+   * a single uniform interface that works identically for both in-memory and
+   * out-of-core (OOC) data stores:
+   *
+   * - **In-memory (DataStore):** Performs a direct std::copy from the backing
+   *   array into the buffer. This is essentially zero-overhead.
+   * - **Out-of-core (OOC stores):** The OOC subclass translates the flat
+   *   element range into the appropriate chunk reads from the backing HDF5
+   *   file, coalescing I/O where possible. The caller does not need to know
+   *   the chunk layout.
+   * - **Empty (EmptyDataStore):** Returns an invalid Result<> because no data
+   *   exists.
+   *
+   * The number of elements to copy is determined by `buffer.size()`. The caller
+   * is responsible for ensuring the buffer is large enough and that the range
+   * `[startIndex, startIndex + buffer.size())` does not exceed `getSize()`.
+   *
+   * @param startIndex The starting flat element index to read from
+   * @param buffer A span to receive the copied values; its size determines how
+   *               many elements are read
+   * @return Result<> valid on success; invalid with an error message if the
+   *         requested range exceeds the store's size or the store has no data.
+   */
+  virtual Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const = 0;
+
+  /**
+   * @brief Copies values from the provided caller-owned buffer into a
+   * contiguous range of this data store.
+   *
+   * This is the primary bulk-write API, the write-side counterpart of
+   * copyIntoBuffer(). It provides a single uniform interface for both
+   * in-memory and out-of-core (OOC) data stores:
+   *
+   * - **In-memory (DataStore):** Performs a direct std::copy from the buffer
+   *   into the backing array.
+   * - **Out-of-core (OOC stores):** The OOC subclass translates the flat
+   *   element range into the appropriate chunk writes to the backing HDF5
+   *   file.
+   * - **Empty (EmptyDataStore):** Returns an invalid Result<> because no data
+   *   exists.
+   *
+   * The number of elements to copy is determined by `buffer.size()`. The caller
+   * is responsible for ensuring the range `[startIndex, startIndex + buffer.size())`
+   * does not exceed `getSize()`.
+   *
+   * @param startIndex The starting flat element index to write to
+   * @param buffer A span containing the values to copy into the store; its
+   *               size determines how many elements are written
+   * @return Result<> valid on success; invalid with an error message if the
+   *         requested range exceeds the store's size or the store has no data.
+   */
+  virtual Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) = 0;
+
+  /**
+   * @brief Reads the values contained in the given N-dimensional extent.
+   *
+   * Unlike the flat copyIntoBuffer() range API, this addresses data by
+   * per-axis (min, max, stride) in tuple-space, which lets callers (notably
+   * the visualization pipeline) pull a strided sub-volume in a single call.
+   * The extent's axis order matches getTupleShape() (slowest- to
+   * fastest-varying). Out-of-core subclasses translate the extent into the
+   * minimal set of chunk reads.
+   *
+   * @param extent The N-dimensional extent to read (min/max/stride per axis,
+   *               in tuple-space dimension order — same order as getTupleShape()).
+   * @return std::vector<T> of length extent.totalElements() * getNumberOfComponents(),
+   *         laid out row-major with components as the fastest-varying dimension.
+   *         Returns an empty vector if the extent does not match the tuple shape
+   *         or the dimensionality is unsupported by the implementation.
+   */
+  virtual std::vector<T> readExtent(const Extent& extent) const = 0;
+
+  /**
+   * @brief Reads an N-dimensional extent into caller-owned storage.
+   *
+   * The destination uses the same row-major, component-fastest layout as
+   * readExtent(). Every concrete store must implement this operation explicitly
+   * so no store can silently inherit an allocating fallback.
+   *
+   * @param extent N-dimensional tuple-space extent to read.
+   * @param destination Exact-sized destination containing
+   *        `extent.totalElements() * getNumberOfComponents()` values.
+   * @throws std::invalid_argument If the extent or destination size is invalid.
+   */
+  virtual void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const = 0;
+
+  /**
+   * @brief Reads related N-dimensional extents into caller-owned storage.
+   *
+   * All extents and destination sizes are validated before the first
+   * destination is written. The base implementation then reads each extent
+   * independently; stores that can serve related extents in one backing-store
+   * traversal should override this method.
+   *
+   * @param extents Tuple-space extents to read.
+   * @param destinations One exact-sized destination per extent, in input order.
+   * @throws std::invalid_argument If counts, extents, or destination sizes are invalid.
+   */
+  virtual void readExtentsIntoBuffers(nonstd::span<const Extent> extents, nonstd::span<nonstd::span<T>> destinations) const
+  {
+    if(extents.size() != destinations.size())
+    {
+      throw std::invalid_argument(fmt::format("AbstractDataStore::readExtentsIntoBuffers: extent count ({}) does not match destination count ({})", extents.size(), destinations.size()));
+    }
+
+    const ShapeType& tupleShape = getTupleShape();
+    for(usize extentIndex = 0; extentIndex < extents.size(); ++extentIndex)
+    {
+      const Extent& extent = extents[extentIndex];
+      if(extent.dimensions() != tupleShape.size())
+      {
+        throw std::invalid_argument(
+            fmt::format("AbstractDataStore::readExtentsIntoBuffers: extent {} dimensions ({}) do not match tuple-shape dimensions ({})", extentIndex, extent.dimensions(), tupleShape.size()));
+      }
+      for(usize dimension = 0; dimension < tupleShape.size(); ++dimension)
+      {
+        if(extent.stride[dimension] == 0 || extent.min[dimension] > extent.max[dimension] || extent.max[dimension] >= tupleShape[dimension])
+        {
+          throw std::invalid_argument(fmt::format("AbstractDataStore::readExtentsIntoBuffers: extent {} dimension {} has min {}, max {}, stride {}, and tuple bound {}", extentIndex, dimension,
+                                                  extent.min[dimension], extent.max[dimension], extent.stride[dimension], tupleShape[dimension]));
+        }
+      }
+
+      const usize requiredValues = static_cast<usize>(extent.totalElements()) * getNumberOfComponents();
+      if(destinations[extentIndex].size() != requiredValues)
+      {
+        throw std::invalid_argument(fmt::format("AbstractDataStore::readExtentsIntoBuffers: destination {} has {} values; expected {}", extentIndex, destinations[extentIndex].size(), requiredValues));
+      }
+    }
+
+    for(usize extentIndex = 0; extentIndex < extents.size(); ++extentIndex)
+    {
+      readExtentIntoBuffer(extents[extentIndex], destinations[extentIndex]);
+    }
+  }
+
+  /**
+   * @brief Reads several N-dimensional extents in one call, returning one
+   * result buffer per extent in input order.
+   *
+   * Each result is laid out exactly as readExtent() would produce it: length
+   * extent.totalElements() * getNumberOfComponents(), row-major with components
+   * as the fastest-varying dimension.
+   *
+   * The base implementation reads each extent independently. Storage backends
+   * whose extent reads must sweep large regions of backing storage override
+   * this to serve every extent from a single sweep, so N related extents (for
+   * example a strided overview plus its thin boundary-face layers) cost one
+   * traversal instead of N.
+   *
+   * @param extents The N-dimensional extents to read, each addressed the same
+   *                way as readExtent()'s argument.
+   * @return One std::vector<T> per input extent, in the same order.
+   */
+  virtual std::vector<std::vector<T>> readExtents(nonstd::span<const Extent> extents) const
+  {
+    std::vector<std::vector<T>> results;
+    results.reserve(extents.size());
+    for(const Extent& extent : extents)
+    {
+      results.push_back(readExtent(extent));
+    }
+    return results;
+  }
+
+  /**
+   * @brief Writes values into the given N-dimensional extent.
+   *
+   * Write-side counterpart of readExtent(): the same per-axis (min, max,
+   * stride) addressing and the same row-major layout with components as the
+   * fastest-varying dimension. Out-of-core subclasses translate the extent
+   * into the minimal set of chunk writes.
+   *
+   * @param extent The N-dimensional extent to write (min/max/stride per axis,
+   *               in tuple-space dimension order — same order as getTupleShape()).
+   * @param data Span containing the values to write, of length
+   *             extent.totalElements() * getNumberOfComponents(), row-major
+   *             with components as the fastest-varying dimension.
+   */
+  virtual void writeExtent(const Extent& extent, nonstd::span<const T> data) = 0;
+
+  /**
    * @brief Returns the value found at the specified index of the DataStore.
    * This cannot be used to edit the value found at the specified index.
    * @param index
@@ -645,11 +834,15 @@ public:
    *  destArray[7] = sourceArray[7];
    *  ...
    * @endcode
-   * @param destTupleOffset
-   * @param source
-   * @param srcTupleOffset
-   * @param totalSrcTuples
-   * @return
+   * The transfer uses bounded bulk pages rather than iterators. Consequently a
+   * DataArray deep copy can preserve resolver-selected disk-backed destination
+   * storage without materializing the complete source in RAM or paying one
+   * virtual/chunk-cache access per element.
+   * @param destTupleOffset First destination tuple to replace.
+   * @param source Source store; it may use a different backing implementation.
+   * @param srcTupleOffset First source tuple to read.
+   * @param totalSrcTuples Number of complete tuples to transfer.
+   * @return The first bounds, component-shape, source-read, or destination-write error.
    */
   Result<> copyFrom(usize destTupleOffset, const AbstractDataStore& source, usize srcTupleOffset, usize totalSrcTuples)
   {
@@ -677,10 +870,35 @@ public:
                                          totalSrcTuples * sourceNumComponents, destTupleOffset * numComponents, getSize()));
     }
 
-    auto srcBegin = source.begin() + (srcTupleOffset * sourceNumComponents);
-    auto srcEnd = srcBegin + (totalSrcTuples * sourceNumComponents);
-    auto dstBegin = begin() + (destTupleOffset * numComponents);
-    std::copy(srcBegin, srcEnd, dstBegin);
+    if((totalSrcTuples * sourceNumComponents + srcTupleOffset * sourceNumComponents) > source.getSize())
+    {
+      return MakeErrorResult(-14603, fmt::format("The total size of tuples to be copied ({}) plus the offset in the source data store ({}) exceeds the available size of the source data store ({}).",
+                                                 totalSrcTuples * sourceNumComponents, srcTupleOffset * sourceNumComponents, source.getSize()));
+    }
+
+    constexpr usize k_TargetBufferBytes = 1024 * 1024;
+    const usize totalElements = totalSrcTuples * numComponents;
+    const usize bufferElements = std::max<usize>(1, std::min(totalElements, k_TargetBufferBytes / sizeof(T)));
+    auto buffer = std::make_unique<T[]>(bufferElements);
+
+    const usize sourceStart = srcTupleOffset * sourceNumComponents;
+    const usize destinationStart = destTupleOffset * numComponents;
+    for(usize copiedElements = 0; copiedElements < totalElements; copiedElements += bufferElements)
+    {
+      const usize count = std::min(bufferElements, totalElements - copiedElements);
+      nonstd::span<T> readBuffer(buffer.get(), count);
+      Result<> readResult = source.copyIntoBuffer(sourceStart + copiedElements, readBuffer);
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+
+      Result<> writeResult = copyFromBuffer(destinationStart + copiedElements, nonstd::span<const T>(buffer.get(), count));
+      if(writeResult.invalid())
+      {
+        return writeResult;
+      }
+    }
     return {};
   }
 
@@ -803,132 +1021,6 @@ public:
     index_type index = tupleIndex * getNumberOfComponents() + componentIndex;
     return getValue(index);
   }
-
-  std::optional<ShapeType> getChunkShape() const override
-  {
-    return {};
-  }
-
-  /**
-   * @brief Returns the data for a particular data chunk. Returns an empty span if the data is not chunked.
-   * @param chunkPosition
-   * @return chunk data as span
-   */
-  virtual std::vector<T> getChunkValues(const ShapeType& chunkPosition) const
-  {
-    return {};
-  }
-
-  /**
-   * @brief Returns the number of chunks used to store the data.
-   * @return uint64
-   */
-  virtual uint64 getNumberOfChunks() const = 0;
-  //  {
-  //    return 1;
-  //  }
-
-  /**
-   * @brief Returns the number of elements in the specified chunk index.
-   * @param flatChunkIndex
-   * @return
-   */
-  virtual uint64 getChunkSize(uint64 flatChunkIndex) const
-  {
-    if(flatChunkIndex >= getNumberOfChunks())
-    {
-      return 0;
-    }
-    return size();
-  }
-
-  /**
-   * @brief Returns the Smallest N-Dimensional tuple position included in the
-   * specified chunk.
-   * @param flatChunkIndex
-   * @return ShapeType
-   */
-  virtual ShapeType getChunkLowerBounds(uint64 flatChunkIndex) const = 0;
-
-  /**
-   * @brief Returns the largest N-Dimensional tuple position included in the
-   * specified chunk.
-   * @param flatChunkIndex
-   * @return ShapeType
-   */
-  virtual ShapeType getChunkUpperBounds(uint64 flatChunkIndex) const = 0;
-
-  /**
-   * @brief Returns the tuple shape for the specified chunk.
-   * Returns an empty vector if the chunk is out of bounds.
-   * @param flatChunkIndex
-   * @return std::vector<uint64> chunk tuple shape
-   */
-  virtual ShapeType getChunkTupleShape(uint64 flatChunkIndex) const
-  {
-    if(flatChunkIndex >= getNumberOfChunks())
-    {
-      return ShapeType();
-    }
-    auto lowerBounds = getChunkLowerBounds(flatChunkIndex);
-    auto upperBounds = getChunkUpperBounds(flatChunkIndex);
-
-    const usize tupleCount = lowerBounds.size();
-    ShapeType chunkTupleShape(tupleCount);
-    for(usize i = 0; i < tupleCount; i++)
-    {
-      chunkTupleShape[i] = upperBounds[i] - lowerBounds[i] + 1;
-    }
-    return chunkTupleShape;
-  }
-
-  /**
-   * @brief Returns a vector containing the tuple extents for a specified chunk.
-   * The returned values are formatted as [min, max] in the order of the tuple
-   * dimensions. For instance, a single chunk with tuple dimensions {X, Y, Z}
-   * will result in an extent of [0, X-1, 0, Y-1, 0, Z-1].
-   * Returns an empty vector if the chunk requested is beyond the scope of the
-   * available chunks.
-   * @param flatChunkIndex
-   * @return std::vector<uint64> extents
-   */
-  std::vector<uint64> getChunkExtents(uint64 flatChunkIndex) const
-  {
-    if(flatChunkIndex >= getNumberOfChunks())
-    {
-      return std::vector<uint64>();
-    }
-
-    usize tupleDims = getTupleShape().size();
-    std::vector<uint64> extents(tupleDims * 2);
-
-    auto upperBounds = getChunkUpperBounds(flatChunkIndex);
-    auto lowerBounds = getChunkLowerBounds(flatChunkIndex);
-
-    for(usize i = 0; i < tupleDims; i++)
-    {
-      extents[i * 2] = lowerBounds[i];
-      extents[i * 2 + 1] = upperBounds[i];
-    }
-
-    return extents;
-  }
-
-  /**
-   * @brief Makes sure the target chunk is loaded in memory.
-   * This method does nothing for in-memory DataStores.
-   * @param flatChunkIndex
-   */
-  virtual void loadChunk(uint64 flatChunkIndex)
-  {
-  }
-
-  /**
-   * @brief Creates and returns an in-memory AbstractDataStore from a copy of the data
-   * from the specified chunk.
-   * @param flatChunkIndex
-   */
-  virtual std::unique_ptr<AbstractDataStore<T>> convertChunkToDataStore(uint64 flatChunkIndex) const = 0;
 
   /**
    * @brief Flushes the data store to its respective target.

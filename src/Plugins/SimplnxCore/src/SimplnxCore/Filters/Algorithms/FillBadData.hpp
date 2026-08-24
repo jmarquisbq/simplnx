@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "SimplnxCore/SimplnxCore_export.hpp"
@@ -7,89 +6,66 @@
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/Filter/IFilter.hpp"
 
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace nx::core
 {
 
-// Forward declarations
-template <typename T>
-class DataArray;
-using Int32Array = DataArray<int32>;
-
-template <typename T>
-class AbstractDataStore;
-using Int32AbstractDataStore = AbstractDataStore<int32>;
-
 /**
- * @class ChunkAwareUnionFind
- * @brief Union-Find data structure for tracking connected component equivalences across chunks
+ * @struct FillBadDataInputValues
+ * @brief Holds all user-specified parameters for the FillBadData algorithm.
+ *
+ * This struct is populated by FillBadDataFilter and passed to the algorithm
+ * dispatcher. It is shared between the BFS and CCL algorithm variants.
  */
-class SIMPLNXCORE_EXPORT ChunkAwareUnionFind
-{
-public:
-  ChunkAwareUnionFind() = default;
-  ~ChunkAwareUnionFind() = default;
-
-  /**
-   * @brief Find the root label with path compression
-   * @param x Label to find
-   * @return Root label
-   */
-  int64 find(int64 x);
-
-  /**
-   * @brief Unite two labels into the same equivalence class
-   * @param a First label
-   * @param b Second label
-   */
-  void unite(int64 a, int64 b);
-
-  /**
-   * @brief Add to the size count for a label
-   * @param label Label to update
-   * @param count Number of voxels to add
-   */
-  void addSize(int64 label, uint64 count);
-
-  /**
-   * @brief Get the total size of a label's equivalence class
-   * @param label Label to query
-   * @return Total number of voxels in the equivalence class
-   */
-  uint64 getSize(int64 label);
-
-  /**
-   * @brief Flatten the union-find structure and sum sizes to roots
-   */
-  void flatten();
-
-private:
-  std::unordered_map<int64, int64> m_Parent;
-  std::unordered_map<int64, int32> m_Rank;
-  std::unordered_map<int64, uint64> m_Size;
-};
-
 struct SIMPLNXCORE_EXPORT FillBadDataInputValues
 {
-  int32 minAllowedDefectSizeValue;
-  bool storeAsNewPhase;
-  DataPath featureIdsArrayPath;
-  DataPath cellPhasesArrayPath;
-  std::vector<DataPath> ignoredDataArrayPaths;
-  DataPath inputImageGeometry;
+  int32 minAllowedDefectSizeValue;             ///< Minimum voxel count for a bad-data region to be preserved as a large defect (regions smaller than this are filled)
+  bool storeAsNewPhase;                        ///< If true, large defect regions are assigned to a new phase (maxPhase + 1) for visualization
+  DataPath featureIdsArrayPath;                ///< Path to the cell-level FeatureIds array (int32); voxels with value 0 are "bad data"
+  DataPath cellPhasesArrayPath;                ///< Path to the cell-level Phases array (int32); only used when storeAsNewPhase is true
+  std::vector<DataPath> ignoredDataArrayPaths; ///< Cell arrays that should NOT be updated during the fill (e.g., arrays the user wants to preserve)
+  DataPath inputImageGeometry;                 ///< Path to the ImageGeom that defines the voxel grid dimensions
 };
 
 /**
  * @class FillBadData
-
+ * @brief Dispatcher that selects between BFS (in-core) and CCL (out-of-core) algorithms
+ * for filling bad data regions in an image geometry.
+ *
+ * This class does not contain algorithm logic itself. It inspects the storage
+ * type of the FeatureIds array and delegates to one of two algorithm classes:
+ *
+ * - **FillBadDataBFS** (in-core): Uses breadth-first search (BFS) flood-fill
+ *   with O(N) temporary buffers (neighbors array, visited flags). Efficient when
+ *   data fits in RAM because BFS queue access is fast and random access to the
+ *   contiguous in-memory buffer is O(1).
+ *
+ * - **FillBadDataCCL** (out-of-core): Uses a four-phase approach with scanline
+ *   Connected Component Labeling (CCL) and Union-Find. Processes data in Z-slice
+ *   buffers with strictly sequential access patterns. Avoids the random access
+ *   pattern of BFS that causes catastrophic chunk load/evict cycles ("chunk
+ *   thrashing") when data is stored on disk in compressed HDF5 chunks.
+ *
+ * The dispatch decision is made by DispatchAlgorithm<BFS, CCL>(), which checks
+ * whether any input array uses out-of-core storage (or if the global
+ * ForceOocAlgorithm() test flag is set).
+ *
+ * @see FillBadDataBFS for the in-core-optimized implementation.
+ * @see FillBadDataCCL for the out-of-core-optimized implementation.
+ * @see AlgorithmDispatch.hpp for the dispatch mechanism.
  */
 class SIMPLNXCORE_EXPORT FillBadData
 {
 public:
-  FillBadData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, FillBadDataInputValues* inputValues);
+  /**
+   * @brief Constructs the dispatcher with the required context for algorithm selection.
+   * @param dataStructure The data structure containing the arrays to process.
+   * @param mesgHandler Handler for progress and informational messages.
+   * @param shouldCancel Cancellation flag checked during execution.
+   * @param inputValues Filter parameter values controlling fill behavior.
+   */
+  FillBadData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const FillBadDataInputValues* inputValues);
   ~FillBadData() noexcept;
 
   FillBadData(const FillBadData&) = delete;
@@ -97,51 +73,22 @@ public:
   FillBadData& operator=(const FillBadData&) = delete;
   FillBadData& operator=(FillBadData&&) noexcept = delete;
 
-  Result<> operator()() const;
-
-  const std::atomic_bool& getCancel() const;
+  /**
+   * @brief Dispatches to either BFS or CCL algorithm based on data residency.
+   *
+   * Checks whether the FeatureIds array uses out-of-core storage. If so (or if
+   * ForceOocAlgorithm() is true), constructs and runs FillBadDataCCL. Otherwise,
+   * constructs and runs FillBadDataBFS. Both produce identical results.
+   *
+   * @return Result indicating success or an error with a descriptive message.
+   */
+  Result<> operator()();
 
 private:
-  /**
-   * @brief Phase 1: Chunk-sequential connected component labeling
-   * @param featureIdsStore Feature IDs data store
-   * @param unionFind Union-find structure for tracking equivalences
-   * @param provisionalLabels Map from voxel index to provisional label
-   * @param dims Image geometry dimensions
-   */
-  static void phaseOneCCL(Int32AbstractDataStore& featureIdsStore, ChunkAwareUnionFind& unionFind, std::unordered_map<usize, int64>& provisionalLabels, const std::array<int64_t, 3>& dims);
-
-  /**
-   * @brief Phase 2: Global resolution of equivalences and region classification
-   * @param unionFind Union-find structure to flatten
-   * @param smallRegions Output set of labels for small regions that need filling
-   */
-  static void phaseTwoGlobalResolution(ChunkAwareUnionFind& unionFind, std::unordered_set<int64>& smallRegions);
-
-  /**
-   * @brief Phase 3: Relabel voxels based on region classification
-   * @param featureIdsStore Feature IDs data store
-   * @param cellPhasesPtr Cell phases array (could be null)
-   * @param provisionalLabels Map from voxel index to provisional label
-   * @param smallRegions Set of labels for small regions
-   * @param unionFind Union-find for looking up equivalences
-   * @param maxPhase Maximum phase value (for new phase assignment)
-   */
-  void phaseThreeRelabeling(Int32AbstractDataStore& featureIdsStore, Int32Array* cellPhasesPtr, const std::unordered_map<usize, int64>& provisionalLabels,
-                            const std::unordered_set<int64>& smallRegions, ChunkAwareUnionFind& unionFind, size_t maxPhase) const;
-
-  /**
-   * @brief Phase 4: Iterative morphological fill
-   * @param featureIdsStore Feature IDs data store
-   * @param dims Image geometry dimensions
-   * @param numFeatures Number of features
-   */
-  void phaseFourIterativeFill(Int32AbstractDataStore& featureIdsStore, const std::array<int64_t, 3>& dims, size_t numFeatures) const;
-
-  DataStructure& m_DataStructure;
-  const FillBadDataInputValues* m_InputValues = nullptr;
-  const std::atomic_bool& m_ShouldCancel;
-  const IFilter::MessageHandler& m_MessageHandler;
+  DataStructure& m_DataStructure;                        ///< Reference to the DataStructure containing all arrays
+  const FillBadDataInputValues* m_InputValues = nullptr; ///< Non-owning pointer to the filter parameter values
+  const std::atomic_bool& m_ShouldCancel;                ///< Cancellation flag checked during long-running phases
+  const IFilter::MessageHandler& m_MessageHandler;       ///< Handler for emitting progress/informational messages
 };
 
 } // namespace nx::core

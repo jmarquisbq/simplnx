@@ -1,28 +1,45 @@
 #include "ComputeAvgOrientations.hpp"
 
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/IO/Generic/IExternalSort.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/DataArrayUtilities.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 #include "simplnx/Utilities/MessageHelper.hpp"
 #include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
 
 #include <EbsdLib/Core/DirectionalStats.hpp>
 #include <EbsdLib/LaueOps/LaueOps.h>
 
-#include <iostream>
+#include <nonstd/span.hpp>
+
+#include <array>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <optional>
 
 using namespace nx::core;
 
 namespace
 {
 
+/**
+ * @brief Preserved resident parallel worker for feature-wise vMF and Watson estimates.
+ *
+ * This implementation repeatedly scans resident cell arrays and is therefore
+ * retained only by the Direct path. The Scanline path groups records through
+ * checked bulk I/O before calling the same EbsdLib estimation mathematics.
+ */
 class VmfWatsonSamplingImpl
 {
 public:
-  VmfWatsonSamplingImpl(ComputeAvgOrientations* filter, const ComputeAvgOrientationsInputValues* inputPtr, DataStructure& dataStructure, const std::vector<usize>& featureNumVoxels,
+  /** @brief Borrows the algorithm context and feature metadata used by each parallel range. */
+  VmfWatsonSamplingImpl(ComputeAvgOrientations* filter, const ComputeAvgOrientationsInputValues* inputPtr, DataStructure& dataStruture, const std::vector<usize>& featureNumVoxels,
                         const std::map<int32, int32>& featureIdToPhaseMap)
   : m_Filter(filter)
   , m_InputValues(inputPtr)
-  , m_DataStructure(dataStructure)
+  , m_DataStructure(dataStruture)
   , m_FeatureNumVoxels(featureNumVoxels)
   , m_FeatureIdToPhaseMap(featureIdToPhaseMap)
   {
@@ -30,6 +47,7 @@ public:
 
   virtual ~VmfWatsonSamplingImpl() = default;
 
+  /** @brief Computes directional estimates for the half-open range of resident feature IDs. */
   void operator()(const Range& range) const
   {
     // Input FeatureIds + Input Orientations. All these should come from the same Attribute Matrix or have the same number of tuples
@@ -61,7 +79,7 @@ public:
       watsonKappaPtr = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->WatsonKappaArrayPath).getDataStorePtr().lock().get();
     }
 
-    usize numVoxels = featureIdsRef.getNumberOfTuples();
+    const usize numVoxels = featureIdsRef.getNumberOfTuples();
     const usize numEnsembles = xtalRef.getNumberOfTuples();
 
     std::vector<ebsdlib::LaueOps::Pointer> ops = ebsdlib::LaueOps::GetAllOrientationOps();
@@ -97,10 +115,8 @@ public:
       // they want to find the average orientation of
       for(usize voxelIdx = 0; voxelIdx < numVoxels; voxelIdx++)
       {
-        // If the feature Id of the voxel matches the current feature Id, then grab that orientation.
-        // The phase gate MUST match the counting pass in computeVmfWatsonAverage() (and the
-        // Rodrigues path): phase-0/unindexed voxels are excluded from the average (issue #1659),
-        // and an out-of-range phase index would read past the CrystalStructures array (issue #1661).
+        // Keep the gather gate identical to the counting pass: phase-0/unindexed
+        // voxels and out-of-range ensemble indices do not participate.
         const int32 voxelPhase = phasesRef[voxelIdx];
         if(featureIdsRef[voxelIdx] == featureId && voxelPhase > 0 && static_cast<usize>(voxelPhase) < numEnsembles)
         {
@@ -193,24 +209,247 @@ private:
   const std::map<int32, int32>& m_FeatureIdToPhaseMap;
 };
 
-template <typename T>
-void UpdateQuaternionArray(AbstractDataStore<T>& quatArray, const ebsdlib::Quaternion<T>& quat, int32 tupleIndex)
+constexpr usize k_ChunkTuples = 65536;
+
+constexpr uint64 k_OrientationRecordSize = sizeof(int32) + sizeof(uint64) + (sizeof(float32) * 4);
+
+/** @brief Multiplies addressable sizes without allowing a wrapped allocation or transfer count. */
+bool CheckedMultiply(usize lhs, usize rhs, usize& product)
 {
-  quatArray.setValue(tupleIndex * 4, quat.x());
-  quatArray.setValue(tupleIndex * 4 + 1, quat.y());
-  quatArray.setValue(tupleIndex * 4 + 2, quat.z());
-  quatArray.setValue(tupleIndex * 4 + 3, quat.w());
+  if(lhs != 0 && rhs > std::numeric_limits<usize>::max() / lhs)
+  {
+    return false;
+  }
+  product = lhs * rhs;
+  return true;
 }
 
-template <typename T>
-void UpdateEulerArray(AbstractDataStore<T>& eulerArray, const ebsdlib::Euler<T>& euler, int32 tupleIndex)
+/** @brief Verifies that an enabled Float32 output exists with the exact feature tuple/component shape. */
+Result<> ValidateFloatOutput(DataStructure& dataStructure, const DataPath& path, usize tupleCount, usize componentCount)
 {
-  eulerArray.setValue(tupleIndex * 3, euler[0]);
-  eulerArray.setValue(tupleIndex * 3 + 1, euler[1]);
-  eulerArray.setValue(tupleIndex * 3 + 2, euler[2]);
+  const auto* array = dataStructure.getDataAs<Float32Array>(path);
+  if(array == nullptr)
+  {
+    return MakeErrorResult(-54674, fmt::format("ComputeAvgOrientations: required Float32 output array '{}' does not exist.", path.toString()));
+  }
+  if(array->getNumberOfTuples() != tupleCount || array->getNumberOfComponents() != componentCount)
+  {
+    return MakeErrorResult(-54675, fmt::format("ComputeAvgOrientations: output array '{}' has {} tuples and {} components; expected {} tuples and {} components.", path.toString(),
+                                               array->getNumberOfTuples(), array->getNumberOfComponents(), tupleCount, componentCount));
+  }
+  return {};
 }
 
+/**
+ * @brief Validates and bulk-writes one complete feature-level directional output.
+ *
+ * Feature outputs are small relative to cell data, so one checked transfer avoids
+ * repeated virtual store access without introducing cell-count scratch.
+ */
+Result<> WriteFloatOutput(DataStructure& dataStructure, const DataPath& path, usize tupleCount, usize componentCount, const std::vector<float32>& values)
+{
+  Result<> validation = ValidateFloatOutput(dataStructure, path, tupleCount, componentCount);
+  if(validation.invalid())
+  {
+    return validation;
+  }
+  usize expectedValues = 0;
+  if(!CheckedMultiply(tupleCount, componentCount, expectedValues) || values.size() != expectedValues)
+  {
+    return MakeErrorResult(
+        -54676, fmt::format("ComputeAvgOrientations: output buffer for '{}' has {} values; expected {} tuples times {} components.", path.toString(), values.size(), tupleCount, componentCount));
+  }
+  return dataStructure.getDataRefAs<Float32Array>(path).getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(values.data(), values.size()));
+}
+
+/** @brief Feature-scale vMF/Watson outputs initialized to NaN for skipped or unsupported phases. */
+struct DirectionalOutputBuffers
+{
+  /** @brief Allocates only the output families enabled by the user. */
+  DirectionalOutputBuffers(usize featureCount, bool useVmf, bool useWatson)
+  {
+    const float32 nan = std::numeric_limits<float32>::quiet_NaN();
+    if(useVmf)
+    {
+      VmfQuats.assign(featureCount * 4, nan);
+      VmfEuler.assign(featureCount * 3, nan);
+      VmfKappa.assign(featureCount, nan);
+    }
+    if(useWatson)
+    {
+      WatsonQuats.assign(featureCount * 4, nan);
+      WatsonEuler.assign(featureCount * 3, nan);
+      WatsonKappa.assign(featureCount, nan);
+    }
+  }
+
+  std::vector<float32> VmfQuats;
+  std::vector<float32> VmfEuler;
+  std::vector<float32> VmfKappa;
+  std::vector<float32> WatsonQuats;
+  std::vector<float32> WatsonEuler;
+  std::vector<float32> WatsonKappa;
+};
+
+/** @brief Stores one EbsdLib quaternion estimate, its Euler conversion, and concentration in feature buffers. */
+void StoreDirectionalEstimate(usize featureId, const ebsdlib::QuatD& muhat, double kappahat, std::vector<float32>& quaternions, std::vector<float32>& eulers, std::vector<float32>& kappas)
+{
+  const usize quaternionOffset = featureId * 4;
+  quaternions[quaternionOffset] = static_cast<float32>(muhat.x());
+  quaternions[quaternionOffset + 1] = static_cast<float32>(muhat.y());
+  quaternions[quaternionOffset + 2] = static_cast<float32>(muhat.z());
+  quaternions[quaternionOffset + 3] = static_cast<float32>(muhat.w());
+
+  const ebsdlib::EulerDType euler = muhat.toEuler();
+  const usize eulerOffset = featureId * 3;
+  eulers[eulerOffset] = static_cast<float32>(euler[0]);
+  eulers[eulerOffset + 1] = static_cast<float32>(euler[1]);
+  eulers[eulerOffset + 2] = static_cast<float32>(euler[2]);
+  kappas[featureId] = static_cast<float32>(kappahat);
+}
+
+/**
+ * @brief Runs the enabled vMF and Watson estimators for one deterministically grouped feature.
+ *
+ * The complete feature quaternion vector is required by the current EbsdLib API;
+ * keeping only one feature at a time bounds simplnx-owned grouping state but does
+ * not yet eliminate this documented largest-feature allocation.
+ */
+Result<> ComputeDirectionalFeature(usize featureId, const ebsdlib::LaueOps::Pointer& orientationOp, const std::vector<ebsdlib::QuatD>& fzQuats, const ComputeAvgOrientationsInputValues& inputValues,
+                                   const std::atomic_bool& shouldCancel, DirectionalOutputBuffers& outputs)
+{
+  if(shouldCancel)
+  {
+    return {};
+  }
+
+  const auto computeEstimate = [&](const std::string& distribution, std::vector<float32>& quaternions, std::vector<float32>& eulers, std::vector<float32>& kappas) -> Result<> {
+    ebsdlib::QuatD muhat = ebsdlib::QuatD::identity();
+    double kappahat = 0.0;
+    if(fzQuats.size() == 1)
+    {
+      muhat = fzQuats.front();
+    }
+    else if(!fzQuats.empty())
+    {
+      uint32 seed = inputValues.RandomSeed;
+      ebsdlib::DirectionalStats directionalStats(distribution, orientationOp);
+      directionalStats.setNumEM(inputValues.NumEMIterations);
+      directionalStats.setNumIter(inputValues.NumIterations);
+      directionalStats.setQuatArray(fzQuats);
+      directionalStats.EMforDS(seed, muhat, kappahat, false);
+      muhat.positiveOrientation();
+    }
+    if(shouldCancel)
+    {
+      return {};
+    }
+    StoreDirectionalEstimate(featureId, muhat, kappahat, quaternions, eulers, kappas);
+    return {};
+  };
+
+  if(inputValues.useVonMisesAverage)
+  {
+    Result<> result = computeEstimate("VMF", outputs.VmfQuats, outputs.VmfEuler, outputs.VmfKappa);
+    if(result.invalid() || shouldCancel)
+    {
+      return result;
+    }
+  }
+  if(inputValues.useWatsonAverage)
+  {
+    Result<> result = computeEstimate("WAT", outputs.WatsonQuats, outputs.WatsonEuler, outputs.WatsonKappa);
+    if(result.invalid() || shouldCancel)
+    {
+      return result;
+    }
+  }
+  return {};
+}
+
+/** @brief Encodes a fixed external-sort record containing feature ID, original order, and quaternion. */
+void EncodeOrientationRecord(nonstd::span<std::byte> bytes, int32 featureId, uint64 originalTupleIndex, const float32* quaternion)
+{
+  std::memcpy(bytes.data(), &featureId, sizeof(featureId));
+  std::memcpy(bytes.data() + sizeof(featureId), &originalTupleIndex, sizeof(originalTupleIndex));
+  std::memcpy(bytes.data() + sizeof(featureId) + sizeof(originalTupleIndex), quaternion, sizeof(float32) * 4);
+}
+
+/** @brief Decodes a complete fixed orientation record returned by the external sort. */
+void DecodeOrientationRecord(nonstd::span<const std::byte> bytes, int32& featureId, uint64& originalTupleIndex, std::array<float32, 4>& quaternion)
+{
+  std::memcpy(&featureId, bytes.data(), sizeof(featureId));
+  std::memcpy(&originalTupleIndex, bytes.data() + sizeof(featureId), sizeof(originalTupleIndex));
+  std::memcpy(quaternion.data(), bytes.data() + sizeof(featureId) + sizeof(originalTupleIndex), sizeof(float32) * quaternion.size());
+}
+
+/** @brief Decodes only the record fields needed by the stable sort comparator. */
+void DecodeOrientationSortKey(nonstd::span<const std::byte> bytes, int32& featureId, uint64& originalTupleIndex)
+{
+  std::memcpy(&featureId, bytes.data(), sizeof(featureId));
+  std::memcpy(&originalTupleIndex, bytes.data() + sizeof(featureId), sizeof(originalTupleIndex));
+}
+
+/** @brief Orders records by feature and original tuple index so per-feature input order remains unchanged. */
+int32 CompareOrientationRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
+{
+  int32 leftFeature = 0;
+  int32 rightFeature = 0;
+  uint64 leftIndex = 0;
+  uint64 rightIndex = 0;
+  DecodeOrientationSortKey(left, leftFeature, leftIndex);
+  DecodeOrientationSortKey(right, rightFeature, rightIndex);
+  if(leftFeature != rightFeature)
+  {
+    return leftFeature < rightFeature ? -1 : 1;
+  }
+  if(leftIndex == rightIndex)
+  {
+    return 0;
+  }
+  return leftIndex < rightIndex ? -1 : 1;
+}
 } // namespace
+
+/** @brief Dispatch adapter for the preserved resident implementation. */
+class ComputeAvgOrientations::DirectAlgorithm
+{
+public:
+  /** @brief Borrows the parent algorithm whose private Direct entry point is invoked. */
+  explicit DirectAlgorithm(ComputeAvgOrientations& algorithm)
+  : m_Algorithm(algorithm)
+  {
+  }
+
+  /** @brief Executes the resident averaging path. */
+  Result<> operator()()
+  {
+    return m_Algorithm.executeDirect();
+  }
+
+private:
+  ComputeAvgOrientations& m_Algorithm;
+};
+
+/** @brief Dispatch adapter for the bulk-I/O and external-grouping implementation. */
+class ComputeAvgOrientations::ScanlineAlgorithm
+{
+public:
+  /** @brief Borrows the parent algorithm whose private Scanline entry point is invoked. */
+  explicit ScanlineAlgorithm(ComputeAvgOrientations& algorithm)
+  : m_Algorithm(algorithm)
+  {
+  }
+
+  /** @brief Executes the OOC-safe averaging path. */
+  Result<> operator()()
+  {
+    return m_Algorithm.executeScanline();
+  }
+
+private:
+  ComputeAvgOrientations& m_Algorithm;
+};
 
 // -----------------------------------------------------------------------------
 ComputeAvgOrientations::ComputeAvgOrientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
@@ -247,6 +486,47 @@ void ComputeAvgOrientations::sendThreadSafeProgressMessage(usize counter)
 // -----------------------------------------------------------------------------
 Result<> ComputeAvgOrientations::operator()()
 {
+  std::vector<const IArray*> targets;
+  targets.reserve(13);
+  const auto appendTarget = [&](const DataPath& path) {
+    if(const auto* array = m_DataStructure.getDataAs<IArray>(path); array != nullptr)
+    {
+      targets.push_back(array);
+    }
+  };
+
+  appendTarget(m_InputValues->cellFeatureIdsArrayPath);
+  appendTarget(m_InputValues->cellPhasesArrayPath);
+  appendTarget(m_InputValues->cellQuatsArrayPath);
+  appendTarget(m_InputValues->crystalStructuresArrayPath);
+  if(m_InputValues->useRodriguesAverage)
+  {
+    appendTarget(m_InputValues->avgQuatsArrayPath);
+    appendTarget(m_InputValues->avgEulerAnglesArrayPath);
+  }
+  if(m_InputValues->useVonMisesAverage)
+  {
+    appendTarget(m_InputValues->VMFQuatsArrayPath);
+    appendTarget(m_InputValues->VMFEulerAnglesArrayPath);
+    appendTarget(m_InputValues->VMFKappaArrayPath);
+  }
+  if(m_InputValues->useWatsonAverage)
+  {
+    appendTarget(m_InputValues->WatsonQuatsArrayPath);
+    appendTarget(m_InputValues->WatsonEulerAnglesArrayPath);
+    appendTarget(m_InputValues->WatsonKappaArrayPath);
+  }
+
+  return DispatchAlgorithm<DirectAlgorithm, ScanlineAlgorithm>(AlgorithmArrayTargets(std::move(targets)), *this);
+}
+
+// -----------------------------------------------------------------------------
+Result<> ComputeAvgOrientations::executeDirect()
+{
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellFeatureIdsArrayPath);
   if(m_DataStructure.containsData(m_InputValues->avgEulerAnglesArrayPath))
   {
@@ -282,14 +562,13 @@ Result<> ComputeAvgOrientations::operator()()
 
   MessageHelper messageHelper(m_MessageHandler);
 
-  // Warnings (e.g. dropped voxels/features) from each path are merged and returned together.
   Result<> finalResult;
   if(m_InputValues->useRodriguesAverage)
   {
     messageHelper.sendMessage("Computing Rodrigues Average Orientations");
 
     Result<> result = computeRodriguesAverage();
-    if(result.invalid())
+    if(result.invalid() || m_ShouldCancel)
     {
       return result;
     }
@@ -311,13 +590,180 @@ Result<> ComputeAvgOrientations::operator()()
     }
 
     Result<> result = computeVmfWatsonAverage();
-    if(result.invalid())
+    if(result.invalid() || m_ShouldCancel)
     {
       return result;
     }
     finalResult = MergeResults(std::move(finalResult), std::move(result));
   }
 
+  return finalResult;
+}
+
+// -----------------------------------------------------------------------------
+Result<> ComputeAvgOrientations::executeScanline()
+{
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+  if(!m_InputValues->useRodriguesAverage && !m_InputValues->useVonMisesAverage && !m_InputValues->useWatsonAverage)
+  {
+    return MakeErrorResult(-54670, "A valid Feature level array that stores results was not found.");
+  }
+
+  const auto* featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->cellFeatureIdsArrayPath);
+  const auto* phases = m_DataStructure.getDataAs<Int32Array>(m_InputValues->cellPhasesArrayPath);
+  const auto* quaternions = m_DataStructure.getDataAs<Float32Array>(m_InputValues->cellQuatsArrayPath);
+  const auto* crystalStructures = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->crystalStructuresArrayPath);
+  if(featureIds == nullptr || phases == nullptr || quaternions == nullptr || crystalStructures == nullptr)
+  {
+    return MakeErrorResult(-54674, "ComputeAvgOrientations: one or more required input arrays are missing or have the wrong scalar type.");
+  }
+  const usize tupleCount = featureIds->getNumberOfTuples();
+  if(featureIds->getNumberOfComponents() != 1 || phases->getNumberOfComponents() != 1 || quaternions->getNumberOfComponents() != 4 || crystalStructures->getNumberOfComponents() != 1 ||
+     phases->getNumberOfTuples() != tupleCount || quaternions->getNumberOfTuples() != tupleCount)
+  {
+    return MakeErrorResult(
+        -54675,
+        fmt::format("ComputeAvgOrientations: FeatureIds, Phases, and Quaternions must have identical tuple counts and component counts 1, 1, and 4; observed tuples {}/{}/{} and components {}/{}/{}.",
+                    tupleCount, phases->getNumberOfTuples(), quaternions->getNumberOfTuples(), featureIds->getNumberOfComponents(), phases->getNumberOfComponents(),
+                    quaternions->getNumberOfComponents()));
+  }
+  usize quaternionValueCount = 0;
+  if(!CheckedMultiply(tupleCount, usize{4}, quaternionValueCount))
+  {
+    return MakeErrorResult(-54676, fmt::format("ComputeAvgOrientations: {} quaternion tuples cannot be addressed as four-component values on this platform.", tupleCount));
+  }
+  if(quaternions->getSize() != quaternionValueCount)
+  {
+    return MakeErrorResult(
+        -54675, fmt::format("ComputeAvgOrientations: quaternion array '{}' has {} values; expected {} tuples times four components.", quaternions->getName(), quaternions->getSize(), tupleCount));
+  }
+
+  const DataPath* featureCountPath = nullptr;
+  if(m_InputValues->useRodriguesAverage)
+  {
+    featureCountPath = &m_InputValues->avgEulerAnglesArrayPath;
+  }
+  else if(m_InputValues->useVonMisesAverage)
+  {
+    featureCountPath = &m_InputValues->VMFEulerAnglesArrayPath;
+  }
+  else
+  {
+    featureCountPath = &m_InputValues->WatsonEulerAnglesArrayPath;
+  }
+  const auto* featureCountArray = m_DataStructure.getDataAs<Float32Array>(*featureCountPath);
+  if(featureCountArray == nullptr)
+  {
+    return MakeErrorResult(-54670, "A valid Feature level array that stores results was not found.");
+  }
+  m_NumberOfFeatures = featureCountArray->getNumberOfTuples();
+
+  const auto validateOutputs = [&](bool enabled, const DataPath& quaternionPath, const DataPath& eulerPath, const DataPath* kappaPath) -> Result<> {
+    if(!enabled)
+    {
+      return {};
+    }
+    Result<> result = ValidateFloatOutput(m_DataStructure, quaternionPath, m_NumberOfFeatures, 4);
+    if(result.invalid())
+    {
+      return result;
+    }
+    result = ValidateFloatOutput(m_DataStructure, eulerPath, m_NumberOfFeatures, 3);
+    if(result.invalid() || kappaPath == nullptr)
+    {
+      return result;
+    }
+    return ValidateFloatOutput(m_DataStructure, *kappaPath, m_NumberOfFeatures, 1);
+  };
+  Result<> outputResult = validateOutputs(m_InputValues->useRodriguesAverage, m_InputValues->avgQuatsArrayPath, m_InputValues->avgEulerAnglesArrayPath, nullptr);
+  if(outputResult.invalid())
+  {
+    return outputResult;
+  }
+  outputResult = validateOutputs(m_InputValues->useVonMisesAverage, m_InputValues->VMFQuatsArrayPath, m_InputValues->VMFEulerAnglesArrayPath, &m_InputValues->VMFKappaArrayPath);
+  if(outputResult.invalid())
+  {
+    return outputResult;
+  }
+  outputResult = validateOutputs(m_InputValues->useWatsonAverage, m_InputValues->WatsonQuatsArrayPath, m_InputValues->WatsonEulerAnglesArrayPath, &m_InputValues->WatsonKappaArrayPath);
+  if(outputResult.invalid())
+  {
+    return outputResult;
+  }
+
+  const auto& featureIdsStore = featureIds->getDataStoreRef();
+  auto featureBuffer = std::make_unique<int32[]>(k_ChunkTuples);
+  int32 minimumFeatureId = std::numeric_limits<int32>::max();
+  int32 maximumFeatureId = std::numeric_limits<int32>::lowest();
+  for(usize offset = 0; offset < tupleCount;)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(k_ChunkTuples, tupleCount - offset);
+    Result<> readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(featureBuffer.get(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const auto [minimum, maximum] = std::minmax_element(featureBuffer.get(), featureBuffer.get() + count);
+    minimumFeatureId = std::min(minimumFeatureId, *minimum);
+    maximumFeatureId = std::max(maximumFeatureId, *maximum);
+    offset += count;
+  }
+  if(tupleCount > 0 && minimumFeatureId < 0)
+  {
+    return MakeErrorResult(
+        -5355, fmt::format("Feature Ids array with name '{}' has negative values within the array. The most negative value encountered was '{}'. All values must be positive within the array",
+                           featureIds->getName(), minimumFeatureId));
+  }
+  if(tupleCount > 0 && static_cast<uint64>(maximumFeatureId) >= static_cast<uint64>(m_NumberOfFeatures))
+  {
+    return MakeErrorResult(-5351, fmt::format("Feature Ids array with name '{}' has a value '{}' that would exceed the number of tuples {} in the selected Data Path: '{}'", featureIds->getName(),
+                                              maximumFeatureId, m_NumberOfFeatures, featureCountPath->toString()));
+  }
+
+  MessageHelper messageHelper(m_MessageHandler);
+  Result<> finalResult;
+  if(m_InputValues->useRodriguesAverage)
+  {
+    messageHelper.sendMessage("Computing Rodrigues Average Orientations");
+    Result<> result = computeRodriguesAverageScanline();
+    if(result.invalid() || m_ShouldCancel)
+    {
+      return result;
+    }
+    finalResult = MergeResults(std::move(finalResult), std::move(result));
+  }
+  if(m_InputValues->useVonMisesAverage || m_InputValues->useWatsonAverage)
+  {
+    if(m_InputValues->useVonMisesAverage && !m_InputValues->useWatsonAverage)
+    {
+      messageHelper.sendMessage("Computing von-Mises Fisher Average Orientations");
+    }
+    else if(!m_InputValues->useVonMisesAverage && m_InputValues->useWatsonAverage)
+    {
+      messageHelper.sendMessage("Computing Watson Average Orientations");
+    }
+    else
+    {
+      messageHelper.sendMessage("Computing von-Mises Fisher and Watson Average Orientations");
+    }
+    Result<> result = computeVmfWatsonAverageScanline();
+    if(result.invalid() || m_ShouldCancel)
+    {
+      return result;
+    }
+    finalResult = MergeResults(std::move(finalResult), std::move(result));
+  }
   return finalResult;
 }
 
@@ -332,10 +778,8 @@ Result<> ComputeAvgOrientations::computeVmfWatsonAverage()
   const size_t totalVoxels = featureIds.getNumberOfTuples();
   const usize numEnsembles = crystalStructures.getNumberOfTuples();
 
-  // Run through the "voxels" and compute the number of voxels for each feature.
-  // NOTE: for a feature spanning multiple phases the map is last-writer-wins — the
-  // feature's crystal structure is taken from the phase of its highest-index voxel.
-  // (vMF/Watson uses one phase per feature; the Rodrigues path is per-voxel.)
+  // Run through the voxels and compute the number of valid voxels for each feature.
+  // For a feature spanning multiple phases, the highest-index voxel wins.
   std::vector<usize> featureNumVoxels(m_NumberOfFeatures, 0);
   std::map<int32, int32> featureIdToPhaseMap;
   usize outOfRangePhaseCount = 0;
@@ -345,8 +789,6 @@ Result<> ComputeAvgOrientations::computeVmfWatsonAverage()
     const int32_t currentPhase = phases[i];
     if(currentPhase > 0)
     {
-      // An out-of-range phase index would read past the CrystalStructures array (issue #1661).
-      // This gate MUST match the gather loop in VmfWatsonSamplingImpl.
       if(static_cast<usize>(currentPhase) >= numEnsembles)
       {
         outOfRangePhaseCount++;
@@ -357,17 +799,13 @@ Result<> ComputeAvgOrientations::computeVmfWatsonAverage()
     }
   }
 
-  // Features whose crystal structure is unknown/unsupported are skipped by the worker
-  // (their outputs remain NaN); report that up front instead of dropping them silently.
   usize unknownXtalFeatureCount = 0;
+  const usize numValidXtal = ebsdlib::LaueOps::GetAllOrientationOps().size();
+  for(const auto& [featureId, phaseValue] : featureIdToPhaseMap)
   {
-    const usize numValidXtal = ebsdlib::LaueOps::GetAllOrientationOps().size();
-    for(const auto& [featureId, phaseValue] : featureIdToPhaseMap)
+    if(crystalStructures[phaseValue] >= numValidXtal)
     {
-      if(crystalStructures[phaseValue] >= numValidXtal)
-      {
-        unknownXtalFeatureCount++;
-      }
+      unknownXtalFeatureCount++;
     }
   }
 
@@ -426,113 +864,616 @@ Result<> ComputeAvgOrientations::computeVmfWatsonAverage()
 }
 
 // -----------------------------------------------------------------------------
+Result<> ComputeAvgOrientations::computeVmfWatsonAverageScanline()
+{
+  const auto& featureIdsStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellFeatureIdsArrayPath).getDataStoreRef();
+  const auto& phasesStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellPhasesArrayPath).getDataStoreRef();
+  const auto& quaternionsStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->cellQuatsArrayPath).getDataStoreRef();
+  const auto& crystalStructuresStore = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->crystalStructuresArrayPath).getDataStoreRef();
+  const usize tupleCount = featureIdsStore.getNumberOfTuples();
+  const usize ensembleCount = crystalStructuresStore.getNumberOfTuples();
+  if(m_NumberOfFeatures > std::numeric_limits<usize>::max() / 4 || m_NumberOfFeatures > std::numeric_limits<usize>::max() / 3)
+  {
+    return MakeErrorResult(-54676, fmt::format("ComputeAvgOrientations: {} feature tuples cannot be addressed by the directional-statistics output component shapes.", m_NumberOfFeatures));
+  }
+
+  std::vector<uint32> crystalStructures(ensembleCount);
+  if(ensembleCount > 0)
+  {
+    Result<> readResult = crystalStructuresStore.copyIntoBuffer(0, nonstd::span<uint32>(crystalStructures.data(), crystalStructures.size()));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+  }
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+
+  std::vector<usize> featureCounts(m_NumberOfFeatures, 0);
+  std::vector<int32> winningPhases(m_NumberOfFeatures, 0);
+  usize outOfRangePhaseCount = 0;
+  auto featureBuffer = std::make_unique<int32[]>(k_ChunkTuples);
+  auto phaseBuffer = std::make_unique<int32[]>(k_ChunkTuples);
+  for(usize offset = 0; offset < tupleCount;)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(k_ChunkTuples, tupleCount - offset);
+    Result<> readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(featureBuffer.get(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    readResult = phasesStore.copyIntoBuffer(offset, nonstd::span<int32>(phaseBuffer.get(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    for(usize index = 0; index < count; ++index)
+    {
+      const int32 phase = phaseBuffer[index];
+      if(phase <= 0)
+      {
+        continue;
+      }
+      if(static_cast<usize>(phase) >= ensembleCount)
+      {
+        ++outOfRangePhaseCount;
+        continue;
+      }
+      const usize feature = static_cast<usize>(featureBuffer[index]);
+      if(featureCounts[feature] == std::numeric_limits<usize>::max())
+      {
+        return MakeErrorResult(-54676, fmt::format("ComputeAvgOrientations: valid cell count for feature {} exceeds the addressable size on this platform.", feature));
+      }
+      ++featureCounts[feature];
+      winningPhases[feature] = phase;
+    }
+    offset += count;
+  }
+
+  const std::vector<ebsdlib::LaueOps::Pointer> orientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
+  std::vector<ebsdlib::LaueOps::Pointer> featureOps(m_NumberOfFeatures);
+  usize unknownXtalFeatureCount = 0;
+  for(usize feature = 0; feature < m_NumberOfFeatures; ++feature)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    if(featureCounts[feature] == 0)
+    {
+      continue;
+    }
+    const int32 phase = winningPhases[feature];
+    const uint32 laueClass = crystalStructures[static_cast<usize>(phase)];
+    if(laueClass >= orientationOps.size())
+    {
+      ++unknownXtalFeatureCount;
+      continue;
+    }
+    featureOps[feature] = orientationOps[laueClass];
+  }
+
+  DirectionalOutputBuffers outputs(m_NumberOfFeatures, m_InputValues->useVonMisesAverage, m_InputValues->useWatsonAverage);
+  const auto processFeature = [&](usize feature, const std::vector<ebsdlib::QuatD>& fzQuaternions) -> Result<> {
+    if(feature >= featureOps.size() || featureOps[feature] == nullptr)
+    {
+      return MakeErrorResult(-54677, fmt::format("ComputeAvgOrientations: grouped quaternion data referenced feature {} without a valid selected Laue operation.", feature));
+    }
+    if(fzQuaternions.size() != featureCounts[feature])
+    {
+      return MakeErrorResult(-54678, fmt::format("ComputeAvgOrientations: grouped quaternion count for feature {} is {}; expected {} from the phase-valid counting pass.", feature,
+                                                 fzQuaternions.size(), featureCounts[feature]));
+    }
+    Result<> result = ComputeDirectionalFeature(feature, featureOps[feature], fzQuaternions, *m_InputValues, m_ShouldCancel, outputs);
+    if(result.valid() && !m_ShouldCancel)
+    {
+      sendThreadSafeProgressMessage(1);
+    }
+    return result;
+  };
+
+  if(DataStoreUtilities::GetIOCollection().hasExternalSortCapability())
+  {
+    ExternalSortConfig config;
+    config.recordSize = k_OrientationRecordSize;
+    config.maxRecordsPerBatch = k_ChunkTuples;
+    config.compare = CompareOrientationRecords;
+    Result<std::unique_ptr<IExternalSort>> createResult = DataStoreUtilities::GetIOCollection().createExternalSort(config);
+    if(createResult.invalid())
+    {
+      return ConvertResult(std::move(createResult));
+    }
+    std::unique_ptr<IExternalSort> externalSort = std::move(createResult.value());
+    if(externalSort == nullptr)
+    {
+      return MakeErrorResult(-54679, "ComputeAvgOrientations: the registered external-sort provider returned a null sorter.");
+    }
+
+    auto quaternionBuffer = std::make_unique<float32[]>(k_ChunkTuples * 4);
+    std::vector<std::byte> recordBytes(k_ChunkTuples * static_cast<usize>(k_OrientationRecordSize));
+    uint64 appendedRecordCount = 0;
+    for(usize offset = 0; offset < tupleCount;)
+    {
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      const usize count = std::min(k_ChunkTuples, tupleCount - offset);
+      Result<> readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(featureBuffer.get(), count));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+      readResult = phasesStore.copyIntoBuffer(offset, nonstd::span<int32>(phaseBuffer.get(), count));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+      readResult = quaternionsStore.copyIntoBuffer(offset * 4, nonstd::span<float32>(quaternionBuffer.get(), count * 4));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+
+      uint64 recordCount = 0;
+      for(usize index = 0; index < count; ++index)
+      {
+        const int32 phase = phaseBuffer[index];
+        const usize feature = static_cast<usize>(featureBuffer[index]);
+        if(phase <= 0 || static_cast<usize>(phase) >= ensembleCount || featureOps[feature] == nullptr)
+        {
+          continue;
+        }
+        const usize byteOffset = static_cast<usize>(recordCount * k_OrientationRecordSize);
+        EncodeOrientationRecord(nonstd::span<std::byte>(recordBytes.data() + byteOffset, static_cast<usize>(k_OrientationRecordSize)), static_cast<int32>(feature), static_cast<uint64>(offset + index),
+                                quaternionBuffer.get() + (index * 4));
+        ++recordCount;
+      }
+      if(recordCount > 0)
+      {
+        if(recordCount > std::numeric_limits<uint64>::max() - appendedRecordCount)
+        {
+          return MakeErrorResult(-54676, "ComputeAvgOrientations: external-sort record count exceeds uint64.");
+        }
+        Result<> appendResult = externalSort->append(recordCount, nonstd::span<const std::byte>(recordBytes.data(), static_cast<usize>(recordCount * k_OrientationRecordSize)), m_ShouldCancel, {});
+        if(appendResult.invalid() || m_ShouldCancel)
+        {
+          return appendResult;
+        }
+        appendedRecordCount += recordCount;
+      }
+      offset += count;
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    Result<> finishResult = externalSort->finish(m_ShouldCancel, {});
+    if(finishResult.invalid() || m_ShouldCancel)
+    {
+      return finishResult;
+    }
+
+    std::optional<usize> currentFeature;
+    std::optional<uint64> previousTupleIndex;
+    std::vector<ebsdlib::QuatD> fzQuaternions;
+    const auto flushFeature = [&]() -> Result<> {
+      if(!currentFeature.has_value())
+      {
+        return {};
+      }
+      return processFeature(*currentFeature, fzQuaternions);
+    };
+
+    const uint64 totalRecords = externalSort->recordCount();
+    if(totalRecords != appendedRecordCount)
+    {
+      return MakeErrorResult(-54680, fmt::format("ComputeAvgOrientations: external sort reports {} records after {} records were appended.", totalRecords, appendedRecordCount));
+    }
+    for(uint64 recordOffset = 0; recordOffset < totalRecords;)
+    {
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      const uint64 count = std::min<uint64>(k_ChunkTuples, totalRecords - recordOffset);
+      Result<uint64> readResult = externalSort->read(recordOffset, count, nonstd::span<std::byte>(recordBytes.data(), static_cast<usize>(count * k_OrientationRecordSize)), m_ShouldCancel);
+      if(readResult.invalid())
+      {
+        return ConvertResult(std::move(readResult));
+      }
+      if(readResult.value() != count)
+      {
+        return MakeErrorResult(-54680, fmt::format("ComputeAvgOrientations: external sort short read at record {}: requested {} records but received {}.", recordOffset, count, readResult.value()));
+      }
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      for(uint64 index = 0; index < count; ++index)
+      {
+        int32 featureId = 0;
+        uint64 originalTupleIndex = 0;
+        std::array<float32, 4> quaternion{};
+        const usize byteOffset = static_cast<usize>(index * k_OrientationRecordSize);
+        DecodeOrientationRecord(nonstd::span<const std::byte>(recordBytes.data() + byteOffset, static_cast<usize>(k_OrientationRecordSize)), featureId, originalTupleIndex, quaternion);
+        if(featureId < 0 || static_cast<usize>(featureId) >= m_NumberOfFeatures || originalTupleIndex >= tupleCount)
+        {
+          return MakeErrorResult(-54681, fmt::format("ComputeAvgOrientations: external sort returned invalid feature {} or original tuple index {} for {} features and {} input tuples.", featureId,
+                                                     originalTupleIndex, m_NumberOfFeatures, tupleCount));
+        }
+        const usize feature = static_cast<usize>(featureId);
+        if(!currentFeature.has_value() || *currentFeature != feature)
+        {
+          if(currentFeature.has_value() && feature < *currentFeature)
+          {
+            return MakeErrorResult(-54682, "ComputeAvgOrientations: external sort returned feature groups out of ascending order.");
+          }
+          Result<> flushResult = flushFeature();
+          if(flushResult.invalid() || m_ShouldCancel)
+          {
+            return flushResult;
+          }
+          currentFeature = feature;
+          previousTupleIndex.reset();
+          fzQuaternions.clear();
+          fzQuaternions.reserve(featureCounts[feature]);
+        }
+        if(previousTupleIndex.has_value() && originalTupleIndex <= *previousTupleIndex)
+        {
+          return MakeErrorResult(
+              -54683, fmt::format("ComputeAvgOrientations: external sort returned non-increasing original tuple indices {} then {} for feature {}.", *previousTupleIndex, originalTupleIndex, feature));
+        }
+        previousTupleIndex = originalTupleIndex;
+        const ebsdlib::QuatD inputQuaternion(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+        fzQuaternions.push_back(featureOps[feature]->getFZQuat(inputQuaternion));
+      }
+      recordOffset += count;
+    }
+    Result<> flushResult = flushFeature();
+    if(flushResult.invalid() || m_ShouldCancel)
+    {
+      return flushResult;
+    }
+  }
+  else
+  {
+    auto quaternionBuffer = std::make_unique<float32[]>(k_ChunkTuples * 4);
+    std::vector<ebsdlib::QuatD> fzQuaternions;
+    for(usize feature = 0; feature < m_NumberOfFeatures; ++feature)
+    {
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      if(featureCounts[feature] == 0 || featureOps[feature] == nullptr)
+      {
+        continue;
+      }
+      fzQuaternions.clear();
+      fzQuaternions.reserve(featureCounts[feature]);
+      for(usize offset = 0; offset < tupleCount;)
+      {
+        if(m_ShouldCancel)
+        {
+          return {};
+        }
+        const usize count = std::min(k_ChunkTuples, tupleCount - offset);
+        Result<> readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(featureBuffer.get(), count));
+        if(readResult.invalid())
+        {
+          return readResult;
+        }
+        readResult = phasesStore.copyIntoBuffer(offset, nonstd::span<int32>(phaseBuffer.get(), count));
+        if(readResult.invalid())
+        {
+          return readResult;
+        }
+        readResult = quaternionsStore.copyIntoBuffer(offset * 4, nonstd::span<float32>(quaternionBuffer.get(), count * 4));
+        if(readResult.invalid())
+        {
+          return readResult;
+        }
+        if(m_ShouldCancel)
+        {
+          return {};
+        }
+        for(usize index = 0; index < count; ++index)
+        {
+          const int32 phase = phaseBuffer[index];
+          if(static_cast<usize>(featureBuffer[index]) != feature || phase <= 0 || static_cast<usize>(phase) >= ensembleCount)
+          {
+            continue;
+          }
+          const usize quaternionOffset = index * 4;
+          const ebsdlib::QuatD inputQuaternion(quaternionBuffer[quaternionOffset], quaternionBuffer[quaternionOffset + 1], quaternionBuffer[quaternionOffset + 2],
+                                               quaternionBuffer[quaternionOffset + 3]);
+          fzQuaternions.push_back(featureOps[feature]->getFZQuat(inputQuaternion));
+        }
+        offset += count;
+      }
+      Result<> featureResult = processFeature(feature, fzQuaternions);
+      if(featureResult.invalid() || m_ShouldCancel)
+      {
+        return featureResult;
+      }
+    }
+  }
+
+  const auto writeOutput = [&](bool enabled, const DataPath& quaternionPath, const DataPath& eulerPath, const DataPath& kappaPath, const std::vector<float32>& quaternions,
+                               const std::vector<float32>& eulers, const std::vector<float32>& kappas) -> Result<> {
+    if(!enabled)
+    {
+      return {};
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    Result<> result = WriteFloatOutput(m_DataStructure, quaternionPath, m_NumberOfFeatures, 4, quaternions);
+    if(result.invalid() || m_ShouldCancel)
+    {
+      return result;
+    }
+    result = WriteFloatOutput(m_DataStructure, eulerPath, m_NumberOfFeatures, 3, eulers);
+    if(result.invalid() || m_ShouldCancel)
+    {
+      return result;
+    }
+    return WriteFloatOutput(m_DataStructure, kappaPath, m_NumberOfFeatures, 1, kappas);
+  };
+
+  Result<> writeResult = writeOutput(m_InputValues->useVonMisesAverage, m_InputValues->VMFQuatsArrayPath, m_InputValues->VMFEulerAnglesArrayPath, m_InputValues->VMFKappaArrayPath, outputs.VmfQuats,
+                                     outputs.VmfEuler, outputs.VmfKappa);
+  if(writeResult.invalid() || m_ShouldCancel)
+  {
+    return writeResult;
+  }
+  writeResult = writeOutput(m_InputValues->useWatsonAverage, m_InputValues->WatsonQuatsArrayPath, m_InputValues->WatsonEulerAnglesArrayPath, m_InputValues->WatsonKappaArrayPath, outputs.WatsonQuats,
+                            outputs.WatsonEuler, outputs.WatsonKappa);
+  if(writeResult.invalid() || m_ShouldCancel)
+  {
+    return writeResult;
+  }
+
+  Result<> result;
+  if(unknownXtalFeatureCount > 0)
+  {
+    result.warnings().push_back(
+        {-54671, fmt::format("vMF/Watson average: {} feature(s) have an unknown/unsupported crystal structure value and were skipped; their output tuples remain NaN.", unknownXtalFeatureCount)});
+  }
+  if(outOfRangePhaseCount > 0)
+  {
+    result.warnings().push_back(
+        {-54672, fmt::format("vMF/Watson average: {} cell(s) have a Phases value outside the range of the Crystal Structures array ({} tuples) and were excluded from the average.",
+                             outOfRangePhaseCount, ensembleCount)});
+  }
+  return result;
+}
+
+// -----------------------------------------------------------------------------
+/**
+ * @brief Computes the average quaternion orientation for each feature using
+ * iterative Rodrigues averaging. For each cell, the voxel quaternion is rotated
+ * to the nearest equivalent of the running average, then accumulated. After all
+ * cells are processed, the accumulated quaternions are normalized, forced into
+ * the positive hemisphere, and converted to Euler angles.
+ *
+ * OOC strategy: Cell-level arrays (featureIds, phases, quats) are read in
+ * sequential 64K-tuple chunks via copyIntoBuffer to avoid random OOC page
+ * faults. Feature-level accumulation uses local std::vector buffers (small
+ * enough to fit in RAM). Final results are bulk-written back via copyFromBuffer.
+ */
 Result<> ComputeAvgOrientations::computeRodriguesAverage()
 {
   std::vector<ebsdlib::LaueOps::Pointer> orientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
 
-  Int32Array& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellFeatureIdsArrayPath);
-  Int32Array& phases = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellPhasesArrayPath);
-  Float32Array& quats = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->cellQuatsArrayPath);
+  auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellFeatureIdsArrayPath);
+  auto& phases = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->cellPhasesArrayPath);
+  auto& quats = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->cellQuatsArrayPath);
 
-  UInt32Array& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->crystalStructuresArrayPath);
+  auto& crystalStructuresArray = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->crystalStructuresArrayPath);
 
-  auto& avgQuats = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->avgQuatsArrayPath).getDataStoreRef();
-  auto& avgEuler = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->avgEulerAnglesArrayPath).getDataStoreRef();
+  auto& avgQuatsStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->avgQuatsArrayPath).getDataStoreRef();
+  auto& avgEulerStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->avgEulerAnglesArrayPath).getDataStoreRef();
 
-  const size_t totalPoints = featureIds.getNumberOfTuples();
-  const usize numEnsembles = crystalStructures.getNumberOfTuples();
+  const usize totalPoints = featureIds.getNumberOfTuples();
+  if(totalPoints > std::numeric_limits<usize>::max() / 4)
+  {
+    return MakeErrorResult(-54676, fmt::format("ComputeAvgOrientations: {} quaternion tuples cannot be addressed as four-component values on this platform.", totalPoints));
+  }
 
-  size_t totalFeatures = avgQuats.getNumberOfTuples();
-  std::vector<float> counts(totalFeatures, 0.0f);
+  const usize totalFeatures = avgQuatsStore.getNumberOfTuples();
+  if(totalFeatures > std::numeric_limits<usize>::max() / 4 || totalFeatures > std::numeric_limits<usize>::max() / 3)
+  {
+    return MakeErrorResult(-54676, fmt::format("ComputeAvgOrientations: {} feature tuples cannot be addressed by the Rodrigues output component shapes.", totalFeatures));
+  }
+  std::vector<float32> counts(totalFeatures, 0.0f);
   usize outOfRangePhaseCount = 0;
   usize unknownXtalCount = 0;
 
-  // initialize the output arrays
-  avgQuats.fill(0.0F);
-  // Initialize all Euler Angles to Zero
-  avgEuler.fill(0.0F);
+  // Bulk-read crystal structures into a local vector (ensemble-level, typically < 10 entries).
+  // This avoids repeated virtual dispatch into the OOC DataStore during the hot cell loop.
+  const usize numPhases = crystalStructuresArray.getNumberOfTuples();
+  std::vector<uint32> crystalStructures(numPhases);
+  if(numPhases > 0)
+  {
+    Result<> crystalReadResult = crystalStructuresArray.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructures.data(), numPhases));
+    if(crystalReadResult.invalid())
+    {
+      return crystalReadResult;
+    }
+  }
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+
+  // Feature-level quaternion accumulator — kept entirely in RAM. Random access
+  // by featureId would thrash OOC chunks if stored in a DataStore directly.
+  std::vector<float32> localAvgQuats(totalFeatures * 4, 0.0f);
 
   // Get the Identity Quaternion
   static const ebsdlib::QuatF identityQuat(0.0f, 0.0f, 0.0f, 1.0f);
 
+  // Obtain DataStore references for bulk I/O. The stores may be backed by
+  // HDF5 chunked storage, so element-wise operator[] would trigger expensive
+  // page faults. All cell-level reads go through copyIntoBuffer instead.
+  const auto& featureIdsStore = featureIds.getDataStoreRef();
+  const auto& phasesStore = phases.getDataStoreRef();
+  const auto& quatsStore = quats.getDataStoreRef();
+
+  // Pre-allocate chunk buffers (reused across iterations to avoid allocation churn)
+  auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
+  auto phasesBuf = std::make_unique<int32[]>(k_ChunkTuples);
+  auto quatsBuf = std::make_unique<float32[]>(k_ChunkTuples * 4);
+
   MessageHelper messageHelper(m_MessageHandler);
   ThrottledMessenger messenger = messageHelper.createThrottledMessenger();
 
-  for(size_t i = 0; i < totalPoints; i++)
+  for(usize offset = 0; offset < totalPoints;)
   {
     if(m_ShouldCancel)
     {
       return {};
     }
-    messenger.sendThrottledMessage([i, totalPoints]() { return fmt::format("Computing Rodrigues Average: Cell {}/{}", i + 1, totalPoints); });
+    messenger.sendThrottledMessage([offset, totalPoints]() { return fmt::format("Computing Rodrigues Average: Cell {}/{}", offset, totalPoints); });
 
-    const int32_t currentFeatureId = featureIds[i];
-    const int32_t currentPhase = phases[i];
-    // As long as we have a valid `currentPhase` value which is used as an index
-    // into the CrystalStructures array. We ALWAYS ignore the first value in the
-    // CrystalStructures array. So therefore the `currentPhase` MUST be > 0.
-    // We can use `currentFeatureId = 0` because if someone is just wanting to compute
-    // the average of a bunch of orientations they may have labeled the "FeatureIds = 0"
-    // for all the values. The most important value is the `currentPhase` which for
-    // the grand majority of historical data should be > 0.
-    //    Now in theory someone could absolutely manually import data into an "Ensemble"
-    // Array and NOT have the zero index as `unknown` in which case this check will
-    // fail them and they will not compute anything most likely. The documentation
-    // for the filter should be updated to cover these use-cases.
-    if(currentPhase > 0)
+    const usize count = std::min(k_ChunkTuples, totalPoints - offset);
+    // Sequential bulk reads — each call fetches one contiguous chunk from the
+    // underlying DataStore (a single HDF5 read or memcpy for in-core stores).
+    Result<> readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(featureIdBuf.get(), count));
+    if(readResult.invalid())
     {
-      // An out-of-range phase index would read past the CrystalStructures array (issue #1661).
-      if(static_cast<usize>(currentPhase) >= numEnsembles)
-      {
-        outOfRangePhaseCount++;
-        continue;
-      }
-      const uint32 xtal = crystalStructures[currentPhase];
-      // Guard against an out-of-range crystal-structure enum (e.g. 999/Unknown).
-      if(xtal >= orientationOps.size())
-      {
-        unknownXtalCount++;
-        continue;
-      }
-      counts[currentFeatureId] += 1.0f;
-      ebsdlib::QuatF voxQuat(quats[i * 4], quats[i * 4 + 1], quats[i * 4 + 2], quats[i * 4 + 3]);
-      ebsdlib::QuatF curAvgQuat(avgQuats[currentFeatureId * 4], avgQuats[currentFeatureId * 4 + 1], avgQuats[currentFeatureId * 4 + 2], avgQuats[currentFeatureId * 4 + 3]);
-      ebsdlib::QuatF finalAvgQuat(avgQuats[currentFeatureId * 4], avgQuats[currentFeatureId * 4 + 1], avgQuats[currentFeatureId * 4 + 2], avgQuats[currentFeatureId * 4 + 3]);
-
-      curAvgQuat = curAvgQuat.scalarDivide(counts[currentFeatureId]);
-
-      if(counts[currentFeatureId] == 1.0f)
-      {
-        curAvgQuat = ebsdlib::QuatF::identity();
-      }
-      voxQuat = orientationOps[xtal]->getNearestQuat(curAvgQuat, voxQuat);
-      curAvgQuat = finalAvgQuat + voxQuat;
-
-      UpdateQuaternionArray(avgQuats, curAvgQuat, currentFeatureId);
+      return readResult;
     }
+    readResult = phasesStore.copyIntoBuffer(offset, nonstd::span<int32>(phasesBuf.get(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    readResult = quatsStore.copyIntoBuffer(offset * 4, nonstd::span<float32>(quatsBuf.get(), count * 4));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+
+    for(usize i = 0; i < count; i++)
+    {
+      const int32 currentFeatureId = featureIdBuf[i];
+      const int32 currentPhase = phasesBuf[i];
+      // Phase index must be > 0 (index 0 is reserved for "unknown" in CrystalStructures).
+      if(currentPhase > 0)
+      {
+        if(static_cast<usize>(currentPhase) >= numPhases)
+        {
+          outOfRangePhaseCount++;
+          continue;
+        }
+        const uint32 xtal = crystalStructures[currentPhase]; // Laue class from local cache
+        // Guard against an out-of-range crystal-structure enum (e.g. 999/Unknown).
+        if(xtal >= orientationOps.size())
+        {
+          unknownXtalCount++;
+          continue;
+        }
+        counts[currentFeatureId] += 1.0f;
+
+        // Read the voxel quaternion from the chunk buffer (not from DataStore)
+        const usize qi = i * 4;
+        ebsdlib::QuatF voxQuat(quatsBuf[qi], quatsBuf[qi + 1], quatsBuf[qi + 2], quatsBuf[qi + 3]);
+
+        // Read the running average from the local accumulator (random access by featureId)
+        const usize fi = static_cast<usize>(currentFeatureId) * 4;
+        ebsdlib::QuatF curAvgQuat(localAvgQuats[fi], localAvgQuats[fi + 1], localAvgQuats[fi + 2], localAvgQuats[fi + 3]);
+        ebsdlib::QuatF finalAvgQuat = curAvgQuat;
+
+        curAvgQuat = curAvgQuat.scalarDivide(counts[currentFeatureId]);
+
+        // First voxel: seed with identity so getNearestQuat has a valid reference
+        if(counts[currentFeatureId] == 1.0f)
+        {
+          curAvgQuat = ebsdlib::QuatF::identity();
+        }
+        // Rotate voxQuat to the symmetrically equivalent orientation nearest the running average
+        voxQuat = orientationOps[xtal]->getNearestQuat(curAvgQuat, voxQuat);
+        curAvgQuat = finalAvgQuat + voxQuat;
+
+        // Write back into local accumulator (not into DataStore — avoids OOC writes)
+        localAvgQuats[fi] = curAvgQuat.x();
+        localAvgQuats[fi + 1] = curAvgQuat.y();
+        localAvgQuats[fi + 2] = curAvgQuat.z();
+        localAvgQuats[fi + 3] = curAvgQuat.w();
+      }
+    }
+    offset += count;
   }
 
-  for(size_t featureId = 0; featureId < totalFeatures; featureId++)
+  // Second pass: normalize accumulated quaternions and convert to Euler angles.
+  // This is feature-level only (O(features)), so no chunking needed.
+  std::vector<float32> localAvgEuler(totalFeatures * 3, 0.0f);
+
+  for(usize featureId = 0; featureId < totalFeatures; featureId++)
   {
     if(m_ShouldCancel)
     {
       return {};
     }
 
+    const usize fi = featureId * 4;
     if(counts[featureId] == 0.0f)
     {
-      UpdateQuaternionArray(avgQuats, identityQuat, featureId);
+      localAvgQuats[fi] = identityQuat.x();
+      localAvgQuats[fi + 1] = identityQuat.y();
+      localAvgQuats[fi + 2] = identityQuat.z();
+      localAvgQuats[fi + 3] = identityQuat.w();
       continue;
     }
 
-    ebsdlib::QuatF curAvgQuat(avgQuats[featureId * 4], avgQuats[featureId * 4 + 1], avgQuats[featureId * 4 + 2], avgQuats[featureId * 4 + 3]);
+    ebsdlib::QuatF curAvgQuat(localAvgQuats[fi], localAvgQuats[fi + 1], localAvgQuats[fi + 2], localAvgQuats[fi + 3]);
     curAvgQuat = curAvgQuat.scalarDivide(counts[featureId]);
-    curAvgQuat = curAvgQuat.normalize().getPositiveOrientation(); // Be sure the Quaterion is in the Northern Hemisphere
-    UpdateQuaternionArray(avgQuats, curAvgQuat, featureId);
+    curAvgQuat = curAvgQuat.normalize().getPositiveOrientation();
+    localAvgQuats[fi] = curAvgQuat.x();
+    localAvgQuats[fi + 1] = curAvgQuat.y();
+    localAvgQuats[fi + 2] = curAvgQuat.z();
+    localAvgQuats[fi + 3] = curAvgQuat.w();
 
-    // Update the value for the average Euler.
     ebsdlib::EulerFType eu = ebsdlib::QuaternionFType(curAvgQuat).toEuler();
-    UpdateEulerArray(avgEuler, eu, featureId);
+    const usize ei = featureId * 3;
+    localAvgEuler[ei] = eu[0];
+    localAvgEuler[ei + 1] = eu[1];
+    localAvgEuler[ei + 2] = eu[2];
+  }
+
+  // Bulk-write feature-level results back to DataStore in a single operation.
+  // This is the only write to these stores — all accumulation was done in RAM.
+  Result<> writeResult = avgQuatsStore.copyFromBuffer(0, nonstd::span<const float32>(localAvgQuats.data(), localAvgQuats.size()));
+  if(writeResult.invalid() || m_ShouldCancel)
+  {
+    return writeResult;
+  }
+  writeResult = avgEulerStore.copyFromBuffer(0, nonstd::span<const float32>(localAvgEuler.data(), localAvgEuler.size()));
+  if(writeResult.invalid() || m_ShouldCancel)
+  {
+    return writeResult;
   }
 
   Result<> result;
@@ -545,7 +1486,13 @@ Result<> ComputeAvgOrientations::computeRodriguesAverage()
   {
     result.warnings().push_back(
         {-54672, fmt::format("Rodrigues average: {} cell(s) have a Phases value outside the range of the Crystal Structures array ({} tuples) and were excluded from the average.",
-                             outOfRangePhaseCount, numEnsembles)});
+                             outOfRangePhaseCount, numPhases)});
   }
   return result;
+}
+
+// -----------------------------------------------------------------------------
+Result<> ComputeAvgOrientations::computeRodriguesAverageScanline()
+{
+  return computeRodriguesAverage();
 }

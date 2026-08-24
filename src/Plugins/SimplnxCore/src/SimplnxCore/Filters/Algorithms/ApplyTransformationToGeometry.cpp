@@ -2,6 +2,7 @@
 
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/Geometry/INodeGeometry0D.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/DataGroupUtilities.hpp"
 #include "simplnx/Utilities/ParallelAlgorithmUtilities.hpp"
 #include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
@@ -65,7 +66,6 @@ Result<> ApplyTransformationToGeometry::applyImageGeometryTransformation()
   // The actual rotating of the dataStructure arrays is done in parallel where parallel here
   // refers to the cropping of each DataArray being done on a separate thread.
   ParallelTaskAlgorithm taskRunner;
-  taskRunner.setParallelizationEnabled(true);
 
   const DataPath srcCelLDataAMPath = srcImageGeom.getCellDataPath();
   const auto& srcCellDataAM = srcImageGeom.getCellDataRef();
@@ -89,6 +89,20 @@ Result<> ApplyTransformationToGeometry::applyImageGeometryTransformation()
     destImageGeom.setSpacing(spacing);
     destCellDataAM.resizeTuples(dataArrayShape);
   }
+
+  // OOC transformations use bounded source pages inside ImageRotationUtilities.
+  // Run arrays serially so their page caches and output slices do not multiply
+  // resident memory by the number of cell arrays being transformed.
+  bool usesOutOfCoreStore = false;
+  for(const auto& [dataId, srcDataObject] : srcCellDataAM)
+  {
+    const auto* srcDataArray = m_DataStructure.getDataAs<IDataArray>(srcCelLDataAMPath.createChildPath(srcDataObject->getName()));
+    const auto* destDataArray = m_DataStructure.getDataAs<IDataArray>(destCellDataAMPath.createChildPath(srcDataObject->getName()));
+    usesOutOfCoreStore = usesOutOfCoreStore || IsOutOfCore(*srcDataArray) || IsOutOfCore(*destDataArray);
+  }
+  const bool useOutOfCoreAlgorithm = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCoreAlgorithm ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+  taskRunner.setParallelizationEnabled(!useOutOfCoreAlgorithm);
 
   for(const auto& [dataId, srcDataObject] : srcCellDataAM)
   {
@@ -215,12 +229,7 @@ Result<> ApplyTransformationToGeometry::operator()()
 
   if(imageGeometryPtr == nullptr)
   {
-    applyNodeGeometryTransformation();
+    return applyNodeGeometryTransformation();
   }
-  else
-  {
-    applyImageGeometryTransformation();
-  }
-
-  return {};
+  return applyImageGeometryTransformation();
 }

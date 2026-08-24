@@ -18,7 +18,11 @@ struct SIMPLNXCORE_EXPORT ConvertDataInputValues
 };
 
 /**
- * @class
+ * @class ConvertData
+ * @brief Converts a selected array to a new scalar type while preserving its shape.
+ *
+ * Uses direct parallel access for in-memory arrays and bounded bulk transfers for
+ * out-of-core arrays to avoid per-value datastore I/O.
  */
 class SIMPLNXCORE_EXPORT ConvertData
 {

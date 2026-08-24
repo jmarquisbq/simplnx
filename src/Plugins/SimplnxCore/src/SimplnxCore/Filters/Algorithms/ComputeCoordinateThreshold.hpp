@@ -22,7 +22,11 @@ struct SIMPLNXCORE_EXPORT ComputeCoordinateThresholdInputValues
 };
 
 /**
- * @class
+ * @class ComputeCoordinateThreshold
+ * @brief Creates a cell mask by testing geometry coordinates against rectangular or spherical bounds.
+ *
+ * Image geometry cells use contiguous direct writes in memory and bounded bulk DataStore I/O out of core.
+ * This keeps disk access sequential without imposing scanline overhead on in-memory masks.
  */
 class SIMPLNXCORE_EXPORT ComputeCoordinateThreshold
 {

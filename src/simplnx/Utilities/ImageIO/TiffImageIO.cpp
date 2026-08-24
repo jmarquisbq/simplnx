@@ -225,7 +225,32 @@ Result<ImageMetadata> TiffImageIO::readMetadata(const std::filesystem::path& fil
 // -----------------------------------------------------------------------------
 Result<> TiffImageIO::readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const
 {
-  std::string pathStr = filePath.string();
+  Result<ImageMetadata> metadataResult = readMetadata(filePath);
+  if(metadataResult.invalid())
+  {
+    return ConvertResult(std::move(metadataResult));
+  }
+  const ImageMetadata& metadata = metadataResult.value();
+  const usize bytesPerElement = GetDataTypeSize(metadata.dataType);
+  const usize rowBytes = metadata.width * metadata.numComponents * bytesPerElement;
+  const usize expectedSize = rowBytes * metadata.height;
+  if(buffer.size() != expectedSize)
+  {
+    return MakeErrorResult(k_ErrorBufferSizeMismatch, fmt::format("Buffer size {} does not match expected size {} for TIFF image '{}'", buffer.size(), expectedSize, filePath.string()));
+  }
+
+  return readPixelDataRows(filePath, [&](usize row, usize columnOffset, usize pixelCount, std::span<const uint8> pixels) -> Result<> {
+    const usize byteOffset = row * rowBytes + columnOffset * metadata.numComponents * bytesPerElement;
+    const usize byteCount = pixelCount * metadata.numComponents * bytesPerElement;
+    std::memcpy(buffer.data() + byteOffset, pixels.data(), byteCount);
+    return {};
+  });
+}
+
+// -----------------------------------------------------------------------------
+Result<> TiffImageIO::readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const
+{
+  const std::string pathStr = filePath.string();
   TiffFile tiffFile(pathStr, "r");
   if(!tiffFile.valid())
   {
@@ -233,19 +258,12 @@ Result<> TiffImageIO::readPixelData(const std::filesystem::path& filePath, std::
   }
 
   TIFF* tiff = tiffFile.get();
-
   uint32_t width = 0;
   uint32_t height = 0;
-  if(TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, &width) == 0 || TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, &height) == 0)
-  {
-    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("Failed to read TIFF dimensions from '{}': {}", pathStr, tiffFile.errorMessage()));
-  }
-
-  // SamplesPerPixel is required by the TIFF 6.0 spec (Section 7). See readMetadata().
   uint16_t samplesPerPixel = 0;
-  if(TIFFGetField(tiff, TIFFTAG_SAMPLESPERPIXEL, &samplesPerPixel) == 0)
+  if(TIFFGetField(tiff, TIFFTAG_IMAGEWIDTH, &width) == 0 || TIFFGetField(tiff, TIFFTAG_IMAGELENGTH, &height) == 0 || TIFFGetField(tiff, TIFFTAG_SAMPLESPERPIXEL, &samplesPerPixel) == 0)
   {
-    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("Required TIFF tag SamplesPerPixel is missing from '{}'", pathStr));
+    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("Failed to read required TIFF dimensions/components from '{}': {}", pathStr, tiffFile.errorMessage()));
   }
 
   Result<DataType> dataTypeResult = DetermineTiffDataType(tiff);
@@ -253,61 +271,56 @@ Result<> TiffImageIO::readPixelData(const std::filesystem::path& filePath, std::
   {
     return ConvertResult(std::move(dataTypeResult));
   }
-  DataType dataType = dataTypeResult.value();
-  usize bpe = GetDataTypeSize(dataType);
+  const usize bytesPerElement = GetDataTypeSize(dataTypeResult.value());
+  const usize pixelBytes = static_cast<usize>(samplesPerPixel) * bytesPerElement;
 
-  usize expectedSize = static_cast<usize>(width) * static_cast<usize>(height) * static_cast<usize>(samplesPerPixel) * bpe;
-  if(buffer.size() != expectedSize)
+  uint16_t planarConfig = PLANARCONFIG_CONTIG;
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_PLANARCONFIG, &planarConfig);
+  if(planarConfig != PLANARCONFIG_CONTIG)
   {
-    return MakeErrorResult(k_ErrorBufferSizeMismatch, fmt::format("Buffer size {} does not match expected size {} for TIFF image '{}'", buffer.size(), expectedSize, pathStr));
+    return MakeErrorResult(k_ErrorUnsupportedFormat, fmt::format("Planar-separate TIFF data is not supported for '{}'.", pathStr));
   }
 
-  // Check if the image is tiled
   if(TIFFIsTiled(tiff) != 0)
   {
-    // For tiled TIFFs, use TIFFReadRGBAImageOriented as a fallback.
-    // This converts to uint8 RGBA, so it only works well for uint8 images.
-    if(dataType != DataType::uint8)
+    uint32_t tileWidth = 0;
+    uint32_t tileHeight = 0;
+    if(TIFFGetField(tiff, TIFFTAG_TILEWIDTH, &tileWidth) == 0 || TIFFGetField(tiff, TIFFTAG_TILELENGTH, &tileHeight) == 0 || tileWidth == 0 || tileHeight == 0)
     {
-      return MakeErrorResult(k_ErrorUnsupportedFormat, fmt::format("Tiled TIFF with non-uint8 data is not supported for '{}'. Convert to stripped TIFF first.", pathStr));
+      return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("Failed to read valid TIFF tile dimensions from '{}': {}", pathStr, tiffFile.errorMessage()));
     }
 
-    std::vector<uint32_t> raster(static_cast<usize>(width) * static_cast<usize>(height));
-    if(TIFFReadRGBAImageOriented(tiff, width, height, raster.data(), ORIENTATION_TOPLEFT, 0) == 0)
+    const tmsize_t encodedTileSize = TIFFTileSize(tiff);
+    const usize tileRowBytes = static_cast<usize>(tileWidth) * pixelBytes;
+    const usize computedTileSize = tileRowBytes * static_cast<usize>(tileHeight);
+    if(encodedTileSize <= 0)
     {
-      return MakeErrorResult(k_ErrorReadPixelFailed, fmt::format("Failed to read tiled TIFF pixel data from '{}': {}", pathStr, tiffFile.errorMessage()));
+      return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("TIFFTileSize returned {} for '{}': {}", encodedTileSize, pathStr, tiffFile.errorMessage()));
     }
+    std::vector<uint8> tileBuffer(std::max(static_cast<usize>(encodedTileSize), computedTileSize));
 
-    // TIFFReadRGBAImageOriented produces ABGR uint32 packed pixels.
-    // Extract the requested number of components.
-    usize pixelCount = static_cast<usize>(width) * static_cast<usize>(height);
-    for(usize i = 0; i < pixelCount; i++)
+    for(uint32_t tileY = 0; tileY < height; tileY += tileHeight)
     {
-      uint32_t pixel = raster[i];
-      uint8 r = TIFFGetR(pixel);
-      uint8 g = TIFFGetG(pixel);
-      uint8 b = TIFFGetB(pixel);
-      uint8 a = TIFFGetA(pixel);
+      for(uint32_t tileX = 0; tileX < width; tileX += tileWidth)
+      {
+        if(TIFFReadTile(tiff, tileBuffer.data(), tileX, tileY, 0, 0) < 0)
+        {
+          return MakeErrorResult(k_ErrorReadPixelFailed, fmt::format("Failed to read tile at ({}, {}) from TIFF '{}': {}", tileX, tileY, pathStr, tiffFile.errorMessage()));
+        }
 
-      usize offset = i * samplesPerPixel;
-      if(samplesPerPixel >= 1)
-      {
-        buffer[offset] = r;
-      }
-      if(samplesPerPixel >= 2)
-      {
-        buffer[offset + 1] = g;
-      }
-      if(samplesPerPixel >= 3)
-      {
-        buffer[offset + 2] = b;
-      }
-      if(samplesPerPixel >= 4)
-      {
-        buffer[offset + 3] = a;
+        const usize validWidth = std::min<usize>(tileWidth, static_cast<usize>(width - tileX));
+        const usize validHeight = std::min<usize>(tileHeight, static_cast<usize>(height - tileY));
+        for(usize localRow = 0; localRow < validHeight; ++localRow)
+        {
+          const uint8* rowData = tileBuffer.data() + localRow * tileRowBytes;
+          Result<> result = callback(static_cast<usize>(tileY) + localRow, tileX, validWidth, std::span<const uint8>(rowData, validWidth * pixelBytes));
+          if(result.invalid())
+          {
+            return result;
+          }
+        }
       }
     }
-
     return {};
   }
 
@@ -319,7 +332,7 @@ Result<> TiffImageIO::readPixelData(const std::filesystem::path& filePath, std::
   {
     return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("TIFFScanlineSize returned {} for '{}': {}", scanlineSize, pathStr, tiffFile.errorMessage()));
   }
-  usize rowBytes = static_cast<usize>(width) * static_cast<usize>(samplesPerPixel) * bpe;
+  usize rowBytes = static_cast<usize>(width) * pixelBytes;
 
   // Use the larger of TIFFScanlineSize and our computed row size
   usize scanlineBufSize = std::max(static_cast<usize>(scanlineSize), rowBytes);
@@ -331,7 +344,11 @@ Result<> TiffImageIO::readPixelData(const std::filesystem::path& filePath, std::
     {
       return MakeErrorResult(k_ErrorReadPixelFailed, fmt::format("Failed to read scanline {} from TIFF '{}': {}", row, pathStr, tiffFile.errorMessage()));
     }
-    std::memcpy(buffer.data() + (static_cast<usize>(row) * rowBytes), scanlineBuf.data(), rowBytes);
+    Result<> result = callback(row, 0, width, std::span<const uint8>(scanlineBuf.data(), rowBytes));
+    if(result.invalid())
+    {
+      return result;
+    }
   }
 
   return {};

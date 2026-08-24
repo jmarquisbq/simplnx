@@ -134,99 +134,6 @@ struct SIMPLNXCORE_EXPORT OperatorDef
 };
 
 // ---------------------------------------------------------------------------
-// RAII sentinel for temporary Float64Arrays in the evaluator.
-// Move-only. When an Owned CalcBuffer is destroyed, it removes its
-// DataArray from the scratch DataStructure via removeData().
-// ---------------------------------------------------------------------------
-class SIMPLNXCORE_EXPORT CalcBuffer
-{
-public:
-  // --- Factory methods ---
-
-  /**
-   * @brief Zero-copy reference to an existing Float64Array in the real DataStructure.
-   * Read-only. Destructor: no-op.
-   */
-  static CalcBuffer borrow(const Float64Array& source);
-
-  /**
-   * @brief Allocate a temp Float64Array in tempDS and convert source data from any numeric type.
-   * Owned. Destructor: removes the temp array from tempDS.
-   */
-  static CalcBuffer convertFrom(DataStructure& tempDS, const IDataArray& source, const std::string& name);
-
-  /**
-   * @brief Allocate a 1-element temp Float64Array with the given scalar value.
-   * Owned. Destructor: removes the temp array from tempDS.
-   */
-  static CalcBuffer scalar(DataStructure& tempDS, float64 value, const std::string& name);
-
-  /**
-   * @brief Allocate an empty temp Float64Array with the given shape.
-   * Owned. Destructor: removes the temp array from tempDS.
-   */
-  static CalcBuffer allocate(DataStructure& tempDS, const std::string& name, std::vector<usize> tupleShape, std::vector<usize> compShape);
-
-  /**
-   * @brief Wrap the output DataArray<float64> for direct writing.
-   * Not owned. Destructor: no-op.
-   */
-  static CalcBuffer wrapOutput(DataArray<float64>& outputArray);
-
-  // --- Move-only, non-copyable ---
-  CalcBuffer(CalcBuffer&& other) noexcept;
-  CalcBuffer& operator=(CalcBuffer&& other) noexcept;
-  ~CalcBuffer();
-
-  CalcBuffer(const CalcBuffer&) = delete;
-  CalcBuffer& operator=(const CalcBuffer&) = delete;
-
-  // --- Element access ---
-  float64 read(usize index) const;
-  void write(usize index, float64 value);
-  void fill(float64 value);
-
-  // --- Metadata ---
-  usize size() const;
-  usize numTuples() const;
-  usize numComponents() const;
-  std::vector<usize> tupleShape() const;
-  std::vector<usize> compShape() const;
-  bool isScalar() const;
-  bool isOwned() const;
-  bool isOutputDirect() const;
-  void markAsScalar();
-
-  // --- Access underlying array (for final copy to non-float64 output) ---
-  const Float64Array& array() const;
-
-private:
-  CalcBuffer() = default;
-
-  enum class Storage
-  {
-    Borrowed,
-    Owned,
-    OutputDirect
-  };
-
-  Storage m_Storage = Storage::Owned;
-
-  // Borrowed: const pointer to source Float64Array in real DataStructure
-  const Float64Array* m_BorrowedArray = nullptr;
-
-  // Owned: pointer to temp Float64Array + reference to its DataStructure for cleanup
-  DataStructure* m_TempDS = nullptr;
-  DataObject::IdType m_ArrayId = 0;
-  Float64Array* m_OwnedArray = nullptr;
-
-  // OutputDirect: writable pointer to output DataArray<float64>
-  DataArray<float64>* m_OutputArray = nullptr;
-
-  bool m_IsScalar = false;
-};
-
-// ---------------------------------------------------------------------------
 // A single item in the RPN (reverse-polish notation) evaluation sequence.
 // Data-free: stores DataPath references and scalar values, not DataObject IDs.
 // ---------------------------------------------------------------------------
@@ -297,6 +204,18 @@ public:
   /**
    * @brief Evaluates the already-parsed equation and writes the result into
    * the output array at @p outputPath inside @p dataStructure.
+   *
+   * Evaluation is a streaming-RPN pass: no buffer sized to the input/output tuple count is ever
+   * allocated. A first "reduction" step resolves every Array[T, C] / (expr)[T, C] tuple+component
+   * extraction down to a cached float64 scalar using a single-element recursive evaluator (bounded
+   * by expression complexity, not data size). If the whole expression then collapses to a scalar
+   * (e.g. all-constant arithmetic, or the extraction result itself), that one value is computed once
+   * and broadcast-filled into the output. Otherwise the remaining array-valued expression is walked
+   * once per bounded tuple-chunk: each chunk reads only its own slice of every operand array via
+   * copyIntoBuffer, evaluates the full RPN on that slice using small reusable per-node buffers sized
+   * to the chunk (not the array), and writes the chunk's result via copyFromBuffer -- so an
+   * out-of-core array is touched as a handful of hyperslab reads/writes regardless of how many
+   * operators the expression contains.
    */
   Result<> evaluateInto(DataStructure& dataStructure, const DataPath& outputPath, NumericType scalarType, CalculatorParameter::AngleUnits units);
 

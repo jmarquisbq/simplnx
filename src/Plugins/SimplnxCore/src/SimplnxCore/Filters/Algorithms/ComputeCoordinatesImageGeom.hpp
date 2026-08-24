@@ -18,7 +18,11 @@ struct SIMPLNXCORE_EXPORT ComputeCoordinatesImageGeomInputValues
 };
 
 /**
- * @class
+ * @class ComputeCoordinatesImageGeom
+ * @brief Generates physical cell-center coordinates and/or integer cell indices for an ImageGeom.
+ *
+ * In-memory outputs use a fused parallel writer over contiguous storage. Out-of-core outputs use
+ * fixed-size generated chunks and bulk writes, keeping scratch memory independent of cell count.
  */
 class SIMPLNXCORE_EXPORT ComputeCoordinatesImageGeom
 {

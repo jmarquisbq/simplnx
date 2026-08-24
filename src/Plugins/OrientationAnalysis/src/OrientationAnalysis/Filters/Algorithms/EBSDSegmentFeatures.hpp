@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "OrientationAnalysis/OrientationAnalysis_export.hpp"
 
 #include "simplnx/DataStructure/DataArray.hpp"
@@ -18,75 +20,169 @@ namespace nx::core
 {
 
 /**
- * @brief The EBSDSegmentFeaturesInputValues struct
+ * @struct EBSDSegmentFeaturesInputValues
+ * @brief Holds all user-supplied parameters for the EBSDSegmentFeatures algorithm.
  */
 struct ORIENTATIONANALYSIS_EXPORT EBSDSegmentFeaturesInputValues
 {
-  float32 MisorientationTolerance;
-  bool UseMask;
-  bool RandomizeFeatureIds;
-  SegmentFeatures::NeighborScheme NeighborScheme;
-  DataPath ImageGeometryPath;
-  DataPath QuatsArrayPath;
-  DataPath CellPhasesArrayPath;
-  DataPath MaskArrayPath;
-  DataPath CrystalStructuresArrayPath;
-  DataPath FeatureIdsArrayPath;
-  DataPath CellFeatureAttributeMatrixPath;
-  DataPath ActiveArrayPath;
-  bool IsPeriodic;
+  float32 MisorientationTolerance = 0.0f;           ///< Maximum misorientation angle (radians) for grouping voxels into the same feature
+  bool UseMask = false;                             ///< Whether to exclude masked voxels from segmentation
+  bool RandomizeFeatureIds = false;                 ///< Whether to randomize feature IDs after segmentation for better visual contrast
+  SegmentFeatures::NeighborScheme NeighborScheme{}; ///< Face-only (6) or all-connected (26) neighbor connectivity
+  DataPath ImageGeometryPath;                       ///< Path to the IGridGeometry defining the 3D voxel grid
+  DataPath QuatsArrayPath;                          ///< Path to the Float32 quaternion array (4 components per cell)
+  DataPath CellPhasesArrayPath;                     ///< Path to the Int32 cell phases array
+  DataPath MaskArrayPath;                           ///< Path to the Bool/UInt8 mask array (only used when UseMask is true)
+  DataPath CrystalStructuresArrayPath;              ///< Path to the UInt32 crystal structures ensemble array
+  DataPath FeatureIdsArrayPath;                     ///< Path to the output Int32 feature IDs array
+  DataPath CellFeatureAttributeMatrixPath;          ///< Path to the Feature-level AttributeMatrix (resized to match feature count)
+  DataPath ActiveArrayPath;                         ///< Path to the output UInt8 Active array (1 = active feature, 0 = reserved slot 0)
+  bool IsPeriodic = false;                          ///< Whether to apply periodic boundary conditions during segmentation
 };
 
 /**
- * @brief
+ * @class EBSDSegmentFeatures
+ * @brief Segments an EBSD dataset into crystallographic features (grains)
+ * by grouping contiguous voxels whose orientations are within a
+ * user-specified misorientation tolerance.
+ *
+ * Two neighboring voxels are grouped into the same feature only if they share
+ * the same crystallographic phase and their misorientation -- computed via the
+ * appropriate EbsdLib LaueOps symmetry operator from their quaternion
+ * representations -- is below MisorientationTolerance. The misorientation
+ * calculation accounts for all symmetry-equivalent orientations of the given
+ * Laue class, so that the minimum rotation angle between the two crystal
+ * orientations is used.
+ *
+ * ## Connected-Component Labeling
+ *
+ * operator() segments the volume with the base-class connected-component
+ * labeling algorithm (SegmentFeatures::executeCCL()), which processes data one
+ * Z-slice at a time to keep memory usage bounded. The subclass supplies the
+ * per-voxel comparison logic by overriding isValidVoxel() and
+ * areNeighborsSimilar().
+ *
+ * ## Rolling 2-Slot Slice Buffers
+ *
+ * The CCL algorithm calls isValidVoxel() and areNeighborsSimilar() for every
+ * voxel and its neighbors. On OOC DataStores, each call would trigger a chunk
+ * decompress-read-evict cycle, making the algorithm orders of magnitude slower.
+ *
+ * To avoid this, prepareForSlice() bulk-reads each Z-slice's quaternion, phase,
+ * and mask data into a rolling 2-slot buffer (even slices -> slot 0, odd slices
+ * -> slot 1). Because CCL processes slices sequentially and only compares
+ * adjacent slices, both the current slice (iz) and previous slice (iz-1) are
+ * always resident. The isValidVoxel() and areNeighborsSimilar() methods check
+ * the buffer first (fast path) and fall back to direct DataStore access only
+ * when the needed slice is not buffered (e.g., during periodic boundary merging).
+ *
+ * Additionally, the small ensemble-level crystal structures array is cached
+ * locally in m_CrystalStructuresCache to avoid per-voxel virtual dispatch
+ * through the DataStore.
  */
 class ORIENTATIONANALYSIS_EXPORT EBSDSegmentFeatures : public SegmentFeatures
 {
 public:
-  using FeatureIdsArrayType = Int32Array;
+  using FeatureIdsArrayType = Int32Array; ///< Type alias for the feature IDs array
 
+  /**
+   * @brief Constructs the algorithm with all required references and parameters.
+   * @param dataStructure The DataStructure containing all input/output arrays.
+   * @param mesgHandler Handler for sending progress messages to the UI.
+   * @param shouldCancel Atomic flag checked between iterations to support cancellation.
+   * @param inputValues User-supplied parameters controlling the segmentation behavior.
+   */
   EBSDSegmentFeatures(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, EBSDSegmentFeaturesInputValues* inputValues);
   ~EBSDSegmentFeatures() noexcept override;
 
-  EBSDSegmentFeatures(const EBSDSegmentFeatures&) = delete;            // Copy Constructor Not Implemented
-  EBSDSegmentFeatures(EBSDSegmentFeatures&&) = delete;                 // Move Constructor Not Implemented
-  EBSDSegmentFeatures& operator=(const EBSDSegmentFeatures&) = delete; // Copy Assignment Not Implemented
-  EBSDSegmentFeatures& operator=(EBSDSegmentFeatures&&) = delete;      // Move Assignment Not Implemented
+  EBSDSegmentFeatures(const EBSDSegmentFeatures&) = delete;
+  EBSDSegmentFeatures(EBSDSegmentFeatures&&) = delete;
+  EBSDSegmentFeatures& operator=(const EBSDSegmentFeatures&) = delete;
+  EBSDSegmentFeatures& operator=(EBSDSegmentFeatures&&) = delete;
 
+  /**
+   * @brief Executes the EBSD segmentation algorithm using connected-component
+   * labeling.
+   * @return Result<> indicating success or any errors encountered during execution.
+   */
   Result<> operator()();
 
 protected:
   /**
-   * @brief
-   * @param data
-   * @param args
-   * @param gnum
-   * @param nextSeed
-   * @return int64
+   * @brief Checks whether a voxel can participate in EBSD segmentation.
+   *
+   * When slice buffers are active, reads from the in-memory buffer (fast path);
+   * otherwise falls back to direct DataStore access.
+   *
+   * @param point Linear voxel index.
+   * @return true if the voxel passes mask and phase > 0 checks.
    */
-  int64_t getSeed(int32 gnum, int64 nextSeed) const override;
+  bool isValidVoxel(int64 point) const override;
 
   /**
-   * @brief
-   * @param data
-   * @param args
-   * @param referencepoint
-   * @param neighborpoint
-   * @param gnum
-   * @return bool
+   * @brief Determines whether two neighboring voxels belong to the same EBSD
+   * segment.
+   *
+   * When both voxels' Z-slices are in the rolling buffer, all data is read
+   * from local memory. Otherwise falls back to direct DataStore access.
+   *
+   * @param point1 First voxel index.
+   * @param point2 Second (neighbor) voxel index.
+   * @return true if both share the same phase and their misorientation is within tolerance.
    */
-  bool determineGrouping(int64 referencePoint, int64 neighborPoint, int32 gnum) const override;
+  bool areNeighborsSimilar(int64 point1, int64 point2) const override;
+
+  /**
+   * @brief Pre-loads a Z-slice's quaternion, phase, and mask data into the
+   * rolling 2-slot buffer for OOC-efficient access during CCL.
+   *
+   * Slot assignment: even slices -> slot 0, odd slices -> slot 1. Passing
+   * iz < 0 disables slice buffering (used after the slice-by-slice sweep
+   * completes, before periodic boundary merging).
+   *
+   * @param iz Z-slice index to load, or -1 to disable buffering.
+   * @param dimX Number of voxels in X.
+   * @param dimY Number of voxels in Y.
+   * @param dimZ Number of voxels in Z.
+   */
+  Result<> prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ) override;
 
 private:
-  const EBSDSegmentFeaturesInputValues* m_InputValues = nullptr;
-  Float32Array* m_QuatsArray = nullptr;
-  FeatureIdsArrayType* m_CellPhases = nullptr;
-  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxelsArray = nullptr;
-  DataArray<uint32>* m_CrystalStructures = nullptr;
+  const EBSDSegmentFeaturesInputValues* m_InputValues = nullptr;                  ///< Non-owning pointer to user-supplied parameters
+  Float32Array* m_QuatsArray = nullptr;                                           ///< Pointer to the quaternion array (4 components per cell)
+  FeatureIdsArrayType* m_CellPhases = nullptr;                                    ///< Pointer to the cell phases array
+  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxelsArray = nullptr; ///< Mask comparator for filtering valid voxels
+  DataArray<uint32>* m_CrystalStructures = nullptr;                               ///< Pointer to the crystal structures ensemble array
 
-  FeatureIdsArrayType* m_FeatureIdsArray = nullptr;
+  FeatureIdsArrayType* m_FeatureIdsArray = nullptr; ///< Pointer to the output feature IDs array
 
-  std::vector<ebsdlib::LaueOps::Pointer> m_OrientationOps;
+  std::vector<ebsdlib::LaueOps::Pointer> m_OrientationOps; ///< Cached Laue symmetry operators for all crystal systems
+
+  /**
+   * @brief Allocates the rolling 2-slot slice buffers for OOC optimization.
+   * Each slot holds one full XY slice of quaternions, phases, and mask flags.
+   * @param dimX Number of voxels in X.
+   * @param dimY Number of voxels in Y.
+   */
+  Result<> allocateSliceBuffers(int64 dimX, int64 dimY);
+
+  /**
+   * @brief Releases the slice buffers and resets m_UseSliceBuffers to false.
+   */
+  void deallocateSliceBuffers();
+
+  // Rolling 2-slot input buffers for OOC optimization.
+  // Pre-loading input data into these avoids per-element OOC overhead
+  // during neighbor comparisons in the CCL algorithm.
+  std::vector<float32> m_QuatBuffer;                  ///< 2 * sliceSize * 4 quaternion components
+  std::vector<int32> m_PhaseBuffer;                   ///< 2 * sliceSize phase IDs
+  std::vector<uint8> m_MaskBuffer;                    ///< 2 * sliceSize mask flags
+  std::vector<uint32> m_CrystalStructuresCache;       ///< Local copy of the crystal structures ensemble array
+  int64 m_BufSliceSize = 0;                           ///< Number of voxels per XY slice (dimX * dimY)
+  std::array<int64, 2> m_BufferedSliceZ = {-1, -1};   ///< Z-indices currently loaded in each buffer slot
+  std::array<uint64, 2> m_BufferUseSequence = {0, 0}; ///< LRU sequence number for each slot
+  uint64 m_NextBufferUseSequence = 1;                 ///< Next sequence number assigned on a prepare call
+  bool m_UseSliceBuffers = false;                     ///< Whether slice buffers are active
 };
 
 } // namespace nx::core

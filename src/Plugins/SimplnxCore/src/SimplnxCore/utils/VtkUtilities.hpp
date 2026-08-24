@@ -2,6 +2,8 @@
 
 #include "simplnx/Utilities/OStreamUtilities.hpp"
 
+#include <memory>
+
 namespace nx::core
 {
 
@@ -127,21 +129,40 @@ std::string TypeForPrimitive(const IFilter::MessageHandler& messageHandler)
   {
     messageHandler(
         IFilter::Message::Type::Info,
-        fmt::format(
-            "You are using 'long int' as a type which is not 32/64 bit safe. It is suggested you use one of the H5SupportTypes defined in <Common/H5SupportTypes.h> such as int32_t or uint32_t.",
-            typeid(T).name()));
+        fmt::format("You are using 'long int' as a type which is not 32/64 bit safe. It is suggested you use one of the H5SupportTypes defined in <Common/H5SupportTypes.h> such as int32 or uint32.",
+                    typeid(T).name()));
   }
   return "";
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Type-dispatched writer for one numeric DataArray in the legacy VTK
+ * scalar-array representation.
+ *
+ * Both output modes read fixed-size contiguous pages so a disk-backed array is
+ * not revisited once per scalar. Binary pages are converted to VTK's required
+ * big-endian byte order in the temporary buffer, which keeps the source array
+ * unchanged. Boolean values use an explicit byte buffer because packed or
+ * implementation-defined bool storage cannot be written as raw VTK bytes.
+ */
 struct WriteVtkDataArrayFunctor
 {
+  /**
+   * @brief Writes the array selected by @p arrayPath to an already-open VTK file.
+   * @tparam T Primitive component type selected from the array's runtime type.
+   * @param outputFile Destination owned and closed by the caller.
+   * @param binary When true, writes big-endian binary values; otherwise writes ASCII.
+   * @param dataStructure DataStructure that owns the source array.
+   * @param arrayPath Path of the numeric array to write.
+   * @param messageHandler Receives the per-array progress message.
+   * @return An invalid result if a source page cannot be read or a binary page
+   * cannot be written; otherwise a valid result.
+   */
   template <typename T>
-  void operator()(FILE* outputFile, bool binary, DataStructure& dataStructure, const DataPath& arrayPath, const IFilter::MessageHandler& messageHandler)
+  Result<> operator()(FILE* outputFile, bool binary, DataStructure& dataStructure, const DataPath& arrayPath, const IFilter::MessageHandler& messageHandler)
   {
     auto* dataArray = dataStructure.getDataAs<DataArray<T>>(arrayPath);
-    auto& dataStore = dataArray->template getIDataStoreRefAs<DataStore<T>>();
+    auto& dataStore = dataArray->getDataStoreRef();
 
     messageHandler(IFilter::Message::Type::Info, fmt::format("Writing Cell Data {}", arrayPath.getTargetName()));
 
@@ -161,51 +182,97 @@ struct WriteVtkDataArrayFunctor
     fprintf(outputFile, "LOOKUP_TABLE default\n");
     if(binary)
     {
-      if constexpr(endian::little == endian::native)
+      constexpr usize k_ChunkSize = 4096;
+      const usize bufferSize = std::min(k_ChunkSize, std::max<usize>(1, totalElements));
+      auto buf = std::make_unique<T[]>(bufferSize);
+      std::unique_ptr<uint8[]> boolBytes;
+      if constexpr(std::is_same_v<T, bool>)
       {
-        dataArray->byteSwapElements();
+        boolBytes = std::make_unique<uint8[]>(bufferSize);
       }
-      fwrite(dataStore.data(), sizeof(T), totalElements, outputFile);
+      for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
+      {
+        const usize count = std::min(k_ChunkSize, totalElements - offset);
+        auto copyResult = dataStore.copyIntoBuffer(offset, nonstd::span<T>(buf.get(), count));
+        if(copyResult.invalid())
+        {
+          return MakeErrorResult(-2090, fmt::format("Failed to read chunk [{}, {}) from data array '{}' while writing VTK file: {}", offset, offset + count, arrayPath.toString(),
+                                                    copyResult.errors().empty() ? "unknown error" : copyResult.errors()[0].message));
+        }
+
+        if constexpr(std::is_same_v<T, bool>)
+        {
+          for(usize i = 0; i < count; i++)
+          {
+            boolBytes[i] = buf[i] ? uint8{1} : uint8{0};
+          }
+          if(fwrite(boolBytes.get(), sizeof(uint8), count, outputFile) != count)
+          {
+            return MakeErrorResult(-2090, fmt::format("Failed to write chunk [{}, {}) from data array '{}' while writing VTK file.", offset, offset + count, arrayPath.toString()));
+          }
+        }
+        else
+        {
+          if constexpr(endian::little == endian::native)
+          {
+            for(usize i = 0; i < count; i++)
+            {
+              buf[i] = nx::core::byteswap(buf[i]);
+            }
+          }
+          if(fwrite(buf.get(), sizeof(T), count, outputFile) != count)
+          {
+            return MakeErrorResult(-2090, fmt::format("Failed to write chunk [{}, {}) from data array '{}' while writing VTK file.", offset, offset + count, arrayPath.toString()));
+          }
+        }
+      }
       fprintf(outputFile, "\n");
-      if constexpr(endian::little == endian::native)
-      {
-        dataArray->byteSwapElements();
-      }
     }
     else
     {
       std::string buffer;
       buffer.reserve(k_BufferDumpVal);
-      for(size_t i = 0; i < totalElements; i++)
+      constexpr usize k_ChunkSize = 4096;
+      auto values = std::make_unique<T[]>(std::min(k_ChunkSize, std::max<usize>(1, totalElements)));
+      for(usize offset = 0; offset < totalElements; offset += k_ChunkSize)
       {
-        if(i % 20 == 0 && i > 0)
+        const usize count = std::min(k_ChunkSize, totalElements - offset);
+        Result<> copyResult = dataStore.copyIntoBuffer(offset, nonstd::span<T>(values.get(), count));
+        if(copyResult.invalid())
         {
-          buffer.append("\n");
+          return copyResult;
         }
-        if(useIntCast)
+        for(usize localIndex = 0; localIndex < count; localIndex++)
         {
-          buffer.append(fmt::format(" {:d}", static_cast<int>(dataStore[i])));
-        }
-        else if constexpr(std::is_floating_point_v<T>)
-        {
-          buffer.append(fmt::format(" {:f}", dataStore.getValue(i)));
-        }
-        else
-        {
-          buffer.append(fmt::format(" {}", dataStore.getValue(i)));
-        }
-        // If the buffer is within 32 bytes of the reserved size, then dump
-        // the contents to the file.
-        if(buffer.size() > (k_BufferDumpVal - 32))
-        {
-          fprintf(outputFile, "%s", buffer.c_str());
-          buffer.clear();
-          buffer.reserve(k_BufferDumpVal);
+          const usize globalIndex = offset + localIndex;
+          if(globalIndex % 20 == 0 && globalIndex > 0)
+          {
+            buffer.append("\n");
+          }
+          if(useIntCast)
+          {
+            buffer.append(fmt::format(" {:d}", static_cast<int>(values[localIndex])));
+          }
+          else if constexpr(std::is_floating_point_v<T>)
+          {
+            buffer.append(fmt::format(" {:f}", values[localIndex]));
+          }
+          else
+          {
+            buffer.append(fmt::format(" {}", values[localIndex]));
+          }
+          if(buffer.size() > (k_BufferDumpVal - 32))
+          {
+            fprintf(outputFile, "%s", buffer.c_str());
+            buffer.clear();
+            buffer.reserve(k_BufferDumpVal);
+          }
         }
       }
       buffer.append("\n");
       fprintf(outputFile, "%s", buffer.c_str());
     }
+    return {};
   }
 };
 
@@ -294,17 +361,17 @@ struct WriteVtkDataFunctor
     }
     else
     {
-      const size_t k_DefaultElementsPerLine = 10;
+      const usize k_DefaultElementsPerLine = 10;
       auto start = std::chrono::steady_clock::now();
       auto numTuples = dataStoreRef.getSize();
-      size_t currentItemCount = 0;
+      usize currentItemCount = 0;
 
-      for(size_t idx = 0; idx < numTuples; idx++)
+      for(usize idx = 0; idx < numTuples; idx++)
       {
         auto now = std::chrono::steady_clock::now();
         if(std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > 1000)
         {
-          auto string = fmt::format("Processing {}: {}% completed", dataArrayRef.getName(), static_cast<int32>(100 * static_cast<float>(idx) / static_cast<float>(numTuples)));
+          auto string = fmt::format("Processing {}: {}% completed", dataArrayRef.getName(), static_cast<int32>(100 * static_cast<float32>(idx) / static_cast<float32>(numTuples)));
           messageHandler(IFilter::Message::Type::Info, string);
           start = now;
           if(shouldCancel)

@@ -5,24 +5,13 @@
 #include "simplnx/DataStructure/DataPath.hpp"
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/Filter/IFilter.hpp"
-#include "simplnx/Parameters/ArrayCreationParameter.hpp"
-#include "simplnx/Parameters/ArraySelectionParameter.hpp"
-#include "simplnx/Parameters/BoolParameter.hpp"
-
-/**
-* This is example code to put in the Execute Method of the filter.
-  ComputeQuaternionConjugateInputValues inputValues;
-
-  inputValues.QuaternionDataArrayPath = filterArgs.value<DataPath>(k_QuaternionDataArrayPath_Key);
-  inputValues.OutputDataArrayPath = filterArgs.value<DataPath>(k_OutputDataArrayPath_Key);
-  inputValues.DeleteOriginalData = filterArgs.value<bool>(k_DeleteOriginalData_Key);
-
-  return ComputeQuaternionConjugate(dataStructure, messageHandler, shouldCancel, &inputValues)();
-*/
 
 namespace nx::core
 {
 
+/**
+ * @brief Holds the paths and options used to compute quaternion conjugates.
+ */
 struct ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugateInputValues
 {
   DataPath QuaternionDataArrayPath;
@@ -31,7 +20,10 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugateInputValues
 };
 
 /**
- * @class
+ * @brief Selects the direct or bulk-I/O quaternion conjugation implementation.
+ *
+ * The dispatcher keeps the existing parallel direct path for RAM-backed arrays and
+ * selects the bounded scanline path whenever either quaternion array is out-of-core.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugate
 {
@@ -44,6 +36,9 @@ public:
   ComputeQuaternionConjugate& operator=(const ComputeQuaternionConjugate&) = delete;
   ComputeQuaternionConjugate& operator=(ComputeQuaternionConjugate&&) noexcept = delete;
 
+  /**
+   * @brief Computes quaternion conjugates using the storage-appropriate algorithm.
+   */
   Result<> operator()();
 
   const std::atomic_bool& getCancel();

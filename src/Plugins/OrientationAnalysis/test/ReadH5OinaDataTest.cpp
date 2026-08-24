@@ -10,6 +10,7 @@
 #include "OrientationAnalysis/OrientationAnalysis_test_dirs.hpp"
 #include "OrientationAnalysis/Parameters/OEMEbsdScanSelectionParameter.h"
 
+#include <EbsdLib/IO/HKL/H5OINAReader.h>
 #include <EbsdLib/IO/TSL/AngFields.h>
 
 #include <filesystem>

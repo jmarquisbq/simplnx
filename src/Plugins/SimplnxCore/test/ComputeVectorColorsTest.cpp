@@ -1,14 +1,21 @@
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
+#include <array>
 #include <catch2/catch.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+
+#include <nonstd/span.hpp>
 
 #include "SimplnxCore/Filters/ComputeVectorColorsFilter.hpp"
 
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 using namespace nx::core;
 namespace fs = std::filesystem;

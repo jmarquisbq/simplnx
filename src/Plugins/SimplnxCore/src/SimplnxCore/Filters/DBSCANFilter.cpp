@@ -160,20 +160,9 @@ IFilter::PreflightResult DBSCANFilter::preflightImpl(const DataStructure& dataSt
   }
 
   {
-    auto createAction = std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue),
-                                                            CreateArrayAction::k_DefaultDataFormat, "0");
+    auto createAction =
+        std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue), "", "0");
     resultOutputActions.value().appendAction(std::move(createAction));
-  }
-
-  if(!pUseMaskValue)
-  {
-    DataPath tempPath = DataPath({k_MaskName});
-    {
-      auto createAction = std::make_unique<CreateArrayAction>(DataType::boolean, clusterArray->getTupleShape(), std::vector<usize>{1}, tempPath, CreateArrayAction::k_DefaultDataFormat, "true");
-      resultOutputActions.value().appendAction(std::move(createAction));
-    }
-
-    resultOutputActions.value().appendDeferredAction(std::make_unique<DeleteDataAction>(tempPath));
   }
 
   // Resized later
@@ -197,11 +186,8 @@ IFilter::PreflightResult DBSCANFilter::preflightImpl(const DataStructure& dataSt
 Result<> DBSCANFilter::executeImpl(DataStructure& dataStructure, const Arguments& filterArgs, const PipelineFilter* pipelineNode, const MessageHandler& messageHandler,
                                    const std::atomic_bool& shouldCancel, const ExecutionContext& executionContext) const
 {
-  auto maskPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
-  if(!filterArgs.value<bool>(k_UseMask_Key))
-  {
-    maskPath = DataPath({k_MaskName});
-  }
+  const bool useMask = filterArgs.value<bool>(k_UseMask_Key);
+  const auto maskPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
 
   auto seed = filterArgs.value<std::mt19937_64::result_type>(k_SeedValue_Key);
   if(static_cast<DBSCAN::ParseOrder>(filterArgs.value<ChoicesParameter::ValueType>(k_ParseOrderIndex_Key)) != DBSCAN::ParseOrder::SeededRandom)
@@ -220,6 +206,7 @@ Result<> DBSCANFilter::executeImpl(DataStructure& dataStructure, const Arguments
   inputValues.Epsilon = filterArgs.value<float32>(k_Epsilon_Key);
   inputValues.MinPoints = filterArgs.value<int32>(k_MinPoints_Key);
   inputValues.DistanceMetric = static_cast<ClusterUtilities::DistanceMetric>(filterArgs.value<ChoicesParameter::ValueType>(k_DistanceMetric_Key));
+  inputValues.UseMask = useMask;
   inputValues.MaskArrayPath = maskPath;
   inputValues.ClusteringArrayPath = filterArgs.value<DataPath>(k_SelectedArrayPath_Key);
   inputValues.FeatureIdsArrayPath = inputValues.ClusteringArrayPath.replaceName(filterArgs.value<std::string>(k_FeatureIdsArrayName_Key));

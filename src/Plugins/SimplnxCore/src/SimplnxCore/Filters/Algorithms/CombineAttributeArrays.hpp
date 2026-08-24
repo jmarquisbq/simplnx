@@ -8,14 +8,12 @@
 #include "simplnx/Parameters/MultiArraySelectionParameter.hpp"
 #include "simplnx/Parameters/StringParameter.hpp"
 
-/**
-* This is example code to put in the Execute Method of the filter.
-
-*/
-
 namespace nx::core
 {
 
+/**
+ * @brief Runtime inputs for combining selected arrays component-wise into one output array.
+ */
 struct SIMPLNXCORE_EXPORT CombineAttributeArraysInputValues
 {
   bool NormalizeData = {};
@@ -24,7 +22,11 @@ struct SIMPLNXCORE_EXPORT CombineAttributeArraysInputValues
 };
 
 /**
- * @class
+ * @brief Streams equally typed arrays into a combined array while preserving tuple and component order.
+ *
+ * Data is transferred through bounded contiguous buffers so disk-backed stores are never accessed
+ * per element and transient memory does not scale with the number of tuples. Normalization uses a
+ * bounded min/max pass followed by the combined-output pass.
  */
 class SIMPLNXCORE_EXPORT CombineAttributeArrays
 {

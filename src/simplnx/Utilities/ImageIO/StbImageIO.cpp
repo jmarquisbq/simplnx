@@ -71,7 +71,6 @@ Result<ImageMetadata> StbImageIO::readMetadata(const std::filesystem::path& file
 // -----------------------------------------------------------------------------
 Result<> StbImageIO::readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const
 {
-  // First get metadata to determine the data type
   Result<ImageMetadata> metaResult = readMetadata(filePath);
   if(metaResult.invalid())
   {
@@ -79,54 +78,72 @@ Result<> StbImageIO::readPixelData(const std::filesystem::path& filePath, std::s
   }
   const ImageMetadata& metadata = metaResult.value();
 
-  std::string pathStr = filePath.string();
-  int width = 0;
-  int height = 0;
-  int comp = 0;
-
   usize bpe = GetDataTypeSize(metadata.dataType);
   usize expectedSize = metadata.width * metadata.height * metadata.numComponents * bpe;
 
   if(buffer.size() != expectedSize)
   {
-    return MakeErrorResult(k_ErrorBufferSizeMismatch, fmt::format("Buffer size {} does not match expected size {} for image '{}'", buffer.size(), expectedSize, pathStr));
+    return MakeErrorResult(k_ErrorBufferSizeMismatch, fmt::format("Buffer size {} does not match expected size {} for image '{}'", buffer.size(), expectedSize, filePath.string()));
   }
+
+  const usize rowBytes = metadata.width * metadata.numComponents * bpe;
+  return readPixelDataRows(filePath, [&](usize row, usize columnOffset, usize pixelCount, std::span<const uint8> pixels) -> Result<> {
+    const usize byteOffset = row * rowBytes + columnOffset * metadata.numComponents * bpe;
+    const usize byteCount = pixelCount * metadata.numComponents * bpe;
+    std::memcpy(buffer.data() + byteOffset, pixels.data(), byteCount);
+    return {};
+  });
+}
+
+// -----------------------------------------------------------------------------
+Result<> StbImageIO::readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const
+{
+  Result<ImageMetadata> metaResult = readMetadata(filePath);
+  if(metaResult.invalid())
+  {
+    return ConvertResult(std::move(metaResult));
+  }
+  const ImageMetadata& metadata = metaResult.value();
+
+  const std::string pathStr = filePath.string();
+  int width = 0;
+  int height = 0;
+  int comp = 0;
+  void* decodedData = nullptr;
 
   if(metadata.dataType == DataType::float32)
   {
-    float* data = stbi_loadf(pathStr.c_str(), &width, &height, &comp, 0);
-    if(data == nullptr)
-    {
-      const char* reason = stbi_failure_reason();
-      return MakeErrorResult(k_ErrorLoadFailed, fmt::format("Failed to load HDR image '{}': {}", pathStr, reason != nullptr ? reason : "unknown error"));
-    }
-    std::memcpy(buffer.data(), data, expectedSize);
-    stbi_image_free(data);
+    decodedData = stbi_loadf(pathStr.c_str(), &width, &height, &comp, 0);
   }
   else if(metadata.dataType == DataType::uint16)
   {
-    stbi_us* data = stbi_load_16(pathStr.c_str(), &width, &height, &comp, 0);
-    if(data == nullptr)
-    {
-      const char* reason = stbi_failure_reason();
-      return MakeErrorResult(k_ErrorLoadFailed, fmt::format("Failed to load 16-bit image '{}': {}", pathStr, reason != nullptr ? reason : "unknown error"));
-    }
-    std::memcpy(buffer.data(), data, expectedSize);
-    stbi_image_free(data);
+    decodedData = stbi_load_16(pathStr.c_str(), &width, &height, &comp, 0);
   }
   else
   {
-    stbi_uc* data = stbi_load(pathStr.c_str(), &width, &height, &comp, 0);
-    if(data == nullptr)
-    {
-      const char* reason = stbi_failure_reason();
-      return MakeErrorResult(k_ErrorLoadFailed, fmt::format("Failed to load image '{}': {}", pathStr, reason != nullptr ? reason : "unknown error"));
-    }
-    std::memcpy(buffer.data(), data, expectedSize);
-    stbi_image_free(data);
+    decodedData = stbi_load(pathStr.c_str(), &width, &height, &comp, 0);
   }
 
-  return {};
+  if(decodedData == nullptr)
+  {
+    const char* reason = stbi_failure_reason();
+    return MakeErrorResult(k_ErrorLoadFailed, fmt::format("Failed to load image '{}': {}", pathStr, reason != nullptr ? reason : "unknown error"));
+  }
+
+  const usize bytesPerElement = GetDataTypeSize(metadata.dataType);
+  const usize rowBytes = metadata.width * metadata.numComponents * bytesPerElement;
+  const auto* bytes = static_cast<const uint8*>(decodedData);
+  Result<> result;
+  for(usize row = 0; row < metadata.height; ++row)
+  {
+    result = callback(row, 0, metadata.width, std::span<const uint8>(bytes + row * rowBytes, rowBytes));
+    if(result.invalid())
+    {
+      break;
+    }
+  }
+  stbi_image_free(decodedData);
+  return result;
 }
 
 // -----------------------------------------------------------------------------

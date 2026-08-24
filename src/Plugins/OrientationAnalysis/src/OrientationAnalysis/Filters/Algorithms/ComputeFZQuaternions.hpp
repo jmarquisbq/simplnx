@@ -12,6 +12,9 @@
 namespace nx::core
 {
 
+/**
+ * @brief Input paths and options consumed by ComputeFZQuaternions.
+ */
 struct ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternionsInputValues
 {
   ArraySelectionParameter::ValueType CellPhasesArrayPath;
@@ -24,9 +27,12 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternionsInputValues
 
 /**
  * @class ComputeFZQuaternions
- * @brief This algorithm implements support code for the ComputeFZQuaternionsFilter
+ * @brief Computes a symmetry-equivalent fundamental-zone quaternion for each input tuple.
+ *
+ * The algorithm dispatches between a parallel contiguous-store path for in-memory arrays and
+ * a bounded streaming path for OOC arrays. This removes datastore abstraction from the direct
+ * hot loop while preventing per-cell access from loading and evicting disk-backed chunks.
  */
-
 class ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternions
 {
 public:
@@ -38,6 +44,10 @@ public:
   ComputeFZQuaternions& operator=(const ComputeFZQuaternions&) = delete;
   ComputeFZQuaternions& operator=(ComputeFZQuaternions&&) noexcept = delete;
 
+  /**
+   * @brief Executes the direct or streaming implementation based on the participating datastores.
+   * @return A valid result on success or cancellation, or an error for invalid phase references or bulk I/O failures.
+   */
   Result<> operator()();
 
 private:

@@ -25,7 +25,7 @@ struct SIMPLNXCORE_EXPORT ComputeArrayHistogramInputValues
 
 /**
  * @class ComputeArrayHistogram
- * @brief This filter calculates a Histogram according to user specification and stores it accordingly
+ * @brief Calculates histograms using direct modal processing for in-memory arrays and bounded contiguous reads for out-of-core arrays.
  */
 class SIMPLNXCORE_EXPORT ComputeArrayHistogram
 {
@@ -38,10 +38,10 @@ public:
   ComputeArrayHistogram& operator=(const ComputeArrayHistogram&) = delete;
   ComputeArrayHistogram& operator=(ComputeArrayHistogram&&) noexcept = delete;
 
+  /**
+   * @brief Streams each input through range and binning passes and dispatches modal processing according to the input storage type.
+   */
   Result<> operator()();
-
-  void updateProgress(const std::string& progMessage);
-  const std::atomic_bool& getCancel();
 
 private:
   DataStructure& m_DataStructure;

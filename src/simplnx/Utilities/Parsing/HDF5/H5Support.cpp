@@ -95,6 +95,8 @@ herr_t nx::core::HDF5::Support::FindAttr(hid_t /*locationID*/, const char* name,
 
 herr_t nx::core::HDF5::Support::FindAttribute(hid_t locationId, const std::string& attributeName)
 {
+  H5SUPPORT_MUTEX_LOCK()
+
   hsize_t attributeNum;
   herr_t returnError = 0;
 

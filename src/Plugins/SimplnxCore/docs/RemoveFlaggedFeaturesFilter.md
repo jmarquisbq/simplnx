@@ -24,6 +24,24 @@ If the operation is [0] or [2] and the Cell Feature AttributeMatrix contains any
 
 This filter will **ONLY** run on an Image Geometry.
 
+## Algorithm
+
+### In-Core Path
+
+`RemoveFlaggedFeaturesDirect` preserves the established in-memory workflow: it marks
+cells belonging to flagged features, optionally fills those cells from the most common
+face-connected neighboring feature, and compacts the feature data group.
+
+### Out-of-Core Path
+
+`RemoveFlaggedFeaturesScanline` is selected whenever a cell array that can be changed
+by removal or filling is disk-backed. It reads and writes FeatureIds in fixed bulk
+chunks. During filling it keeps only a rolling set of FeatureIds slices and one
+per-slice source-mark array; each affected sibling cell array is copied with bounded
+bulk slice transfers. The working memory therefore scales with an Image Geometry slice
+rather than the total number of cells, while feature-level flags and compaction state
+remain small resident data.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

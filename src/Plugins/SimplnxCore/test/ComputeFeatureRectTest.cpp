@@ -4,12 +4,18 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include "SimplnxCore/Filters/ComputeFeatureRectFilter.hpp"
 
 #include <catch2/catch.hpp>
+#include <nonstd/span.hpp>
+
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <memory>
 
 using namespace nx::core;
 namespace fs = std::filesystem;
@@ -22,6 +28,11 @@ const std::string k_FeatureAttrMatrixName = "FeatureData";
 const std::string k_FeatureIdsArrayName = "FeatureIds";
 const std::string k_RectCoordsArrayName = "RectCoords";
 const std::string k_RectCoordsExemplaryArrayName = "RectCoordsExemplary";
+
+constexpr usize k_LargeDim = 200;
+constexpr usize k_BlockSize = 10;
+constexpr usize k_BlocksPerAxis = k_LargeDim / k_BlockSize;
+constexpr usize k_NumBlockFeatures = k_BlocksPerAxis * k_BlocksPerAxis * k_BlocksPerAxis;
 
 // -----------------------------------------------------------------------------
 DataStructure CreateTestData()
@@ -100,6 +111,55 @@ DataStructure CreateTestData()
   rectStore.setComponent(3, 5, 2);
 
   return dataStructure;
+}
+
+// -----------------------------------------------------------------------------
+Int32Array* CreateLargeBlockTestData(DataStructure& dataStructure)
+{
+  auto* imageGeom = ImageGeom::Create(dataStructure, k_ImageGeometryName);
+  imageGeom->setDimensions({k_LargeDim, k_LargeDim, k_LargeDim});
+
+  const ShapeType cellShape = {k_LargeDim, k_LargeDim, k_LargeDim};
+  auto* cellAM = AttributeMatrix::Create(dataStructure, k_CellAttrMatrixName, cellShape, imageGeom->getId());
+  imageGeom->setCellData(*cellAM);
+
+  const DataPath featureIdsPath{{k_ImageGeometryName, k_CellAttrMatrixName, k_FeatureIdsArrayName}};
+  auto featureIdsDataStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, featureIdsPath, cellShape, {1}, IDataAction::Mode::Execute);
+  auto* featureIds = Int32Array::Create(dataStructure, k_FeatureIdsArrayName, featureIdsDataStore, cellAM->getId());
+  auto& featureIdsStore = featureIds->getDataStoreRef();
+
+  constexpr usize k_SliceTuples = k_LargeDim * k_LargeDim;
+  auto sliceBuffer = std::make_unique<int32[]>(k_SliceTuples);
+  for(usize z = 0; z < k_LargeDim; z++)
+  {
+    const usize blockZ = z / k_BlockSize;
+    for(usize y = 0; y < k_LargeDim; y++)
+    {
+      const usize blockY = y / k_BlockSize;
+      for(usize x = 0; x < k_LargeDim; x++)
+      {
+        const usize blockX = x / k_BlockSize;
+        sliceBuffer[y * k_LargeDim + x] = static_cast<int32>(1 + blockX + k_BlocksPerAxis * (blockY + k_BlocksPerAxis * blockZ));
+      }
+    }
+
+    auto writeResult = featureIdsStore.copyFromBuffer(z * k_SliceTuples, nonstd::span<const int32>(sliceBuffer.get(), k_SliceTuples));
+    SIMPLNX_RESULT_REQUIRE_VALID(writeResult);
+  }
+
+  AttributeMatrix::Create(dataStructure, k_FeatureAttrMatrixName, {k_NumBlockFeatures + 1}, imageGeom->getId());
+  return featureIds;
+}
+
+// -----------------------------------------------------------------------------
+void RequireFeatureCorners(const UInt32Array& corners, usize featureId, const std::array<uint32, 6>& expected)
+{
+  const auto& cornersStore = corners.getDataStoreRef();
+  INFO("Feature ID: " << featureId);
+  for(usize component = 0; component < expected.size(); component++)
+  {
+    REQUIRE(cornersStore.getComponentValue(featureId, component) == expected[component]);
+  }
 }
 } // namespace
 

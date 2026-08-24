@@ -14,6 +14,31 @@
 namespace nx::core
 {
 /**
+ * @brief Result of ComputeFeatureRenumbering: the compaction mapping applied when inactive features
+ * are removed from a feature AttributeMatrix.
+ */
+struct FeatureRenumbering
+{
+  std::vector<size_t> newNames; ///< Old feature id -> new compacted id. Feature 0 and inactive features map to 0.
+  std::vector<size_t> keepList; ///< Active feature ids (>= 1), in ascending order.
+  bool anyRemoved = false;      ///< True if at least one feature with id >= 1 is inactive.
+};
+
+/**
+ * @brief Computes the feature-id compaction mapping for RemoveInactiveObjects.
+ *
+ * Active features (id >= 1) are renumbered to consecutive ids starting at 1, preserving order;
+ * feature 0 and any inactive feature map to 0. This is the single source of truth for the renumber
+ * mapping so callers that renumber cell FeatureIds upstream (and then pass
+ * cellFeatureIdsRenumbered=true to RemoveInactiveObjects) stay consistent with the feature-array
+ * compaction RemoveInactiveObjects performs.
+ *
+ * @param activeObjects Per-feature active flag (index 0 is the unused/feature-0 slot).
+ * @return FeatureRenumbering holding newNames, keepList, and anyRemoved.
+ */
+SIMPLNX_EXPORT FeatureRenumbering ComputeFeatureRenumbering(const std::vector<bool>& activeObjects);
+
+/**
  * @brief RemoveInactiveObjects This assumes a single Dimension TupleShape, i.e., a Linear array, (1D)
  *
  * NeighborLists are NO LONGER Removed. That is the responsibility of the filter.
@@ -24,10 +49,14 @@ namespace nx::core
  * @param cellFeatureIds
  * @param messageHandler
  * @param shouldCancel
+ * @param cellFeatureIdsRenumbered When true, the caller has already remapped cellFeatureIds using the
+ *        ComputeFeatureRenumbering mapping (e.g. fused into an earlier pass), so the expensive
+ *        full-volume renumber of cellFeatureIds is skipped. Feature-array compaction and the
+ *        AttributeMatrix resize still run. Defaults to false (RemoveInactiveObjects renumbers).
  * @return
  */
 SIMPLNX_EXPORT bool RemoveInactiveObjects(DataStructure& dataStructure, const DataPath& featureDataGroupPath, const std::vector<bool>& activeObjects, Int32AbstractDataStore& cellFeatureIds,
-                                          size_t currentFeatureCount, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel);
+                                          size_t currentFeatureCount, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, bool cellFeatureIdsRenumbered = false);
 
 /**
  * @brief This function will gather all of the sibling DataArrays to the input DataPath, then filter out all the 'IgnoredDataPaths`

@@ -12,18 +12,29 @@
 namespace nx::core
 {
 
+/**
+ * @brief Input values for the ReadAngData algorithm.
+ */
 struct ORIENTATIONANALYSIS_EXPORT ReadAngDataInputValues
 {
-  FileSystemPathParameter::ValueType InputFile;
-  DataPath DataContainerName;
-  std::string CellAttributeMatrixName;
-  std::string CellEnsembleAttributeMatrixName;
+  FileSystemPathParameter::ValueType InputFile; ///< Path to the .ang EBSD data file.
+  DataPath DataContainerName;                   ///< Path to the output DataContainer (ImageGeom).
+  std::string CellAttributeMatrixName;          ///< Name of the cell-level AttributeMatrix.
+  std::string CellEnsembleAttributeMatrixName;  ///< Name of the ensemble-level AttributeMatrix.
 };
 
 /**
  * @class ReadAngData
- * @brief This filter will read a single .ang file into a new Image Geometry, allowing the immediate use of Filters on the data instead of having to generate the intermediate
- * .h5ebsd file.
+ * @brief Algorithm that reads a single .ang EBSD file into an Image Geometry.
+ *
+ * Parses the .ang file using EbsdLib's AngReader, then transfers the parsed data
+ * into the DataStructure's cell-level and ensemble-level arrays.
+ *
+ * @section ooc_summary OOC Optimization Summary
+ * All data transfer from the EbsdLib reader buffers into the DataStructure uses
+ * copyFromBuffer() bulk writes instead of per-element operator[] access. Euler angles
+ * (3 separate source arrays interleaved into 1 destination) use a chunked buffer approach
+ * to bound memory while maintaining bulk I/O efficiency. See copyRawEbsdData() for details.
  */
 class ORIENTATIONANALYSIS_EXPORT ReadAngData
 {
@@ -31,11 +42,15 @@ public:
   ReadAngData(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ReadAngDataInputValues* inputValues);
   ~ReadAngData() noexcept;
 
-  ReadAngData(const ReadAngData&) = delete;            // Copy Constructor Not Implemented
-  ReadAngData(ReadAngData&&) = delete;                 // Move Constructor Not Implemented
-  ReadAngData& operator=(const ReadAngData&) = delete; // Copy Assignment Not Implemented
-  ReadAngData& operator=(ReadAngData&&) = delete;      // Move Assignment Not Implemented
+  ReadAngData(const ReadAngData&) = delete;
+  ReadAngData(ReadAngData&&) = delete;
+  ReadAngData& operator=(const ReadAngData&) = delete;
+  ReadAngData& operator=(ReadAngData&&) = delete;
 
+  /**
+   * @brief Executes the algorithm: reads the .ang file and populates the DataStructure.
+   * @return Result<> indicating success or an EbsdLib error.
+   */
   Result<> operator()();
 
 private:

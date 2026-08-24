@@ -16,6 +16,8 @@
 
 #include "SimplnxCore/Filters/Algorithms/ComputeArrayHistogramByFeature.hpp"
 
+#include <limits>
+
 using namespace nx::core;
 
 namespace nx::core
@@ -127,8 +129,21 @@ IFilter::PreflightResult ComputeArrayHistogramByFeatureFilter::preflightImpl(con
   auto pBinModalBinRangesName = filterArgs.value<std::string>(k_HistoModalBinRangesName_Key);
   auto pUseMaskValue = filterArgs.value<bool>(k_UseMask_Key);
   auto pMaskArrayPathValue = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
+  auto pCellFeatureIdsArrayPathValue = filterArgs.value<DataPath>(k_CellFeatureIdsArrayPath_Key);
 
   nx::core::Result<OutputActions> resultOutputActions;
+
+  if(pNumberOfBinsValue <= 0)
+  {
+    return {MakeErrorResult<OutputActions>(-57208, fmt::format("Number of Bins ({}) must be greater than zero.", pNumberOfBinsValue)), {}};
+  }
+  if(static_cast<usize>(pNumberOfBinsValue) > std::numeric_limits<usize>::max() / 2)
+  {
+    return {MakeErrorResult<OutputActions>(-57210, fmt::format("Number of Bins ({}) is too large to create a bin-range component shape with two values per bin on this platform.", pNumberOfBinsValue)),
+            {}};
+  }
+
+  const auto& featureIdsArray = dataStructure.getDataRefAs<IDataArray>(pCellFeatureIdsArrayPathValue);
 
   if(pNewDataGroupValue)
   {
@@ -154,10 +169,17 @@ IFilter::PreflightResult ComputeArrayHistogramByFeatureFilter::preflightImpl(con
   for(auto& selectedArrayPath : pSelectedArrayPathsValue)
   {
     const auto* dataArray = dataStructure.getDataAs<IDataArray>(selectedArrayPath);
+    if(featureIdsArray.getNumberOfTuples() != dataArray->getNumberOfTuples())
+    {
+      return {MakeErrorResult<OutputActions>(-57209,
+                                             fmt::format("Cell Feature Ids array '{}' has tuple count {} and input array '{}' has tuple count {}. These tuple counts MUST match.",
+                                                         pCellFeatureIdsArrayPathValue.toString(), featureIdsArray.getNumberOfTuples(), selectedArrayPath.toString(), dataArray->getNumberOfTuples())),
+              {}};
+    }
     if(maskArray && maskArray->getNumberOfTuples() != dataArray->getNumberOfTuples())
     {
-      return {MakeErrorResult<OutputActions>(-57207, fmt::format("Mask array '{}' has tuple count {} and input array '{}' has tuple count {}.  These tuple counts MUST match.", maskArray->getName(),
-                                                                 maskArray->getNumberOfTuples(), dataArray->getName(), dataArray->getNumberOfTuples())),
+      return {MakeErrorResult<OutputActions>(-57207, fmt::format("Mask array '{}' has tuple count {} and input array '{}' has tuple count {}. These tuple counts MUST match.",
+                                                                 pMaskArrayPathValue.toString(), maskArray->getNumberOfTuples(), selectedArrayPath.toString(), dataArray->getNumberOfTuples())),
               {}};
     }
 

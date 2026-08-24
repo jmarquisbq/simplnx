@@ -267,6 +267,18 @@ public:
    */
   void setStore(const std::shared_ptr<AbstractStringStore>& newStore);
 
+  /**
+   * @brief Returns whether this array is still backed by a metadata-only placeholder store
+   * (EmptyStringStore) rather than a real value store.
+   *
+   * A placeholder records the tuple shape during preflight/import but holds no string data. Import
+   * finalization replaces it with a real StringStore. This forwards AbstractStringStore::isPlaceholder()
+   * so callers (e.g. the deferred-import Empty-sweep) can detect un-materialized placeholders without a
+   * dynamic_cast on the store type. A null store is treated as a placeholder.
+   * @return bool True if the underlying store is a placeholder (or null), false otherwise
+   */
+  bool isPlaceholder() const;
+
 protected:
   /**
    * @brief Constructs an empty StringArray.

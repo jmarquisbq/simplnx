@@ -14,13 +14,14 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <type_traits>
 
 using namespace nx::core;
 
 namespace
 {
-// Cropping window inside the source image. If no cropping is used, the window covers the full image.
+/** @brief Source crop and destination shape used to request and place one decoded image row. */
 struct CropWindow
 {
   usize srcWidth = 0;
@@ -32,8 +33,7 @@ struct CropWindow
   usize numComponents = 1;
 };
 
-// Extracts a single element of type T from a raw byte buffer at the given byte offset
-// without violating strict aliasing rules.
+/** @brief Extracts a typed element from raw decoder bytes without violating alignment or aliasing rules. */
 template <typename T>
 T ReadElementAs(const uint8* data, usize byteOffset)
 {
@@ -42,46 +42,30 @@ T ReadElementAs(const uint8* data, usize byteOffset)
   return value;
 }
 
+/** @brief Copies decoder bytes whose scalar type already matches the destination through one checked bulk write. */
 struct CopyPixelDataFunctor
 {
+  /** @brief Copies one row/band into the runtime-selected destination store type. */
   template <typename T>
-  Result<> operator()(IDataArray& dataArray, const std::vector<uint8>& buffer, const CropWindow& window)
+  Result<> operator()(IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
     auto& dataStore = dataArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
-    const uint8* bufferData = buffer.data();
-
-    const usize nComps = window.numComponents;
-    const usize srcWidth = window.srcWidth;
-    const usize dstWidth = window.dstWidth;
-    const usize xStart = window.xStart;
-    const usize yStart = window.yStart;
-
-    for(usize y = 0; y < window.dstHeight; y++)
-    {
-      const usize srcY = y + yStart;
-      for(usize x = 0; x < window.dstWidth; x++)
-      {
-        const usize srcX = x + xStart;
-        const usize srcIndex = (srcY * srcWidth + srcX) * nComps;
-        const usize dstIndex = (y * dstWidth + x) * nComps;
-        for(usize c = 0; c < nComps; c++)
-        {
-          dataStore[dstIndex + c] = ReadElementAs<T>(bufferData, (srcIndex + c) * sizeof(T));
-        }
-      }
-    }
-    return {};
+    const usize elementCount = bytes.size() / sizeof(T);
+    auto values = std::make_unique<T[]>(elementCount);
+    std::memcpy(values.get(), bytes.data(), bytes.size());
+    return dataStore.copyFromBuffer(destinationOffset, nonstd::span<const T>(values.get(), elementCount));
   }
 };
 
+/** @brief Converts one decoder row/band from SrcT to a normalized destination scalar type. */
 template <typename SrcT>
 struct ConvertPixelDataFunctor
 {
+  /** @brief Saturates, normalizes, converts, and bulk-writes one bounded decoded byte range. */
   template <typename DestT>
-  Result<> operator()(IDataArray& dataArray, const std::vector<uint8>& buffer, const CropWindow& window)
+  Result<> operator()(IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
     auto& dataStore = dataArray.template getIDataStoreRefAs<AbstractDataStore<DestT>>();
-    const uint8* bufferData = buffer.data();
 
     // For integer source/dest types the saturation value is the type's max. For floating-point
     // we follow stb's HDR convention that pixel values lie in [0, 1] and saturate outside that
@@ -90,41 +74,29 @@ struct ConvertPixelDataFunctor
     constexpr double srcMax = std::is_floating_point_v<SrcT> ? 1.0 : static_cast<double>(std::numeric_limits<SrcT>::max());
     constexpr double destMax = std::is_floating_point_v<DestT> ? 1.0 : static_cast<double>(std::numeric_limits<DestT>::max());
 
-    const usize nComps = window.numComponents;
-    const usize srcWidth = window.srcWidth;
-    const usize dstWidth = window.dstWidth;
-    const usize xStart = window.xStart;
-    const usize yStart = window.yStart;
-
-    for(usize y = 0; y < window.dstHeight; y++)
+    const usize elementCount = bytes.size() / sizeof(SrcT);
+    auto convertedValues = std::make_unique<DestT[]>(elementCount);
+    for(usize i = 0; i < elementCount; ++i)
     {
-      const usize srcY = y + yStart;
-      for(usize x = 0; x < window.dstWidth; x++)
-      {
-        const usize srcX = x + xStart;
-        const usize srcIndex = (srcY * srcWidth + srcX) * nComps;
-        const usize dstIndex = (y * dstWidth + x) * nComps;
-        for(usize c = 0; c < nComps; c++)
-        {
-          const SrcT srcValue = ReadElementAs<SrcT>(bufferData, (srcIndex + c) * sizeof(SrcT));
-          // Clamp into the source's saturation range before normalizing so HDR floats > 1.0 or
-          // negative values do not wrap around through the destination's representable range.
-          const double clampedSrc = std::clamp(static_cast<double>(srcValue), 0.0, srcMax);
-          const double normalized = clampedSrc / srcMax;
-          dataStore[dstIndex + c] = static_cast<DestT>(normalized * destMax);
-        }
-      }
+      const SrcT srcValue = ReadElementAs<SrcT>(bytes.data(), i * sizeof(SrcT));
+      // Clamp into the source's saturation range before normalizing so HDR floats > 1.0 or
+      // negative values do not wrap around through the destination's representable range.
+      const double clampedSrc = std::clamp(static_cast<double>(srcValue), 0.0, srcMax);
+      const double normalized = clampedSrc / srcMax;
+      convertedValues[i] = static_cast<DestT>(normalized * destMax);
     }
-    return {};
+    return dataStore.copyFromBuffer(destinationOffset, nonstd::span<const DestT>(convertedValues.get(), elementCount));
   }
 };
 
+/** @brief Performs the second runtime dispatch from source scalar type to destination scalar type. */
 struct DispatchConversionFunctor
 {
+  /** @brief Invokes the matching source/destination conversion specialization. */
   template <typename SrcT>
-  Result<> operator()(DataType destType, IDataArray& dataArray, const std::vector<uint8>& buffer, const CropWindow& window)
+  Result<> operator()(DataType destType, IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
-    return ExecuteDataFunction(ConvertPixelDataFunctor<SrcT>{}, destType, dataArray, buffer, window);
+    return ExecuteDataFunction(ConvertPixelDataFunctor<SrcT>{}, destType, dataArray, bytes, destinationOffset);
   }
 };
 } // namespace
@@ -161,21 +133,6 @@ Result<> ReadImage::operator()()
     return ConvertResult(std::move(metadataResult));
   }
   const auto& metadata = metadataResult.value();
-
-  usize bytesPerComp = GetDataTypeSize(metadata.dataType);
-  usize bufferSize = metadata.width * metadata.height * metadata.numComponents * bytesPerComp;
-
-  std::vector<uint8> tempBuffer(bufferSize);
-  auto readResult = imageIO->readPixelData(inputFilePath, tempBuffer);
-  if(readResult.invalid())
-  {
-    return readResult;
-  }
-
-  if(m_ShouldCancel)
-  {
-    return {};
-  }
 
   auto& imageArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues.imageDataArrayPath);
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues.imageGeometryPath);
@@ -265,23 +222,51 @@ Result<> ReadImage::operator()()
   DataType destType = imageArray.getDataType();
   DataType srcType = metadata.dataType;
 
-  if(m_InputValues.changeDataType && srcType != destType)
+  const bool convertData = m_InputValues.changeDataType && srcType != destType;
+  if(convertData)
   {
     m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Converting pixel data from {} to {}", DataTypeToString(srcType), DataTypeToString(destType)));
-    auto convResult = ExecuteDataFunction(DispatchConversionFunctor{}, srcType, destType, imageArray, tempBuffer, window);
-    if(convResult.invalid())
-    {
-      return convResult;
-    }
-  }
-  else
-  {
-    auto copyResult = ExecuteDataFunction(CopyPixelDataFunctor{}, srcType, imageArray, tempBuffer, window);
-    if(copyResult.invalid())
-    {
-      return copyResult;
-    }
   }
 
-  return {};
+  const usize bytesPerComponent = GetDataTypeSize(srcType);
+  const usize bytesPerPixel = window.numComponents * bytesPerComponent;
+  bool cancelled = false;
+  Result<> streamResult = imageIO->readPixelDataRows(inputFilePath, [&](usize sourceRow, usize sourceColumn, usize pixelCount, std::span<const uint8> pixels) -> Result<> {
+    if(m_ShouldCancel)
+    {
+      cancelled = true;
+      return MakeErrorResult(-2004, "Image read cancelled.");
+    }
+
+    if(sourceRow < window.yStart || sourceRow >= window.yStart + window.dstHeight)
+    {
+      return {};
+    }
+
+    const usize segmentEnd = sourceColumn + pixelCount;
+    const usize cropEnd = window.xStart + window.dstWidth;
+    const usize copyStart = std::max(sourceColumn, window.xStart);
+    const usize copyEnd = std::min(segmentEnd, cropEnd);
+    if(copyStart >= copyEnd)
+    {
+      return {};
+    }
+
+    const usize copiedPixels = copyEnd - copyStart;
+    const usize sourceByteOffset = (copyStart - sourceColumn) * bytesPerPixel;
+    const usize copiedBytes = copiedPixels * bytesPerPixel;
+    const std::span<const uint8> copiedSpan = pixels.subspan(sourceByteOffset, copiedBytes);
+    const usize destinationOffset = (((sourceRow - window.yStart) * window.dstWidth) + (copyStart - window.xStart)) * window.numComponents;
+
+    if(convertData)
+    {
+      return ExecuteDataFunction(DispatchConversionFunctor{}, srcType, destType, imageArray, copiedSpan, destinationOffset);
+    }
+    return ExecuteDataFunction(CopyPixelDataFunctor{}, srcType, imageArray, copiedSpan, destinationOffset);
+  });
+  if(cancelled)
+  {
+    return {};
+  }
+  return streamResult;
 }

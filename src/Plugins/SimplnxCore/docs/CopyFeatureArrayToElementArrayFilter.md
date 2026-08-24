@@ -12,6 +12,10 @@ Multiple **Feature** arrays may be selected and copied in a single filter instan
 
 Note that each created array is **Element**-sized (number of **Elements** × components × bytes per value), so selecting many **Feature** arrays multiplies the additional memory required.
 
+## Algorithm
+
+The filter first validates the full *Cell Feature Ids* range in bounded bulk-read batches, before writing any output.  With entirely in-memory targets it uses the parallel Direct path.  If *Cell Feature Ids*, any selected feature source, or any created cell output is out-of-core, it selects the Scanline path.  Scanline reads each selected feature array once into a feature-level cache, then reads Feature Ids and writes the corresponding cell output in fixed 65,536-tuple bulk-I/O chunks.  Its working memory is O(feature data + chunk × components), independent of the number of cells; it never performs per-cell DataStore access.
+
 ### Input Validation
 
 - All selected **Feature** arrays must have the same number of tuples (error -3020).

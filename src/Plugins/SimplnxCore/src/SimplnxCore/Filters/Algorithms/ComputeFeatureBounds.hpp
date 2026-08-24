@@ -29,7 +29,9 @@ struct SIMPLNXCORE_EXPORT ComputeFeatureBoundsInputValues
 };
 
 /**
- * @class
+ * @class ComputeFeatureBounds
+ * @brief Dispatches feature-bound computation to a direct in-memory implementation
+ * or a bounded-memory bulk-I/O implementation for out-of-core inputs.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureBounds
 {
@@ -48,6 +50,10 @@ public:
     Unified = 1
   };
 
+  /**
+   * @brief Computes and writes the requested feature bounds and optional edge geometry.
+   * @return Errors from input reads or invalid geometry/feature sizing.
+   */
   Result<> operator()();
 
 private:

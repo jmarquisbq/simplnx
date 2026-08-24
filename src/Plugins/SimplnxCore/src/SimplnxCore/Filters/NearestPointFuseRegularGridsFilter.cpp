@@ -106,11 +106,18 @@ IFilter::PreflightResult NearestPointFuseRegularGridsFilter::preflightImpl(const
 
   // Create arrays on the reference grid to hold data present on the sampling grid
   {
-    auto sampleVoxelArrays = sampleAM->findAllChildrenOfType<IDataArray>();
+    auto sampleVoxelArrays = sampleAM->findAllChildrenOfType<IArray>();
     for(const auto& array : sampleVoxelArrays)
     {
+      // Neighbor lists may implement IDataArray, but this filter intentionally does not create or
+      // copy them. Only ordinary numeric/Boolean DataArray instances have regular-grid semantics.
+      if(array->getArrayType() != IArray::ArrayType::DataArray)
+      {
+        continue;
+      }
+      const auto& dataArray = dynamic_cast<const IDataArray&>(*array);
       DataPath createdArrayPath = pReferenceCellAttributeMatrixPathValue.createChildPath(array->getName());
-      auto createArrayAction = std::make_unique<CreateArrayAction>(array->getDataType(), refAM->getShape(), array->getComponentShape(), createdArrayPath);
+      auto createArrayAction = std::make_unique<CreateArrayAction>(dataArray.getDataType(), refAM->getShape(), dataArray.getComponentShape(), createdArrayPath);
       resultOutputActions.value().appendAction(std::move(createArrayAction));
     }
   }

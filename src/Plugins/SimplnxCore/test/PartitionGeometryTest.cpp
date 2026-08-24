@@ -21,13 +21,22 @@
  */
 
 #include <catch2/catch.hpp>
-#include <filesystem>
 
+#include <algorithm>
+#include <filesystem>
+#include <limits>
+#include <memory>
+
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/Parameters/ArrayCreationParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
 #include "simplnx/Parameters/ChoicesParameter.hpp"
 #include "simplnx/Parameters/Dream3dImportParameter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include "SimplnxCore/Filters/PartitionGeometryFilter.hpp"
 #include "SimplnxCore/Filters/ReadDREAM3DFilter.hpp"
@@ -50,6 +59,66 @@ const fs::path k_VertexGeomTestFilePath = k_TestFilesPath / fs::path("vertex_geo
 const fs::path k_PlanalXYNodeGeomTestFilePath = k_TestFilesPath / fs::path("planal_xy_node_geom.dream3d");
 const fs::path k_PlanalXZNodeGeomTestFilePath = k_TestFilesPath / fs::path("planal_xz_node_geom.dream3d");
 const fs::path k_PlanalYZNodeGeomTestFilePath = k_TestFilesPath / fs::path("planal_yz_node_geom.dream3d");
+
+constexpr usize k_BenchmarkDim = 200;
+constexpr usize k_BenchmarkPartitionsPerAxis = 20;
+constexpr usize k_BenchmarkCellsPerPartition = k_BenchmarkDim / k_BenchmarkPartitionsPerAxis;
+constexpr usize k_BenchmarkSliceTuples = k_BenchmarkDim * k_BenchmarkDim;
+constexpr usize k_BenchmarkTotalTuples = k_BenchmarkSliceTuples * k_BenchmarkDim;
+constexpr usize k_BenchmarkFeatureCount = k_BenchmarkPartitionsPerAxis * k_BenchmarkPartitionsPerAxis * k_BenchmarkPartitionsPerAxis;
+constexpr int32 k_BenchmarkStartingFeatureId = 7;
+const std::string k_BenchmarkGeomName = "Partition Benchmark Geometry";
+const std::string k_BenchmarkCellDataName = "Cell Data";
+const std::string k_BenchmarkInputArrayName = "Input Values";
+const std::string k_BenchmarkPartitionIdsName = "Partition Ids";
+const std::string k_BenchmarkPartitionDataName = "Partition Data";
+const std::string k_BenchmarkPartitionGridName = "Partition Grid";
+const std::string k_BenchmarkPartitionGridCellDataName = "Cell Data";
+const std::string k_BenchmarkPartitionGridFeatureIdsName = "Feature Ids";
+const DataPath k_BenchmarkGeomPath({k_BenchmarkGeomName});
+const DataPath k_BenchmarkCellDataPath = k_BenchmarkGeomPath.createChildPath(k_BenchmarkCellDataName);
+const DataPath k_BenchmarkInputArrayPath = k_BenchmarkCellDataPath.createChildPath(k_BenchmarkInputArrayName);
+const DataPath k_BenchmarkPartitionIdsPath = k_BenchmarkCellDataPath.createChildPath(k_BenchmarkPartitionIdsName);
+const DataPath k_BenchmarkPartitionGridPath({k_BenchmarkPartitionGridName});
+const DataPath k_BenchmarkPartitionGridFeatureIdsPath = k_BenchmarkPartitionGridPath.createChildPath(k_BenchmarkPartitionGridCellDataName).createChildPath(k_BenchmarkPartitionGridFeatureIdsName);
+
+// -----------------------------------------------------------------------------
+void BuildPartitionGeometryBenchmarkInput(DataStructure& dataStructure)
+{
+  const ShapeType cellTupleShape = {k_BenchmarkDim, k_BenchmarkDim, k_BenchmarkDim};
+  auto* imageGeom = ImageGeom::Create(dataStructure, k_BenchmarkGeomName);
+  imageGeom->setDimensions({k_BenchmarkDim, k_BenchmarkDim, k_BenchmarkDim});
+  imageGeom->setOrigin({0.0f, 0.0f, 0.0f});
+  imageGeom->setSpacing({1.0f, 1.0f, 1.0f});
+
+  auto* cellData = AttributeMatrix::Create(dataStructure, k_BenchmarkCellDataName, cellTupleShape, imageGeom->getId());
+  imageGeom->setCellData(*cellData);
+
+  auto inputStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, k_BenchmarkInputArrayPath, cellTupleShape, {1}, IDataAction::Mode::Execute);
+  auto* inputArray = Int32Array::Create(dataStructure, k_BenchmarkInputArrayName, inputStore, cellData->getId());
+  auto& inputStoreRef = inputArray->getDataStoreRef();
+  auto sliceBuffer = std::make_unique<int32[]>(k_BenchmarkSliceTuples);
+  for(usize z = 0; z < k_BenchmarkDim; z++)
+  {
+    const usize sliceOffset = z * k_BenchmarkSliceTuples;
+    for(usize index = 0; index < k_BenchmarkSliceTuples; index++)
+    {
+      sliceBuffer[index] = static_cast<int32>(sliceOffset + index);
+    }
+
+    const Result<> writeResult = inputStoreRef.copyFromBuffer(sliceOffset, nonstd::span<const int32>(sliceBuffer.get(), k_BenchmarkSliceTuples));
+    SIMPLNX_RESULT_REQUIRE_VALID(writeResult);
+  }
+}
+
+// -----------------------------------------------------------------------------
+constexpr int32 ExpectedPartitionId(usize x, usize y, usize z)
+{
+  const usize partitionX = x / k_BenchmarkCellsPerPartition;
+  const usize partitionY = y / k_BenchmarkCellsPerPartition;
+  const usize partitionZ = z / k_BenchmarkCellsPerPartition;
+  return k_BenchmarkStartingFeatureId + static_cast<int32>(partitionX + (partitionY * k_BenchmarkPartitionsPerAxis) + (partitionZ * k_BenchmarkPartitionsPerAxis * k_BenchmarkPartitionsPerAxis));
+}
 
 // -----------------------------------------------------------------------------
 Arguments createBasicPartitionGeometryArguments(const DataPath& inputGeometryPath, const DataPath& attrMatrixPath, const std::string& partitionIdsArrayName, const IntVec3& numOfPartitionsPerAxis,
@@ -122,6 +191,9 @@ SharedFileSentinelType s_FileSentinel;
 
 TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeometryFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   const std::string partitionIdsArrayName = "PartitioningSchemeIds";
@@ -184,7 +256,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
 
       const PartitionGeometryFilter filter;
       // Execute the filter and check the result
-      auto executeResult = filter.execute(dataStructure, partitionGeometryArgs);
+      auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
       attrMatrixPath = partitionGeometryArgs.value<DataPath>(PartitionGeometryFilter::k_InputGeometryCellAttributeMatrixPath_Key);
@@ -216,6 +288,9 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
 
 TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][PartitionGeometryFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   const std::string partitionIdsArrayName = "PartitioningSchemeIds";
@@ -285,7 +360,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
 
       const PartitionGeometryFilter filter;
       // Execute the filter and check the result
-      auto executeResult = filter.execute(dataStructure, partitionGeometryArgs);
+      auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
       attrMatrixPath = partitionGeometryArgs.value<DataPath>(PartitionGeometryFilter::k_InputGeometryCellAttributeMatrixPath_Key);
@@ -317,6 +392,9 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
 
 TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][PartitionGeometryFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   const std::string partitionIdsArrayName = "PartitioningSchemeIds";
@@ -384,7 +462,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
 
       const PartitionGeometryFilter filter;
       // Execute the filter and check the result
-      auto executeResult = filter.execute(dataStructure, partitionGeometryArgs);
+      auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
       attrMatrixPath = partitionGeometryArgs.value<DataPath>(PartitionGeometryFilter::k_InputGeometryCellAttributeMatrixPath_Key);
@@ -417,6 +495,9 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
 TEST_CASE("SimplnxCore::PartitionGeometryFilter: Valid filter execution", "[Plugins][PartitionGeometryFilter]")
 {
   UnitTest::LoadPlugins();
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "PartitionGeometryTest.tar.gz", "PartitionGeometryTest");
 
@@ -516,7 +597,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Valid filter execution", "[Plug
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
   // Execute the filter and check the result
-  executeResult = filter.execute(dataStructure, partitionGeometryArgs);
+  executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
   const auto attrMatrixPath = partitionGeometryArgs.value<DataPath>(PartitionGeometryFilter::k_InputGeometryCellAttributeMatrixPath_Key);

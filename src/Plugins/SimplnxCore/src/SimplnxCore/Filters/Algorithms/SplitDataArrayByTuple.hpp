@@ -18,7 +18,12 @@ struct SIMPLNXCORE_EXPORT SplitDataArrayByTupleInputValues
 };
 
 /**
- * @class
+ * @class SplitDataArrayByTuple
+ * @brief Splits an array into ordered N-dimensional tuple blocks.
+ *
+ * Numeric DataArrays use contiguous direct copies for in-memory stores and bounded scanline
+ * transfers for out-of-core stores. StringArray and NeighborList inputs retain their
+ * type-specific copying behavior.
  */
 class SIMPLNXCORE_EXPORT SplitDataArrayByTuple
 {

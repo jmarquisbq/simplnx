@@ -7,10 +7,12 @@
 #include "simplnx/Utilities/DataGroupUtilities.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 
+#include <nonstd/span.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numbers>
-#include <stack>
 #include <stdexcept>
 
 using namespace nx::core;
@@ -20,6 +22,16 @@ using namespace nx::core;
 // ===========================================================================
 namespace
 {
+
+// ---------------------------------------------------------------------------
+// Bounded chunk size (in tuples' worth of elements, roughly) used throughout this file for the
+// streaming evaluator's bulk copyIntoBuffer/copyFromBuffer calls. Every per-chunk buffer used by
+// the evaluator is sized off of this constant (scaled down for arrays with many components), never
+// off of the array's total tuple count -- that bound is what lets the evaluator stream an
+// out-of-core array as a handful of hyperslab reads/writes rather than one round-trip per voxel,
+// without allocating memory proportional to the input size.
+// ---------------------------------------------------------------------------
+constexpr usize k_ChunkSize = 65536;
 
 // ---------------------------------------------------------------------------
 // Intermediate representation used between parsing and shunting-yard.
@@ -131,23 +143,6 @@ std::vector<DataPath> findArraysByName(const DataStructure& ds, const std::strin
 }
 
 // ---------------------------------------------------------------------------
-// Functor to copy an IDataArray of any numeric type into a Float64Array
-// ---------------------------------------------------------------------------
-struct CopyToFloat64Functor
-{
-  template <typename T>
-  void operator()(const IDataArray& sourceArray, Float64Array& destArray)
-  {
-    const auto& typedSource = dynamic_cast<const DataArray<T>&>(sourceArray);
-    const usize totalElements = typedSource.getSize();
-    for(usize i = 0; i < totalElements; i++)
-    {
-      destArray[i] = static_cast<double>(typedSource.at(i));
-    }
-  }
-};
-
-// ---------------------------------------------------------------------------
 // Check whether the previous ParsedItem is a binary operator
 // ---------------------------------------------------------------------------
 bool isBinaryOp(const ParsedItem& item)
@@ -237,23 +232,81 @@ void wrapFunctionArguments(std::vector<ParsedItem>& items)
 }
 
 // ---------------------------------------------------------------------------
-// Functor to copy a Float64Array result into the output DataArray of any
-// numeric type, performing static_cast on each element.
+// Functor reading a single element (any numeric source type) as a float64, by type-dispatched
+// dynamic_cast + at(). Only used by the O(1) reduction pre-pass below (resolving a
+// TupleComponentExtract's operand, or a whole-expression scalar result) -- never from inside the
+// bounded per-chunk streaming loop, so a single-element round trip here costs nothing relative to
+// the size of the dataset.
 // ---------------------------------------------------------------------------
-struct CopyResultFunctor
+struct ReadSingleElementFunctor
 {
-  // Full array copy (non-float64 output)
   template <typename T>
-  void operator()(DataStructure& ds, const DataPath& outputPath, const Float64Array* resultArray, bool /*unused*/)
+  float64 operator()(const IDataArray& sourceArray, usize flatIndex)
   {
-    auto& output = ds.getDataRefAs<DataArray<T>>(outputPath).getDataStoreRef();
-    for(usize i = 0; i < output.getSize(); i++)
+    const auto& typedSource = dynamic_cast<const DataArray<T>&>(sourceArray);
+    return static_cast<float64>(typedSource.at(flatIndex));
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Functor reading a bounded contiguous run of `destBuffer.size()` elements (any numeric source
+// type) into `destBuffer` as float64. The scratch buffer holding the source's native type is sized
+// to the caller's chunk (never the array's total element count), so an out-of-core source is
+// touched with one bulk hyperslab read per chunk instead of one round-trip per voxel.
+// ---------------------------------------------------------------------------
+struct ReadChunkToFloat64Functor
+{
+  template <typename T>
+  void operator()(const IDataArray& sourceArray, usize startIndex, nonstd::span<float64> destBuffer)
+  {
+    const auto& typedSource = dynamic_cast<const DataArray<T>&>(sourceArray);
+    const auto& sourceStore = typedSource.getDataStoreRef();
+    const usize count = destBuffer.size();
+
+    // std::vector<bool> packs to bits and has no contiguous .data(); make_unique<T[]> sidesteps
+    // that specialization for the T=bool instantiation of this template.
+    auto rawBuf = std::make_unique<T[]>(count);
+    sourceStore.copyIntoBuffer(startIndex, nonstd::span<T>(rawBuf.get(), count));
+    for(usize i = 0; i < count; i++)
     {
-      output[i] = static_cast<T>(resultArray->at(i));
+      destBuffer[i] = static_cast<float64>(rawBuf[i]);
     }
   }
+};
 
-  // Scalar fill
+// ---------------------------------------------------------------------------
+// Functor casting a bounded contiguous run of float64 values down to the output array's own
+// numeric type and writing them. The scratch buffer holding the cast values is sized to the
+// caller's chunk, so a non-float64 out-of-core output is written with one bulk hyperslab write per
+// chunk instead of one round-trip per voxel.
+// ---------------------------------------------------------------------------
+struct WriteChunkFromFloat64Functor
+{
+  template <typename T>
+  void operator()(DataStructure& ds, const DataPath& outputPath, usize startIndex, nonstd::span<const float64> srcBuffer)
+  {
+    auto& outputStore = ds.getDataRefAs<DataArray<T>>(outputPath).getDataStoreRef();
+    const usize count = srcBuffer.size();
+
+    // std::vector<bool> packs to bits and has no contiguous .data(); make_unique<T[]> sidesteps
+    // that specialization for the T=bool instantiation of this template.
+    auto writeBuf = std::make_unique<T[]>(count);
+    for(usize i = 0; i < count; i++)
+    {
+      writeBuf[i] = static_cast<T>(srcBuffer[i]);
+    }
+    outputStore.copyFromBuffer(startIndex, nonstd::span<const T>(writeBuf.get(), count));
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Functor filling an output array of any numeric type with a single scalar value. Used when the
+// entire infix expression collapses to one float64 value (all-constant arithmetic, or a
+// Array[T, C] / (expr)[T, C] extraction that is the whole expression) -- the value is computed
+// once and broadcast via the store's own fill(), never via a per-element loop here.
+// ---------------------------------------------------------------------------
+struct FillScalarResultFunctor
+{
   template <typename T>
   void operator()(DataStructure& ds, const DataPath& outputPath, float64 scalarValue)
   {
@@ -262,270 +315,340 @@ struct CopyResultFunctor
   }
 };
 
-} // anonymous namespace
-
-// ===========================================================================
-// CalcBuffer implementation
-// ===========================================================================
-
-CalcBuffer::CalcBuffer(CalcBuffer&& other) noexcept
-: m_Storage(other.m_Storage)
-, m_BorrowedArray(other.m_BorrowedArray)
-, m_TempDS(other.m_TempDS)
-, m_ArrayId(other.m_ArrayId)
-, m_OwnedArray(other.m_OwnedArray)
-, m_OutputArray(other.m_OutputArray)
-, m_IsScalar(other.m_IsScalar)
+// ---------------------------------------------------------------------------
+// For every position i in a valid RPN (postfix) sequence, computes the index at which the
+// subexpression producing items[i]'s value begins. Reverse-polish notation has the property that
+// every subexpression is a contiguous run of tokens ending at the token that combines it, so a
+// single forward pass tracking, for each value currently pending on a simulated stack, the index
+// where its subtree started, is enough. This lets the TupleComponentExtract reduction pass below
+// carve a subexpression's tokens out of the RPN list, and lets the single-element evaluator find
+// where a binary operator's left operand ends (immediately before its right operand's own start).
+// ---------------------------------------------------------------------------
+std::vector<usize> computeSpanStarts(const std::vector<RpnItem>& rpn)
 {
-  other.m_TempDS = nullptr;
-  other.m_BorrowedArray = nullptr;
-  other.m_OwnedArray = nullptr;
-  other.m_OutputArray = nullptr;
+  std::vector<usize> spanStart(rpn.size(), 0);
+  std::vector<usize> pending; // start-indices of values currently on the simulated stack
+
+  for(usize i = 0; i < rpn.size(); i++)
+  {
+    const RpnItem& item = rpn[i];
+    const bool isBinaryOperator = item.type == RpnItem::Type::Operator && item.op != nullptr && item.op->numArgs == 2;
+    const bool consumesOneOperand = (item.type == RpnItem::Type::Operator && !isBinaryOperator) || item.type == RpnItem::Type::ComponentExtract || item.type == RpnItem::Type::TupleComponentExtract;
+
+    usize myStart = i;
+    if(isBinaryOperator)
+    {
+      pending.pop_back(); // right operand's start -- the span still begins at the left operand
+      myStart = pending.back();
+      pending.pop_back();
+    }
+    else if(consumesOneOperand)
+    {
+      myStart = pending.back();
+      pending.pop_back();
+    }
+    // Scalar / ArrayRef are leaves: myStart == i (already set above).
+
+    spanStart[i] = myStart;
+    pending.push_back(myStart);
+  }
+
+  return spanStart;
 }
 
-CalcBuffer& CalcBuffer::operator=(CalcBuffer&& other) noexcept
+// ---------------------------------------------------------------------------
+// Recursively evaluates the value produced by rpn[nodeIndex] (and everything under it) at a single
+// (tupleIdx, compIdx) target, reading at most one element from each ArrayRef leaf involved -- O(1)
+// per source array regardless of how many tuples/components it has. compIdx is threaded down
+// unchanged through Scalar/ArrayRef/Operator nodes (they all act on whichever single component the
+// caller asked for), but a ComponentExtract node OVERRIDES it with its own fixed literal index for
+// everything beneath it, matching the elementwise semantics the bounded per-chunk pass uses for the
+// same node type. Used only by the TupleComponentExtract reduction pass and by the whole-expression
+// scalar fast path below, both of which are O(expression length), not O(data size).
+// ---------------------------------------------------------------------------
+Result<float64> evaluateSingleValue(const DataStructure& dataStructure, const std::vector<RpnItem>& rpn, usize nodeIndex, const std::vector<usize>& spanStart, usize tupleIdx, usize compIdx,
+                                    CalculatorParameter::AngleUnits units)
 {
-  if(this != &other)
+  const RpnItem& item = rpn[nodeIndex];
+
+  switch(item.type)
   {
-    // Clean up current state
-    if(m_Storage == Storage::Owned && m_TempDS != nullptr)
+  case RpnItem::Type::Scalar:
+    return {item.scalarValue};
+
+  case RpnItem::Type::ArrayRef: {
+    const auto* sourceArray = dataStructure.getDataAs<IDataArray>(item.arrayPath);
+    if(sourceArray == nullptr)
     {
-      m_TempDS->removeData(m_ArrayId);
+      return MakeErrorResult<float64>(static_cast<int32>(CalculatorErrorCode::InvalidEquation),
+                                      fmt::format("Internal error: array '{}' could not be resolved during evaluation.", item.arrayPath.toString()));
+    }
+    const usize numComps = sourceArray->getNumberOfComponents();
+    const usize flatIndex = tupleIdx * numComps + compIdx;
+    const float64 value = ExecuteDataFunction(ReadSingleElementFunctor{}, item.sourceDataType, *sourceArray, flatIndex);
+    return {value};
+  }
+
+  case RpnItem::Type::Operator: {
+    const OperatorDef* op = item.op;
+    if(op == nullptr)
+    {
+      return MakeErrorResult<float64>(static_cast<int32>(CalculatorErrorCode::InvalidEquation), "Internal error: null operator encountered during scalar evaluation.");
     }
 
-    m_Storage = other.m_Storage;
-    m_BorrowedArray = other.m_BorrowedArray;
-    m_TempDS = other.m_TempDS;
-    m_ArrayId = other.m_ArrayId;
-    m_OwnedArray = other.m_OwnedArray;
-    m_OutputArray = other.m_OutputArray;
-    m_IsScalar = other.m_IsScalar;
+    if(op->numArgs == 1)
+    {
+      Result<float64> operandResult = evaluateSingleValue(dataStructure, rpn, nodeIndex - 1, spanStart, tupleIdx, compIdx, units);
+      if(operandResult.invalid())
+      {
+        return operandResult;
+      }
+      float64 val = operandResult.value();
+      if(op->trigMode == OperatorDef::ForwardTrig && units == CalculatorParameter::AngleUnits::Degrees)
+      {
+        val = val * (std::numbers::pi / 180.0);
+      }
+      float64 res = op->unaryOp(val);
+      if(op->trigMode == OperatorDef::InverseTrig && units == CalculatorParameter::AngleUnits::Degrees)
+      {
+        res = res * (180.0 / std::numbers::pi);
+      }
+      return {res};
+    }
 
-    other.m_TempDS = nullptr;
-    other.m_BorrowedArray = nullptr;
-    other.m_OwnedArray = nullptr;
-    other.m_OutputArray = nullptr;
+    // Binary: the right operand ends immediately before this node; its own recorded span start
+    // tells us where the left operand ends.
+    const usize rightIdx = nodeIndex - 1;
+    const usize rightStart = spanStart[rightIdx];
+    const usize leftIdx = rightStart - 1;
+
+    Result<float64> rightResult = evaluateSingleValue(dataStructure, rpn, rightIdx, spanStart, tupleIdx, compIdx, units);
+    if(rightResult.invalid())
+    {
+      return rightResult;
+    }
+    Result<float64> leftResult = evaluateSingleValue(dataStructure, rpn, leftIdx, spanStart, tupleIdx, compIdx, units);
+    if(leftResult.invalid())
+    {
+      return leftResult;
+    }
+    return {op->binaryOp(leftResult.value(), rightResult.value())};
   }
-  return *this;
+
+  case RpnItem::Type::ComponentExtract: {
+    // Overrides compIdx for the ENTIRE operand subtree beneath it, regardless of what component
+    // the caller was originally asking for -- e.g. in "(a + b)[1]", both 'a' and 'b' must be read
+    // at component 1, not whatever component an enclosing Array[T, C] extraction wanted.
+    return evaluateSingleValue(dataStructure, rpn, nodeIndex - 1, spanStart, tupleIdx, item.componentIndex, units);
+  }
+
+  case RpnItem::Type::TupleComponentExtract:
+    return MakeErrorResult<float64>(static_cast<int32>(CalculatorErrorCode::InvalidEquation), "Internal error: nested TupleComponentExtract encountered during scalar evaluation.");
+  }
+
+  return MakeErrorResult<float64>(static_cast<int32>(CalculatorErrorCode::InvalidEquation), "Internal error: unrecognized RPN item type during scalar evaluation.");
 }
 
-CalcBuffer::~CalcBuffer()
+// ---------------------------------------------------------------------------
+// Per-node shape summary tracked by simulateShapes(), below: whether the node's value is a single
+// broadcastable scalar (independent of any tuple index), and if not, how many components each of
+// its tuples has. This never touches array data -- only getNumberOfComponents() -- so the whole
+// simulation costs O(expression length), not O(data size).
+// ---------------------------------------------------------------------------
+struct RpnNodeShape
 {
-  if(m_Storage == Storage::Owned && m_TempDS != nullptr)
+  bool isScalar = false;
+  usize numComponents = 1;
+};
+
+// ---------------------------------------------------------------------------
+// Aggregate result of simulating the RPN stack machine over rpn[startIndex..endIndex] using shape
+// information only (no data). finalShape is the shape of the subexpression's result; maxStackDepth
+// and maxComponents are the peak values needed to size the bounded per-node buffers the main
+// streaming pass below pre-allocates once, before iterating chunks.
+// ---------------------------------------------------------------------------
+struct ShapeSimResult
+{
+  RpnNodeShape finalShape;
+  usize maxStackDepth = 0;
+  usize maxComponents = 1;
+};
+
+// ---------------------------------------------------------------------------
+// Simulates rpn[startIndex..endIndex] (inclusive), a self-contained RPN subexpression, tracking
+// only shape information. Reproduces the same broadcast/shape propagation rules the bounded
+// evaluators below apply to actual data: a unary operator or ComponentExtract preserves its
+// operand's scalar-ness; a binary operator's result is scalar only if both operands are; and
+// whichever operand is NOT scalar determines the component count (matching how the elementwise
+// loops broadcast a lone scalar operand against a full array). Also performs the ComponentExtract
+// bounds check the original element-at-a-time evaluator applied at runtime, since Case B
+// "(expr)[C]" is not bounds-checked until the operand's shape is known.
+// ---------------------------------------------------------------------------
+Result<ShapeSimResult> simulateShapes(const DataStructure& dataStructure, const std::vector<RpnItem>& rpn, usize startIndex, usize endIndex)
+{
+  ShapeSimResult out;
+  std::vector<RpnNodeShape> stack;
+
+  for(usize i = startIndex; i <= endIndex; i++)
   {
-    m_TempDS->removeData(m_ArrayId);
+    const RpnItem& item = rpn[i];
+    switch(item.type)
+    {
+    case RpnItem::Type::Scalar:
+      stack.push_back({true, 1});
+      break;
+
+    case RpnItem::Type::ArrayRef: {
+      const auto* sourceArray = dataStructure.getDataAs<IDataArray>(item.arrayPath);
+      const usize numComps = (sourceArray != nullptr) ? sourceArray->getNumberOfComponents() : 1;
+      stack.push_back({false, numComps});
+      break;
+    }
+
+    case RpnItem::Type::Operator: {
+      const OperatorDef* op = item.op;
+      if(op != nullptr && op->numArgs == 2)
+      {
+        const RpnNodeShape right = stack.back();
+        stack.pop_back();
+        const RpnNodeShape left = stack.back();
+        stack.pop_back();
+        const bool resultScalar = left.isScalar && right.isScalar;
+        const usize numComps = left.isScalar ? right.numComponents : left.numComponents;
+        stack.push_back({resultScalar, resultScalar ? 1 : numComps});
+      }
+      else
+      {
+        const RpnNodeShape operand = stack.back();
+        stack.pop_back();
+        stack.push_back({operand.isScalar, operand.isScalar ? 1 : operand.numComponents});
+      }
+      break;
+    }
+
+    case RpnItem::Type::ComponentExtract: {
+      const RpnNodeShape operand = stack.back();
+      stack.pop_back();
+      const usize numComps = operand.isScalar ? 1 : operand.numComponents;
+      if(item.componentIndex >= numComps)
+      {
+        return MakeErrorResult<ShapeSimResult>(static_cast<int32>(CalculatorErrorCode::ComponentOutOfRange),
+                                               fmt::format("Component index {} is out of range for array with {} components.", item.componentIndex, numComps));
+      }
+      // Extracting a single component from an operand that was already an inherent scalar (e.g.
+      // "(2+3)[0]") still yields a broadcastable scalar.
+      stack.push_back({operand.isScalar, 1});
+      break;
+    }
+
+    case RpnItem::Type::TupleComponentExtract:
+      return MakeErrorResult<ShapeSimResult>(static_cast<int32>(CalculatorErrorCode::InvalidEquation), "Internal error: unresolved TupleComponentExtract encountered during shape simulation.");
+    }
+
+    out.maxStackDepth = std::max(out.maxStackDepth, stack.size());
+    out.maxComponents = std::max(out.maxComponents, stack.back().numComponents);
   }
+
+  out.finalShape = stack.back();
+  return {out};
 }
 
-CalcBuffer CalcBuffer::borrow(const Float64Array& source)
+// ---------------------------------------------------------------------------
+// Finds the first ArrayRef within rpn[startIndex..endIndex] and returns its tuple count; returns 1
+// if the subexpression contains no array at all (a pure scalar/constant sub-expression, matching
+// the single-tuple shape such an expression evaluates to). Used only to bounds-check a
+// TupleComponentExtract's literal tuple index against its operand's actual tuple count.
+// ---------------------------------------------------------------------------
+usize findOperandNumTuples(const DataStructure& dataStructure, const std::vector<RpnItem>& rpn, usize startIndex, usize endIndex)
 {
-  CalcBuffer buf;
-  buf.m_Storage = Storage::Borrowed;
-  buf.m_BorrowedArray = &source;
-  buf.m_IsScalar = false;
-  return buf;
-}
-
-CalcBuffer CalcBuffer::convertFrom(DataStructure& tempDS, const IDataArray& source, const std::string& name)
-{
-  std::vector<usize> tupleShape = source.getTupleShape();
-  std::vector<usize> compShape = source.getComponentShape();
-  Float64Array* destArr = Float64Array::CreateWithStore<Float64DataStore>(tempDS, name, tupleShape, compShape);
-
-  ExecuteDataFunction(CopyToFloat64Functor{}, source.getDataType(), source, *destArr);
-
-  CalcBuffer buf;
-  buf.m_Storage = Storage::Owned;
-  buf.m_TempDS = &tempDS;
-  buf.m_ArrayId = destArr->getId();
-  buf.m_OwnedArray = destArr;
-  buf.m_IsScalar = false;
-  return buf;
-}
-
-CalcBuffer CalcBuffer::scalar(DataStructure& tempDS, float64 value, const std::string& name)
-{
-  Float64Array* arr = Float64Array::CreateWithStore<Float64DataStore>(tempDS, name, std::vector<usize>{1}, std::vector<usize>{1});
-  (*arr)[0] = value;
-
-  CalcBuffer buf;
-  buf.m_Storage = Storage::Owned;
-  buf.m_TempDS = &tempDS;
-  buf.m_ArrayId = arr->getId();
-  buf.m_OwnedArray = arr;
-  buf.m_IsScalar = true;
-  return buf;
-}
-
-CalcBuffer CalcBuffer::allocate(DataStructure& tempDS, const std::string& name, std::vector<usize> tupleShape, std::vector<usize> compShape)
-{
-  Float64Array* arr = Float64Array::CreateWithStore<Float64DataStore>(tempDS, name, tupleShape, compShape);
-
-  CalcBuffer buf;
-  buf.m_Storage = Storage::Owned;
-  buf.m_TempDS = &tempDS;
-  buf.m_ArrayId = arr->getId();
-  buf.m_OwnedArray = arr;
-  buf.m_IsScalar = false;
-  return buf;
-}
-
-CalcBuffer CalcBuffer::wrapOutput(DataArray<float64>& outputArray)
-{
-  CalcBuffer buf;
-  buf.m_Storage = Storage::OutputDirect;
-  buf.m_OutputArray = &outputArray;
-  buf.m_IsScalar = false;
-  return buf;
-}
-
-float64 CalcBuffer::read(usize index) const
-{
-  switch(m_Storage)
+  for(usize i = startIndex; i <= endIndex; i++)
   {
-  case Storage::Borrowed:
-    return m_BorrowedArray->at(index);
-  case Storage::Owned:
-    return m_OwnedArray->at(index);
-  case Storage::OutputDirect:
-    return m_OutputArray->at(index);
+    if(rpn[i].type == RpnItem::Type::ArrayRef)
+    {
+      const auto* sourceArray = dataStructure.getDataAs<IDataArray>(rpn[i].arrayPath);
+      if(sourceArray != nullptr)
+      {
+        return sourceArray->getNumberOfTuples();
+      }
+    }
   }
-  return 0.0;
+  return 1;
 }
 
-void CalcBuffer::write(usize index, float64 value)
+// ---------------------------------------------------------------------------
+// Reduction pre-pass: resolves every TupleComponentExtract ("Array[T, C]" or "(expr)[T, C]") down
+// to a cached float64 Scalar RPN item, in place. Each resolution touches its operand subexpression
+// with a bounded, O(1)-per-array single-element read (via evaluateSingleValue) instead of
+// materializing the whole subexpression -- this is what lets an out-of-core dataset be indexed by
+// a literal tuple/component pair without an O(n_cells) buffer anywhere.
+//
+// TupleComponentExtract items are resolved leftmost-first. Reverse-polish subexpressions nest
+// contiguously, so if two TupleComponentExtract items are nested (one's operand subexpression
+// contains the other), the inner one necessarily has a smaller index than the outer one; always
+// picking the smallest remaining index therefore always resolves the innermost pending extraction
+// first, guaranteeing every operand span handed to evaluateSingleValue() is itself already free of
+// TupleComponentExtract items.
+// ---------------------------------------------------------------------------
+Result<> resolveTupleComponentExtracts(const DataStructure& dataStructure, std::vector<RpnItem>& rpn, CalculatorParameter::AngleUnits units)
 {
-  switch(m_Storage)
+  while(true)
   {
-  case Storage::Owned:
-    (*m_OwnedArray)[index] = value;
-    return;
-  case Storage::OutputDirect:
-    (*m_OutputArray)[index] = value;
-    return;
-  case Storage::Borrowed:
-    throw std::runtime_error("CalcBuffer::write() called on a read-only Borrowed buffer");
-  }
-}
+    usize tceIndex = rpn.size();
+    for(usize i = 0; i < rpn.size(); i++)
+    {
+      if(rpn[i].type == RpnItem::Type::TupleComponentExtract)
+      {
+        tceIndex = i;
+        break;
+      }
+    }
+    if(tceIndex == rpn.size())
+    {
+      break; // no TupleComponentExtract items remain -- reduction complete
+    }
 
-void CalcBuffer::fill(float64 value)
-{
-  switch(m_Storage)
-  {
-  case Storage::Owned:
-    m_OwnedArray->fill(value);
-    return;
-  case Storage::OutputDirect:
-    m_OutputArray->fill(value);
-    return;
-  case Storage::Borrowed:
-    throw std::runtime_error("CalcBuffer::fill() called on a read-only Borrowed buffer");
-  }
-}
+    const std::vector<usize> spanStart = computeSpanStarts(rpn);
+    const usize operandIdx = tceIndex - 1;
+    const usize operandStart = spanStart[operandIdx];
 
-usize CalcBuffer::size() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return m_BorrowedArray->getSize();
-  case Storage::Owned:
-    return m_OwnedArray->getSize();
-  case Storage::OutputDirect:
-    return m_OutputArray->getSize();
-  }
-  return 0;
-}
+    const usize tupleIdx = rpn[tceIndex].tupleIndex;
+    const usize compIdx = rpn[tceIndex].componentIndex;
 
-usize CalcBuffer::numTuples() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return m_BorrowedArray->getNumberOfTuples();
-  case Storage::Owned:
-    return m_OwnedArray->getNumberOfTuples();
-  case Storage::OutputDirect:
-    return m_OutputArray->getNumberOfTuples();
-  }
-  return 0;
-}
+    const usize numTuplesOperand = findOperandNumTuples(dataStructure, rpn, operandStart, operandIdx);
+    if(tupleIdx >= numTuplesOperand)
+    {
+      return MakeErrorResult(static_cast<int32>(CalculatorErrorCode::TupleOutOfRange), fmt::format("Tuple index {} is out of range for array with {} tuples.", tupleIdx, numTuplesOperand));
+    }
 
-usize CalcBuffer::numComponents() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return m_BorrowedArray->getNumberOfComponents();
-  case Storage::Owned:
-    return m_OwnedArray->getNumberOfComponents();
-  case Storage::OutputDirect:
-    return m_OutputArray->getNumberOfComponents();
-  }
-  return 0;
-}
+    Result<ShapeSimResult> shapeResult = simulateShapes(dataStructure, rpn, operandStart, operandIdx);
+    if(shapeResult.invalid())
+    {
+      return ConvertResult(std::move(shapeResult));
+    }
+    const usize numCompsOperand = shapeResult.value().finalShape.isScalar ? 1 : shapeResult.value().finalShape.numComponents;
+    if(compIdx >= numCompsOperand)
+    {
+      return MakeErrorResult(static_cast<int32>(CalculatorErrorCode::ComponentOutOfRange), fmt::format("Component index {} is out of range for array with {} components.", compIdx, numCompsOperand));
+    }
 
-std::vector<usize> CalcBuffer::tupleShape() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return m_BorrowedArray->getTupleShape();
-  case Storage::Owned:
-    return m_OwnedArray->getTupleShape();
-  case Storage::OutputDirect:
-    return m_OutputArray->getTupleShape();
+    Result<float64> valueResult = evaluateSingleValue(dataStructure, rpn, operandIdx, spanStart, tupleIdx, compIdx, units);
+    if(valueResult.invalid())
+    {
+      return ConvertResult(std::move(valueResult));
+    }
+
+    RpnItem scalarItem;
+    scalarItem.type = RpnItem::Type::Scalar;
+    scalarItem.scalarValue = valueResult.value();
+
+    rpn.erase(rpn.begin() + static_cast<std::ptrdiff_t>(operandStart), rpn.begin() + static_cast<std::ptrdiff_t>(tceIndex) + 1);
+    rpn.insert(rpn.begin() + static_cast<std::ptrdiff_t>(operandStart), scalarItem);
   }
+
   return {};
 }
 
-std::vector<usize> CalcBuffer::compShape() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return m_BorrowedArray->getComponentShape();
-  case Storage::Owned:
-    return m_OwnedArray->getComponentShape();
-  case Storage::OutputDirect:
-    return m_OutputArray->getComponentShape();
-  }
-  return {};
-}
-
-bool CalcBuffer::isScalar() const
-{
-  return m_IsScalar;
-}
-
-bool CalcBuffer::isOwned() const
-{
-  return m_Storage == Storage::Owned;
-}
-
-bool CalcBuffer::isOutputDirect() const
-{
-  return m_Storage == Storage::OutputDirect;
-}
-
-void CalcBuffer::markAsScalar()
-{
-  m_IsScalar = true;
-}
-
-const Float64Array& CalcBuffer::array() const
-{
-  switch(m_Storage)
-  {
-  case Storage::Borrowed:
-    return *m_BorrowedArray;
-  case Storage::Owned:
-    return *m_OwnedArray;
-  case Storage::OutputDirect:
-    return *m_OutputArray;
-  }
-  throw std::runtime_error("CalcBuffer::array() called on buffer with unknown storage mode");
-}
+} // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // getOperatorRegistry
@@ -1815,267 +1938,245 @@ Result<> ArrayCalculatorParser::evaluateInto(DataStructure& dataStructure, const
     return parseResult;
   }
 
-  // 2. Create local temp DataStructure for intermediate arrays
-  DataStructure tempDS;
-  usize scratchCounter = 0;
-  auto nextScratchName = [&scratchCounter]() -> std::string { return "_calc_" + std::to_string(scratchCounter++); };
+  const DataType outputDataType = ConvertNumericTypeToDataType(scalarType);
 
-  // 3. Pre-scan RPN to find the index of the last operator/extract item
-  //    for the OutputDirect optimization
-  DataType outputDataType = ConvertNumericTypeToDataType(scalarType);
-  bool outputIsFloat64 = (outputDataType == DataType::float64);
-  int64 lastOpIndex = -1;
-  for(int64 idx = static_cast<int64>(m_RpnItems.size()) - 1; idx >= 0; --idx)
+  // 2. Reduction pre-pass: collapse every Array[T, C] / (expr)[T, C] tuple+component extraction to
+  // a cached float64 Scalar item. Works on a local copy since m_RpnItems is repopulated from
+  // scratch by parse() on every call.
+  std::vector<RpnItem> rpn = m_RpnItems;
+  Result<> reduceResult = resolveTupleComponentExtracts(m_DataStructure, rpn, units);
+  if(reduceResult.invalid())
   {
-    RpnItem::Type t = m_RpnItems[static_cast<usize>(idx)].type;
-    if(t == RpnItem::Type::Operator || t == RpnItem::Type::ComponentExtract || t == RpnItem::Type::TupleComponentExtract)
+    return reduceResult;
+  }
+
+  // 3. Determine whether the (now TupleComponentExtract-free) expression collapses to a single
+  // broadcastable scalar -- either because it was nothing but constants/operators to begin with
+  // (e.g. "12 + 6"), or because the entire expression WAS one extraction that the pre-pass above
+  // just resolved. Either way this is an O(expression length) computation, not O(data size).
+  Result<ShapeSimResult> shapeResult = simulateShapes(m_DataStructure, rpn, 0, rpn.size() - 1);
+  if(shapeResult.invalid())
+  {
+    return ConvertResult(std::move(shapeResult));
+  }
+  const ShapeSimResult& shapeInfo = shapeResult.value();
+
+  if(shapeInfo.finalShape.isScalar)
+  {
+    const std::vector<usize> spanStart = computeSpanStarts(rpn);
+    Result<float64> scalarResult = evaluateSingleValue(m_DataStructure, rpn, rpn.size() - 1, spanStart, 0, 0, units);
+    if(scalarResult.invalid())
     {
-      lastOpIndex = idx;
-      break;
+      return ConvertResult(std::move(scalarResult));
+    }
+    ExecuteDataFunction(FillScalarResultFunctor{}, outputDataType, dataStructure, outputPath, scalarResult.value());
+    return parseResult;
+  }
+
+  // 4. Main streaming pass: the expression is array-valued. Walk it once per bounded tuple-chunk,
+  // writing each chunk's result directly into the output array. No buffer here scales with the
+  // input/output tuple count -- every per-node buffer is capped at tuplesPerChunk * maxComponents
+  // (bounded by chunk size and expression complexity) and is reused across every chunk.
+  auto& outputArray = dataStructure.getDataRefAs<IDataArray>(outputPath);
+  const usize outputNumTuples = outputArray.getNumberOfTuples();
+  const usize outputNumComps = outputArray.getNumberOfComponents();
+  const usize tuplesPerChunk = std::max<usize>(1, k_ChunkSize / std::max<usize>(1, outputNumComps));
+
+  // Resolve every ArrayRef's source array once, up front, rather than re-resolving its DataPath on
+  // every chunk iteration -- the same handful of arrays are read repeatedly, once per chunk.
+  std::vector<const IDataArray*> resolvedArrays(rpn.size(), nullptr);
+  for(usize i = 0; i < rpn.size(); i++)
+  {
+    if(rpn[i].type == RpnItem::Type::ArrayRef)
+    {
+      resolvedArrays[i] = m_DataStructure.getDataAs<IDataArray>(rpn[i].arrayPath);
+      if(resolvedArrays[i] == nullptr)
+      {
+        return MakeErrorResult(static_cast<int32>(CalculatorErrorCode::InvalidEquation),
+                               fmt::format("Internal error: array '{}' could not be resolved during evaluation.", rpn[i].arrayPath.toString()));
+      }
     }
   }
 
-  // 4. Walk the RPN items using a CalcBuffer evaluation stack
-  std::stack<CalcBuffer> evalStack;
+  // Fixed-size evaluation stack: entries are reused in place for every RPN item of every chunk, so
+  // no per-chunk or per-item heap churn occurs beyond the occasional resize() that keeps a buffer's
+  // logical size in step with its node's current component count (capacity, reserved once below,
+  // never grows past tuplesPerChunk * maxComponents).
+  struct ChunkStackEntry
+  {
+    bool isScalar = false;
+    float64 scalarValue = 0.0;
+    usize numComponents = 1;
+    std::vector<float64> buffer;
+  };
+  std::vector<ChunkStackEntry> stack(shapeInfo.maxStackDepth);
+  for(auto& entry : stack)
+  {
+    entry.buffer.reserve(tuplesPerChunk * shapeInfo.maxComponents);
+  }
+  std::vector<float64> outWriteBuf;
+  outWriteBuf.reserve(tuplesPerChunk * outputNumComps);
 
-  for(usize rpnIdx = 0; rpnIdx < m_RpnItems.size(); ++rpnIdx)
+  for(usize tupleStart = 0; tupleStart < outputNumTuples; tupleStart += tuplesPerChunk)
   {
     if(m_ShouldCancel)
     {
       return {};
     }
+    const usize tupleCount = std::min(tuplesPerChunk, outputNumTuples - tupleStart);
+    usize depth = 0;
 
-    const RpnItem& rpnItem = m_RpnItems[rpnIdx];
-    bool isLastOp = (static_cast<int64>(rpnIdx) == lastOpIndex);
-
-    switch(rpnItem.type)
+    for(usize rpnIdx = 0; rpnIdx < rpn.size(); rpnIdx++)
     {
-    case RpnItem::Type::Scalar: {
-      evalStack.push(CalcBuffer::scalar(tempDS, rpnItem.scalarValue, nextScratchName()));
-      break;
-    }
-
-    case RpnItem::Type::ArrayRef: {
-      if(rpnItem.sourceDataType == DataType::float64)
+      const RpnItem& item = rpn[rpnIdx];
+      switch(item.type)
       {
-        const auto& sourceArray = m_DataStructure.getDataRefAs<Float64Array>(rpnItem.arrayPath);
-        evalStack.push(CalcBuffer::borrow(sourceArray));
-      }
-      else
-      {
-        const auto& sourceArray = m_DataStructure.getDataRefAs<IDataArray>(rpnItem.arrayPath);
-        evalStack.push(CalcBuffer::convertFrom(tempDS, sourceArray, nextScratchName()));
-      }
-      break;
-    }
-
-    case RpnItem::Type::Operator: {
-      const OperatorDef* op = rpnItem.op;
-      if(op == nullptr)
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::InvalidEquation), "Internal error: null operator in RPN evaluation.");
+      case RpnItem::Type::Scalar: {
+        stack[depth].isScalar = true;
+        stack[depth].scalarValue = item.scalarValue;
+        depth++;
+        break;
       }
 
-      if(op->numArgs == 1)
-      {
-        if(evalStack.empty())
+      case RpnItem::Type::ArrayRef: {
+        ChunkStackEntry& entry = stack[depth];
+        const IDataArray* sourceArray = resolvedArrays[rpnIdx];
+        const usize numComps = sourceArray->getNumberOfComponents();
+        const usize count = tupleCount * numComps;
+        entry.isScalar = false;
+        entry.numComponents = numComps;
+        entry.buffer.resize(count);
+        if(item.sourceDataType == DataType::float64)
         {
-          return MakeErrorResult(static_cast<int>(CalculatorErrorCode::NotEnoughArguments), "Not enough arguments for unary operator.");
-        }
-        CalcBuffer operand = std::move(evalStack.top());
-        evalStack.pop();
-
-        std::vector<usize> resultTupleShape = operand.tupleShape();
-        std::vector<usize> resultCompShape = operand.compShape();
-        usize totalSize = operand.size();
-
-        CalcBuffer result = (isLastOp && outputIsFloat64) ? CalcBuffer::wrapOutput(dataStructure.getDataRefAs<DataArray<float64>>(outputPath)) :
-                                                            CalcBuffer::allocate(tempDS, nextScratchName(), resultTupleShape, resultCompShape);
-
-        for(usize i = 0; i < totalSize; i++)
-        {
-          float64 val = operand.read(i);
-
-          if(op->trigMode == OperatorDef::ForwardTrig && units == CalculatorParameter::AngleUnits::Degrees)
-          {
-            val = val * (std::numbers::pi / 180.0);
-          }
-
-          float64 res = op->unaryOp(val);
-
-          if(op->trigMode == OperatorDef::InverseTrig && units == CalculatorParameter::AngleUnits::Degrees)
-          {
-            res = res * (180.0 / std::numbers::pi);
-          }
-
-          result.write(i, res);
-        }
-
-        bool wasScalar = operand.isScalar();
-        if(wasScalar)
-        {
-          result.markAsScalar();
-        }
-        // operand destroyed here, RAII cleans up
-        evalStack.push(std::move(result));
-      }
-      else if(op->numArgs == 2)
-      {
-        if(evalStack.size() < 2)
-        {
-          return MakeErrorResult(static_cast<int>(CalculatorErrorCode::NotEnoughArguments), "Not enough arguments for binary operator.");
-        }
-        CalcBuffer right = std::move(evalStack.top());
-        evalStack.pop();
-        CalcBuffer left = std::move(evalStack.top());
-        evalStack.pop();
-
-        // Determine output shape: use the array operand's shape (broadcast scalars)
-        std::vector<usize> outTupleShape;
-        std::vector<usize> outCompShape;
-        if(!left.isScalar())
-        {
-          outTupleShape = left.tupleShape();
-          outCompShape = left.compShape();
+          const auto& typedArray = dynamic_cast<const Float64Array&>(*sourceArray);
+          typedArray.getDataStoreRef().copyIntoBuffer(tupleStart * numComps, nonstd::span<float64>(entry.buffer.data(), count));
         }
         else
         {
-          outTupleShape = right.tupleShape();
-          outCompShape = right.compShape();
+          ExecuteDataFunction(ReadChunkToFloat64Functor{}, item.sourceDataType, *sourceArray, tupleStart * numComps, nonstd::span<float64>(entry.buffer.data(), count));
         }
-
-        usize totalSize = 1;
-        for(usize d : outTupleShape)
-        {
-          totalSize *= d;
-        }
-        for(usize d : outCompShape)
-        {
-          totalSize *= d;
-        }
-
-        CalcBuffer result = (isLastOp && outputIsFloat64) ? CalcBuffer::wrapOutput(dataStructure.getDataRefAs<DataArray<float64>>(outputPath)) :
-                                                            CalcBuffer::allocate(tempDS, nextScratchName(), outTupleShape, outCompShape);
-
-        bool leftIsScalar = left.isScalar();
-        bool rightIsScalar = right.isScalar();
-
-        for(usize i = 0; i < totalSize; i++)
-        {
-          float64 lv = left.read(leftIsScalar ? 0 : i);
-          float64 rv = right.read(rightIsScalar ? 0 : i);
-          result.write(i, op->binaryOp(lv, rv));
-        }
-
-        if(leftIsScalar && rightIsScalar)
-        {
-          result.markAsScalar();
-        }
-        // left and right destroyed here, RAII cleans up owned temps
-        evalStack.push(std::move(result));
+        depth++;
+        break;
       }
-      else
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::InvalidEquation), fmt::format("Internal error: operator '{}' has unsupported numArgs={}.", op->token, op->numArgs));
+
+      case RpnItem::Type::Operator: {
+        const OperatorDef* op = item.op;
+        if(op->numArgs == 1)
+        {
+          ChunkStackEntry& operand = stack[depth - 1];
+          if(operand.isScalar)
+          {
+            float64 val = operand.scalarValue;
+            if(op->trigMode == OperatorDef::ForwardTrig && units == CalculatorParameter::AngleUnits::Degrees)
+            {
+              val = val * (std::numbers::pi / 180.0);
+            }
+            float64 res = op->unaryOp(val);
+            if(op->trigMode == OperatorDef::InverseTrig && units == CalculatorParameter::AngleUnits::Degrees)
+            {
+              res = res * (180.0 / std::numbers::pi);
+            }
+            operand.scalarValue = res;
+          }
+          else
+          {
+            const usize count = tupleCount * operand.numComponents;
+            for(usize i = 0; i < count; i++)
+            {
+              float64 val = operand.buffer[i];
+              if(op->trigMode == OperatorDef::ForwardTrig && units == CalculatorParameter::AngleUnits::Degrees)
+              {
+                val = val * (std::numbers::pi / 180.0);
+              }
+              float64 res = op->unaryOp(val);
+              if(op->trigMode == OperatorDef::InverseTrig && units == CalculatorParameter::AngleUnits::Degrees)
+              {
+                res = res * (180.0 / std::numbers::pi);
+              }
+              operand.buffer[i] = res;
+            }
+          }
+          // Net effect: pop 1, push 1 -- the result stays in the same slot, depth unchanged.
+        }
+        else
+        {
+          ChunkStackEntry& right = stack[depth - 1];
+          ChunkStackEntry& left = stack[depth - 2];
+          depth--; // pop right; the result replaces left, which becomes the new top of stack
+
+          if(left.isScalar && right.isScalar)
+          {
+            left.scalarValue = op->binaryOp(left.scalarValue, right.scalarValue);
+          }
+          else
+          {
+            const bool leftWasScalar = left.isScalar;
+            const bool rightWasScalar = right.isScalar;
+            const float64 leftScalarVal = left.scalarValue;
+            const float64 rightScalarVal = right.scalarValue;
+            const usize numComps = leftWasScalar ? right.numComponents : left.numComponents;
+            const usize count = tupleCount * numComps;
+
+            left.buffer.resize(count);
+            for(usize i = 0; i < count; i++)
+            {
+              const float64 lv = leftWasScalar ? leftScalarVal : left.buffer[i];
+              const float64 rv = rightWasScalar ? rightScalarVal : right.buffer[i];
+              left.buffer[i] = op->binaryOp(lv, rv);
+            }
+            left.isScalar = false;
+            left.numComponents = numComps;
+          }
+        }
+        break;
       }
-      break;
+
+      case RpnItem::Type::ComponentExtract: {
+        ChunkStackEntry& operand = stack[depth - 1];
+        const usize compIdx = item.componentIndex;
+        if(!operand.isScalar)
+        {
+          const usize numComps = operand.numComponents;
+          for(usize t = 0; t < tupleCount; t++)
+          {
+            operand.buffer[t] = operand.buffer[t * numComps + compIdx];
+          }
+          operand.buffer.resize(tupleCount);
+          operand.numComponents = 1;
+        }
+        // If the operand is already an inherent scalar, extracting its only valid component (0)
+        // is a no-op: the value and scalar-ness are unchanged.
+        break;
+      }
+
+      case RpnItem::Type::TupleComponentExtract:
+        // Unreachable: every TupleComponentExtract item was resolved to a Scalar in step 2 above.
+        break;
+      }
     }
 
-    case RpnItem::Type::ComponentExtract: {
-      if(evalStack.empty())
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::NotEnoughArguments), "Not enough arguments for component extraction.");
-      }
-      CalcBuffer operand = std::move(evalStack.top());
-      evalStack.pop();
-
-      usize numComps = operand.numComponents();
-      usize numTuples = operand.numTuples();
-      usize compIdx = rpnItem.componentIndex;
-
-      if(compIdx >= numComps)
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::ComponentOutOfRange), fmt::format("Component index {} is out of range for array with {} components.", compIdx, numComps));
-      }
-
-      CalcBuffer result = (isLastOp && outputIsFloat64) ? CalcBuffer::wrapOutput(dataStructure.getDataRefAs<DataArray<float64>>(outputPath)) :
-                                                          CalcBuffer::allocate(tempDS, nextScratchName(), operand.tupleShape(), std::vector<usize>{1});
-
-      for(usize t = 0; t < numTuples; ++t)
-      {
-        result.write(t, operand.read(t * numComps + compIdx));
-      }
-
-      evalStack.push(std::move(result));
-      break;
-    }
-
-    case RpnItem::Type::TupleComponentExtract: {
-      if(evalStack.empty())
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::NotEnoughArguments), "Not enough arguments for tuple+component extraction.");
-      }
-      CalcBuffer operand = std::move(evalStack.top());
-      evalStack.pop();
-
-      usize numComps = operand.numComponents();
-      usize numTuples = operand.numTuples();
-      usize tupleIdx = rpnItem.tupleIndex;
-      usize compIdx = rpnItem.componentIndex;
-
-      if(tupleIdx >= numTuples)
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::TupleOutOfRange), fmt::format("Tuple index {} is out of range for array with {} tuples.", tupleIdx, numTuples));
-      }
-      if(compIdx >= numComps)
-      {
-        return MakeErrorResult(static_cast<int>(CalculatorErrorCode::ComponentOutOfRange), fmt::format("Component index {} is out of range for array with {} components.", compIdx, numComps));
-      }
-
-      float64 value = operand.read(tupleIdx * numComps + compIdx);
-      // operand destroyed, RAII cleans up
-      evalStack.push(CalcBuffer::scalar(tempDS, value, nextScratchName()));
-      break;
-    }
-
-    } // end switch
-  }
-
-  // 5. Final result
-  if(evalStack.size() != 1)
-  {
-    return MakeErrorResult(static_cast<int>(CalculatorErrorCode::InvalidEquation), fmt::format("Internal error: evaluation stack has {} items remaining; expected exactly 1.", evalStack.size()));
-  }
-
-  CalcBuffer finalResult = std::move(evalStack.top());
-  evalStack.pop();
-
-  // 6. Copy/cast result into the output array (checked in order, first match wins)
-  if(finalResult.isScalar())
-  {
-    // Fill entire output with the scalar value
-    float64 scalarVal = finalResult.read(0);
-    ExecuteDataFunction(CopyResultFunctor{}, outputDataType, dataStructure, outputPath, scalarVal);
-  }
-  else if(finalResult.isOutputDirect())
-  {
-    // Data is already in the output array — nothing to do
-  }
-  else if(outputIsFloat64)
-  {
-    // Direct float64-to-float64 copy via operator[] (no type cast)
-    auto& outputArray = dataStructure.getDataRefAs<DataArray<float64>>(outputPath);
-    usize totalSize = finalResult.size();
-    for(usize i = 0; i < totalSize; i++)
+    // depth == 1 here; stack[0] holds this chunk's fully-evaluated result.
+    const ChunkStackEntry& result = stack[0];
+    outWriteBuf.resize(tupleCount * outputNumComps);
+    if(result.isScalar)
     {
-      outputArray[i] = finalResult.read(i);
+      std::fill(outWriteBuf.begin(), outWriteBuf.end(), result.scalarValue);
     }
-  }
-  else
-  {
-    // Type-casting copy via CopyResultFunctor
-    const Float64Array& resultArray = finalResult.array();
-    ExecuteDataFunction(CopyResultFunctor{}, outputDataType, dataStructure, outputPath, &resultArray, false);
+    else
+    {
+      std::copy(result.buffer.begin(), result.buffer.begin() + static_cast<std::ptrdiff_t>(tupleCount * outputNumComps), outWriteBuf.begin());
+    }
+
+    if(outputDataType == DataType::float64)
+    {
+      auto& outputStore = dataStructure.getDataRefAs<Float64Array>(outputPath).getDataStoreRef();
+      outputStore.copyFromBuffer(tupleStart * outputNumComps, nonstd::span<const float64>(outWriteBuf.data(), tupleCount * outputNumComps));
+    }
+    else
+    {
+      ExecuteDataFunction(WriteChunkFromFloat64Functor{}, outputDataType, dataStructure, outputPath, tupleStart * outputNumComps,
+                          nonstd::span<const float64>(outWriteBuf.data(), tupleCount * outputNumComps));
+    }
   }
 
   return parseResult;

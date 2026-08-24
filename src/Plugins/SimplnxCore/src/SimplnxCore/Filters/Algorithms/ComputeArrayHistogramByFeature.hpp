@@ -27,11 +27,21 @@ struct SIMPLNXCORE_EXPORT ComputeArrayHistogramByFeatureInputValues
 
 /**
  * @class ComputeArrayHistogramByFeature
- * @brief This filter calculates a Histogram according to user specification and stores it accordingly
+ * @brief Computes per-feature histograms, bin ranges, most-populated bins, and
+ * optional modal-bin ranges for one or more scalar cell arrays.
+ *
+ * Resident arrays use the established parallel feature implementation. If any
+ * participating input or output is out-of-core, a bounded multi-pass scan routes
+ * each cell directly into its feature histogram. Exact modal values use external
+ * sorting when available and an exact repeated-scan fallback otherwise.
  */
 class SIMPLNXCORE_EXPORT ComputeArrayHistogramByFeature
 {
 public:
+  /**
+   * @brief Binds filter-owned data, parameters, progress, and cancellation.
+   * All references and @p inputValues must remain valid through operator()().
+   */
   ComputeArrayHistogramByFeature(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ComputeArrayHistogramByFeatureInputValues* inputValues);
   ~ComputeArrayHistogramByFeature() noexcept;
 
@@ -40,6 +50,10 @@ public:
   ComputeArrayHistogramByFeature& operator=(const ComputeArrayHistogramByFeature&) = delete;
   ComputeArrayHistogramByFeature& operator=(ComputeArrayHistogramByFeature&&) noexcept = delete;
 
+  /**
+   * @brief Discovers the feature count and dispatches each selected array to
+   * the resident or bounded implementation according to all participating stores.
+   */
   Result<> operator()();
 
 private:

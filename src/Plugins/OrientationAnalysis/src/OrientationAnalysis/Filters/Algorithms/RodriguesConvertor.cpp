@@ -2,12 +2,19 @@
 
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/DataGroup.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
+
+#include <nonstd/span.hpp>
+
+#include <algorithm>
+#include <memory>
 
 using namespace nx::core;
 
 namespace
 {
+/** @brief Preserved parallel resident worker that converts Rodrigues triples through direct array indexing. */
 class RodriguesConvertorImpl
 {
 private:
@@ -16,6 +23,7 @@ private:
   const std::atomic_bool* m_ShouldCancel;
 
 public:
+  /** @brief Borrows resident input/output arrays and cancellation state for the parallel run. */
   RodriguesConvertorImpl(const Float32Array* inputQuat, Float32Array* outputQuat, const std::atomic_bool* shouldCancel)
   : m_Input(inputQuat)
   , m_Output(outputQuat)
@@ -23,6 +31,7 @@ public:
   {
   }
 
+  /** @brief Converts a half-open resident tuple range to unit axis plus magnitude. */
   void convert(size_t start, size_t end) const
   {
     for(size_t i = start; i < end; i++)
@@ -43,11 +52,64 @@ public:
     }
   }
 
+  /** @brief Adapts a ParallelDataAlgorithm range to convert(). */
   void operator()(const Range& range) const
   {
     convert(range.min(), range.max());
   }
 };
+
+/**
+ * @brief Converts Rodrigues triples with bounded three-component reads and four-component writes.
+ *
+ * The mathematical operation and tuple order match the Direct worker; only the
+ * DataStore transfer granularity changes for OOC safety.
+ */
+Result<> ConvertRodriguesBulk(const Float32Array& input, Float32Array& output, const std::atomic_bool& shouldCancel)
+{
+  constexpr usize k_ChunkTuples = 65536;
+  auto inputValues = std::make_unique<float32[]>(k_ChunkTuples * 3);
+  auto outputValues = std::make_unique<float32[]>(k_ChunkTuples * 4);
+  const auto& inputStore = input.getDataStoreRef();
+  auto& outputStore = output.getDataStoreRef();
+  const usize tupleCount = input.getNumberOfTuples();
+  for(usize tupleOffset = 0; tupleOffset < tupleCount; tupleOffset += k_ChunkTuples)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(k_ChunkTuples, tupleCount - tupleOffset);
+    auto readResult = inputStore.copyIntoBuffer(tupleOffset * 3, nonstd::span<float32>(inputValues.get(), count * 3));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    for(usize localTuple = 0; localTuple < count; ++localTuple)
+    {
+      const usize inputOffset = localTuple * 3;
+      const usize outputOffset = localTuple * 4;
+      const float32 r0 = inputValues[inputOffset];
+      const float32 r1 = inputValues[inputOffset + 1];
+      const float32 r2 = inputValues[inputOffset + 2];
+      const float32 length = sqrtf(r0 * r0 + r1 * r1 + r2 * r2);
+      outputValues[outputOffset] = r0 / length;
+      outputValues[outputOffset + 1] = r1 / length;
+      outputValues[outputOffset + 2] = r2 / length;
+      outputValues[outputOffset + 3] = length;
+    }
+    if(shouldCancel)
+    {
+      return {};
+    }
+    auto writeResult = outputStore.copyFromBuffer(tupleOffset * 4, nonstd::span<const float32>(outputValues.get(), count * 4));
+    if(writeResult.invalid())
+    {
+      return writeResult;
+    }
+  }
+  return {};
+}
 
 } // namespace
 
@@ -74,6 +136,14 @@ Result<> RodriguesConvertor::operator()()
 {
   const auto& input = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->RodriguesDataArrayPath);
   auto& output = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->OutputDataArrayPath);
+
+  const bool usesOutOfCoreStore = IsOutOfCore(input) || IsOutOfCore(output);
+  const bool useOutOfCoreAlgorithm = !ForceInCoreAlgorithm() && (ForceOocAlgorithm() || usesOutOfCoreStore);
+  RecordAlgorithmPathExecution(useOutOfCoreAlgorithm ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+  if(useOutOfCoreAlgorithm)
+  {
+    return ConvertRodriguesBulk(input, output, m_ShouldCancel);
+  }
 
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(0, input.getNumberOfTuples());

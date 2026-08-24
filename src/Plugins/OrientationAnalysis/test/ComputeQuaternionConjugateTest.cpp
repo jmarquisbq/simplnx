@@ -1,6 +1,10 @@
+#include <array>
 #include <catch2/catch.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+
+#include <nonstd/span.hpp>
 
 #include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
@@ -8,7 +12,9 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/DataArrayUtilities.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include "OrientationAnalysis/Filters/ComputeQuaternionConjugateFilter.hpp"
 #include "OrientationAnalysis/OrientationAnalysis_test_dirs.hpp"
@@ -26,6 +32,10 @@ const std::string k_Exemplar0 = "Exemplar0";
 TEST_CASE("OrientationAnalysis::ComputeQuaternionConjugateFilter", "[OrientationAnalysis][ComputeQuaternionConjugateFilter]")
 {
   UnitTest::LoadPlugins();
+
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
   DataStructure dataStructure;
@@ -74,7 +84,7 @@ TEST_CASE("OrientationAnalysis::ComputeQuaternionConjugateFilter", "[Orientation
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
     // Execute the filter and check the result
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     auto& outputArray = dataStructure.getDataRefAs<Float32Array>(DataPath({k_ConvertedName}));

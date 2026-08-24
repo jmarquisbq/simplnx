@@ -8,6 +8,8 @@ Processing (Cleanup)
 
 This **Filter** allows the user to define a subvolume of the data set in which the **Filter** will reset all data for every **Cell** within the subvolume. The user can choose from three initialization modes: *Manual* (initialize to a user-specified value), *Random* (initialize with random values across the full range of the data type), or *Random With Range* (initialize with random values within a user-specified range).
 
+The selected **Cell** data is initialized in bounded contiguous blocks. This keeps the memory working set fixed and avoids individual storage accesses, including when the selected **Data Array** is disk-backed. A seeded random initialization remains deterministic: values are generated in Z-Y-X cell order, with one random value per cell copied to every component of that cell's tuple.
+
 ### Initialization Type
 
 The *Initialization Type* parameter provides the following choices:

@@ -58,8 +58,11 @@ public:
 
 /**
  * @class ReadChannel5Data
- * @brief This filter will read a single .ang file into a new Image Geometry, allowing the immediate use of Filters on the data instead of having to generate the intermediate
- * .h5ebsd file.
+ * @brief Reads an Oxford Channel 5 .cpr/.crc pair into an Image Geometry.
+ *
+ * Reader-owned field buffers are transferred to DataStore arrays with bounded bulk
+ * writes. Compatible phase and Euler arrays are converted in fixed-size chunks so
+ * the algorithm adds no scratch storage proportional to the image cell count.
  */
 class ORIENTATIONANALYSIS_EXPORT ReadChannel5Data
 {
@@ -72,6 +75,10 @@ public:
   ReadChannel5Data& operator=(const ReadChannel5Data&) = delete; // Copy Assignment Not Implemented
   ReadChannel5Data& operator=(ReadChannel5Data&&) = delete;      // Move Assignment Not Implemented
 
+  /**
+   * @brief Reads the Channel 5 file and populates the preflight-created output arrays.
+   * @return A valid result on success or the EbsdLib reader error on failure.
+   */
   Result<> operator()();
 
 private:
@@ -88,8 +95,8 @@ private:
   std::pair<int32, std::string> loadMaterialInfo(ebsdlib::CprReader* reader) const;
 
   /**
-   * @brief
-   * @param reader
+   * @brief Transfers reader-owned cell data into output arrays using bounded bulk I/O.
+   * @param reader The EbsdLib reader containing the parsed Channel 5 fields.
    */
   void copyRawEbsdData(ebsdlib::CprReader* reader) const;
 };

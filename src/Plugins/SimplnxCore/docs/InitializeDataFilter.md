@@ -8,6 +8,8 @@ Processing (Cleanup)
 
 This **Filter** allows the user to define the data set in a _DataArray_.
 
+All initialization modes generate values in bounded contiguous blocks and write them through bulk storage transfers. The resident working set therefore stays fixed for both in-memory and disk-backed arrays, including Boolean and multi-component arrays. Incremental and seeded random modes retain tuple-major, component-minor generation order, so chunk boundaries do not change their results.
+
 ### Initialization Type
 
 The *Initialization Type* parameter provides the following choices:

@@ -10,6 +10,8 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
@@ -475,39 +477,42 @@ void TestOverwriteArray()
 // -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::ConvertData: Valid Execution", "[SimplnxCore][ConvertDataFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   std::cout << "#### ConvertDataTest Starting ####" << std::endl;
 
-  TestInt8Signed();
-  TestInt8Unsigned();
+  scope.execute([&] { TestInt8Signed(); });
+  scope.execute([&] { TestInt8Unsigned(); });
 
-  TestInt16Signed();
-  TestInt16Unsigned();
+  scope.execute([&] { TestInt16Signed(); });
+  scope.execute([&] { TestInt16Unsigned(); });
 
-  TestInt32Signed();
-  TestInt32Unsigned();
+  scope.execute([&] { TestInt32Signed(); });
+  scope.execute([&] { TestInt32Unsigned(); });
 
-  TestInt64Signed();
-  TestInt64Unsigned();
+  scope.execute([&] { TestInt64Signed(); });
+  scope.execute([&] { TestInt64Unsigned(); });
 
-  TestUInt8Signed();
-  TestUInt8Unsigned();
+  scope.execute([&] { TestUInt8Signed(); });
+  scope.execute([&] { TestUInt8Unsigned(); });
 
-  TestUInt16Signed();
-  TestUInt16Unsigned();
+  scope.execute([&] { TestUInt16Signed(); });
+  scope.execute([&] { TestUInt16Unsigned(); });
 
-  TestUInt32Signed();
-  TestUInt32Unsigned();
+  scope.execute([&] { TestUInt32Signed(); });
+  scope.execute([&] { TestUInt32Unsigned(); });
 
-  TestUInt64Signed();
-  TestUInt64Unsigned();
+  scope.execute([&] { TestUInt64Signed(); });
+  scope.execute([&] { TestUInt64Unsigned(); });
 
-  TestFloat();
-  TestDouble();
+  scope.execute([&] { TestFloat(); });
+  scope.execute([&] { TestDouble(); });
 
-  TestBoolSigned();
-  TestBoolUnsigned();
+  scope.execute([&] { TestBoolSigned(); });
+  scope.execute([&] { TestBoolUnsigned(); });
 
   TestInvalidDataArray();
   TestOverwriteArray();
@@ -516,6 +521,9 @@ TEST_CASE("SimplnxCore::ConvertData: Valid Execution", "[SimplnxCore][ConvertDat
 // -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::ConvertData: In Place Execution", "[SimplnxCore][ConvertDataFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   ConvertDataFilter filter;
@@ -525,7 +533,7 @@ TEST_CASE("SimplnxCore::ConvertData: In Place Execution", "[SimplnxCore][Convert
   REQUIRE(dataStructure.getDataAs<IDataArray>(DataArrayPath)->getDataType() == DataType::int8);
   Arguments args = getArgs(DataArrayPath, DataType::int32, "DataArray");
   args.insertOrAssign(ConvertDataFilter::k_DeleteOriginal_Key, true);
-  auto executeResults = filter.execute(dataStructure, args);
+  auto executeResults = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResults.result);
   REQUIRE(dataStructure.getDataAs<IDataArray>(DataArrayPath)->getDataType() == DataType::int32);
 }

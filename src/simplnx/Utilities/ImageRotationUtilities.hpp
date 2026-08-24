@@ -9,14 +9,18 @@
 #include "simplnx/Filter/IFilter.hpp"
 #include "simplnx/Parameters/DynamicTableParameter.hpp"
 #include "simplnx/Parameters/VectorParameter.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
 #include "simplnx/simplnx_export.hpp"
 
 #include <Eigen/Dense>
 
 #include <chrono>
 #include <concepts>
+#include <cstring>
 #include <fstream>
 #include <mutex>
+#include <new>
 
 namespace nx::core::ImageRotationUtilities
 {
@@ -24,10 +28,10 @@ const Eigen::Vector3f k_XAxis = Eigen::Vector3f::UnitX();
 const Eigen::Vector3f k_YAxis = Eigen::Vector3f::UnitY();
 const Eigen::Vector3f k_ZAxis = Eigen::Vector3f::UnitZ();
 
-using Matrix3fR = Eigen::Matrix<float, 3, 3, Eigen::RowMajor>;
-using Matrix4fR = Eigen::Matrix<float, 4, 4, Eigen::RowMajor>;
+using Matrix3fR = Eigen::Matrix<float32, 3, 3, Eigen::RowMajor>;
+using Matrix4fR = Eigen::Matrix<float32, 4, 4, Eigen::RowMajor>;
 
-using Vector3i64 = Eigen::Array<int64_t, 1, 3>;
+using Vector3i64 = Eigen::Array<int64, 1, 3>;
 
 // Error code reported (via FilterProgressCallback::mergeResult) when a nearest-neighbor tuple copy fails.
 constexpr int32 k_NearestNeighborCopyFailed_Error = -6852;
@@ -37,12 +41,12 @@ struct RotateArgs
   USizeVec3 OriginalDims;
   FloatVec3 OriginalSpacing;
   FloatVec3 OriginalOrigin;
-  int64_t xp = 0;
-  int64_t yp = 0;
-  int64_t zp = 0;
-  float xRes = 0.0f;
-  float yRes = 0.0f;
-  float zRes = 0.0f;
+  int64 xp = 0;
+  int64 yp = 0;
+  int64 zp = 0;
+  float32 xRes = 0.0f;
+  float32 yRes = 0.0f;
+  float32 zRes = 0.0f;
 
   USizeVec3 TransformedDims;
   FloatVec3 TransformedSpacing;
@@ -51,9 +55,9 @@ struct RotateArgs
   USizeVec3 outputDims;
   FloatVec3 outputSpacing;
 
-  float outputXMin = 0.0f;
-  float outputYMin = 0.0f;
-  float outputZMin = 0.0f;
+  float32 outputXMin = 0.0f;
+  float32 outputYMin = 0.0f;
+  float32 outputZMin = 0.0f;
 };
 
 /**
@@ -141,7 +145,7 @@ T CosBetweenVectors(const Eigen::Vector3<T>& vectorA, const Eigen::Vector3<T>& v
  * @param axisNew
  * @return spacing for a given axis.
  */
-SIMPLNX_EXPORT float DetermineSpacing(const FloatVec3& spacing, const Eigen::Vector3f& axisNew);
+SIMPLNX_EXPORT float32 DetermineSpacing(const FloatVec3& spacing, const Eigen::Vector3f& axisNew);
 
 /**
  * @brief Determines parameters for image rotation
@@ -161,7 +165,7 @@ SIMPLNX_EXPORT ImageRotationUtilities::RotateArgs CreateRotationArgs(const Image
  * @return
  */
 template <typename T>
-T inline GetSourceArrayValue(const RotateArgs& params, Vector3i64 xyzIndex, const DataArray<T>& sourceArray, size_t compIndex)
+T inline GetSourceArrayValue(const RotateArgs& params, Vector3i64 xyzIndex, const DataArray<T>& sourceArray, usize compIndex)
 {
   if(xyzIndex[0] < 0)
   {
@@ -202,7 +206,7 @@ T inline GetSourceArrayValue(const RotateArgs& params, Vector3i64 xyzIndex, cons
  * @param coord
  * @return
  */
-SIMPLNX_EXPORT size_t FindOctant(const RotateArgs& params, const Point3Df& centerPoint, const Eigen::Array4f& coord);
+SIMPLNX_EXPORT usize FindOctant(const RotateArgs& params, const Point3Df& centerPoint, const Eigen::Array4f& coord);
 
 using OctantOffsetArrayType = std::array<Vector3i64, 8>;
 
@@ -244,20 +248,20 @@ using AccumulationValueType = std::conditional_t<std::is_floating_point_v<T>, fl
  * @param hitVoxelCenterPoint
  */
 template <typename T>
-inline void FindInterpolationValues(const RotateArgs& params, size_t octant, SizeVec3 oldIndicesU, Eigen::Array4f& oldCoords, const DataArray<T>& sourceArray,
+inline void FindInterpolationValues(const RotateArgs& params, usize octant, SizeVec3 oldIndicesU, Eigen::Array4f& oldCoords, const DataArray<T>& sourceArray,
                                     std::vector<AccumulationValueType<T>>& pValues, Eigen::Vector3f& uvw, Point3Df& hitVoxelCenterPoint)
 {
   const std::array<Vector3i64, 8>& indexOffset = k_AllOctantOffsets[octant];
 
-  const Vector3i64 oldIndices(static_cast<int64_t>(oldIndicesU[0]), static_cast<int64_t>(oldIndicesU[1]), static_cast<int64_t>(oldIndicesU[2]));
-  size_t numComps = sourceArray.getNumberOfComponents();
+  const Vector3i64 oldIndices(static_cast<int64>(oldIndicesU[0]), static_cast<int64>(oldIndicesU[1]), static_cast<int64>(oldIndicesU[2]));
+  usize numComps = sourceArray.getNumberOfComponents();
 
   Eigen::Vector3f p1Coord;
 
-  for(size_t i = 0; i < 8; i++)
+  for(usize i = 0; i < 8; i++)
   {
     auto pIndices = oldIndices + indexOffset[i];
-    for(size_t compIndex = 0; compIndex < numComps; compIndex++)
+    for(usize compIndex = 0; compIndex < numComps; compIndex++)
     {
       T value = GetSourceArrayValue<T>(params, pIndices, sourceArray, compIndex);
       pValues[i * numComps + compIndex] = value;
@@ -280,7 +284,7 @@ inline void FindInterpolationValues(const RotateArgs& params, size_t octant, Siz
                                 static_cast<float32>(c111_Index[1]) * params.yRes + (0.5F * params.yRes) + params.OriginalOrigin[1],
                                 static_cast<float32>(c111_Index[2]) * params.zRes + (0.5F * params.zRes) + params.OriginalOrigin[2]};
 
-  for(size_t i = 0; i < 3; i++)
+  for(usize i = 0; i < 3; i++)
   {
     uvw[i] = (oldCoords[i] - c000_Coord[i]) / (c111_Coord[i] - c000_Coord[i]);
     uvw[i] = uvw[i] < 0.0 ? 0.0 : uvw[i];
@@ -289,18 +293,24 @@ inline void FindInterpolationValues(const RotateArgs& params, size_t octant, Siz
 }
 
 /**
- * @brief
+ * @brief Synchronizes progress reporting, cancellation access, and worker
+ * Result aggregation for parallel image transformations.
+ *
+ * It borrows the filter callbacks and is owned by the calling transformation
+ * until all tasks have joined.
  */
 class FilterProgressCallback
 {
 public:
+  /** @brief Captures non-owning filter callbacks for the transformation lifetime. */
   FilterProgressCallback(const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel)
   : m_MessageHandler(mesgHandler)
   , m_ShouldCancel(shouldCancel)
   {
   }
 
-  void sendThreadSafeProgressMessage(int64_t counter)
+  /** @brief Adds completed nodes and emits a throttled aggregate progress message. */
+  void sendThreadSafeProgressMessage(int64 counter)
   {
     static std::mutex mutex;
     m_Progcounter += static_cast<int32>(counter);
@@ -313,6 +323,7 @@ public:
     }
   }
 
+  /** @brief Emits a caller-formatted progress message under the shared throttle lock. */
   void sendThreadSafeProgressMessage(const std::string& progressMessage)
   {
     static std::mutex mutex;
@@ -325,6 +336,7 @@ public:
     }
   }
 
+  /** @brief Returns the borrowed cancellation flag for worker polling. */
   const std::atomic_bool& getCancel() const
   {
     return m_ShouldCancel;
@@ -359,6 +371,205 @@ private:
   std::mutex m_ResultMutex;
   Result<> m_Result;
 };
+
+/**
+ * @brief Fixed-memory LRU cache for arbitrary source-array element reads.
+ *
+ * Rotations that map one output slice across most of the source Z range cannot
+ * use a Z-slab without allocating nearly the entire source array. This cache
+ * retains at most eight one-mebibyte flat pages and fills them through bulk
+ * DataStore reads. It is intentionally used serially by the OOC transform path.
+ */
+template <typename T>
+class BoundedDataStorePageCache
+{
+public:
+  /** @brief Borrows the source store and derives a one-mebibyte page size. */
+  explicit BoundedDataStorePageCache(const AbstractDataStore<T>& store)
+  : m_Store(store)
+  , m_PageElements(std::max<usize>(1, (1024 * 1024) / sizeof(T)))
+  {
+    m_Pages.reserve(k_MaxPages);
+  }
+
+  /**
+   * @brief Copies an arbitrary flat element range, joining data from as many
+   * cached pages as needed while retaining no more than eight pages.
+   */
+  Result<> copyElements(usize elementOffset, nonstd::span<T> destination)
+  {
+    if(elementOffset > m_Store.getSize() || destination.size() > m_Store.getSize() - elementOffset)
+    {
+      return MakeErrorResult(k_NearestNeighborCopyFailed_Error, "Image transform source-page request exceeds the source array.");
+    }
+
+    usize copied = 0;
+    while(copied < destination.size())
+    {
+      const usize currentOffset = elementOffset + copied;
+      const usize pageIndex = currentOffset / m_PageElements;
+      auto pageResult = page(pageIndex);
+      if(pageResult.invalid())
+      {
+        return ConvertResult(std::move(pageResult));
+      }
+      Page* pagePtr = pageResult.value();
+      const usize inPageOffset = currentOffset - pageIndex * m_PageElements;
+      const usize copyCount = std::min(destination.size() - copied, pagePtr->size - inPageOffset);
+      std::copy_n(pagePtr->values.get() + inPageOffset, copyCount, destination.data() + copied);
+      copied += copyCount;
+    }
+    return {};
+  }
+
+private:
+  /** @brief One flat source page plus its LRU sequence and valid element count. */
+  struct Page
+  {
+    usize index = std::numeric_limits<usize>::max();
+    uint64 useSequence = 0;
+    std::unique_ptr<T[]> values;
+    usize size = 0;
+  };
+
+  /** @brief Returns a cached page or bulk-loads it into a free/LRU slot. */
+  Result<Page*> page(usize pageIndex)
+  {
+    for(auto& page : m_Pages)
+    {
+      if(page.index == pageIndex)
+      {
+        page.useSequence = m_NextUseSequence++;
+        return {&page};
+      }
+    }
+
+    Page* destination = nullptr;
+    if(m_Pages.size() < k_MaxPages)
+    {
+      try
+      {
+        m_Pages.emplace_back();
+      } catch(const std::bad_alloc&)
+      {
+        return MakeErrorResult<Page*>(k_NearestNeighborCopyFailed_Error, "Image transform could not allocate a bounded source page.");
+      }
+      destination = &m_Pages.back();
+    }
+    else
+    {
+      destination = &*std::min_element(m_Pages.begin(), m_Pages.end(), [](const Page& left, const Page& right) { return left.useSequence < right.useSequence; });
+    }
+
+    const usize elementOffset = pageIndex * m_PageElements;
+    const usize elementCount = std::min(m_PageElements, m_Store.getSize() - elementOffset);
+    try
+    {
+      if(destination->size < elementCount)
+      {
+        destination->values = std::make_unique<T[]>(elementCount);
+        destination->size = elementCount;
+      }
+    } catch(const std::bad_alloc&)
+    {
+      return MakeErrorResult<Page*>(k_NearestNeighborCopyFailed_Error, "Image transform could not allocate a bounded source page.");
+    }
+    auto readResult = m_Store.copyIntoBuffer(elementOffset, nonstd::span<T>(destination->values.get(), elementCount));
+    if(readResult.invalid())
+    {
+      return ConvertResultTo<Page*>(std::move(readResult), nullptr);
+    }
+    destination->index = pageIndex;
+    destination->size = elementCount;
+    destination->useSequence = m_NextUseSequence++;
+    return {destination};
+  }
+
+  static constexpr usize k_MaxPages = 8;
+  const AbstractDataStore<T>& m_Store;
+  const usize m_PageElements;
+  std::vector<Page> m_Pages;
+  uint64 m_NextUseSequence = 1;
+};
+
+/**
+ * @brief Update a Z-slice slab cache to cover [newZMin, newZMax].
+ *
+ * The slab cache holds a contiguous range of source Z-slices in a pre-allocated buffer.
+ * When the caller asks for a new range that overlaps the cached range, this helper shifts
+ * the surviving slices to their new position via memmove and issues bulk reads only for
+ * the delta slices (below or above the overlap). When there is no overlap (or the buffer
+ * had to grow), the entire new range is re-read.
+ *
+ * The caller owns \a slabBuf and \a slabBufSize; this function may grow the buffer but
+ * will not shrink it. \a cachedZMin and \a cachedZMax are updated in place.
+ *
+ * Preconditions: \a newZMin <= \a newZMax, both within the source dataset's Z range.
+ */
+template <typename T>
+inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::unique_ptr<T[]>& slabBuf, usize& slabBufSize, int64& cachedZMin, int64& cachedZMax, int64 newZMin, int64 newZMax,
+                                usize sliceTuples, usize numComps)
+{
+  const usize sliceElems = sliceTuples * numComps;
+  const usize needElems = static_cast<usize>(newZMax - newZMin + 1) * sliceElems;
+
+  bool validCache = (cachedZMin >= 0 && cachedZMax >= cachedZMin);
+
+  // Grow buffer if needed. Growth discards the old contents, so the cache must be re-read in full.
+  if(needElems > slabBufSize)
+  {
+    slabBuf = std::make_unique<T[]>(needElems);
+    slabBufSize = needElems;
+    validCache = false;
+  }
+
+  const int64 overlapMin = std::max(newZMin, cachedZMin);
+  const int64 overlapMax = std::min(newZMax, cachedZMax);
+  const bool hasOverlap = validCache && overlapMin <= overlapMax;
+
+  if(hasOverlap)
+  {
+    // Shift the surviving slices to their new position (memmove handles overlap in either direction).
+    const usize srcOff = static_cast<usize>(overlapMin - cachedZMin) * sliceElems;
+    const usize dstOff = static_cast<usize>(overlapMin - newZMin) * sliceElems;
+    const usize moveCount = static_cast<usize>(overlapMax - overlapMin + 1) * sliceElems;
+    if(srcOff != dstOff)
+    {
+      std::memmove(slabBuf.get() + dstOff, slabBuf.get() + srcOff, moveCount * sizeof(T));
+    }
+    // Read slices below the overlap (the new range extends further back).
+    if(newZMin < overlapMin)
+    {
+      const usize readElems = static_cast<usize>(overlapMin - newZMin) * sliceElems;
+      if(auto readResult = srcStore.copyIntoBuffer(static_cast<usize>(newZMin) * sliceElems, nonstd::span<T>(slabBuf.get(), readElems)); readResult.invalid())
+      {
+        return readResult;
+      }
+    }
+    // Read slices above the overlap (the new range extends further forward — typical case).
+    if(newZMax > overlapMax)
+    {
+      const usize readElems = static_cast<usize>(newZMax - overlapMax) * sliceElems;
+      const usize readStartZ = static_cast<usize>(overlapMax + 1);
+      const usize dstReadOff = static_cast<usize>(overlapMax + 1 - newZMin) * sliceElems;
+      if(auto readResult = srcStore.copyIntoBuffer(readStartZ * sliceElems, nonstd::span<T>(slabBuf.get() + dstReadOff, readElems)); readResult.invalid())
+      {
+        return readResult;
+      }
+    }
+  }
+  else
+  {
+    if(auto readResult = srcStore.copyIntoBuffer(static_cast<usize>(newZMin) * sliceElems, nonstd::span<T>(slabBuf.get(), needElems)); readResult.invalid())
+    {
+      return readResult;
+    }
+  }
+
+  cachedZMin = newZMin;
+  cachedZMax = newZMax;
+  return {};
+}
 
 /**
  * @brief The RotateImageGeometryWithTrilinearInterpolation class
@@ -402,16 +613,16 @@ public:
    * @param indices
    * @return
    */
-  T calculateInterpolatedValue(const std::vector<AccumulationValueType<T>>& pValues, const Eigen::Vector3f& uvw, size_t numComps, size_t compIndex) const
+  T calculateInterpolatedValue(const std::vector<AccumulationValueType<T>>& pValues, const Eigen::Vector3f& uvw, usize numComps, usize compIndex) const
   {
-    constexpr size_t P1 = 0;
-    constexpr size_t P2 = 1;
-    constexpr size_t P3 = 2;
-    constexpr size_t P4 = 3;
-    constexpr size_t P5 = 4;
-    constexpr size_t P6 = 5;
-    constexpr size_t P7 = 6;
-    constexpr size_t P8 = 7;
+    constexpr usize P1 = 0;
+    constexpr usize P2 = 1;
+    constexpr usize P3 = 2;
+    constexpr usize P4 = 3;
+    constexpr usize P5 = 4;
+    constexpr usize P6 = 5;
+    constexpr usize P7 = 6;
+    constexpr usize P8 = 7;
 
     /* clang-format on */
     const AccumulationValueType<T> c000 = pValues[P1 * numComps + compIndex];
@@ -423,9 +634,9 @@ public:
     const AccumulationValueType<T> c111 = pValues[P7 * numComps + compIndex];
     const AccumulationValueType<T> c011 = pValues[P8 * numComps + compIndex];
 
-    const float Xd = uvw[0];
-    const float Yd = uvw[1];
-    const float Zd = uvw[2];
+    const float32 Xd = uvw[0];
+    const float32 Yd = uvw[1];
+    const float32 Zd = uvw[2];
 
     const AccumulationValueType<T> c00 = c000 * (1 - Xd) + c100 * Xd;
     const AccumulationValueType<T> c01 = c001 * (1 - Xd) + c101 * Xd;
@@ -444,13 +655,19 @@ public:
    * @brief This is the main algorithm to perform the interpolation and get a final value that is placed into the transformed
    * voxel. This uses Trilinear interpolation which will devolve into Bilinear and Linear interpolation depending on the
    * values of U, V and W.
+   *
+   * Direct execution uses a sliding source Z-slab. OOC execution uses a fixed
+   * eight-page LRU cache so rotations whose source-Z span covers most of the
+   * volume cannot materialize a full-volume slab. Each output Z-slice is
+   * accumulated locally and flushed through one bulk write.
    */
   void operator()() const
   {
     using DataArrayType = DataArray<T>;
 
     const auto& sourceArray = dynamic_cast<const DataArrayType&>(*m_SourceArray);
-    const size_t numComps = sourceArray.getNumberOfComponents();
+    const auto& oldDataStore = sourceArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
+    const usize numComps = sourceArray.getNumberOfComponents();
     if(numComps == 0)
     {
       m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Number of Components was Zero for array. Exiting Transform.", sourceArray.getName()));
@@ -472,58 +689,226 @@ public:
     destImageGeomPtr->setSpacing(m_Params.TransformedSpacing);
     destImageGeomPtr->setOrigin(m_Params.TransformedOrigin);
 
-    std::vector<AccumulationValueType<T>> pValues(8 * numComps);
+    const int64 srcDimX = static_cast<int64>(m_Params.OriginalDims[0]);
+    const int64 srcDimY = static_cast<int64>(m_Params.OriginalDims[1]);
+    const int64 srcDimZ = static_cast<int64>(m_Params.OriginalDims[2]);
+    const usize srcSliceSize = static_cast<usize>(srcDimX * srcDimY);
+    const usize outSliceSize = static_cast<usize>(m_Params.outputDims[0] * m_Params.outputDims[1]);
+    const bool usesOutOfCoreStore = IsOutOfCore(*m_SourceArray) || IsOutOfCore(*m_TargetArray);
+    const bool useBoundedPageCache = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
 
     Matrix4fR inverseTransform = m_TransformationMatrix.inverse();
 
-    for(int64_t k = 0; k < m_Params.outputDims[2]; k++)
+    // Output slice buffer (one Z-slice of the output geometry)
+    auto outSliceBuf = std::make_unique<T[]>(outSliceSize * numComps);
+    std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+
+    // Direct uses a contiguous source Z-slab; OOC uses the bounded page cache.
+    std::unique_ptr<T[]> srcSlabBuf;
+    usize srcSlabBufSize = 0;
+    int64 cachedSrcZMin = -1;
+    int64 cachedSrcZMax = -2; // invalid range initially
+    std::unique_ptr<BoundedDataStorePageCache<T>> sourcePageCache;
+    if(useBoundedPageCache)
+    {
+      sourcePageCache = std::make_unique<BoundedDataStorePageCache<T>>(oldDataStore);
+    }
+
+    for(int64 k = 0; k < m_Params.outputDims[2]; k++)
     {
       if(m_FilterCallback->getCancel())
       {
         break;
       }
       m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Interpolating values for slice '{}/{}'", m_SourceArray->getName(), k, m_Params.outputDims[2]));
-      int64_t ktot = (m_Params.outputDims[0] * m_Params.outputDims[1]) * k;
 
-      for(int64_t j = 0; j < m_Params.outputDims[1]; j++)
+      // Determine source Z range needed for this output slice analytically using the 4 corners
+      // of the output slice's XY bounding box (same idea as RotateImageGeometryWithNearestNeighbor)
+      // and then pad by +/- 1 on each side to cover the 8-corner trilinear neighbors.
+      int64 neededZMin = srcDimZ;
+      int64 neededZMax = -1;
+      for(int cj = 0; cj <= 1; cj++)
       {
-        int64_t jtot = (m_Params.outputDims[0]) * j;
-        for(int64_t i = 0; i < m_Params.outputDims[0]; i++)
+        for(int ci = 0; ci <= 1; ci++)
         {
-          int64_t destIndex = ktot + jtot + i;
-          Point3Df destPoint = destImageGeomPtr->getCoordsf(destIndex);
-          // Last value is 1. See https://www.euclideanspace.com/maths/geometry/affine/matrix4x4/index.htm
-          Eigen::Vector4f coordsNew(destPoint.getX(), destPoint.getY(), destPoint.getZ(), 1.0f);
-          // Transform back to the old coordinate
-          Eigen::Array4f coordsOld = inverseTransform * coordsNew;
+          int64 cx = ci == 0 ? 0 : static_cast<int64>(m_Params.outputDims[0] - 1);
+          int64 cy = cj == 0 ? 0 : static_cast<int64>(m_Params.outputDims[1] - 1);
+          int64 cornerFlatIdx = cx + cy * static_cast<int64>(m_Params.outputDims[0]) + k * static_cast<int64>(m_Params.outputDims[0] * m_Params.outputDims[1]);
+          Point3Df cornerPt = destImageGeomPtr->getCoordsf(cornerFlatIdx);
+          Eigen::Vector4f cornerNew(cornerPt.getX(), cornerPt.getY(), cornerPt.getZ(), 1.0f);
+          Eigen::Array4f cornerOld = inverseTransform * cornerNew;
+          float32 srcPhysZ = cornerOld[2];
+          float32 srcOriginZ = m_Params.OriginalOrigin[2];
+          float32 srcSpacingZ = m_Params.OriginalSpacing[2];
+          int64 srcZIdx = static_cast<int64>(std::floor((srcPhysZ - srcOriginZ) / srcSpacingZ));
+          neededZMin = std::min(neededZMin, srcZIdx);
+          neededZMax = std::max(neededZMax, srcZIdx);
+        }
+      }
+      // +/- 1 margin for trilinear corner neighbors, plus +1 extra slop for floor/ceil ambiguity
+      neededZMin = std::max(static_cast<int64>(0), neededZMin - 2);
+      neededZMax = std::min(srcDimZ - 1, neededZMax + 2);
 
-          // Now compute the old Cell Index from the old coordinate
-          SizeVec3 oldGeomIndices;
-          auto errorResult = origImageGeomPtr->computeCellIndex(coordsOld.data(), oldGeomIndices);
+      if(neededZMin > neededZMax || neededZMin >= srcDimZ || neededZMax < 0)
+      {
+        // No valid source mapping for this slice — fill with zeros
+        std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+        if(auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps)); writeResult.invalid())
+        {
+          m_FilterCallback->mergeResult(
+              MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Trilinear destination slice write failed for '{}' at destination Z {}", m_SourceArray->getName(), k)));
+          return;
+        }
+        continue;
+      }
 
-          // Now we know what voxel the new cell center maps back to in the original geometry.
-          if(errorResult == ImageGeom::ErrorType::NoError)
+      // Slide the slab cache to cover [neededZMin, neededZMax]. When the new range overlaps the
+      // cached range (typical case, where consecutive output slices shift the source window by a
+      // small amount), only the delta slices are read from disk; the surviving slices are moved
+      // to their new position in the buffer via memmove.
+      if(!useBoundedPageCache)
+      {
+        if(auto readResult = updateSlabCache<T>(oldDataStore, srcSlabBuf, srcSlabBufSize, cachedSrcZMin, cachedSrcZMax, neededZMin, neededZMax, srcSliceSize, numComps); readResult.invalid())
+        {
+          m_FilterCallback->mergeResult(MakeErrorResult(k_NearestNeighborCopyFailed_Error,
+                                                        fmt::format("Trilinear source slab read failed for '{}' at source Z range [{}, {}]", m_SourceArray->getName(), neededZMin, neededZMax)));
+          return;
+        }
+      }
+
+      // Process output slice into local buffer. Zero-fill first so that destination voxels whose
+      // inverse-transformed coordinate falls outside the source grid remain zero.
+      std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+
+      // Direct executes rows in parallel over the read-only slab. OOC executes
+      // serially because its bounded LRU cache mutates on page misses.
+      T* outSliceBufPtr = outSliceBuf.get();
+      const T* srcSlabBufPtr = srcSlabBuf.get();
+      const int64 outDimX = static_cast<int64>(m_Params.outputDims[0]);
+      const int64 outDimY = static_cast<int64>(m_Params.outputDims[1]);
+      const int64 destSliceBaseIdx = outDimX * outDimY * k;
+
+      auto readFromSlab = [&](int64 xIdx, int64 yIdx, int64 zIdx, usize compIndex) -> T {
+        int64 xClamped = std::min(std::max<int64>(0, xIdx), srcDimX - 1);
+        int64 yClamped = std::min(std::max<int64>(0, yIdx), srcDimY - 1);
+        int64 zClamped = std::min(std::max<int64>(0, zIdx), srcDimZ - 1);
+        const usize slabLocalIdx = (static_cast<usize>(zClamped - cachedSrcZMin) * srcSliceSize + static_cast<usize>(yClamped) * static_cast<usize>(srcDimX) + static_cast<usize>(xClamped)) * numComps;
+        return srcSlabBufPtr[slabLocalIdx + compIndex];
+      };
+
+      ParallelDataAlgorithm dataAlg;
+      dataAlg.setParallelizationEnabled(!useBoundedPageCache);
+      dataAlg.setRange(0, static_cast<usize>(outDimY));
+      Result<> boundedReadResult;
+      dataAlg.execute([&](const Range& range) {
+        // Per-thread scratch. pValues holds the 8 corner voxel values for one destination voxel.
+        std::vector<AccumulationValueType<T>> pValues(8 * numComps);
+        std::vector<T> sourceTuple(numComps);
+
+        for(int64 j = static_cast<int64>(range.min()); j < static_cast<int64>(range.max()); j++)
+        {
+          for(int64 i = 0; i < outDimX; i++)
           {
-            size_t oldIndex = (m_Params.OriginalDims[0] * m_Params.OriginalDims[1] * oldGeomIndices[2]) + (m_Params.OriginalDims[0] * oldGeomIndices[1]) + oldGeomIndices[0];
+            if(boundedReadResult.invalid())
+            {
+              return;
+            }
+            const int64 destIndex = destSliceBaseIdx + outDimX * j + i;
+            const usize outBufIdx = static_cast<usize>(j * outDimX + i);
+            Point3Df destPoint = destImageGeomPtr->getCoordsf(destIndex);
+            Eigen::Vector4f coordsNew(destPoint.getX(), destPoint.getY(), destPoint.getZ(), 1.0f);
+            Eigen::Array4f coordsOld = inverseTransform * coordsNew;
 
+            SizeVec3 oldGeomIndices;
+            auto errorResult = origImageGeomPtr->computeCellIndex(coordsOld.data(), oldGeomIndices);
+
+            if(errorResult != ImageGeom::ErrorType::NoError)
+            {
+              // Already zero-filled above; leave as zero.
+              continue;
+            }
+
+            usize oldIndex = (m_Params.OriginalDims[0] * m_Params.OriginalDims[1] * oldGeomIndices[2]) + (m_Params.OriginalDims[0] * oldGeomIndices[1]) + oldGeomIndices[0];
             auto oldVoxelCenterPoint = origImageGeomPtr->getCoordsf(oldIndex);
-
             int octant = FindOctant(m_Params, oldVoxelCenterPoint, coordsOld);
 
+            // Inlined slab-aware version of FindInterpolationValues: read 8 corner voxels from the
+            // cached slab instead of issuing per-element virtual dispatches against sourceArray.
+            const std::array<Vector3i64, 8>& indexOffset = k_AllOctantOffsets[octant];
+            const Vector3i64 oldIndicesV(static_cast<int64>(oldGeomIndices[0]), static_cast<int64>(oldGeomIndices[1]), static_cast<int64>(oldGeomIndices[2]));
+            Eigen::Vector3f p1Coord;
+            for(usize ci = 0; ci < 8; ci++)
+            {
+              auto pIndices = oldIndicesV + indexOffset[ci];
+              if(useBoundedPageCache)
+              {
+                const int64 xClamped = std::min(std::max<int64>(0, pIndices[0]), srcDimX - 1);
+                const int64 yClamped = std::min(std::max<int64>(0, pIndices[1]), srcDimY - 1);
+                const int64 zClamped = std::min(std::max<int64>(0, pIndices[2]), srcDimZ - 1);
+                const usize sourceTupleIndex = (static_cast<usize>(zClamped) * srcSliceSize + static_cast<usize>(yClamped) * static_cast<usize>(srcDimX) + static_cast<usize>(xClamped));
+                auto readResult = sourcePageCache->copyElements(sourceTupleIndex * numComps, nonstd::span<T>(sourceTuple.data(), numComps));
+                if(readResult.invalid())
+                {
+                  boundedReadResult = std::move(readResult);
+                  return;
+                }
+                for(usize compIndex = 0; compIndex < numComps; compIndex++)
+                {
+                  pValues[ci * numComps + compIndex] = sourceTuple[compIndex];
+                }
+              }
+              else
+              {
+                for(usize compIndex = 0; compIndex < numComps; compIndex++)
+                {
+                  pValues[ci * numComps + compIndex] = readFromSlab(pIndices[0], pIndices[1], pIndices[2], compIndex);
+                }
+              }
+              if(ci == 0)
+              {
+                p1Coord = {static_cast<float32>(pIndices[0]) * m_Params.xRes + (0.5F * m_Params.xRes) + m_Params.OriginalOrigin[0],
+                           static_cast<float32>(pIndices[1]) * m_Params.yRes + (0.5F * m_Params.yRes) + m_Params.OriginalOrigin[1],
+                           static_cast<float32>(pIndices[2]) * m_Params.zRes + (0.5F * m_Params.zRes) + m_Params.OriginalOrigin[2]};
+              }
+            }
+            // Compute uvw (normalized interpolation weights) from the coordinate of the coordsOld
+            // relative to the P1 corner. Matches the computation in FindInterpolationValues().
             Eigen::Vector3f uvw;
-            FindInterpolationValues(m_Params, octant, oldGeomIndices, coordsOld, sourceArray, pValues, uvw, oldVoxelCenterPoint);
+            for(usize axis = 0; axis < 3; axis++)
+            {
+              float32 cellSize = (axis == 0) ? m_Params.xRes : (axis == 1) ? m_Params.yRes : m_Params.zRes;
+              uvw[axis] = (static_cast<float32>(coordsOld[axis]) - p1Coord[axis]) / cellSize;
+              if(uvw[axis] < 0.0f)
+              {
+                uvw[axis] = 0.0f;
+              }
+              if(uvw[axis] > 1.0f)
+              {
+                uvw[axis] = 1.0f;
+              }
+            }
 
-            for(size_t compIndex = 0; compIndex < numComps; compIndex++)
+            for(usize compIndex = 0; compIndex < numComps; compIndex++)
             {
               T value = calculateInterpolatedValue(pValues, uvw, numComps, compIndex);
-              newDataStore.setComponent(destIndex, compIndex, value);
+              outSliceBufPtr[outBufIdx * numComps + compIndex] = value;
             }
           }
-          else
-          {
-            newDataStore.fillTuple(destIndex, static_cast<T>(0));
-          }
         }
+      });
+
+      if(boundedReadResult.invalid())
+      {
+        m_FilterCallback->mergeResult(std::move(boundedReadResult));
+        return;
+      }
+
+      // Flush output slice with a single bulk write
+      if(auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps)); writeResult.invalid())
+      {
+        m_FilterCallback->mergeResult(
+            MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Trilinear destination slice write failed for '{}' at destination Z {}", m_SourceArray->getName(), k)));
+        return;
       }
     }
     m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Transform Ending", sourceArray.getName()));
@@ -578,8 +963,32 @@ public:
 
     const auto& oldDataStore = m_SourceArray->template getIDataStoreRefAs<AbstractDataStore<T>>();
     auto& newDataStore = m_TargetArray->template getIDataStoreRefAs<AbstractDataStore<T>>();
+    const usize numComps = oldDataStore.getNumberOfComponents();
+    const int64 srcDimX = static_cast<int64>(m_Params.OriginalDims[0]);
+    const int64 srcDimY = static_cast<int64>(m_Params.OriginalDims[1]);
+    const int64 srcDimZ = static_cast<int64>(m_Params.OriginalDims[2]);
+    const usize srcSliceSize = static_cast<usize>(srcDimX * srcDimY);
+    const usize outSliceSize = static_cast<usize>(m_Params.outputDims[0] * m_Params.outputDims[1]);
+    const bool usesOutOfCoreStore = IsOutOfCore(*m_SourceArray) || IsOutOfCore(*m_TargetArray);
+    const bool useBoundedPageCache = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
 
     Matrix4fR inverseTransform = m_TransformationMatrix.inverse();
+
+    // Allocate output slice buffer (bounded: one Z-slice of the output geometry)
+    auto outSliceBuf = std::make_unique<T[]>(outSliceSize * numComps);
+    std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+
+    // Direct uses a contiguous source Z-slab; OOC uses the bounded page cache.
+    std::unique_ptr<T[]> srcSlabBuf;
+    usize srcSlabBufSize = 0;
+    int64 cachedSrcZMin = -1;
+    int64 cachedSrcZMax = -2; // invalid range initially
+    std::unique_ptr<BoundedDataStorePageCache<T>> sourcePageCache;
+    if(useBoundedPageCache)
+    {
+      sourcePageCache = std::make_unique<BoundedDataStorePageCache<T>>(oldDataStore);
+    }
+
     for(int64 k = 0; k < m_Params.outputDims[2]; k++)
     {
       if(m_FilterCallback->getCancel())
@@ -588,45 +997,150 @@ public:
       }
       m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Interpolating values for slice '{}/{}'", m_SourceArray->getName(), k, m_Params.outputDims[2]));
 
-      int64 const ktot = (m_Params.outputDims[0] * m_Params.outputDims[1]) * k;
-      for(int64 j = 0; j < m_Params.outputDims[1]; j++)
+      // Determine source Z range needed for this output slice analytically.
+      // The inverse transform maps output physical coords to source physical coords.
+      // Source Z is a linear function of output (X, Y) for a fixed output Z, so
+      // extrema occur at the corners of the output slice's XY bounding box.
+      int64 neededZMin = srcDimZ;
+      int64 neededZMax = -1;
+
+      if(m_SliceBySlice)
       {
-        int64 jtot = (m_Params.outputDims[0]) * j;
-        for(int64 i = 0; i < m_Params.outputDims[0]; i++)
+        neededZMin = k;
+        neededZMax = k;
+      }
+      else
+      {
+        // Probe all 4 corners — compute source Z regardless of whether the point is in-bounds
+        for(int cj = 0; cj <= 1; cj++)
         {
-          const int64 destIndex = ktot + jtot + i;
-          Point3Df destPoint = destImageGeomPtr->getCoordsf(destIndex);
-          // Last value is 1. See https://www.euclideanspace.com/maths/geometry/affine/matrix4x4/index.htm
-          Eigen::Vector4f coordsNew(destPoint.getX(), destPoint.getY(), destPoint.getZ(), 1.0f);
-          // Transform back to the old coordinate
-          Eigen::Array4f coordsOld = inverseTransform * coordsNew;
-
-          // Now compute the old Cell Index from the old coordinate
-          SizeVec3 oldGeomIndices;
-          auto errorResult = srcImageGeomPtr->computeCellIndex(coordsOld.data(), oldGeomIndices);
-
-          // Now we know what voxel the new cell center maps back to in the original geometry.
-          if(errorResult == ImageGeom::ErrorType::NoError)
+          for(int ci = 0; ci <= 1; ci++)
           {
-            if(m_SliceBySlice)
-            {
-              oldGeomIndices[2] = k;
-            }
-            size_t oldIndex = (m_Params.OriginalDims[0] * m_Params.OriginalDims[1] * oldGeomIndices[2]) + (m_Params.OriginalDims[0] * oldGeomIndices[1]) + oldGeomIndices[0];
-
-            if(newDataStore.copyFrom(destIndex, oldDataStore, oldIndex, 1).invalid())
-            {
-              m_FilterCallback->mergeResult(
-                  MakeErrorResult(k_NearestNeighborCopyFailed_Error,
-                                  fmt::format("Nearest-neighbor array copy failed for '{}': source tuple index {} -> destination tuple index {}", m_SourceArray->getName(), oldIndex, destIndex)));
-              return;
-            }
-          }
-          else
-          {
-            newDataStore.fillTuple(destIndex, 0);
+            int64 cx = ci == 0 ? 0 : static_cast<int64>(m_Params.outputDims[0] - 1);
+            int64 cy = cj == 0 ? 0 : static_cast<int64>(m_Params.outputDims[1] - 1);
+            int64 cornerFlatIdx = cx + cy * static_cast<int64>(m_Params.outputDims[0]) + k * static_cast<int64>(m_Params.outputDims[0] * m_Params.outputDims[1]);
+            Point3Df cornerPt = destImageGeomPtr->getCoordsf(cornerFlatIdx);
+            Eigen::Vector4f cornerNew(cornerPt.getX(), cornerPt.getY(), cornerPt.getZ(), 1.0f);
+            Eigen::Array4f cornerOld = inverseTransform * cornerNew;
+            // Convert source physical Z to cell index (floor division)
+            float srcPhysZ = cornerOld[2];
+            float srcOriginZ = m_Params.OriginalOrigin[2];
+            float srcSpacingZ = m_Params.OriginalSpacing[2];
+            int64 srcZIdx = static_cast<int64>(std::floor((srcPhysZ - srcOriginZ) / srcSpacingZ));
+            neededZMin = std::min(neededZMin, srcZIdx);
+            neededZMax = std::max(neededZMax, srcZIdx);
           }
         }
+        // Clamp to valid source range with margin
+        neededZMin = std::max(static_cast<int64>(0), neededZMin - 1);
+        neededZMax = std::min(srcDimZ - 1, neededZMax + 1);
+      }
+
+      if(neededZMin > neededZMax || neededZMin >= srcDimZ || neededZMax < 0)
+      {
+        // No valid source mapping for this slice — fill with zeros
+        std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+        auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps));
+        if(writeResult.invalid())
+        {
+          m_FilterCallback->mergeResult(
+              MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Nearest-neighbor destination slice write failed for '{}' at destination Z {}", m_SourceArray->getName(), k)));
+          return;
+        }
+        continue;
+      }
+      neededZMin = std::max(neededZMin, static_cast<int64>(0));
+      neededZMax = std::min(neededZMax, srcDimZ - 1);
+
+      // Slide the slab cache to cover [neededZMin, neededZMax]. Only the delta slices are
+      // re-read when the new range overlaps the cached range.
+      if(!useBoundedPageCache)
+      {
+        if(auto readResult = updateSlabCache<T>(oldDataStore, srcSlabBuf, srcSlabBufSize, cachedSrcZMin, cachedSrcZMax, neededZMin, neededZMax, srcSliceSize, numComps); readResult.invalid())
+        {
+          m_FilterCallback->mergeResult(MakeErrorResult(k_NearestNeighborCopyFailed_Error,
+                                                        fmt::format("Nearest-neighbor source slab read failed for '{}' at source Z range [{}, {}]", m_SourceArray->getName(), neededZMin, neededZMax)));
+          return;
+        }
+      }
+
+      // Process output slice. Zero-fill first so destination voxels with no valid source mapping
+      // remain zero.
+      std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
+
+      // Direct executes rows in parallel over the read-only slab. OOC executes
+      // serially because its bounded LRU cache mutates on page misses.
+      T* outSliceBufPtr = outSliceBuf.get();
+      const T* srcSlabBufPtr = srcSlabBuf.get();
+      const int64 outDimX = static_cast<int64>(m_Params.outputDims[0]);
+      const int64 outDimY = static_cast<int64>(m_Params.outputDims[1]);
+      const int64 destSliceBaseIdx = outDimX * outDimY * k;
+      const bool sliceBySlice = m_SliceBySlice;
+
+      ParallelDataAlgorithm dataAlg;
+      dataAlg.setParallelizationEnabled(!useBoundedPageCache);
+      dataAlg.setRange(0, static_cast<usize>(outDimY));
+      Result<> boundedReadResult;
+      dataAlg.execute([&](const Range& range) {
+        for(int64 j = static_cast<int64>(range.min()); j < static_cast<int64>(range.max()); j++)
+        {
+          for(int64 i = 0; i < outDimX; i++)
+          {
+            if(boundedReadResult.invalid())
+            {
+              return;
+            }
+            const int64 destIndex = destSliceBaseIdx + outDimX * j + i;
+            const usize outBufIdx = static_cast<usize>(j * outDimX + i);
+            Point3Df destPoint = destImageGeomPtr->getCoordsf(destIndex);
+            Eigen::Vector4f coordsNew(destPoint.getX(), destPoint.getY(), destPoint.getZ(), 1.0f);
+            Eigen::Array4f coordsOld = inverseTransform * coordsNew;
+
+            SizeVec3 oldGeomIndices;
+            auto errorResult = srcImageGeomPtr->computeCellIndex(coordsOld.data(), oldGeomIndices);
+
+            if(errorResult == ImageGeom::ErrorType::NoError)
+            {
+              if(sliceBySlice)
+              {
+                oldGeomIndices[2] = k;
+              }
+              int64 srcZ = static_cast<int64>(oldGeomIndices[2]);
+              if(useBoundedPageCache)
+              {
+                const usize sourceTupleIndex = static_cast<usize>(srcZ) * srcSliceSize + oldGeomIndices[1] * static_cast<usize>(srcDimX) + oldGeomIndices[0];
+                auto readResult = sourcePageCache->copyElements(sourceTupleIndex * numComps, nonstd::span<T>(outSliceBufPtr + outBufIdx * numComps, numComps));
+                if(readResult.invalid())
+                {
+                  boundedReadResult = std::move(readResult);
+                  return;
+                }
+              }
+              else if(srcZ >= cachedSrcZMin && srcZ <= cachedSrcZMax)
+              {
+                const usize slabLocalIdx = (static_cast<usize>(srcZ - cachedSrcZMin) * srcSliceSize + oldGeomIndices[1] * static_cast<usize>(srcDimX) + oldGeomIndices[0]) * numComps;
+                for(usize c = 0; c < numComps; c++)
+                {
+                  outSliceBufPtr[outBufIdx * numComps + c] = srcSlabBufPtr[slabLocalIdx + c];
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if(boundedReadResult.invalid())
+      {
+        m_FilterCallback->mergeResult(std::move(boundedReadResult));
+        return;
+      }
+
+      auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps));
+      if(writeResult.invalid())
+      {
+        m_FilterCallback->mergeResult(
+            MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Nearest-neighbor destination slice write failed for '{}' at destination Z {}", m_SourceArray->getName(), k)));
+        return;
       }
     }
     m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Transform Ending", m_SourceArray->getName()));
@@ -659,30 +1173,60 @@ public:
   {
   }
 
-  void convert(size_t start, size_t end) const
+  void convert(usize start, usize end) const
   {
-    int64_t progCounter = 0;
-    const size_t totalElements = (end - start);
-    const size_t progIncrement = static_cast<int64_t>(totalElements / 100);
+    // OOC optimization: process vertices in fixed-size chunks using bulk I/O. Each chunk reads
+    // a contiguous range of vertex components into a local buffer, performs the transform in
+    // memory, then writes the whole chunk back with a single copyFromBuffer. This replaces
+    // per-element at()/setValue() virtual dispatches that force chunk load/evict thrashing in
+    // OOC-backed SharedVertexList stores.
+    constexpr usize k_ChunkVertices = 16384; // 16K vertices * 3 components * 4 bytes = 192 KB per chunk
+    auto& vertexStore = m_Vertices.getDataStoreRef();
+    auto chunkBuf = std::make_unique<float32[]>(k_ChunkVertices * 3);
 
-    for(size_t i = start; i < end; i++)
+    int64 progCounter = 0;
+    const usize totalElements = (end - start);
+    const usize progIncrement = std::max(totalElements / 100, static_cast<usize>(1));
+
+    for(usize chunkStart = start; chunkStart < end; chunkStart += k_ChunkVertices)
     {
       if(m_FilterCallback->getCancel())
       {
         return;
       }
-      const Eigen::Vector4f position(m_Vertices.at(3 * i + 0), m_Vertices.at(3 * i + 1), m_Vertices.at(3 * i + 2), 1);
-      Eigen::Vector4f transformedPosition = m_TransformationMatrix * position;
-      m_Vertices.setValue(3 * i + 0, transformedPosition[0]);
-      m_Vertices.setValue(3 * i + 1, transformedPosition[1]);
-      m_Vertices.setValue(3 * i + 2, transformedPosition[2]);
+      const usize chunkCount = std::min(k_ChunkVertices, end - chunkStart);
+      const usize elementOffset = chunkStart * 3;
+      const usize elementCount = chunkCount * 3;
 
-      if(progCounter > progIncrement)
+      if(auto readResult = vertexStore.copyIntoBuffer(elementOffset, nonstd::span<float32>(chunkBuf.get(), elementCount)); readResult.invalid())
+      {
+        m_FilterCallback->mergeResult(
+            MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Node-geometry vertex read failed at vertex range [{}, {}]", chunkStart, chunkStart + chunkCount - 1)));
+        return;
+      }
+
+      for(usize i = 0; i < chunkCount; i++)
+      {
+        const Eigen::Vector4f position(chunkBuf[3 * i + 0], chunkBuf[3 * i + 1], chunkBuf[3 * i + 2], 1.0f);
+        const Eigen::Vector4f transformedPosition = m_TransformationMatrix * position;
+        chunkBuf[3 * i + 0] = transformedPosition[0];
+        chunkBuf[3 * i + 1] = transformedPosition[1];
+        chunkBuf[3 * i + 2] = transformedPosition[2];
+      }
+
+      if(auto writeResult = vertexStore.copyFromBuffer(elementOffset, nonstd::span<const float32>(chunkBuf.get(), elementCount)); writeResult.invalid())
+      {
+        m_FilterCallback->mergeResult(
+            MakeErrorResult(k_NearestNeighborCopyFailed_Error, fmt::format("Node-geometry vertex write failed at vertex range [{}, {}]", chunkStart, chunkStart + chunkCount - 1)));
+        return;
+      }
+
+      progCounter += chunkCount;
+      if(progCounter > static_cast<int64>(progIncrement))
       {
         m_FilterCallback->sendThreadSafeProgressMessage(progCounter);
         progCounter = 0;
       }
-      progCounter++;
     }
   }
 

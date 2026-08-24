@@ -10,6 +10,10 @@ This **Filter** fuses two **Image Geometry** data sets together. The grid of **C
 
 *Note:* The *Sampling* **Data Container** remains identical after this **Filter**, but the *Reference* **Data Container**, while "geometrically identical", gains all the attribute arrays from the *Sampling* **Data Container**.
 
+## Algorithm
+
+The filter maps each reference-grid coordinate to the containing sampling-grid **Cell** without interpolation. For in-memory arrays, the direct implementation preserves the original cell-by-cell traversal. When either a sampled numeric or Boolean **Data Array** or its newly created reference counterpart is out-of-core, the scanline implementation is selected. It calculates the source index for each X, Y, and Z coordinate once, reads only the required sampling row into a bounded buffer, and writes each completed reference row in one bulk operation. Its working memory is proportional to the largest row and the three grid axes, rather than the number of **Cells**. Only numeric and Boolean **Data Arrays** are copied; strings and neighbor lists are skipped.
+
 % Auto generated parameter table will be inserted here
 
 ## License & Copyright

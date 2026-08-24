@@ -3,9 +3,11 @@
 #include "simplnx/simplnx_export.hpp"
 
 #include "simplnx/Common/Result.hpp"
+#include "simplnx/Core/Preferences.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/DataStructure.hpp"
+#include "simplnx/DataStructure/EmptyDataStore.hpp"
 #include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
 #include "simplnx/Filter/Output.hpp"
 #include "simplnx/Utilities/DataStoreUtilities.hpp"
@@ -15,13 +17,66 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <numeric>
 
 namespace nx::core::ArrayCreationUtilities
 {
-inline static constexpr StringLiteral k_DefaultDataFormat = "";
+/**
+ * @brief Checks whether an in-core allocation of the requested size fits within available system memory.
+ * @param dataStructure The DataStructure whose current memory usage is added to the requirement
+ * @param requiredMemory Size in bytes of the new in-core allocation being considered
+ * @return true if the combined memory requirement fits within available memory, false otherwise
+ */
+SIMPLNX_EXPORT bool CheckMemoryRequirement(const DataStructure& dataStructure, uint64 requiredMemory);
 
-SIMPLNX_EXPORT bool CheckMemoryRequirement(DataStructure& dataStructure, uint64 requiredMemory, std::string& format);
+/**
+ * @brief Returns false (=> the array MUST be in-core) iff an unstructured/poly geometry
+ * (Vertex/Edge/Triangle/Quad/Tetrahedral/Hexahedral) is an ancestor of @p arrayPath. Returns true
+ * for arrays under an Image/RectGrid geometry or with no geometry ancestor. This is the resolver- and
+ * format-independent rule that keeps unstructured-geometry arrays in-core (their OOC stores do not
+ * exist). It walks the path's ancestor containers, so the array itself need not yet exist.
+ *
+ * Note: this answers only whether OOC is structurally permitted for the array's location; it is
+ * separate from size/preference-based resolution. Passing this check means the array CAN be OOC,
+ * not that it WILL be.
+ */
+SIMPLNX_EXPORT bool ParentGeometrySupportsOoc(const DataStructure& dataStructure, const DataPath& arrayPath);
+
+/**
+ * @brief Resolves the storage format for an array/list about to be created, applying the standard order:
+ *  (1) unstructured/poly geometry ancestor => "" (in-core, overrides everything);
+ *  (2) explicit requestedFormat (non-empty) => use it;
+ *  (3) otherwise => the DataStructure's format resolver.
+ *
+ * Note: the unstructured/poly geometry gate is AUTHORITATIVE — it returns in-core ("") even when
+ * requestedFormat is a non-empty explicit format. Arrays under unstructured/poly geometries have no OOC
+ * store implementation, so they are always in-core regardless of any explicit per-filter format request.
+ *
+ * This is the single decision point shared by every array-creation call site (CreateArray here,
+ * CreateDataStore/CreateListStore, and CreateNeighborListAction). The resolver is an interface
+ * (IDataStoreFormatResolver) so the rule stays OOC-agnostic: the in-memory default always returns "",
+ * and an OOC-aware resolver (registered by the OOC plugin) returns a disk-backed format name when its
+ * size/preference policy fires.
+ *
+ * @param dataStructure  The DataStructure that contains (or will contain) the array
+ * @param path           The DataPath where the array lives/will be created
+ * @param numericType    The element data type
+ * @param dataSizeBytes  Total array size in bytes (0 when unknown, e.g. an unpopulated NeighborList)
+ * @param requestedFormat An explicit per-filter format override, or "" to defer to the resolver
+ * @return A registered format name, or "" for the in-memory default
+ */
+SIMPLNX_EXPORT std::string ResolveStorageFormat(const DataStructure& dataStructure, const DataPath& path, DataType numericType, uint64 dataSizeBytes, const std::string& requestedFormat);
+
+/**
+ * @brief Overflow-safe test of whether currentUsageBytes + requiredMemory exceeds availableBytes.
+ *        Strictly-greater: exactly-at-available returns false.
+ * @param currentUsageBytes Current in-core usage in bytes
+ * @param requiredMemory Bytes of the new in-core allocation being considered
+ * @param availableBytes Bytes of currently-available physical RAM
+ * @return true if the combined requirement exceeds availableBytes
+ */
+[[nodiscard]] SIMPLNX_EXPORT bool WouldExceedAvailableMemory(uint64 currentUsageBytes, uint64 requiredMemory, uint64 availableBytes);
 
 /**
  * @brief Creates a DataArray with the given properties
@@ -34,7 +89,7 @@ SIMPLNX_EXPORT bool CheckMemoryRequirement(DataStructure& dataStructure, uint64 
  * @return
  */
 template <class T>
-Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, const ShapeType& compShape, const DataPath& path, IDataAction::Mode mode, std::string dataFormat = "",
+Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, const ShapeType& compShape, const DataPath& path, IDataAction::Mode mode, const std::string& dataFormat = "",
                      std::string fillValue = "")
 {
   auto parentPath = path.getParent();
@@ -75,18 +130,84 @@ Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, 
 
   const usize numTuples = std::accumulate(tupleShape.cbegin(), tupleShape.cend(), static_cast<usize>(1), std::multiplies<>());
   uint64 requiredMemory = numTuples * numComponents * sizeof(T);
-  if(!CheckMemoryRequirement(dataStructure, requiredMemory, dataFormat))
+
+  // Resolve the storage format once for BOTH preflight and execute via the shared decision
+  // helper (an unstructured-geometry ancestor forces in-core (""), else an explicit per-filter
+  // override wins, else the DataStructure's format resolver decides). "In-core" means the
+  // empty/in-memory sentinel; any other format is out-of-core and consumes no RAM.
+  const std::string resolvedFormat = ResolveStorageFormat(dataStructure, path, GetDataType<T>(), requiredMemory, dataFormat);
+  const bool isInCore = resolvedFormat.empty() || resolvedFormat == Preferences::k_InMemoryFormat.str();
+
+  // Accumulates any non-blocking warnings to return on the success path.
+  Result<> result;
+
+  if(mode == IDataAction::Mode::Execute)
   {
-    uint64 totalMemory = requiredMemory + dataStructure.memoryUsage();
-    uint64 availableMemory = Memory::GetTotalMemory();
-    return MakeErrorResult(-264, fmt::format("CreateArray: Cannot create DataArray '{}'.\n\tTotal memory required for DataStructure: '{}' Bytes.\n\tTotal reported memory: '{}' Bytes", name,
-                                             totalMemory, availableMemory));
+    // Hard guard (unchanged): refuse an in-core array that would exceed TOTAL RAM.
+    if(isInCore && !CheckMemoryRequirement(dataStructure, requiredMemory))
+    {
+      uint64 totalMemory = requiredMemory + dataStructure.memoryUsage();
+      uint64 availableMemory = Memory::GetTotalMemory();
+      return MakeErrorResult(-264, fmt::format("Cannot create array '{}': the DataStructure would require {} bytes total, "
+                                               "but only {} bytes of RAM are available. Consider enabling out-of-core "
+                                               "storage or lowering the size thresholds in Preferences so that large "
+                                               "arrays are stored on disk instead of in memory.",
+                                               path.toString(), totalMemory, availableMemory));
+    }
+  }
+  else // Preflight: proactive, non-blocking warning when an in-core array would exceed
+       // currently-available RAM. OOC arrays are silent (0 RAM). Pipeline still runs.
+  {
+    constexpr double k_BytesPerGiB = 1024.0 * 1024.0 * 1024.0;
+    // One memory snapshot drives BOTH the decision and the message, so the reported
+    // numbers always match the trigger condition. availableGiB is clamped to >= 0
+    // (usedGB can momentarily exceed totalGB due to OS reporting granularity).
+    const Memory::SystemMemoryInfo info = Memory::GetSystemMemoryInfo();
+    const double availableGiB = std::max(0.0, info.totalGB - info.usedGB);
+    const uint64 availableBytes = static_cast<uint64>(availableGiB * k_BytesPerGiB);
+    if(isInCore && WouldExceedAvailableMemory(dataStructure.memoryUsage(), requiredMemory, availableBytes))
+    {
+      const double requiredGiB = static_cast<double>(requiredMemory) / k_BytesPerGiB;
+      const double projectedGiB = (static_cast<double>(dataStructure.memoryUsage()) + static_cast<double>(requiredMemory)) / k_BytesPerGiB;
+      result.warnings().emplace_back(Warning{-271, fmt::format("Creating array '{}' (~{:.1f} GB) would bring in-core memory to ~{:.1f} GB, "
+                                                               "above this machine's currently-available ~{:.1f} GB. It may swap badly or "
+                                                               "fail. Consider out-of-core storage for this data.",
+                                                               path.toString(), requiredGiB, projectedGiB, availableGiB)});
+    }
   }
 
-  auto store = DataStoreUtilities::CreateDataStore<T>(tupleShape, compShape, mode, dataFormat);
+  // Preflight: never allocate; emit an EmptyDataStore that carries shape metadata only.
+  // Execute: hand the already-resolved format directly to the IO collection's typed factory.
+  std::shared_ptr<AbstractDataStore<T>> store;
+  switch(mode)
+  {
+  case IDataAction::Mode::Preflight: {
+    // Stamp the OOC format so EmptyDataStore::memoryUsage() reports 0 (OOC = 0 RAM);
+    // in-core placeholders keep the "" sentinel (logical size). Normalizing the
+    // explicit in-memory sentinel to "" keeps EmptyDataStore free of any Preferences
+    // dependency.
+    store = std::make_unique<EmptyDataStore<T>>(tupleShape, compShape, isInCore ? std::string{} : resolvedFormat);
+    break;
+  }
+  case IDataAction::Mode::Execute: {
+    // Route through the registered IO managers. The built-in core manager serves the
+    // in-memory default ("" / k_InMemoryFormat); any other registered format (e.g. the
+    // OOC manager's disk-backed format) is served by its manager when that plugin is loaded.
+    store = DataStoreUtilities::GetIOCollection().createDataStoreWithType<T>(resolvedFormat, tupleShape, compShape);
+    break;
+  }
+  default: {
+    throw std::runtime_error("Invalid mode");
+  }
+  }
   if(nullptr == store)
   {
-    return MakeErrorResult(-265, fmt::format("CreateArray: Unable to create DataStore<T> at '{}' of DataStore format '{}'", path.toString(), dataFormat));
+    // No registered IO manager could produce a DataStore<T> for this format.
+    // Include the full manager capability list so the user can tell whether
+    // the format is a typo, whether the required plugin is missing, or whether
+    // the format simply does not support this store type.
+    return MakeErrorResult(-265, fmt::format("CreateArray: Unable to create DataStore<T> at '{}' of DataStore format '{}'.\n{}", path.toString(), resolvedFormat,
+                                             DataStoreUtilities::GetIOCollection().generateManagerListString()));
   }
   if(!fillValue.empty())
   {
@@ -136,6 +257,6 @@ Result<> CreateArray(DataStructure& dataStructure, const ShapeType& tupleShape, 
     return MakeErrorResult(-269, fmt::format("CreateArray: Unable to create DataArray at '{}'", path.toString()));
   }
 
-  return {};
+  return result;
 }
 } // namespace nx::core::ArrayCreationUtilities

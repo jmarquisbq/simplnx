@@ -10,6 +10,7 @@
 #include "EbsdLib/Math/Matrix3X1.hpp"
 
 #include <random>
+#include <vector>
 
 namespace nx::core
 {
@@ -35,7 +36,10 @@ struct ORIENTATIONANALYSIS_EXPORT GroupMicroTextureRegionsInputValues
 
 /**
  * @class GroupMicroTextureRegions
- * @brief This filter ...
+ * @brief Groups compatible neighboring features into microtexture parent regions.
+ *
+ * Feature-level inputs are cached once for random-access grouping. Cell parent
+ * IDs are then remapped with bounded bulk I/O to avoid per-cell OOC access.
  */
 class ORIENTATIONANALYSIS_EXPORT GroupMicroTextureRegions
 {
@@ -56,7 +60,9 @@ protected:
   int getSeed(int32 newFid);
   bool determineGrouping(int32 referenceFeature, int32 neighborFeature, int32 newFid);
   Result<> execute();
-  void randomizeParentIds(usize totalPoints, usize totalParentIds);
+  Result<> cacheFeatureData();
+  Result<> remapCellParentIds();
+  void randomizeParentIds(usize totalParentIds);
 
 private:
   DataStructure& m_DataStructure;
@@ -76,5 +82,11 @@ private:
   UInt32Array& m_CrystalStructures;
   Float32Array& m_AvgQuats;
   Float32Array& m_Volumes;
+
+  std::vector<int32> m_FeaturePhasesCache;
+  std::vector<int32> m_FeatureParentIdsCache;
+  std::vector<uint32> m_CrystalStructuresCache;
+  std::vector<float32> m_AvgQuatsCache;
+  std::vector<float32> m_VolumesCache;
 };
 } // namespace nx::core

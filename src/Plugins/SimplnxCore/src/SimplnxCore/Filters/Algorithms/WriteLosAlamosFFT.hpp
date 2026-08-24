@@ -21,7 +21,12 @@ struct SIMPLNXCORE_EXPORT WriteLosAlamosFFTInputValues
 };
 
 /**
- * @class
+ * @class WriteLosAlamosFFT
+ * @brief Writes an eight-column Los Alamos FFT text export from image-cell data.
+ *
+ * Contiguous arrays are formatted directly to the output stream, while
+ * disk-backed arrays are streamed in bounded tuple batches to avoid per-voxel
+ * I/O and retain a fixed working set.
  */
 class SIMPLNXCORE_EXPORT WriteLosAlamosFFT
 {

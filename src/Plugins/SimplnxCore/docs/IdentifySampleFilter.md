@@ -46,6 +46,40 @@ When *Process Data Slice-By-Slice* is enabled, the *Slice-By-Slice Plane* parame
 - **XZ [1]**: Processes the volume slice by slice along the Y axis, scanning each XZ plane independently.
 - **YZ [2]**: Processes the volume slice by slice along the X axis, scanning each YZ plane independently.
 
+## Algorithm
+
+This filter identifies the largest connected region of "good" voxels (the sample) and marks all other voxels as "bad." Two algorithm paths are available, selected automatically based on the underlying data storage.
+
+### In-Core Path (BFS)
+
+When data resides entirely in memory, a **breadth-first search (BFS)** flood fill is used:
+
+1. Iterate through all voxels and, for each unvisited "good" voxel, start a BFS that explores all 6-connected face neighbors.
+2. Track the largest connected component found — this is identified as the sample.
+3. Set all "good" voxels **not** in the largest component to "bad."
+4. If **Fill Holes** is enabled, run a second BFS pass over "bad" voxels: any connected region of "bad" voxels that does not touch the volume boundary is filled back to "good."
+
+BFS is efficient for in-memory data because the queue-driven traversal has excellent cache locality when all data fits in RAM.
+
+### Out-of-Core Path (CCL)
+
+When any input array uses chunked on-disk storage (out-of-core / OOC), BFS would cause **chunk thrashing** — each random queue-driven access may load and evict entire disk chunks, making the algorithm 100–1000× slower. Instead, a **connected component labeling (CCL)** approach is used:
+
+1. **Scanline labeling**: Iterate voxels sequentially (Z → Y → X), assigning provisional labels to "good" voxels. When two labeled regions are found to be connected (same row or adjacent Z-slice), their labels are merged through disk-backed fixed records.
+2. **Global resolution**: Resolve each provisional label through a bounded external equivalence table, which retains parent links, component sizes, and boundary flags outside the cell-data working set.
+3. **Classification**: The largest component is kept as the sample; all other "good" voxels are set to "bad."
+4. **Hole filling** (if enabled): A second CCL pass identifies connected components of "bad" voxels and fills any that do not touch the volume boundary.
+
+Only two label rows (slice-by-slice) or two label slices (whole-volume) and the active bulk mask buffers are resident. The sequential access pattern aligns with OOC chunk layout, and all mask reads and writes use bulk transfers.
+
+### Slice-By-Slice Mode
+
+When **Process Data Slice-By-Slice** is enabled, the in-core path uses breadth-first search on each plane. The OOC path instead uses the same bounded external CCL per plane: XY planes transfer contiguously, XZ planes transfer contiguous rows, and YZ planes bulk-transfer each Z slice before extracting or updating a column. This also keeps boolean masks on bulk I/O paths.
+
+### Performance
+
+For in-memory datasets, BFS is typically faster due to lower overhead. The dispatch is automatic — no user configuration is needed.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

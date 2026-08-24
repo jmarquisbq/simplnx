@@ -49,6 +49,22 @@ is to still use the 6 face neighbors ("Face Only") in order to stay consistent w
 |:--:|:--:|
 | ![Shared Edges & Points With Disconnected Region - "Face Only"](Images/SegmentFeatures/combination_face_only.png) | ![Shared Edges & Points With Disconnected Region - "All Connected"](Images/SegmentFeatures/combination_all_connected.png) |
 
+## Algorithm
+
+This filter segments EBSD orientation data into crystallographic grains using flood-fill region growing. Voxels are grouped into the same feature if their misorientation is below a user-defined tolerance threshold.
+
+### In-Core Path
+
+Uses the same connected-component labeling semantics as the OOC path. Contiguous stores use their normal fast access path.
+
+### Out-of-Core Path
+
+The `SegmentFeatures` connected-component labeling path scans sequentially by Z. Quaternion, phase, and optional mask values are bulk-read into two rolling XY-slice slots, so comparisons within the current and previous slices use RAM rather than per-voxel OOC reads. Only periodic-boundary reconciliation can use the direct-access fallback.
+
+### Performance
+
+The rolling buffers keep resident cell-level scratch proportional to the XY slice area. Before invoking the crystal-symmetry misorientation calculation, the filter also detects exactly equal quaternion components. Equal quaternions have zero misorientation, so this common within-grain case preserves the strict tolerance comparison while avoiding the substantially more expensive symmetry-operator calculation.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

@@ -22,7 +22,11 @@ struct SIMPLNXCORE_EXPORT ComputeFeaturePhasesBinaryInputValues
 
 /**
  * @class ComputeFeaturePhasesBinary
- * @brief This algorithm implements support code for the ComputeFeaturePhasesBinaryFilter
+ * @brief Assigns each referenced feature a binary phase from its cells' mask values.
+ *
+ * Cell feature ids and mask values are streamed through bounded buffers so in-memory and out-of-core stores use the
+ * same bulk-I/O implementation. A feature-indexed cache preserves the original sequential last-cell-wins behavior
+ * for conflicting mask values without requiring cell-sized scratch storage or per-cell DataStore access.
  */
 
 class SIMPLNXCORE_EXPORT ComputeFeaturePhasesBinary

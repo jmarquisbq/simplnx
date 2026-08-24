@@ -1,5 +1,6 @@
 #include "RotateSampleRefFrame.hpp"
 
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/DataGroupUtilities.hpp"
 #include "simplnx/Utilities/ImageRotationUtilities.hpp"
 #include "simplnx/Utilities/ParallelAlgorithmUtilities.hpp"
@@ -72,11 +73,24 @@ Result<> RotateSampleRefFrame::operator()()
   // The actual rotating of the dataStructure arrays is done in parallel where parallel here
   // refers to the cropping of each DataArray being done on a separate thread.
   ParallelTaskAlgorithm taskRunner;
-  taskRunner.setParallelizationEnabled(true);
   const DataPath srcCellDataAMPath = srcImageGeom.getCellDataPath();
   const auto& srcCellDataAM = srcImageGeom.getCellDataRef();
 
   const DataPath destCellDataAMPath = destImageGeom.getCellDataPath();
+
+  // The shared rotation workers use bounded source pages for OOC stores. Keep
+  // per-array tasks serial in that mode so several independent page windows do
+  // not compete for RAM or the backing-store chunk cache.
+  bool usesOutOfCoreStore = false;
+  for(const auto& [dataId, srcDataObject] : srcCellDataAM)
+  {
+    const auto* srcDataArray = m_DataStructure.getDataAs<IDataArray>(srcCellDataAMPath.createChildPath(srcDataObject->getName()));
+    const auto* destDataArray = m_DataStructure.getDataAs<IDataArray>(destCellDataAMPath.createChildPath(srcDataObject->getName()));
+    usesOutOfCoreStore = usesOutOfCoreStore || IsOutOfCore(*srcDataArray) || IsOutOfCore(*destDataArray);
+  }
+  const bool useOutOfCoreAlgorithm = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCoreAlgorithm ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+  taskRunner.setParallelizationEnabled(!useOutOfCoreAlgorithm);
 
   for(const auto& [dataId, srcDataObject] : srcCellDataAM)
   {

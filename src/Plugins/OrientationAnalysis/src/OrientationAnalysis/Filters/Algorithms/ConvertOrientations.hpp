@@ -21,24 +21,43 @@ namespace nx::core
 namespace convert_orientations_constants
 {
 // Error Code constants
+constexpr int32 k_InputRepresentationTypeError = -67001;
+constexpr int32 k_OutputRepresentationTypeError = -67002;
 constexpr int32 k_InputComponentDimensionError = -67003;
 constexpr int32 k_InputComponentCountError = -67004;
 constexpr int32 k_MatchingTypesError = -67005;
 } // namespace convert_orientations_constants
 
+/**
+ * @brief Input values for the ConvertOrientations algorithm.
+ */
 struct ORIENTATIONANALYSIS_EXPORT ConvertOrientationsInputValues
 {
-  ArraySelectionParameter::ValueType InputOrientationArrayPath;
-  ebsdlib::orientations::Type InputType;
-  DataObjectNameParameter::ValueType OutputOrientationArrayName;
-  ebsdlib::orientations::Type OutputType;
+  ArraySelectionParameter::ValueType InputOrientationArrayPath;  ///< Cell-level Float32 input orientation array
+  ebsdlib::orientations::Type InputType;                         ///< Enumerated input representation type
+  DataObjectNameParameter::ValueType OutputOrientationArrayName; ///< Name for the output orientation array
+  ebsdlib::orientations::Type OutputType;                        ///< Enumerated output representation type
 };
 
 /**
  * @class ConvertOrientations
- * @brief This algorithm implements support code for the ConvertOrientationsFilter
+ * @brief Converts between orientation representations (Euler angles, quaternions,
+ *        orientation matrices, axis-angle, Rodrigues, homochoric, cubochoric,
+ *        and stereographic projection).
+ *
+ * A macro-generated parallel worker class is instantiated for each valid
+ * input/output combination. The worker reads input tuples, converts each
+ * orientation, and writes the result to the output array.
+ *
+ * ## OOC Optimization
+ *
+ * The macro-generated parallel worker classes now use chunked bulk I/O
+ * internally (chunk size of 4096 tuples). Within each `operator()(Range)`
+ * call, input data is read via `copyIntoBuffer()` and output data is written
+ * via `copyFromBuffer()` in chunks, with the conversion loop operating on
+ * contiguous local buffers. This replaces per-element `operator[]` access
+ * that would trigger chunk load/evict cycles with OOC storage.
  */
-
 class ORIENTATIONANALYSIS_EXPORT ConvertOrientations
 {
 public:
@@ -50,20 +69,30 @@ public:
   ConvertOrientations& operator=(const ConvertOrientations&) = delete;
   ConvertOrientations& operator=(ConvertOrientations&&) noexcept = delete;
 
+  /**
+   * @brief Executes the orientation conversion using parallel chunked bulk I/O.
+   * @return Result<> with any errors encountered during execution.
+   */
   Result<> operator()();
 
   /**
-   * @brief Returns true if the user has requested the filter be cancelled. Safe to call from the
-   * parallel convertor workers.
+   * @brief Returns true if the user has requested cancellation.
    */
   bool shouldCancel() const;
 
   /**
-   * @brief Mutex-protected, time-throttled progress reporter. The parallel convertor workers call
-   * this once per processed chunk; messages are emitted at most ~once per second.
-   * @param counter Number of tuples completed since the last call.
+   * @brief Emits mutex-protected, time-throttled progress updates from parallel workers.
+   * @param counter Number of tuples completed by the caller.
    */
   void sendThreadSafeProgressMessage(usize counter);
+
+  /**
+   * @brief Exposes the cancellation flag so streaming workers can poll it.
+   */
+  const std::atomic_bool& getCancel() const
+  {
+    return m_ShouldCancel;
+  }
 
 private:
   DataStructure& m_DataStructure;
@@ -71,11 +100,10 @@ private:
   const std::atomic_bool& m_ShouldCancel;
   const IFilter::MessageHandler& m_MessageHandler;
 
-  // Thread safe Progress Message
   std::chrono::steady_clock::time_point m_InitialPoint = std::chrono::steady_clock::now();
   mutable std::mutex m_ProgressMessage_Mutex;
-  size_t m_TotalPoints = 0;
-  size_t m_ProgressCounter = 0;
+  usize m_TotalPoints = 0;
+  usize m_ProgressCounter = 0;
 };
 
 } // namespace nx::core

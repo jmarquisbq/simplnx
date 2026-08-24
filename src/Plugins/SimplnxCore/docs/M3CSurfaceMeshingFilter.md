@@ -64,6 +64,22 @@ heuristic, which does not guarantee globally consistent normals across the whole
 consistent across connected faces. This is recommended for meshes that will be used for normal- or
 curvature-dependent analysis.
 
+## Algorithm
+
+For in-memory arrays, M3C retains the deterministic parallel, sliding-window implementation. It
+visits cubes in ascending order and uses the legacy case tables to create the same ordered triangle
+topology, face labels, node types, and transferred face tuples.
+
+When any cell input or created face array is out-of-core, M3C uses a separate bounded-state sweep.
+It bulk-scans `FeatureIds` in fixed 65,536-value blocks, keeps at most four source Z slices resident,
+and represents the ghost shell implicitly. Candidate-node state and per-cube triangle offsets are
+fixed-width temporary records backed by the registered OOC provider. A first sweep classifies nodes
+and counts triangles; an ascending external prefix assigns compact vertex IDs. A second sweep
+reconstructs each cube with fixed local face/edge/triangle buffers and writes contiguous bounded
+batches of connectivity, labels, and transferred tuples. Exterior node types are promoted before a
+final bounded vertex/node-type stream. Winding repair uses the external-sort implementation for a
+real OOC run and fails clearly if the required external services are unavailable.
+
 ### Notes and Limitations
 
 - The volume is automatically wrapped in a temporary ghost layer so that **Features** touching the

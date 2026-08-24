@@ -28,6 +28,20 @@ with DREAM3D's filters.
 IPFColors can be stored as either uint8 or float values. If you want to immediately view the IPF Colors then 
 the user should check the box for "Create Compatible IPF Color Data"
 
+## Algorithm
+
+The reader transfers each LabDCT and AbsorptionCT HDF5 dataset in C-order
+hyperslabs.  The hyperslab iterator chooses a dimension whose trailing extent
+fits a fixed 65,536-value buffer, so scalar and vector image volumes never
+require a complete slice or volume in memory.  Every transfer is written to the
+destination DataArray with one bulk operation.
+
+When compatible Phase, Rodrigues, IPF color, or quaternion data is requested,
+the conversion is applied to each bounded source chunk before its bulk write.
+This preserves the file's tuple and component ordering while allowing the cell
+arrays to remain out-of-core.  Phase metadata remains ensemble-sized and is
+read normally.
+
 ## Special Notes
 
 The IPF colors (if any) that are read in from the file are *NOT* compatible with the IPF 

@@ -6,6 +6,11 @@
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/DataStructure/Geometry/TriangleGeom.hpp"
+#include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/BoundedRecordPageCache.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
+#include "simplnx/Utilities/InMemoryTemporaryRecordStore.hpp"
 #include "simplnx/Utilities/Meshing/TriangleUtilities.hpp"
 
 #include <fmt/format.h>
@@ -19,6 +24,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <new>
 #include <string_view>
 #include <vector>
 
@@ -34,6 +40,122 @@ using namespace nx::core;
 // =============================================================================
 namespace
 {
+/**
+ * @brief Fixed-record scratch vector with a bounded typed page cache.
+ *
+ * M3C's out-of-core sweep needs several random-access, volume/mesh-scale
+ * state vectors (candidate nodes, cube triangle offsets, and triangle-side
+ * metadata).  Keeping their storage policy in this small wrapper makes every
+ * such vector use the same fail-closed external-store rule: an actual OOC
+ * dispatch may not silently fall back to resident scratch.
+ */
+template <typename T>
+class TemporaryRecordVector
+{
+public:
+  /**
+   * @brief Creates the record store and its bounded typed cache.
+   * @param recordCount Initial number of fixed-size records.
+   * @param requireExternalStore Prevents a true OOC execution from silently
+   * allocating volume-scale scratch in memory when no provider is registered.
+   * @param shouldCancel Checked before storage allocation.
+   * @param recordsPerPage Number of records transferred per backing-store request.
+   * @param cachePages Maximum number of resident pages.
+   */
+  static Result<TemporaryRecordVector> Create(uint64 recordCount, bool requireExternalStore, const std::atomic_bool& shouldCancel, uint64 recordsPerPage = 4096, usize cachePages = 8)
+  {
+    if(recordCount > 0 && shouldCancel)
+    {
+      return MakeErrorResult<TemporaryRecordVector>(-90540, "M3C temporary-record vector creation was cancelled.");
+    }
+    if(recordsPerPage == 0 || cachePages == 0 || recordsPerPage > std::numeric_limits<uint64>::max() / sizeof(T))
+    {
+      return MakeErrorResult<TemporaryRecordVector>(-90541, "M3C temporary-record vector configuration is invalid.");
+    }
+
+    TemporaryRecordStoreConfig config;
+    config.recordSize = sizeof(T);
+    config.maxRecordsPerBatch = recordsPerPage;
+    config.initialRecordCount = recordCount;
+    auto storeResult = DataStoreUtilities::GetIOCollection().createTemporaryRecordStore(config);
+
+    std::unique_ptr<ITemporaryRecordStore> store;
+    if(storeResult.valid())
+    {
+      store = std::move(storeResult.value());
+    }
+    else if(!requireExternalStore)
+    {
+      auto fallbackResult = InMemoryTemporaryRecordStore::Create(config);
+      if(fallbackResult.invalid())
+      {
+        return ConvertInvalidResult<TemporaryRecordVector>(std::move(fallbackResult));
+      }
+      store = std::move(fallbackResult.value());
+    }
+    else
+    {
+      return ConvertInvalidResult<TemporaryRecordVector>(std::move(storeResult));
+    }
+    if(store == nullptr)
+    {
+      return MakeErrorResult<TemporaryRecordVector>(-90542, "M3C temporary-record provider returned a null store.");
+    }
+
+    TemporaryRecordVector vector;
+    vector.m_Store = std::move(store);
+    try
+    {
+      vector.m_Cache = std::make_unique<BoundedRecordPageCache<T>>(*vector.m_Store, recordsPerPage, cachePages);
+    } catch(const std::bad_alloc&)
+    {
+      return MakeErrorResult<TemporaryRecordVector>(-90543, "M3C temporary-record vector could not allocate its bounded page cache.");
+    }
+    return {std::move(vector)};
+  }
+
+  TemporaryRecordVector() = default;
+  TemporaryRecordVector(TemporaryRecordVector&&) noexcept = default;
+  TemporaryRecordVector& operator=(TemporaryRecordVector&&) noexcept = default;
+  TemporaryRecordVector(const TemporaryRecordVector&) = delete;
+  TemporaryRecordVector& operator=(const TemporaryRecordVector&) = delete;
+
+  /** @brief Returns the owned byte-record store for bulk operations. */
+  ITemporaryRecordStore& store() noexcept
+  {
+    return *m_Store;
+  }
+
+  /** @brief Returns the owned typed page cache for localized random access. */
+  BoundedRecordPageCache<T>& cache() noexcept
+  {
+    return *m_Cache;
+  }
+
+  /** @brief Writes every dirty cache page before the next algorithm phase. */
+  Result<> flush(const std::atomic_bool& shouldCancel)
+  {
+    return m_Cache->flush(shouldCancel);
+  }
+
+private:
+  std::unique_ptr<ITemporaryRecordStore> m_Store;
+  std::unique_ptr<BoundedRecordPageCache<T>> m_Cache;
+};
+
+/**
+ * @brief External scratch record for one possible M3C node.
+ * @p type records whether/how the candidate is used; @p compactId is assigned
+ * after counting all live candidates so output vertices can be written densely.
+ */
+struct M3CCandidateNodeRecord
+{
+  int8 type = 0;
+  std::array<std::byte, 7> padding{};
+  uint64 compactId = 0;
+};
+static_assert(std::is_trivially_copyable_v<M3CCandidateNodeRecord>);
+
 // Index of a padded site / voxel (i.e. an index into the FeatureId grid). MUST be 64-bit: a large
 // Image Geometry can have well over 2^31 voxels, and node ids derived as 7*site must not overflow.
 using SiteId = int64;
@@ -2738,6 +2860,42 @@ M3CSurfaceMeshing::~M3CSurfaceMeshing() noexcept = default;
 // -----------------------------------------------------------------------------
 Result<> M3CSurfaceMeshing::operator()()
 {
+  // M3C has dynamic cell inputs and mesh outputs.  Every one of them must
+  // participate in the residency decision: a selected cell array or a created
+  // face array can be disk-backed even when FeatureIds is in memory.  The
+  // TriangleGeom's coordinate/connectivity arrays are included as well so a
+  // future storage-capable geometry implementation cannot accidentally select
+  // the legacy resident path.
+  std::vector<const IArray*> dispatchTargets;
+  const auto appendArray = [this, &dispatchTargets](const DataPath& path) {
+    if(const auto* array = m_DataStructure.getDataAs<IDataArray>(path); array != nullptr)
+    {
+      dispatchTargets.push_back(array);
+    }
+  };
+  appendArray(m_InputValues->FeatureIdsArrayPath);
+  appendArray(m_InputValues->NodeTypesDataPath);
+  appendArray(m_InputValues->FaceLabelsDataPath);
+  for(const auto& path : m_InputValues->SelectedCellDataArrayPaths)
+  {
+    appendArray(path);
+  }
+  for(const auto& path : m_InputValues->CreatedDataArrayPaths)
+  {
+    appendArray(path);
+  }
+  const auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
+  dispatchTargets.push_back(triangleGeom.getVertices());
+  dispatchTargets.push_back(triangleGeom.getFaces());
+
+  const bool usesOutOfCoreStore = AnyOutOfCore(AlgorithmArrayTargets(dispatchTargets));
+  const bool useOutOfCorePath = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
+  RecordAlgorithmPathExecution(useOutOfCorePath ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+  if(useOutOfCorePath)
+  {
+    return runOutOfCore(dispatchTargets, usesOutOfCoreStore);
+  }
+
   // Default: the multithreaded sliding-window sweep (runWindowed(parallel=true)). Peak per-site scratch
   // is O(sliceArea) instead of O(volume), and the per-cube work runs across all cores. It is watertight
   // and correct, with byte-identical vertices, FaceLabels, and NodeTypes to the serial path, but a
@@ -2758,6 +2916,798 @@ Result<> M3CSurfaceMeshing::operator()()
     return runWindowed(false);
   }
   return runWindowed(true);
+}
+
+// -----------------------------------------------------------------------------
+Result<> M3CSurfaceMeshing::runOutOfCore(const std::vector<const IArray*>& dispatchTargets, bool usesOutOfCoreStore)
+{
+  if(dispatchTargets.empty())
+  {
+    return MakeErrorResult(-90544, "M3C out-of-core dispatch did not receive any dynamic storage targets.");
+  }
+
+  const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GridGeomDataPath);
+  const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
+  const auto& featureIdsStore = featureIds.getDataStoreRef();
+  const SizeVec3 gridDims = imageGeom.getDimensions();
+  const usize dims[3] = {gridDims[0], gridDims[1], gridDims[2]};
+  if(dims[0] == 0 || dims[1] == 0 || dims[2] == 0 || dims[0] > std::numeric_limits<usize>::max() / dims[1] || dims[0] * dims[1] > std::numeric_limits<usize>::max() / dims[2])
+  {
+    return MakeErrorResult(-90546, "M3C out-of-core input dimensions are zero or overflow the cell count.");
+  }
+  const usize cellCount = dims[0] * dims[1] * dims[2];
+  if(featureIdsStore.getNumberOfTuples() != cellCount)
+  {
+    return MakeErrorResult(-90547, "M3C out-of-core FeatureIds tuple count does not match the Image Geometry.");
+  }
+
+  // First bounded pass preserves initialize_micro's zero-feature renumbering
+  // without retaining a second copy of the cell data.
+  constexpr usize kFeatureIdBulkValues = 65536;
+  std::array<int32, kFeatureIdBulkValues> maxScanBuffer{};
+  int32 maxGrainId = 0;
+  for(usize offset = 0; offset < cellCount;)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const usize count = std::min(kFeatureIdBulkValues, cellCount - offset);
+    auto readResult = featureIdsStore.copyIntoBuffer(offset, nonstd::span<int32>(maxScanBuffer.data(), count));
+    if(readResult.invalid())
+    {
+      return readResult;
+    }
+    for(usize index = 0; index < count; index++)
+    {
+      maxGrainId = std::max(maxGrainId, maxScanBuffer[index]);
+    }
+    offset += count;
+  }
+  if(maxGrainId == std::numeric_limits<int32>::max())
+  {
+    return MakeErrorResult(-90548, "M3C out-of-core FeatureIds maximum cannot be incremented to reserve the zero feature.");
+  }
+  maxGrainId++;
+
+  const usize fileDim[3] = {dims[0] + 2, dims[1] + 2, dims[2] + 2};
+  if(fileDim[0] < dims[0] || fileDim[1] < dims[1] || fileDim[2] < dims[2] || fileDim[0] > std::numeric_limits<usize>::max() / fileDim[1] ||
+     fileDim[0] * fileDim[1] > std::numeric_limits<usize>::max() / fileDim[2])
+  {
+    return MakeErrorResult(-90549, "M3C out-of-core padded dimensions overflow.");
+  }
+  if(fileDim[0] > static_cast<usize>(std::numeric_limits<int>::max()) || fileDim[0] * fileDim[1] > static_cast<usize>(std::numeric_limits<SiteId>::max()) ||
+     fileDim[0] * fileDim[1] * fileDim[2] > static_cast<usize>(std::numeric_limits<SiteId>::max()))
+  {
+    return MakeErrorResult(-90550, "M3C out-of-core padded dimensions cannot be represented by its signed site/index arithmetic.");
+  }
+  const SiteId numSites = static_cast<SiteId>(fileDim[0] * fileDim[1] * fileDim[2]);
+  const SiteId numSitesPerPlane = static_cast<SiteId>(fileDim[0] * fileDim[1]);
+  if(numSites > std::numeric_limits<SiteId>::max() / 7 || numSites > std::numeric_limits<SiteId>::max() / 3)
+  {
+    return MakeErrorResult(-90551, "M3C out-of-core square or candidate-node count overflows its site index type.");
+  }
+
+  // Four LRU Z slices cover the 26-neighbor anomaly lookup while keeping the
+  // padded ghost shell implicit. The cache also handles the NeighborAccessor's
+  // toroidal border indices without materializing a padded volume.
+  const usize sourceSliceSize = dims[0] * dims[1];
+  std::array<std::vector<int32>, 4> sourceSlices;
+  std::array<int64, 4> sourceSliceZ = {-1, -1, -1, -1};
+  std::array<uint64, 4> sourceSliceUse{};
+  uint64 sourceUseCounter = 0;
+  const auto sourceValue = [&](SiteId site) -> Result<int32> {
+    const usize linear = static_cast<usize>(site - 1);
+    const usize x = linear % fileDim[0];
+    const usize y = (linear / fileDim[0]) % fileDim[1];
+    const usize z = linear / (fileDim[0] * fileDim[1]);
+    if(z == 0)
+    {
+      return {-3};
+    }
+    if(z + 1 == fileDim[2])
+    {
+      return {-8};
+    }
+    if(y == 0)
+    {
+      return {-4};
+    }
+    if(y + 1 == fileDim[1])
+    {
+      return {-7};
+    }
+    if(x == 0)
+    {
+      return {-5};
+    }
+    if(x + 1 == fileDim[0])
+    {
+      return {-6};
+    }
+    const int64 sourceZ = static_cast<int64>(z - 1);
+    usize slot = 0;
+    while(slot < sourceSlices.size() && sourceSliceZ[slot] != sourceZ)
+    {
+      slot++;
+    }
+    if(slot == sourceSlices.size())
+    {
+      slot = static_cast<usize>(std::min_element(sourceSliceUse.begin(), sourceSliceUse.end()) - sourceSliceUse.begin());
+      try
+      {
+        sourceSlices[slot].resize(sourceSliceSize);
+      } catch(const std::bad_alloc&)
+      {
+        return MakeErrorResult<int32>(-90551, "M3C out-of-core rolling FeatureIds slice allocation failed.");
+      }
+      const usize sourceOffset = static_cast<usize>(sourceZ) * sourceSliceSize;
+      auto readResult = featureIdsStore.copyIntoBuffer(sourceOffset, nonstd::span<int32>(sourceSlices[slot].data(), sourceSliceSize));
+      if(readResult.invalid())
+      {
+        return ConvertInvalidResult<int32>(std::move(readResult));
+      }
+      sourceSliceZ[slot] = sourceZ;
+    }
+    sourceSliceUse[slot] = ++sourceUseCounter;
+    const int32 value = sourceSlices[slot][(y - 1) * dims[0] + (x - 1)];
+    return {value == 0 ? maxGrainId : value};
+  };
+
+  const NeighborAccessor neighbors{numSites, numSitesPerPlane, static_cast<int>(fileDim[0])};
+  const uint64 candidateCount = static_cast<uint64>(7 * numSites);
+  const SiteId lastCube = numSites - numSitesPerPlane;
+  if(lastCube < 0 || static_cast<uint64>(lastCube) == std::numeric_limits<uint64>::max())
+  {
+    return MakeErrorResult(-90552, "M3C out-of-core cube-count record range overflows.");
+  }
+  const uint64 cubeRecordCount = static_cast<uint64>(lastCube) + 1;
+  auto candidateResult = TemporaryRecordVector<M3CCandidateNodeRecord>::Create(candidateCount, usesOutOfCoreStore, m_ShouldCancel);
+  if(candidateResult.invalid())
+  {
+    return ConvertResult(std::move(candidateResult));
+  }
+  auto triangleCountResult = TemporaryRecordVector<int64>::Create(cubeRecordCount, usesOutOfCoreStore, m_ShouldCancel);
+  if(triangleCountResult.invalid())
+  {
+    return ConvertResult(std::move(triangleCountResult));
+  }
+  auto candidateNodes = std::move(candidateResult.value());
+  auto triangleCounts = std::move(triangleCountResult.value());
+  const M3CCandidateNodeRecord unusedNode{};
+  auto fillNodesResult = candidateNodes.store().fill(0, candidateCount, nonstd::span<const std::byte>(reinterpret_cast<const std::byte*>(&unusedNode), sizeof(unusedNode)), m_ShouldCancel);
+  if(fillNodesResult.invalid())
+  {
+    return fillNodesResult;
+  }
+  const int64 zeroTriangleCount = 0;
+  auto fillCountsResult =
+      triangleCounts.store().fill(0, cubeRecordCount, nonstd::span<const std::byte>(reinterpret_cast<const std::byte*>(&zeroTriangleCount), sizeof(zeroTriangleCount)), m_ShouldCancel);
+  if(fillCountsResult.invalid())
+  {
+    return fillCountsResult;
+  }
+
+  const auto setNodeType = [&](SiteId nodeId, int8 type) -> Result<> {
+    auto nodeResult = candidateNodes.cache().read(static_cast<uint64>(nodeId), m_ShouldCancel);
+    if(nodeResult.invalid())
+    {
+      return ConvertResult(std::move(nodeResult));
+    }
+    auto node = nodeResult.value();
+    node.type = type;
+    return candidateNodes.cache().write(static_cast<uint64>(nodeId), node, m_ShouldCancel);
+  };
+
+  // Reconstruct one marching square in fixed local storage. The edge ids are
+  // local to the caller; only the candidate-node classification survives pass
+  // one and it lives in the external record vector.
+  const auto buildSquare = [&](SiteId squareId, Face& square, std::array<Segment, 64>& segments, int& segmentCount, bool writeNodeTypes) -> Result<> {
+    square = {};
+    for(auto& edge : square.edge_id)
+    {
+      edge = k_UnusedNodeId;
+    }
+    square.FCnode = -1;
+    const SiteId cubeOrigin = squareId / 3 + 1;
+    const int squareOrder = static_cast<int>(squareId % 3);
+    const auto corners = squareCorners(squareId, neighbors);
+    int spins[4];
+    int ghostCorners = 0;
+    for(int index = 0; index < 4; index++)
+    {
+      auto spinResult = sourceValue(corners[index]);
+      if(spinResult.invalid())
+      {
+        return ConvertResult(std::move(spinResult));
+      }
+      spins[index] = spinResult.value();
+      ghostCorners += spins[index] < 0 ? 1 : 0;
+    }
+    if(ghostCorners != 4)
+    {
+      square.effect = 1;
+    }
+    if(ghostCorners == 4)
+    {
+      return {};
+    }
+    int squareIndex = get_square_index(spins);
+    if(squareIndex == 15)
+    {
+      int neighborCounts[4] = {0, 0, 0, 0};
+      for(int corner = 0; corner < 4; corner++)
+      {
+        const Neighbor cornerNeighbors = neighbors[corners[corner]];
+        for(int neighborIndex = 1; neighborIndex <= num_neigh; neighborIndex++)
+        {
+          auto neighborSpin = sourceValue(cornerNeighbors.neigh_id[neighborIndex]);
+          if(neighborSpin.invalid())
+          {
+            return ConvertResult(std::move(neighborSpin));
+          }
+          neighborCounts[corner] += spins[corner] == neighborSpin.value() && neighborSpin.value() > 0 ? 1 : 0;
+        }
+      }
+      int minimum = 1000;
+      int minimumIndex = -1;
+      for(int corner = 0; corner < 4; corner++)
+      {
+        if(neighborCounts[corner] < minimum)
+        {
+          minimum = neighborCounts[corner];
+          minimumIndex = corner;
+        }
+      }
+      squareIndex += minimumIndex == 0 || minimumIndex == 2 ? 1 : 0;
+    }
+    if(squareIndex == 0)
+    {
+      return {};
+    }
+    for(int edgeIndex = 0; edgeIndex < 8; edgeIndex += 2)
+    {
+      if(k_EdgeTable2d[squareIndex][edgeIndex] == -1)
+      {
+        continue;
+      }
+      const int nodeIndex[2] = {k_EdgeTable2d[squareIndex][edgeIndex], k_EdgeTable2d[squareIndex][edgeIndex + 1]};
+      const int pixelIndex[2] = {k_NsTable2d[squareIndex][edgeIndex], k_NsTable2d[squareIndex][edgeIndex + 1]};
+      SiteId nodeIds[2];
+      get_nodes(cubeOrigin, squareOrder, nodeIndex, nodeIds, numSitesPerPlane, static_cast<int>(fileDim[0]));
+      const int pixelSpins[2] = {spins[pixelIndex[0]], spins[pixelIndex[1]]};
+      if(pixelSpins[0] > 0 || pixelSpins[1] > 0)
+      {
+        if(segmentCount >= static_cast<int>(segments.size()))
+        {
+          return MakeErrorResult(-90552, "M3C out-of-core local square edge buffer overflowed.");
+        }
+        segments[static_cast<usize>(segmentCount)] = Segment{{nodeIds[0], nodeIds[1]}, {pixelSpins[0], pixelSpins[1]}};
+        square.edge_id[square.nEdge++] = static_cast<uint32>(segmentCount++);
+      }
+      else if(writeNodeTypes)
+      {
+        auto firstResult = setNodeType(nodeIds[0], M3CNodeType::k_Unused);
+        if(firstResult.invalid())
+        {
+          return firstResult;
+        }
+        auto secondResult = setNodeType(nodeIds[1], M3CNodeType::k_Unused);
+        if(secondResult.invalid())
+        {
+          return secondResult;
+        }
+      }
+      for(int node = 0; node < 2; node++)
+      {
+        if(nodeIndex[node] == 4 && (squareIndex == 7 || squareIndex == 11 || squareIndex == 13 || squareIndex == 14 || squareIndex == 19))
+        {
+          square.FCnode = nodeIds[node];
+        }
+        if(writeNodeTypes)
+        {
+          int8 type = M3CNodeType::k_Default;
+          if(nodeIndex[node] == 4)
+          {
+            if(squareIndex == 19)
+            {
+              type = M3CNodeType::k_QuadPoint;
+            }
+            else if(squareIndex == 7 || squareIndex == 11 || squareIndex == 13 || squareIndex == 14)
+            {
+              type = M3CNodeType::k_TriplePoint;
+            }
+            else
+            {
+              continue;
+            }
+          }
+          auto typeResult = setNodeType(nodeIds[node], type);
+          if(typeResult.invalid())
+          {
+            return typeResult;
+          }
+        }
+      }
+    }
+    return {};
+  };
+
+  // Match the original edge-stage visitation order exactly when classifying
+  // candidate nodes. No resident square/edge vector survives this pass.
+  for(SiteId squareId = 0; squareId < 3 * numSites; squareId++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    Face square;
+    std::array<Segment, 64> segments{};
+    int segmentCount = 0;
+    auto squareResult = buildSquare(squareId, square, segments, segmentCount, true);
+    if(squareResult.invalid())
+    {
+      return squareResult;
+    }
+  }
+
+  // A cube references only six squares and at most 24 face edges, so its
+  // count is rebuilt locally. Count records preserve the default parallel
+  // path's cube indexing/order for the later prefix + generation pass.
+  for(SiteId cube = 1; cube <= lastCube; cube++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const SiteId squareIds[6] = {3 * (cube - 1), 3 * (cube - 1) + 1, 3 * (cube - 1) + 2, 3 * cube + 2, 3 * (cube + static_cast<SiteId>(fileDim[0]) - 1) + 1, 3 * (cube + numSitesPerPlane - 1)};
+    std::array<Face, 6> squares{};
+    std::array<Segment, 64> segments{};
+    int segmentCount = 0;
+    SiteId faceCenters[6] = {-1, -1, -1, -1, -1, -1};
+    int faceCenterCount = 0;
+    int edgeCount = 0;
+    int effectiveCount = 0;
+    for(int square = 0; square < 6; square++)
+    {
+      auto squareResult = buildSquare(squareIds[square], squares[square], segments, segmentCount, false);
+      if(squareResult.invalid())
+      {
+        return squareResult;
+      }
+      if(squares[square].FCnode != -1)
+      {
+        faceCenters[faceCenterCount++] = squares[square].FCnode;
+      }
+      edgeCount += squares[square].nEdge;
+      effectiveCount += squares[square].effect;
+    }
+    if(faceCenterCount >= 3)
+    {
+      const auto firstCorners = squareCorners(squareIds[0], neighbors);
+      const auto lastCorners = squareCorners(squareIds[5], neighbors);
+      int uniqueSpins = 0;
+      int cubeSpins[8];
+      for(int index = 0; index < 4; index++)
+      {
+        auto firstSpin = sourceValue(firstCorners[index]);
+        auto lastSpin = sourceValue(lastCorners[index]);
+        if(firstSpin.invalid() || lastSpin.invalid())
+        {
+          return firstSpin.invalid() ? ConvertResult(std::move(firstSpin)) : ConvertResult(std::move(lastSpin));
+        }
+        cubeSpins[index] = firstSpin.value();
+        cubeSpins[index + 4] = lastSpin.value();
+      }
+      for(int index = 0; index < 8; index++)
+      {
+        const int spin = cubeSpins[index];
+        if(spin != -1)
+        {
+          uniqueSpins++;
+          cubeSpins[index] = -1;
+          for(int other = 0; other < 8; other++)
+          {
+            if(cubeSpins[other] == spin)
+            {
+              cubeSpins[other] = -1;
+            }
+          }
+        }
+      }
+      auto bodyResult = setNodeType(7 * (cube - 1) + 6, static_cast<int8>(std::min(uniqueSpins, static_cast<int>(M3CNodeType::k_QuadPoint))));
+      if(bodyResult.invalid())
+      {
+        return bodyResult;
+      }
+    }
+    int64 count = 0;
+    if(effectiveCount > 0 && edgeCount > 2)
+    {
+      std::array<SiteId, 64> edgeIds{};
+      int edgeIndex = 0;
+      for(const auto& square : squares)
+      {
+        for(int index = 0; index < square.nEdge; index++)
+        {
+          edgeIds[edgeIndex++] = square.edge_id[index];
+        }
+      }
+      if(faceCenterCount == 0)
+      {
+        count = get_number_case0_triangles(edgeIds.data(), segments.data(), edgeCount);
+      }
+      else if(faceCenterCount == 2)
+      {
+        count = get_number_case2_triangles(edgeIds.data(), segments.data(), edgeCount, faceCenters, faceCenterCount);
+      }
+      else if(faceCenterCount > 2 && faceCenterCount <= 6)
+      {
+        count = get_number_caseM_triangles(edgeIds.data(), segments.data(), edgeCount, faceCenters, faceCenterCount);
+      }
+    }
+    auto writeResult = triangleCounts.cache().write(static_cast<uint64>(cube), count, m_ShouldCancel);
+    if(writeResult.invalid())
+    {
+      return writeResult;
+    }
+  }
+  auto flushNodesResult = candidateNodes.flush(m_ShouldCancel);
+  if(flushNodesResult.invalid())
+  {
+    return flushNodesResult;
+  }
+  auto flushCountsResult = triangleCounts.flush(m_ShouldCancel);
+  if(flushCountsResult.invalid())
+  {
+    return flushCountsResult;
+  }
+
+  // Convert counts in place to the 1-based deterministic cube offsets used by
+  // the parallel path. The values remain in external storage for pass 2.
+  uint64 triangleTotal = 0;
+  uint64 maximumTrianglesPerCube = 0;
+  for(SiteId cube = 1; cube <= lastCube; cube++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    auto countResult = triangleCounts.cache().read(static_cast<uint64>(cube), m_ShouldCancel);
+    if(countResult.invalid())
+    {
+      return ConvertResult(std::move(countResult));
+    }
+    const int64 count = countResult.value();
+    if(count < 0 || static_cast<uint64>(count) > static_cast<uint64>(std::numeric_limits<int64>::max()) - triangleTotal ||
+       triangleTotal > static_cast<uint64>(std::numeric_limits<usize>::max()) - static_cast<uint64>(count))
+    {
+      return MakeErrorResult(-90553, "M3C out-of-core triangle count or offset overflows its output range.");
+    }
+    maximumTrianglesPerCube = std::max(maximumTrianglesPerCube, static_cast<uint64>(count));
+    auto offsetResult = triangleCounts.cache().write(static_cast<uint64>(cube), static_cast<int64>(triangleTotal), m_ShouldCancel);
+    if(offsetResult.invalid())
+    {
+      return offsetResult;
+    }
+    triangleTotal += static_cast<uint64>(count);
+  }
+  auto offsetFlushResult = triangleCounts.flush(m_ShouldCancel);
+  if(offsetFlushResult.invalid())
+  {
+    return offsetFlushResult;
+  }
+
+  // Candidate IDs compact in ascending candidate order, exactly matching the
+  // original assign_new_nodeID traversal. Vertex/NodeTypes output waits until
+  // generation has marked exterior nodes.
+  uint64 nodeTotal = 0;
+  for(uint64 candidate = 0; candidate < candidateCount; candidate++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    auto nodeResult = candidateNodes.cache().read(candidate, m_ShouldCancel);
+    if(nodeResult.invalid())
+    {
+      return ConvertResult(std::move(nodeResult));
+    }
+    auto node = nodeResult.value();
+    if(node.type > 0)
+    {
+      if(nodeTotal == std::numeric_limits<uint64>::max() || nodeTotal >= static_cast<uint64>(std::numeric_limits<usize>::max()))
+      {
+        return MakeErrorResult(-90554, "M3C out-of-core compacted node count overflows its output range.");
+      }
+      node.compactId = nodeTotal++;
+      auto writeResult = candidateNodes.cache().write(candidate, node, m_ShouldCancel);
+      if(writeResult.invalid())
+      {
+        return writeResult;
+      }
+    }
+  }
+  auto compactFlushResult = candidateNodes.flush(m_ShouldCancel);
+  if(compactFlushResult.invalid())
+  {
+    return compactFlushResult;
+  }
+
+  auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
+  triangleGeom.resizeVertexList(static_cast<usize>(nodeTotal));
+  triangleGeom.resizeFaceList(static_cast<usize>(triangleTotal));
+  triangleGeom.getVertexAttributeMatrix()->resizeTuples({static_cast<usize>(nodeTotal)});
+  triangleGeom.getFaceAttributeMatrix()->resizeTuples({static_cast<usize>(triangleTotal)});
+  auto& faceStore = triangleGeom.getFaces()->getDataStoreRef();
+  auto& faceLabelsStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FaceLabelsDataPath).getDataStoreRef();
+  auto& nodeTypesStore = m_DataStructure.getDataRefAs<Int8Array>(m_InputValues->NodeTypesDataPath).getDataStoreRef();
+  faceLabelsStore.resizeTuples({static_cast<usize>(triangleTotal)});
+  nodeTypesStore.resizeTuples({static_cast<usize>(nodeTotal)});
+
+  std::vector<std::shared_ptr<AbstractTupleTransfer>> transfers;
+  for(usize index = 0; index < m_InputValues->SelectedCellDataArrayPaths.size(); index++)
+  {
+    AddTupleTransferInstance(m_DataStructure, m_InputValues->SelectedCellDataArrayPaths[index], m_InputValues->CreatedDataArrayPaths[index], transfers);
+  }
+  const usize cellArrayCount = m_InputValues->SelectedCellDataArrayPaths.size();
+  for(usize index = 0; index < m_InputValues->SelectedFeatureDataArrayPaths.size(); index++)
+  {
+    AddFeatureTupleTransferInstance(m_DataStructure, m_InputValues->SelectedFeatureDataArrayPaths[index], m_InputValues->CreatedDataArrayPaths[cellArrayCount + index],
+                                    m_InputValues->FeatureIdsArrayPath, transfers);
+  }
+  const FloatVec3 spacing = imageGeom.getSpacing();
+  const FloatVec3 origin = imageGeom.getOrigin();
+  const SiteCoords siteCoords{fileDim[0], fileDim[1], fileDim[0] * fileDim[1], {spacing[0], spacing[1], spacing[2]}, {origin[0], origin[1], origin[2]}};
+  const NodeCoords nodeCoords{siteCoords};
+  const auto outputLabel = [maxGrainId](int spin) { return spin < 0 ? int32{-1} : (spin == maxGrainId ? int32{0} : static_cast<int32>(spin)); };
+  const auto sourceCell = [&](int label, SiteId cube) -> Result<usize> {
+    const Neighbor n = neighbors[cube];
+    const SiteId corners[8] = {cube, n.neigh_id[1], n.neigh_id[7], n.neigh_id[8], n.neigh_id[18], n.neigh_id[19], n.neigh_id[25], n.neigh_id[26]};
+    for(SiteId site : corners)
+    {
+      auto value = sourceValue(site);
+      if(value.invalid())
+      {
+        return ConvertInvalidResult<usize>(std::move(value));
+      }
+      if(value.value() == label)
+      {
+        const usize linear = static_cast<usize>(site - 1);
+        const usize x = linear % fileDim[0];
+        const usize y = (linear / fileDim[0]) % fileDim[1];
+        const usize z = linear / (fileDim[0] * fileDim[1]);
+        if(x >= 1 && x <= dims[0] && y >= 1 && y <= dims[1] && z >= 1 && z <= dims[2])
+        {
+          return {(z - 1) * sourceSliceSize + (y - 1) * dims[0] + (x - 1)};
+        }
+      }
+    }
+    return {std::numeric_limits<usize>::max()};
+  };
+
+  constexpr usize kFaceBatch = 16384;
+  std::array<IGeometry::MeshIndexType, kFaceBatch * 3> faceValues{};
+  std::array<int32, kFaceBatch * 2> labelValues{};
+  std::array<QuickSurfaceTransferData, kFaceBatch> transferValues{};
+  const usize localCapacity = std::max<usize>(1, static_cast<usize>(maximumTrianglesPerCube));
+  std::vector<Triangle> localTriangles(localCapacity);
+  std::vector<SiteId> localCubes(localCapacity);
+  for(SiteId cube = 1; cube <= lastCube; cube++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    auto offset = triangleCounts.cache().read(static_cast<uint64>(cube), m_ShouldCancel);
+    if(offset.invalid())
+    {
+      return ConvertResult(std::move(offset));
+    }
+    const usize destination = static_cast<usize>(offset.value());
+    const SiteId squareIds[6] = {3 * (cube - 1), 3 * (cube - 1) + 1, 3 * (cube - 1) + 2, 3 * cube + 2, 3 * (cube + static_cast<SiteId>(fileDim[0]) - 1) + 1, 3 * (cube + numSitesPerPlane - 1)};
+    std::array<Face, 6> squares{};
+    std::array<Segment, 64> segments{};
+    std::array<SiteId, 64> edgeIds{};
+    SiteId centers[6] = {-1, -1, -1, -1, -1, -1};
+    int segmentCount = 0;
+    int edgeCount = 0;
+    int centerCount = 0;
+    int effectiveCount = 0;
+    for(int square = 0; square < 6; square++)
+    {
+      auto result = buildSquare(squareIds[square], squares[square], segments, segmentCount, false);
+      if(result.invalid())
+      {
+        return result;
+      }
+      if(squares[square].FCnode != -1)
+      {
+        centers[centerCount++] = squares[square].FCnode;
+      }
+      effectiveCount += squares[square].effect;
+      for(int edge = 0; edge < squares[square].nEdge; edge++)
+      {
+        edgeIds[edgeCount++] = squares[square].edge_id[edge];
+      }
+    }
+    usize generated = 0;
+    if(effectiveCount > 0 && edgeCount > 2)
+    {
+      double c1[3];
+      double c2[3];
+      for(int component = 0; component < 3; component++)
+      {
+        c1[component] = siteCoords[cube].coord[component];
+        c2[component] = siteCoords[cube + 1 + static_cast<SiteId>(fileDim[0]) + numSitesPerPlane].coord[component];
+      }
+      int64 end = 0;
+      if(centerCount == 0)
+      {
+        get_case0_triangles(localTriangles.data(), localCubes.data(), edgeIds.data(), nodeCoords, segments.data(), edgeCount, 0, &end, c1, c2, cube);
+      }
+      else if(centerCount == 2)
+      {
+        get_case2_triangles(localTriangles.data(), localCubes.data(), edgeIds.data(), nodeCoords, segments.data(), edgeCount, centers, centerCount, 0, &end, c1, c2, cube);
+      }
+      else if(centerCount > 2)
+      {
+        get_caseM_triangles(localTriangles.data(), localCubes.data(), edgeIds.data(), nodeCoords, segments.data(), edgeCount, centers, centerCount, 0, &end, 7 * (cube - 1) + 6, c1, c2, cube);
+      }
+      generated = static_cast<usize>(end);
+    }
+    uint64 expectedEnd = triangleTotal;
+    if(cube != lastCube)
+    {
+      auto nextOffset = triangleCounts.cache().read(static_cast<uint64>(cube + 1), m_ShouldCancel);
+      if(nextOffset.invalid() || nextOffset.value() < 0)
+      {
+        return nextOffset.invalid() ? ConvertResult(std::move(nextOffset)) : MakeErrorResult(-90558, "M3C out-of-core triangle offset is negative.");
+      }
+      expectedEnd = static_cast<uint64>(nextOffset.value());
+    }
+    if(generated > localCapacity || expectedEnd < static_cast<uint64>(destination) || generated != expectedEnd - static_cast<uint64>(destination))
+    {
+      return MakeErrorResult(-90555, "M3C out-of-core generation disagrees with its counted triangle range.");
+    }
+    for(usize start = 0; start < generated; start += kFaceBatch)
+    {
+      const usize count = std::min(kFaceBatch, generated - start);
+      for(usize local = 0; local < count; local++)
+      {
+        const Triangle& triangle = localTriangles[start + local];
+        for(int vertex = 0; vertex < 3; vertex++)
+        {
+          auto nodeResult = candidateNodes.cache().read(static_cast<uint64>(triangle.node_id[vertex]), m_ShouldCancel);
+          if(nodeResult.invalid() || nodeResult.value().type <= 0)
+          {
+            return nodeResult.invalid() ? ConvertResult(std::move(nodeResult)) : MakeErrorResult(-90556, "M3C out-of-core triangle references an unused candidate node.");
+          }
+          auto node = nodeResult.value();
+          if((triangle.nSpin[0] < 0) != (triangle.nSpin[1] < 0) && node.type < 10)
+          {
+            node.type = static_cast<int8>(node.type + 10);
+            auto write = candidateNodes.cache().write(static_cast<uint64>(triangle.node_id[vertex]), node, m_ShouldCancel);
+            if(write.invalid())
+            {
+              return write;
+            }
+          }
+          faceValues[local * 3 + vertex] = static_cast<IGeometry::MeshIndexType>(node.compactId);
+        }
+        const int32 a = outputLabel(triangle.nSpin[0]);
+        const int32 b = outputLabel(triangle.nSpin[1]);
+        const bool aFirst = a <= b;
+        labelValues[local * 2] = aFirst ? a : b;
+        labelValues[local * 2 + 1] = aFirst ? b : a;
+        auto first = sourceCell(aFirst ? triangle.nSpin[0] : triangle.nSpin[1], cube);
+        auto second = sourceCell(aFirst ? triangle.nSpin[1] : triangle.nSpin[0], cube);
+        if(first.invalid() || second.invalid())
+        {
+          return first.invalid() ? ConvertResult(std::move(first)) : ConvertResult(std::move(second));
+        }
+        transferValues[local] = {destination + start + local, first.value(), second.value(), labelValues[local * 2], labelValues[local * 2 + 1]};
+      }
+      auto faceWrite = faceStore.copyFromBuffer((destination + start) * 3, nonstd::span<const IGeometry::MeshIndexType>(faceValues.data(), count * 3));
+      auto labelWrite = faceLabelsStore.copyFromBuffer((destination + start) * 2, nonstd::span<const int32>(labelValues.data(), count * 2));
+      if(faceWrite.invalid() || labelWrite.invalid())
+      {
+        return faceWrite.invalid() ? faceWrite : labelWrite;
+      }
+      for(const auto& transfer : transfers)
+      {
+        auto result = transfer->quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData>(transferValues.data(), count));
+        if(result.invalid())
+        {
+          return result;
+        }
+      }
+    }
+  }
+  auto promotionFlush = candidateNodes.flush(m_ShouldCancel);
+  if(promotionFlush.invalid())
+  {
+    return promotionFlush;
+  }
+
+  auto& vertexStore = triangleGeom.getVertices()->getDataStoreRef();
+  constexpr usize kVertexBatch = 16384;
+  std::array<float32, kVertexBatch * 3> vertexValues{};
+  std::array<int8, kVertexBatch> typeValues{};
+  for(uint64 candidate = 0; candidate < candidateCount;)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const uint64 end = std::min(candidateCount, candidate + static_cast<uint64>(kVertexBatch));
+    usize count = 0;
+    uint64 firstCompact = 0;
+    for(uint64 current = candidate; current < end; current++)
+    {
+      auto nodeResult = candidateNodes.cache().read(current, m_ShouldCancel);
+      if(nodeResult.invalid())
+      {
+        return ConvertResult(std::move(nodeResult));
+      }
+      const auto& node = nodeResult.value();
+      if(node.type > 0)
+      {
+        if(count == 0)
+        {
+          firstCompact = node.compactId;
+        }
+        const Node coordinate = nodeCoords[static_cast<SiteId>(current)];
+        vertexValues[count * 3] = coordinate.coord[0];
+        vertexValues[count * 3 + 1] = coordinate.coord[1];
+        vertexValues[count * 3 + 2] = coordinate.coord[2];
+        typeValues[count++] = node.type;
+      }
+    }
+    if(count > 0)
+    {
+      auto vertexWrite = vertexStore.copyFromBuffer(firstCompact * 3, nonstd::span<const float32>(vertexValues.data(), count * 3));
+      auto typeWrite = nodeTypesStore.copyFromBuffer(firstCompact, nonstd::span<const int8>(typeValues.data(), count));
+      if(vertexWrite.invalid() || typeWrite.invalid())
+      {
+        return vertexWrite.invalid() ? vertexWrite : typeWrite;
+      }
+    }
+    candidate = end;
+  }
+  if(m_InputValues->RepairTriangleWinding)
+  {
+    auto& ioCollection = DataStoreUtilities::GetIOCollection();
+    if(ioCollection.hasExternalSortCapability() && ioCollection.hasTemporaryRecordStoreCapability())
+    {
+      auto result = MeshingUtilities::RepairTriangleWindingExternal(faceStore, faceLabelsStore, m_ShouldCancel, m_MessageHandler);
+      if(result.invalid())
+      {
+        return result;
+      }
+    }
+    else if(usesOutOfCoreStore)
+    {
+      return MakeErrorResult(-90557, "M3C out-of-core winding repair requires external-sort and temporary-record-store providers.");
+    }
+    else
+    {
+      triangleGeom.findElementNeighbors(true);
+      const auto optionalId = triangleGeom.getElementNeighborsId();
+      if(optionalId.has_value())
+      {
+        const auto& connectivity = m_DataStructure.getDataRefAs<IGeometry::ElementDynamicList>(optionalId.value());
+        auto result = MeshingUtilities::RepairTriangleWinding(faceStore, connectivity, faceLabelsStore, m_ShouldCancel, m_MessageHandler);
+        m_DataStructure.removeData(triangleGeom.getElementContainingVertId().value());
+        m_DataStructure.removeData(triangleGeom.getElementNeighborsId().value());
+        if(result.invalid())
+        {
+          return result;
+        }
+      }
+    }
+  }
+  return {};
 }
 
 // -----------------------------------------------------------------------------

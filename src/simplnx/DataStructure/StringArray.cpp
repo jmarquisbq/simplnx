@@ -261,4 +261,10 @@ void StringArray::setStore(const std::shared_ptr<AbstractStringStore>& newStore)
 {
   m_Strings = newStore;
 }
+
+bool StringArray::isPlaceholder() const
+{
+  // A null store has no data and is treated as a placeholder; otherwise defer to the store.
+  return m_Strings == nullptr || m_Strings->isPlaceholder();
+}
 } // namespace nx::core

@@ -10,11 +10,73 @@
 #include "simplnx/Utilities/ParallelTaskAlgorithm.hpp"
 #include "simplnx/Utilities/SamplingUtils.hpp"
 
+#include <limits>
+#include <memory>
+
 using namespace nx::core;
 
 namespace
 {
-// -----------------------------------------------------------------------------
+// Sentinel marking a destination axis position that falls outside the source Image Geometry's bounds
+// along that axis (no source cell to copy from - the destination voxel is filled with zero instead).
+constexpr usize k_InvalidAxisIndex = std::numeric_limits<usize>::max();
+
+/**
+ * @brief Resolves, for every destination Image Geometry coordinate along a single axis, the source
+ * Image Geometry cell index that coordinate's min-corner falls into (or k_InvalidAxisIndex if that
+ * destination position lies outside the source geometry's bounds along this axis).
+ *
+ * WHY this is hoisted out of the voxel loop: both geometries are axis-aligned regular grids, so
+ * ImageGeom::getIndex()'s bounds check and floor-divide are each fully separable per axis - the source
+ * index (or out-of-bounds result) for a given destination x position is the same regardless of the y or
+ * z position, and likewise for y and z. This function reproduces that exact per-axis test (same bounds
+ * comparison, same floor-divide, same float64 promotion of the underlying float32 origin/spacing) once
+ * per axis position - bounded by that axis' destination dimension - instead of re-deriving it for every
+ * voxel that shares the position along this axis.
+ *
+ * @param destDimSize Number of destination coordinates to resolve along this axis
+ * @param destOriginComp Destination Image Geometry origin component for this axis
+ * @param destSpacingComp Destination Image Geometry spacing component for this axis
+ * @param srcDimSize Source Image Geometry dimension for this axis
+ * @param srcOriginComp Source Image Geometry origin component for this axis
+ * @param srcSpacingComp Source Image Geometry spacing component for this axis
+ * @return A vector of length destDimSize mapping each destination axis position to its source axis
+ * index, or k_InvalidAxisIndex if the destination position falls outside the source geometry
+ */
+std::vector<usize> ComputeAxisSrcIndices(usize destDimSize, float64 destOriginComp, float64 destSpacingComp, usize srcDimSize, float64 srcOriginComp, float64 srcSpacingComp)
+{
+  std::vector<usize> srcIndices(destDimSize, k_InvalidAxisIndex);
+  const float64 srcMaxCoord = static_cast<float64>(srcDimSize) * srcSpacingComp + srcOriginComp;
+  for(usize i = 0; i < destDimSize; i++)
+  {
+    const float64 destCoord = static_cast<float64>(i) * destSpacingComp + destOriginComp;
+    if(destCoord < srcOriginComp || destCoord > srcMaxCoord)
+    {
+      continue;
+    }
+    const auto srcIdx = static_cast<usize>(std::floor((destCoord - srcOriginComp) / srcSpacingComp));
+    if(srcIdx < srcDimSize)
+    {
+      srcIndices[i] = srcIdx;
+    }
+  }
+  return srcIndices;
+}
+
+/**
+ * @brief Copies one cell-data array from the source Image Geometry to the resampled destination Image
+ * Geometry by nearest-source-cell lookup.
+ *
+ * WHY buffered row I/O instead of per-voxel copyFrom: destination cells sharing the same (y, z) are
+ * contiguous along x in the backing store, and (per ComputeAxisSrcIndices) the source cell a given
+ * destination x maps to is identical for every row. This lets a whole destination row be assembled in a
+ * bounded, reusable buffer - gathering the mapped source values locally - and written out with a single
+ * copyFromBuffer call, instead of one CopyData call (a chunk-cache round trip per voxel when either store
+ * is out-of-core) for every destination cell. The source row needed for a given (y, z) is itself read once
+ * via copyIntoBuffer (and reused across consecutive destination rows mapping to the same source row, which
+ * is common when upsampling) rather than re-read per voxel. Both buffers are bounded by an axis dimension,
+ * never by the total cell count of either geometry.
+ */
 template <typename T>
 class ResampleImageGeomArrayImpl
 {
@@ -35,42 +97,99 @@ public:
     const auto& srcDataStore = m_SrcArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
     auto& destDataStore = m_DestArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
 
+    const SizeVec3 srcDims = m_SrcImageGeom.getDimensions();
+    const SizeVec3 destDims = m_DestImageGeom.getDimensions();
+    const FloatVec3 srcOrigin = m_SrcImageGeom.getOrigin();
+    const FloatVec3 srcSpacing = m_SrcImageGeom.getSpacing();
+    const FloatVec3 destOrigin = m_DestImageGeom.getOrigin();
+    const FloatVec3 destSpacing = m_DestImageGeom.getSpacing();
+
+    // Precompute, once per axis, which source cell (if any) each destination coordinate along that
+    // axis maps to - see ComputeAxisSrcIndices for why this only needs to run per-axis, not per-voxel.
+    const std::vector<usize> xIndices = ComputeAxisSrcIndices(destDims[0], destOrigin[0], destSpacing[0], srcDims[0], srcOrigin[0], srcSpacing[0]);
+    const std::vector<usize> yIndices = ComputeAxisSrcIndices(destDims[1], destOrigin[1], destSpacing[1], srcDims[1], srcOrigin[1], srcSpacing[1]);
+    const std::vector<usize> zIndices = ComputeAxisSrcIndices(destDims[2], destOrigin[2], destSpacing[2], srcDims[2], srcOrigin[2], srcSpacing[2]);
+
+    const usize numComponents = m_DestArray.getNumberOfComponents();
+    const usize destRowLength = destDims[0] * numComponents;
+    const usize srcRowLength = srcDims[0] * numComponents;
+
+    // Reusable row buffers allocated ONCE for the whole array - bounded by an axis dimension, not by
+    // the total number of cells in either geometry.
+    auto destRowBuffer = std::make_unique<T[]>(destRowLength);
+    auto srcRowBuffer = std::make_unique<T[]>(srcRowLength);
+
+    bool haveCachedSrcRow = false;
+    usize cachedYIndex = k_InvalidAxisIndex;
+    usize cachedZIndex = k_InvalidAxisIndex;
+
+    const usize numVoxels = m_DestImageGeom.getNumberOfCells();
+    const usize counterIncrement = numVoxels / 100 == 0 ? 100 : numVoxels / 100;
+    usize processedVoxels = 0;
     usize counter = 0;
 
-    usize numVoxels = m_DestImageGeom.getNumberOfCells();
-    usize counterIncrement = numVoxels / 100 == 0 ? 100 : numVoxels / 100;
-
-    for(usize destVoxelIdx = 0; destVoxelIdx < numVoxels; destVoxelIdx++)
+    for(usize z = 0; z < destDims[2]; z++)
     {
       if(m_ShouldCancel)
       {
         return;
       }
 
-      // Get the destination voxel origin (min corner).
-      Point3D<float64> coords = m_DestImageGeom.getPlaneCoords(destVoxelIdx);
-      // Based on that position, figure out which source voxel we are in...
-      std::optional<usize> srcIndex = m_SrcImageGeom.getIndex(coords[0], coords[1], coords[2]);
-
-      if(srcIndex.has_value())
+      const usize zIndex = zIndices[z];
+      for(usize y = 0; y < destDims[1]; y++)
       {
-        auto result = destDataStore.copyFrom(destVoxelIdx, srcDataStore, srcIndex.value(), 1);
-        if(result.invalid())
+        const usize yIndex = yIndices[y];
+        const bool rowHasSource = (zIndex != k_InvalidAxisIndex) && (yIndex != k_InvalidAxisIndex);
+
+        if(rowHasSource)
         {
-          destDataStore.fillTuple(destVoxelIdx, 0);
-        }
-      }
-      else
-      {
-        destDataStore.fillTuple(destVoxelIdx, 0);
-      }
+          // Bulk-read the source row for this (yIndex, zIndex) once; skip the read if the previous
+          // destination row already pulled from the same source row (common when upsampling).
+          if(!haveCachedSrcRow || yIndex != cachedYIndex || zIndex != cachedZIndex)
+          {
+            const usize srcRowStart = ((srcDims[0] * srcDims[1] * zIndex) + (srcDims[0] * yIndex)) * numComponents;
+            srcDataStore.copyIntoBuffer(srcRowStart, nonstd::span<T>(srcRowBuffer.get(), srcRowLength));
+            cachedYIndex = yIndex;
+            cachedZIndex = zIndex;
+            haveCachedSrcRow = true;
+          }
 
-      counter++;
-      if(counter >= counterIncrement)
-      {
-        float progress = static_cast<float>(destVoxelIdx) / static_cast<float>(numVoxels) * 100.0f;
-        m_AlgorithmPtr->sendThreadSafeProgressMessage(fmt::format("Resampling Data Array '{}' {:.0f}% Complete", m_DestArray.getName(), progress));
-        counter = 0;
+          // Gather the mapped source values into the destination row buffer - local memory access
+          // against the two bounded buffers above, no store access per voxel.
+          for(usize x = 0; x < destDims[0]; x++)
+          {
+            const usize xIndex = xIndices[x];
+            T* destTuple = destRowBuffer.get() + (x * numComponents);
+            if(xIndex != k_InvalidAxisIndex)
+            {
+              const T* srcTuple = srcRowBuffer.get() + (xIndex * numComponents);
+              std::copy_n(srcTuple, numComponents, destTuple);
+            }
+            else
+            {
+              std::fill_n(destTuple, numComponents, static_cast<T>(0));
+            }
+          }
+        }
+        else
+        {
+          // The whole row falls outside the source geometry along y or z - matches the original
+          // per-voxel fillTuple(0) fallback for an out-of-bounds source lookup.
+          std::fill_n(destRowBuffer.get(), destRowLength, static_cast<T>(0));
+        }
+
+        // Bulk-write the fully assembled destination row in a single store access.
+        const usize destRowStart = ((z * destDims[1] * destDims[0]) + (y * destDims[0])) * numComponents;
+        destDataStore.copyFromBuffer(destRowStart, nonstd::span<const T>(destRowBuffer.get(), destRowLength));
+
+        processedVoxels += destDims[0];
+        counter += destDims[0];
+        if(counter >= counterIncrement)
+        {
+          const float progress = static_cast<float>(processedVoxels) / static_cast<float>(numVoxels) * 100.0f;
+          m_AlgorithmPtr->sendThreadSafeProgressMessage(fmt::format("Resampling Data Array '{}' {:.0f}% Complete", m_DestArray.getName(), progress));
+          counter = 0;
+        }
       }
     }
     m_AlgorithmPtr->sendThreadSafeProgressMessage(fmt::format("Resampling Data Array '{}' Complete", m_DestArray.getName()));

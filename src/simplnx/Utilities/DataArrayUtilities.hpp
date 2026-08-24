@@ -3,6 +3,7 @@
 #include "simplnx/simplnx_export.hpp"
 
 #include "simplnx/Common/Array.hpp"
+#include "simplnx/Common/Bit.hpp"
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/DataStructure/AbstractListStore.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
@@ -20,6 +21,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #if defined(_MSC_VER)
@@ -146,10 +148,13 @@ bool ConvertIDataArray(const std::shared_ptr<IDataArray>& dataArray, const std::
  * @param tupleShape The Tuple Dimensions
  * @param path The DataPath to where the list  will be stored.
  * @param mode The mode to assume: PREFLIGHT or EXECUTE. Preflight will NOT allocate any storage. EXECUTE will allocate the memory/storage
+ * @param dataFormat An explicit per-filter storage format override, or "" to defer to the format
+ *                   resolver. Threaded through to CreateListStore so a filter can force a specific
+ *                   backing store format; empty means "Automatic" (let the resolver decide).
  * @return
  */
 template <class T>
-Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleShape, const DataPath& path, IDataAction::Mode mode)
+Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleShape, const DataPath& path, IDataAction::Mode mode, const std::string& dataFormat = "")
 {
   static constexpr StringLiteral prefix = "CreateNeighborListAction: ";
   auto parentPath = path.getParent();
@@ -170,16 +175,12 @@ Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleSha
   const usize last = path.getLength() - 1;
 
   std::string name = path[last];
-  NeighborList<T>* neighborList = nullptr;
-  if(mode == IDataAction::Mode::Preflight)
-  {
-    auto listStore = std::make_shared<EmptyListStore<T>>(tupleShape);
-    neighborList = NeighborList<T>::Create(dataStructure, name, listStore, dataObjectId);
-  }
-  if(mode == IDataAction::Mode::Execute)
-  {
-    neighborList = NeighborList<T>::Create(dataStructure, name, tupleShape, dataObjectId);
-  }
+  // Route through the format resolver so NeighborLists get OOC-backed storage
+  // when the OOC plugin is loaded and the array is eligible (the geometry walk
+  // in the resolver still forces in-core for unstructured/poly geometries). An
+  // explicit per-filter dataFormat override, when supplied, wins over the resolver.
+  auto listStore = DataStoreUtilities::CreateListStore<T>(dataStructure, path, tupleShape, mode, dataFormat);
+  NeighborList<T>* neighborList = NeighborList<T>::Create(dataStructure, name, listStore, dataObjectId);
 
   if(neighborList == nullptr)
   {
@@ -209,16 +210,20 @@ DataArray<T>& ArrayRefFromPath(DataStructure& dataStructure, const DataPath& pat
 }
 
 /**
- * @brief Reads a binary file into a pre-allocated DataArray<T> object
+ * @brief Reads a binary file into a pre-allocated DataArray in bounded pages.
+ *
+ * Each page is optionally byte-swapped locally and committed with
+ * copyFromBuffer(), so disk-backed destinations do not incur one write per value.
  * @tparam T The POD type. Only C++ native types are supported.
  * @param binaryFilePath The path to the input file
  * @param outputDataArray The DataArray<T> to store the data read from the file
  * @param startByte The byte offset into the file to start reading the data.
  * @param defaultBufferSize The buffer size that is used when reading.
+ * @param swapEndian Whether each page should be byte-swapped before it is written.
  * @return A Result<> type that contains any warnings or errors that occurred.
  */
 template <typename T>
-Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataArray<T>& outputDataArray, usize startByte = 0, usize defaultBufferSize = 1000000)
+Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataArray<T>& outputDataArray, usize startByte = 0, usize defaultBufferSize = 1000000, bool swapEndian = false)
 {
   FILE* inputFilePtr = std::fopen(binaryFilePath.string().c_str(), "rb");
   if(inputFilePtr == nullptr)
@@ -238,14 +243,24 @@ Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataA
   }
 
   const usize numElements = outputDataArray.getSize();
+  if(numElements == 0)
+  {
+    std::fclose(inputFilePtr);
+    return {};
+  }
+  if(defaultBufferSize == 0)
+  {
+    std::fclose(inputFilePtr);
+    return MakeErrorResult(-1002, "The binary import buffer size must be greater than zero.");
+  }
   // Now start reading the data in chunkShape if needed.
   usize chunkSize = std::min(numElements, defaultBufferSize);
-  std::vector<T> buffer(chunkSize);
+  auto buffer = std::make_unique<T[]>(chunkSize);
 
   usize elementCounter = 0;
   while(elementCounter < numElements)
   {
-    usize elementsRead = std::fread(buffer.data(), sizeof(T), chunkSize, inputFilePtr);
+    usize elementsRead = std::fread(buffer.get(), sizeof(T), chunkSize, inputFilePtr);
 
     if(elementsRead == 0)
     {
@@ -253,9 +268,16 @@ Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataA
       return MakeErrorResult(-1001, fmt::format("Unexpected end of file or read error after reading {} of {} elements from '{}'", elementCounter, numElements, binaryFilePath.string()));
     }
 
-    for(usize i = 0; i < elementsRead; i++)
+    if(swapEndian)
     {
-      outputDataArray[i + elementCounter] = buffer[i];
+      std::transform(buffer.get(), buffer.get() + elementsRead, buffer.get(), [](T value) { return nx::core::byteswap(value); });
+    }
+
+    Result<> copyResult = outputDataArray.getDataStoreRef().copyFromBuffer(elementCounter, nonstd::span<const T>(buffer.get(), elementsRead));
+    if(copyResult.invalid())
+    {
+      std::fclose(inputFilePtr);
+      return copyResult;
     }
 
     elementCounter += elementsRead;
@@ -376,10 +398,19 @@ SIMPLNX_EXPORT bool CheckArraysHaveSameTupleCount(const DataStructure& dataStruc
  * @param sourceDataPath The DataPath to the AttributeMatrix or DataArray that the featureIds array indexes into
  * @param featureIds the ids for the array
  * @param ignoreNegativeValues Ignore negative values in the feature Ids array. This should be used carefully.
- * @return void
+ * @param messageHandler Receives the validation progress message.
+ * @return A Result containing -5355 for negative values, -5351 for out-of-range
+ * feature IDs, or a propagated bulk-read error.
  */
 SIMPLNX_EXPORT Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
                                                                            const IFilter::MessageHandler& messageHandler);
+/**
+ * @brief Bulk-validates FeatureIds with cooperative cancellation.
+ * @param shouldCancel Optional flag checked once per bounded validation batch. If set,
+ * validation stops without reading another batch or modifying any output.
+ */
+SIMPLNX_EXPORT Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
+                                                                           const IFilter::MessageHandler& messageHandler, const std::atomic_bool* shouldCancel);
 
 /**
  * @brief This function resize the outermost vector of the NeighborList's underlying data to the NeighborList's set
@@ -585,20 +616,44 @@ std::vector<std::array<T, 2>> GetComponentMinMax(std::shared_ptr<DataArray<T>> d
 namespace CopyFromArray
 {
 /**
- * @brief Appends all of the data from the inputArray into the destination array starting at the given offset. This function DOES NOT do any bounds checking!
+ * @brief Appends all elements at the flat destination @p offset without bounds checking.
+ * Numeric DataArrays move fixed-size pages through their bulk store APIs so
+ * AppendImageGeometry remains efficient and bounded for OOC inputs/outputs;
+ * variable-length arrays retain their element-wise interface.
  */
 template <class K>
 void AppendData(const K& inputArray, K& destArray, usize offset)
 {
   const usize numElements = inputArray.getNumberOfTuples() * inputArray.getNumberOfComponents();
-  for(usize i = 0; i < numElements; ++i)
+  if constexpr(requires { inputArray.getDataStoreRef(); })
   {
-    destArray.setValue(offset + i, inputArray.at(i));
+    // DataArray path: use bulk I/O for OOC efficiency
+    using ValueType = typename std::remove_reference_t<decltype(inputArray.getDataStoreRef())>::value_type;
+    constexpr usize k_ChunkSize = 65536;
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized I/O buffer; std::array cannot represent this extent.
+    auto buffer = std::make_unique<ValueType[]>(std::min(numElements, k_ChunkSize));
+    const auto& srcStore = inputArray.getDataStoreRef();
+    auto& dstStore = destArray.getDataStoreRef();
+    for(usize i = 0; i < numElements; i += k_ChunkSize)
+    {
+      usize count = std::min(k_ChunkSize, numElements - i);
+      srcStore.copyIntoBuffer(i, nonstd::span<ValueType>(buffer.get(), count));
+      dstStore.copyFromBuffer(offset + i, nonstd::span<const ValueType>(buffer.get(), count));
+    }
+  }
+  else
+  {
+    for(usize i = 0; i < numElements; ++i)
+    {
+      destArray.setValue(offset + i, inputArray.at(i));
+    }
   }
 }
 
 /**
- * @brief Copies all of the data from the inputArray into the destination array using the given tuple offsets.
+ * @brief Copies a validated tuple range between same-shaped arrays.
+ * If either numeric DataArray is OOC, a fixed 65,536-element buffer replaces
+ * iterator access; fully resident arrays keep the single std::copy fast path.
  */
 template <class K>
 Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usize srcTupleOffset, usize totalSrcTuples)
@@ -625,14 +680,51 @@ Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usiz
     return MakeErrorResult(-2034, fmt::format("The total number of elements to copy ({}) is larger than the total available elements ({}).", elementsToCopy, availableElements));
   }
 
-  auto srcBegin = inputArray.begin() + (srcTupleOffset * sourceNumComponents);
-  auto srcEnd = srcBegin + (totalSrcTuples * sourceNumComponents);
-  auto dstBegin = destArray.begin() + (destTupleOffset * numComponents);
-  std::copy(srcBegin, srcEnd, dstBegin);
+  const usize numElements = totalSrcTuples * sourceNumComponents;
+  if constexpr(requires { inputArray.getDataStoreRef(); })
+  {
+    const auto& srcStore = inputArray.getDataStoreRef();
+    auto& dstStore = destArray.getDataStoreRef();
+    if(srcStore.getStoreType() == IDataStore::StoreType::OutOfCore || dstStore.getStoreType() == IDataStore::StoreType::OutOfCore)
+    {
+      // OOC path: chunked bulk I/O
+      using ValueType = typename std::remove_reference_t<decltype(srcStore)>::value_type;
+      constexpr usize k_ChunkSize = 65536;
+      // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized I/O buffer; std::array cannot represent this extent.
+      auto buffer = std::make_unique<ValueType[]>(std::min(numElements, k_ChunkSize));
+      usize srcStart = srcTupleOffset * sourceNumComponents;
+      usize dstStart = destTupleOffset * numComponents;
+      for(usize offset = 0; offset < numElements; offset += k_ChunkSize)
+      {
+        usize count = std::min(k_ChunkSize, numElements - offset);
+        srcStore.copyIntoBuffer(srcStart + offset, nonstd::span<ValueType>(buffer.get(), count));
+        dstStore.copyFromBuffer(dstStart + offset, nonstd::span<const ValueType>(buffer.get(), count));
+      }
+    }
+    else
+    {
+      // In-core path: single std::copy (zero overhead)
+      auto srcBegin = inputArray.begin() + (srcTupleOffset * sourceNumComponents);
+      auto srcEnd = srcBegin + numElements;
+      auto dstBegin = destArray.begin() + (destTupleOffset * numComponents);
+      std::copy(srcBegin, srcEnd, dstBegin);
+    }
+  }
+  else
+  {
+    auto srcBegin = inputArray.begin() + (srcTupleOffset * sourceNumComponents);
+    auto srcEnd = srcBegin + numElements;
+    auto dstBegin = destArray.begin() + (destTupleOffset * numComponents);
+    std::copy(srcBegin, srcEnd, dstBegin);
+  }
 
   return {};
 }
 
+/**
+ * @brief Copies a tuple range from resident vector storage into an array.
+ * Numeric/store-aware destinations receive one contiguous bulk write.
+ */
 template <class T, class K>
 Result<> CopyData(const std::vector<T>& src, K& dst, usize dstTupleOffset, usize srcTupleOffset, usize totalSrcTuples, usize srcNumComponents)
 {
@@ -661,10 +753,24 @@ Result<> CopyData(const std::vector<T>& src, K& dst, usize dstTupleOffset, usize
     return MakeErrorResult(-2034, fmt::format("The total number of elements to copy ({}) is larger than the total available elements ({}).", elementsToCopy, dstAvailableElems));
   }
 
-  auto srcBegin = src.begin() + (srcTupleOffset * srcNumComponents);
-  auto srcEnd = srcBegin + (totalSrcTuples * srcNumComponents);
-  auto dstBegin = dst.begin() + (dstTupleOffset * dstNumComponents);
-  std::copy(srcBegin, srcEnd, dstBegin);
+  const usize numElements = totalSrcTuples * srcNumComponents;
+  usize srcStart = srcTupleOffset * srcNumComponents;
+  usize dstStart = dstTupleOffset * dstNumComponents;
+  if constexpr(requires { dst.getDataStoreRef(); })
+  {
+    dst.getDataStoreRef().copyFromBuffer(dstStart, nonstd::span<const T>(src.data() + srcStart, numElements));
+  }
+  else if constexpr(requires { dst.copyFromBuffer(dstStart, nonstd::span<const T>(src.data(), 1)); })
+  {
+    dst.copyFromBuffer(dstStart, nonstd::span<const T>(src.data() + srcStart, numElements));
+  }
+  else
+  {
+    auto srcBegin = src.begin() + srcStart;
+    auto srcEnd = srcBegin + numElements;
+    auto dstBegin = dst.begin() + dstStart;
+    std::copy(srcBegin, srcEnd, dstBegin);
+  }
 
   return {};
 }
@@ -875,12 +981,50 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
       if(mirror)
       {
         auto numComps = destArray.getNumberOfComponents();
-        for(usize x = 0; x < appendDestXDim / 2; ++x)
+        if constexpr(requires { destArray.getDataStoreRef(); })
         {
-          usize tupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + x;
-          usize endTupleIdx = tupleIdx + 1;
-          usize mirrorTupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + (appendDestXDim - 1 - x);
-          std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+          if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
+          {
+            // OOC path: read entire scanline, reverse tuples in-memory, write back
+            using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
+            usize scanlineElements = appendDestXDim * numComps;
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized scanline; std::array cannot represent this extent.
+            auto scanline = std::make_unique<ValueType[]>(scanlineElements);
+            auto& store = destArray.getDataStoreRef();
+            usize rowStart = ((z * appendYDim * appendDestXDim) + (y * appendDestXDim)) * numComps;
+            store.copyIntoBuffer(rowStart, nonstd::span<ValueType>(scanline.get(), scanlineElements));
+            // Reverse tuple order in the buffer
+            for(usize x = 0; x < appendDestXDim / 2; ++x)
+            {
+              usize mirrorX = appendDestXDim - 1 - x;
+              for(usize c = 0; c < numComps; ++c)
+              {
+                std::swap(scanline[x * numComps + c], scanline[mirrorX * numComps + c]);
+              }
+            }
+            store.copyFromBuffer(rowStart, nonstd::span<const ValueType>(scanline.get(), scanlineElements));
+          }
+          else
+          {
+            // In-core path: original swap_ranges
+            for(usize x = 0; x < appendDestXDim / 2; ++x)
+            {
+              usize tupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + x;
+              usize endTupleIdx = tupleIdx + 1;
+              usize mirrorTupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + (appendDestXDim - 1 - x);
+              std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+            }
+          }
+        }
+        else
+        {
+          for(usize x = 0; x < appendDestXDim / 2; ++x)
+          {
+            usize tupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + x;
+            usize endTupleIdx = tupleIdx + 1;
+            usize mirrorTupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + (appendDestXDim - 1 - x);
+            std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+          }
         }
       }
     }
@@ -926,16 +1070,62 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
   if(mirror)
   {
     auto numComps = destArray.getNumberOfComponents();
-    for(int z = 0; z < appendZDim; ++z)
+    if constexpr(requires { destArray.getDataStoreRef(); })
     {
-      for(int x = 0; x < appendXDim; ++x)
+      if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
       {
-        for(int y = 0; y < appendDestYDim / 2; ++y)
+        // OOC path: swap entire rows (scanlines) at once to minimize I/O calls.
+        // Instead of per-tuple swaps (xDim * yDim/2 * zDim calls), this does
+        // yDim/2 * zDim row-sized bulk reads/writes.
+        using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
+        usize rowElements = static_cast<usize>(appendXDim) * numComps;
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
+        auto rowA = std::make_unique<ValueType[]>(rowElements);
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
+        auto rowB = std::make_unique<ValueType[]>(rowElements);
+        auto& store = destArray.getDataStoreRef();
+        for(int64 z = 0; z < appendZDim; ++z)
         {
-          usize tupleIdx = (z * appendDestYDim * appendXDim) + (y * appendXDim) + x;
-          usize endTupleIdx = tupleIdx + 1;
-          usize mirrorTupleIdx = (z * appendDestYDim * appendXDim) + ((appendDestYDim - 1 - y) * appendXDim) + x;
-          std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+          for(usize y = 0; y < appendDestYDim / 2; ++y)
+          {
+            usize mirrorY = appendDestYDim - 1 - y;
+            usize offsetA = (static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + y * static_cast<usize>(appendXDim)) * numComps;
+            usize offsetB = (static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + mirrorY * static_cast<usize>(appendXDim)) * numComps;
+            store.copyIntoBuffer(offsetA, nonstd::span<ValueType>(rowA.get(), rowElements));
+            store.copyIntoBuffer(offsetB, nonstd::span<ValueType>(rowB.get(), rowElements));
+            store.copyFromBuffer(offsetA, nonstd::span<const ValueType>(rowB.get(), rowElements));
+            store.copyFromBuffer(offsetB, nonstd::span<const ValueType>(rowA.get(), rowElements));
+          }
+        }
+      }
+      else
+      {
+        // In-core path: swap entire rows using swap_ranges for efficiency
+        for(int64 z = 0; z < appendZDim; ++z)
+        {
+          for(usize y = 0; y < appendDestYDim / 2; ++y)
+          {
+            usize mirrorY = appendDestYDim - 1 - y;
+            usize rowIdx = static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + y * static_cast<usize>(appendXDim);
+            usize mirrorRowIdx = static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + mirrorY * static_cast<usize>(appendXDim);
+            usize rowElements = static_cast<usize>(appendXDim) * numComps;
+            std::swap_ranges(destArray.begin() + (rowIdx * numComps), destArray.begin() + (rowIdx * numComps + rowElements), destArray.begin() + (mirrorRowIdx * numComps));
+          }
+        }
+      }
+    }
+    else
+    {
+      // Non-DataArray path: swap entire rows
+      for(int64 z = 0; z < appendZDim; ++z)
+      {
+        for(usize y = 0; y < appendDestYDim / 2; ++y)
+        {
+          usize mirrorY = appendDestYDim - 1 - y;
+          usize rowIdx = static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + y * static_cast<usize>(appendXDim);
+          usize mirrorRowIdx = static_cast<usize>(z) * appendDestYDim * static_cast<usize>(appendXDim) + mirrorY * static_cast<usize>(appendXDim);
+          usize rowElements = static_cast<usize>(appendXDim) * numComps;
+          std::swap_ranges(destArray.begin() + (rowIdx * numComps), destArray.begin() + (rowIdx * numComps + rowElements), destArray.begin() + (mirrorRowIdx * numComps));
         }
       }
     }
@@ -967,12 +1157,49 @@ Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector
     auto appendDestZDim = newDestDims[0];
     auto sliceTupleCount = newDestDims[1] * newDestDims[2];
     auto numComps = destArray.getNumberOfComponents();
-    for(int i = 0; i < appendDestZDim / 2; ++i)
+    if constexpr(requires { destArray.getDataStoreRef(); })
     {
-      usize tupleIdx = i * sliceTupleCount;
-      usize endTupleIdx = tupleIdx + sliceTupleCount;
-      usize mirrorTupleIdx = (appendDestZDim - 1 - i) * sliceTupleCount;
-      std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+      if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
+      {
+        // OOC path: bulk I/O swap of entire Z-slices
+        using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
+        usize sliceElements = sliceTupleCount * numComps;
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized slice; std::array cannot represent this extent.
+        auto bufA = std::make_unique<ValueType[]>(sliceElements);
+        // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized slice; std::array cannot represent this extent.
+        auto bufB = std::make_unique<ValueType[]>(sliceElements);
+        auto& store = destArray.getDataStoreRef();
+        for(usize i = 0; i < appendDestZDim / 2; ++i)
+        {
+          usize offsetA = i * sliceElements;
+          usize offsetB = (appendDestZDim - 1 - i) * sliceElements;
+          store.copyIntoBuffer(offsetA, nonstd::span<ValueType>(bufA.get(), sliceElements));
+          store.copyIntoBuffer(offsetB, nonstd::span<ValueType>(bufB.get(), sliceElements));
+          store.copyFromBuffer(offsetA, nonstd::span<const ValueType>(bufB.get(), sliceElements));
+          store.copyFromBuffer(offsetB, nonstd::span<const ValueType>(bufA.get(), sliceElements));
+        }
+      }
+      else
+      {
+        // In-core path: original swap_ranges
+        for(int i = 0; i < appendDestZDim / 2; ++i)
+        {
+          usize tupleIdx = i * sliceTupleCount;
+          usize endTupleIdx = tupleIdx + sliceTupleCount;
+          usize mirrorTupleIdx = (appendDestZDim - 1 - i) * sliceTupleCount;
+          std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+        }
+      }
+    }
+    else
+    {
+      for(int i = 0; i < appendDestZDim / 2; ++i)
+      {
+        usize tupleIdx = i * sliceTupleCount;
+        usize endTupleIdx = tupleIdx + sliceTupleCount;
+        usize mirrorTupleIdx = (appendDestZDim - 1 - i) * sliceTupleCount;
+        std::swap_ranges(destArray.begin() + (tupleIdx * numComps), destArray.begin() + (endTupleIdx * numComps), destArray.begin() + (mirrorTupleIdx * numComps));
+      }
     }
   }
 
@@ -1293,6 +1520,47 @@ private:
   nonstd::span<const int64> m_NewToOldIndices;
 };
 
+namespace
+{
+/**
+ * @brief Resolves, for every destination Image Geometry coordinate along a single axis, the RectGrid
+ * bin index that coordinate falls into (nearest bin, half-open interval (gridValues[i-1], gridValues[i]]).
+ *
+ * WHY this is hoisted out of the voxel loop: the image/rect-grid geometries are axis-aligned, so the bin
+ * a coordinate maps to depends only on that one axis - the same x position resolves to the same RectGrid
+ * bin regardless of y or z. Resolving the mapping once per axis position (bounded by that axis'
+ * dimension) replaces what was previously an O(total destination cells) search (the same search re-run
+ * for every y/z combination sharing an x, and so on) with an O(dims[axis]) precomputation.
+ *
+ * @param dimSize Number of destination coordinates to resolve along this axis
+ * @param originComp Image Geometry origin component for this axis
+ * @param spacingComp Image Geometry spacing component for this axis
+ * @param halfSpacingComp Half of spacingComp, added so each coordinate samples the voxel center
+ * @param gridValues Monotonic increasing RectGrid bound values for this axis
+ * @return A vector of length dimSize mapping each axis position to its RectGrid bin index (0 if no bin matched)
+ */
+std::vector<usize> ComputeAxisBinIndices(usize dimSize, float32 originComp, float32 spacingComp, float32 halfSpacingComp, const Float32Array& gridValues)
+{
+  std::vector<usize> binIndices(dimSize, 0);
+  const usize gridValueCount = gridValues.size();
+  usize gridIdxStart = 1;
+  for(usize i = 0; i < dimSize; i++)
+  {
+    const float32 coord = originComp + (static_cast<float32>(i) * spacingComp) + halfSpacingComp;
+    for(usize gridIdx = gridIdxStart; gridIdx < gridValueCount; gridIdx++)
+    {
+      if(coord > gridValues.at(gridIdx - 1) && coord <= gridValues.at(gridIdx))
+      {
+        binIndices[i] = gridIdx - 1;
+        gridIdxStart = gridIdx;
+        break;
+      }
+    }
+  }
+  return binIndices;
+}
+} // namespace
+
 /**
  * @brief This class will copy all of the data from the RectGrid geometry input array of any IArray type to the given Image geometry destination array of the same IArray type by calculating the mapped
  * RectGrid geometry index from the Image geometry dimensions/spacing. This class DOES NOT do any bounds checking and assumes that the destination array has already been properly resized to fit all of
@@ -1325,56 +1593,129 @@ public:
   MapRectGridDataToImageData& operator=(const MapRectGridDataToImageData&) = delete;
   MapRectGridDataToImageData& operator=(MapRectGridDataToImageData&&) noexcept = delete;
 
+  /**
+   * @brief Maps every destination Image Geometry cell to its RectGrid source cell and copies the array
+   * data across, dispatching to a bulk-buffered path for DataArrays (the only array type that can be
+   * out-of-core) and a per-voxel path for NeighborList/StringArray tuples (variable-length or
+   * non-numeric, never out-of-core).
+   */
   void operator()() const
   {
-    usize imageIndex = 0;
-    usize rgZIdxStart = 1;
+    // Precompute once: see ComputeAxisBinIndices for why this only needs to run per-axis, not per-voxel.
+    const std::vector<usize> zIndices = ComputeAxisBinIndices(m_ImageGeomDims[2], m_Origin[2], m_ImageGeomSpacing[2], m_HalfSpacing[2], *m_ZGridValues);
+    const std::vector<usize> yIndices = ComputeAxisBinIndices(m_ImageGeomDims[1], m_Origin[1], m_ImageGeomSpacing[1], m_HalfSpacing[1], *m_YGridValues);
+    const std::vector<usize> xIndices = ComputeAxisBinIndices(m_ImageGeomDims[0], m_Origin[0], m_ImageGeomSpacing[0], m_HalfSpacing[0], *m_XGridValues);
+
+    if(m_ArrayType == IArray::ArrayType::DataArray)
+    {
+      mapDataArray(zIndices, yIndices, xIndices);
+    }
+    else
+    {
+      mapVariableLengthArray(zIndices, yIndices, xIndices);
+    }
+  }
+
+private:
+  /**
+   * @brief DataArray path: bulk-copies one destination Image Geometry row (fixed y, z; varying x) per
+   * store access instead of one CopyData call per voxel.
+   *
+   * WHY: destination cells sharing the same (y, z) are contiguous along x in the backing store, and the
+   * RectGrid bin a given x maps to is identical for every row (see ComputeAxisBinIndices). This lets the
+   * whole row be assembled in a small reusable buffer - gathering the mapped source values locally - and
+   * written out with a single copyFromBuffer call, instead of one heap allocation plus one chunk-cache
+   * round trip per voxel when either store is out-of-core. The source row needed for a given (y, z) is
+   * itself read once via copyIntoBuffer (and re-used across consecutive destination rows that map to the
+   * same RectGrid row, which is common when upsampling), rather than re-reading the source store per
+   * voxel. Both buffers are bounded by the axis dimensions, never by the total cell count.
+   */
+  void mapDataArray(const std::vector<usize>& zIndices, const std::vector<usize>& yIndices, const std::vector<usize>& xIndices) const
+  {
+    auto* destArray = dynamic_cast<DataArray<T>*>(m_DestCellArray);
+    const auto* srcArray = dynamic_cast<const DataArray<T>*>(m_InputCellArray);
+    auto& destStore = destArray->getDataStoreRef();
+    const auto& srcStore = srcArray->getDataStoreRef();
+
+    const usize numComponents = destArray->getNumberOfComponents();
+    const usize destRowLength = m_ImageGeomDims[0] * numComponents;
+    const usize srcRowLength = m_RectGridDims[0] * numComponents;
+
+    // Reusable row buffers allocated ONCE for the whole array - bounded by an axis dimension, not by
+    // the total number of cells in either geometry.
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
+    auto destRowBuffer = std::make_unique<T[]>(destRowLength);
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
+    auto srcRowBuffer = std::make_unique<T[]>(srcRowLength);
+
+    bool haveCachedSrcRow = false;
+    usize cachedYIndex = 0;
+    usize cachedZIndex = 0;
+
     for(usize z = 0; z < m_ImageGeomDims[2]; z++)
     {
-      float32 zCoord = m_Origin[2] + (z * m_ImageGeomSpacing[2]) + m_HalfSpacing[2];
-      usize zIndex = 0;
-      for(usize rgZIdx = rgZIdxStart; rgZIdx < m_ZGridValues->size(); rgZIdx++)
-      {
-        if(zCoord > m_ZGridValues->at(rgZIdx - 1) && zCoord <= m_ZGridValues->at(rgZIdx))
-        {
-          zIndex = rgZIdx - 1;
-          rgZIdxStart = rgZIdx;
-          break;
-        }
-      }
-
-      usize rgYIdxStart = 1;
+      const usize zIndex = zIndices[z];
       for(usize y = 0; y < m_ImageGeomDims[1]; y++)
       {
-        float32 yCoord = m_Origin[1] + (y * m_ImageGeomSpacing[1]) + m_HalfSpacing[1];
-        usize yIndex = 0;
-        for(usize rgYIdx = rgYIdxStart; rgYIdx < m_YGridValues->size(); rgYIdx++)
+        const usize yIndex = yIndices[y];
+
+        // Bulk-read the RectGrid source row for this (yIndex, zIndex) once; skip the read if the
+        // previous destination row already pulled from the same source row.
+        if(!haveCachedSrcRow || yIndex != cachedYIndex || zIndex != cachedZIndex)
         {
-          if(yCoord > m_YGridValues->at(rgYIdx - 1) && yCoord <= m_YGridValues->at(rgYIdx))
+          const usize srcRowStart = ((m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex)) * numComponents;
+          srcStore.copyIntoBuffer(srcRowStart, nonstd::span<T>(srcRowBuffer.get(), srcRowLength));
+          cachedYIndex = yIndex;
+          cachedZIndex = zIndex;
+          haveCachedSrcRow = true;
+        }
+
+        // Gather the mapped source values into the destination row buffer - local memory access
+        // against the two bounded buffers above, no store access per voxel.
+        for(usize x = 0; x < m_ImageGeomDims[0]; x++)
+        {
+          const usize xIndex = xIndices[x];
+          const int64 rectGridIndex = static_cast<int64>((m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex) + xIndex);
+          T* destTuple = destRowBuffer.get() + (x * numComponents);
+          if(rectGridIndex >= 0)
           {
-            yIndex = rgYIdx - 1;
-            rgYIdxStart = rgYIdx;
-            break;
+            const T* srcTuple = srcRowBuffer.get() + (xIndex * numComponents);
+            std::copy_n(srcTuple, numComponents, destTuple);
+          }
+          else
+          {
+            std::fill_n(destTuple, numComponents, static_cast<T>(0));
           }
         }
 
-        usize rgXIdxStart = 1;
+        // Bulk-write the fully assembled destination row in a single store access.
+        const usize destRowStart = ((z * m_ImageGeomDims[1] * m_ImageGeomDims[0]) + (y * m_ImageGeomDims[0])) * numComponents;
+        destStore.copyFromBuffer(destRowStart, nonstd::span<const T>(destRowBuffer.get(), destRowLength));
+      }
+    }
+  }
+
+  /**
+   * @brief NeighborList/StringArray path: keeps the original per-voxel CopyData call (these tuple types
+   * are variable-length or non-numeric and are never backed by an out-of-core store, so a fixed-size row
+   * buffer cannot represent them) but reuses the precomputed per-axis bin indices instead of re-deriving
+   * them for every voxel.
+   */
+  void mapVariableLengthArray(const std::vector<usize>& zIndices, const std::vector<usize>& yIndices, const std::vector<usize>& xIndices) const
+  {
+    usize imageIndex = 0;
+    for(usize z = 0; z < m_ImageGeomDims[2]; z++)
+    {
+      const usize zIndex = zIndices[z];
+      for(usize y = 0; y < m_ImageGeomDims[1]; y++)
+      {
+        const usize yIndex = yIndices[y];
         for(usize x = 0; x < m_ImageGeomDims[0]; x++)
         {
-          float32 xCoord = m_Origin[0] + (x * m_ImageGeomSpacing[0]) + m_HalfSpacing[0];
-          usize xIndex = 0;
-          for(usize rgXIdx = rgXIdxStart; rgXIdx < m_XGridValues->size(); rgXIdx++)
-          {
-            if(xCoord > m_XGridValues->at(rgXIdx - 1) && xCoord <= m_XGridValues->at(rgXIdx))
-            {
-              xIndex = rgXIdx - 1;
-              rgXIdxStart = rgXIdx;
-              break;
-            }
-          }
+          const usize xIndex = xIndices[x];
 
           // Compute the index into the RectGrid Data Array
-          const int64 rectGridIndex = (m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex) + xIndex;
+          const int64 rectGridIndex = static_cast<int64>((m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex) + xIndex);
 
           // Use the computed index to copy the data from the RectGrid to the Image Geometry
           Result<> copySucceeded;
@@ -1387,19 +1728,6 @@ public:
             if(rectGridIndex >= 0)
             {
               copySucceeded = CopyData<NeighborListT>(*dynamic_cast<const NeighborListT*>(m_InputCellArray), *destArrayPtr, imageIndex, rectGridIndex, 1);
-            }
-          }
-          else if(m_ArrayType == IArray::ArrayType::DataArray)
-          {
-            using DataArrayType = DataArray<T>;
-            auto* destArray = dynamic_cast<DataArrayType*>(m_DestCellArray);
-            if(rectGridIndex >= 0)
-            {
-              copySucceeded = CopyData<DataArrayType>(*dynamic_cast<const DataArrayType*>(m_InputCellArray), *destArray, imageIndex, rectGridIndex, 1);
-            }
-            else
-            {
-              destArray->initializeTuple(imageIndex, 0);
             }
           }
           else if(m_ArrayType == IArray::ArrayType::StringArray)
@@ -1428,7 +1756,6 @@ public:
     }
   }
 
-private:
   IArray::ArrayType m_ArrayType = IArray::ArrayType::Any;
   const IArray* m_InputCellArray = nullptr;
   IArray* m_DestCellArray = nullptr;

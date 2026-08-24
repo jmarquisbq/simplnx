@@ -8,7 +8,6 @@
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/Filter/Actions/CreateArrayAction.hpp"
 #include "simplnx/Filter/Actions/CreateAttributeMatrixAction.hpp"
-#include "simplnx/Filter/Actions/DeleteDataAction.hpp"
 #include "simplnx/Parameters/ArraySelectionParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
 #include "simplnx/Parameters/ChoicesParameter.hpp"
@@ -20,14 +19,10 @@
 
 #include "simplnx/Utilities/SIMPLConversion.hpp"
 
+#include <limits>
 #include <random>
 
 using namespace nx::core;
-
-namespace
-{
-const std::string k_MaskName = "temp_mask";
-}
 
 namespace nx::core
 {
@@ -114,9 +109,7 @@ IFilter::PreflightResult ComputeKMedoidsFilter::preflightImpl(const DataStructur
                                                               const std::atomic_bool& shouldCancel, const ExecutionContext& executionContext) const
 {
   auto pInitClustersValue = filterArgs.value<uint64>(k_InitClusters_Key);
-  auto pUseMaskValue = filterArgs.value<bool>(k_UseMask_Key);
   auto pSelectedArrayPathValue = filterArgs.value<DataPath>(k_SelectedArrayPath_Key);
-  auto pMaskArrayPathValue = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
   auto pFeatureIdsArrayNameValue = filterArgs.value<std::string>(k_FeatureIdsArrayName_Key);
   auto pFeatureAMPathValue = filterArgs.value<DataPath>(k_FeatureAMPath_Key);
   auto pMedoidsArrayNameValue = filterArgs.value<std::string>(k_MedoidsArrayName_Key);
@@ -130,22 +123,20 @@ IFilter::PreflightResult ComputeKMedoidsFilter::preflightImpl(const DataStructur
   {
     return MakePreflightErrorResult(-7584, "Array to Cluster MUST be a valid DataPath.");
   }
-
+  if(pInitClustersValue == 0 || pInitClustersValue >= static_cast<uint64>(std::numeric_limits<int32>::max()) || pInitClustersValue == std::numeric_limits<uint64>::max())
   {
-    auto createAction = std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue),
-                                                            CreateArrayAction::k_DefaultDataFormat, "0");
-    resultOutputActions.value().appendAction(std::move(createAction));
+    return MakePreflightErrorResult(-7585, "The number of initial clusters must be between 1 and INT32_MAX - 1.");
+  }
+  if(clusterArray->getNumberOfComponents() == 0 || (pInitClustersValue + 1) > std::numeric_limits<usize>::max() ||
+     static_cast<usize>(pInitClustersValue + 1) > std::numeric_limits<usize>::max() / clusterArray->getNumberOfComponents())
+  {
+    return MakePreflightErrorResult(-7586, "The medoids output dimensions overflow the supported address range.");
   }
 
-  if(!pUseMaskValue)
   {
-    DataPath tempPath = DataPath({k_MaskName});
-    {
-      auto createAction = std::make_unique<CreateArrayAction>(DataType::boolean, clusterArray->getTupleShape(), std::vector<usize>{1}, tempPath, CreateArrayAction::k_DefaultDataFormat, "true");
-      resultOutputActions.value().appendAction(std::move(createAction));
-    }
-
-    resultOutputActions.value().appendDeferredAction(std::make_unique<DeleteDataAction>(tempPath));
+    auto createAction =
+        std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue), "", "0");
+    resultOutputActions.value().appendAction(std::move(createAction));
   }
 
   auto tupDims = std::vector<usize>{pInitClustersValue + 1};
@@ -171,12 +162,6 @@ IFilter::PreflightResult ComputeKMedoidsFilter::preflightImpl(const DataStructur
 Result<> ComputeKMedoidsFilter::executeImpl(DataStructure& dataStructure, const Arguments& filterArgs, const PipelineFilter* pipelineNode, const MessageHandler& messageHandler,
                                             const std::atomic_bool& shouldCancel, const ExecutionContext& executionContext) const
 {
-  auto maskPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
-  if(!filterArgs.value<bool>(k_UseMask_Key))
-  {
-    maskPath = DataPath({k_MaskName});
-  }
-
   auto seed = filterArgs.value<std::mt19937_64::result_type>(k_SeedValue_Key);
   if(!filterArgs.value<bool>(k_UseSeed_Key))
   {
@@ -190,7 +175,8 @@ Result<> ComputeKMedoidsFilter::executeImpl(DataStructure& dataStructure, const 
 
   inputValues.InitClusters = filterArgs.value<uint64>(k_InitClusters_Key);
   inputValues.DistanceMetric = static_cast<ClusterUtilities::DistanceMetric>(filterArgs.value<ChoicesParameter::ValueType>(k_DistanceMetric_Key));
-  inputValues.MaskArrayPath = maskPath;
+  inputValues.UseMask = filterArgs.value<bool>(k_UseMask_Key);
+  inputValues.MaskArrayPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
   inputValues.MedoidsArrayPath = filterArgs.value<DataPath>(k_FeatureAMPath_Key).createChildPath(filterArgs.value<std::string>(k_MedoidsArrayName_Key));
   inputValues.Seed = seed;
 

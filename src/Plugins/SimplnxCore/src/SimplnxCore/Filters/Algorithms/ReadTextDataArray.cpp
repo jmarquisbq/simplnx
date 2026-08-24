@@ -12,8 +12,10 @@ using namespace nx::core;
 
 namespace
 {
+/** @brief Dispatches the destination numeric type to the paged CSV parser and checked DataStore writes. */
 struct CSVReadFileFunctor
 {
+  /** @brief Parses typed text values directly into the destination store through CsvParser's bounded pages. */
   template <typename T>
   Result<> operator()(IDataArray* inputIDataArray, const fs::path& inputFilePath, uint64 skipLines, char delimiter)
   {

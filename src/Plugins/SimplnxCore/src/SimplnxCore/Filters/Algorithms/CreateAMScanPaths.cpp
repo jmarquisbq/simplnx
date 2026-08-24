@@ -228,8 +228,12 @@ std::vector<LineSegment> fillPolygonWithParallelLines(const std::vector<float>& 
 }
 
 // ----------------------------------------------------------------------------
-void extractRegion(INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D::SharedEdgeList& edges, AbstractDataStore<int32>& regionIds, AbstractDataStore<int32>& sliceIds,
-                   int32_t regionIdToExtract, int32_t sliceIdToExtract, std::vector<float>& outVertices, std::vector<size_t>& outEdges)
+// Builds the sub-mesh (vertices + edges, renumbered to be contiguous from 0) for a single CAD
+// (region, slice) key. 'regionSliceEdgeIndices' is the pre-bucketed list of CAD edge indices that
+// belong to that exact key (see the bucketing pass in operator()), already in ascending edge-index
+// order, so this function no longer needs to scan every CAD edge and re-test its region/slice id.
+void extractRegion(const INodeGeometry0D::SharedVertexList& vertices, const INodeGeometry1D::SharedEdgeList& edges, nonstd::span<const usize> regionSliceEdgeIndices, std::vector<float>& outVertices,
+                   std::vector<usize>& outEdges)
 {
   outVertices.clear();
   outVertices.reserve(750);
@@ -237,58 +241,53 @@ void extractRegion(INodeGeometry0D::SharedVertexList& vertices, INodeGeometry1D:
   outEdges.reserve(500);
 
   // Mapping from old vertex index to new vertex index
-  std::unordered_map<size_t, size_t> vertexMap;
+  std::unordered_map<usize, usize> vertexMap;
   vertexMap.reserve(750);
 
-  const size_t numEdges = edges.getNumberOfTuples();
-
-  // Iterate over all edges
-  for(size_t i = 0; i < numEdges; ++i)
+  // Iterate only the edges belonging to this (region, slice) key
+  for(usize i : regionSliceEdgeIndices)
   {
-    if(regionIds[i] == regionIdToExtract && sliceIds[i] == sliceIdToExtract)
+    // This edge belongs to the target region
+    usize oldV0 = edges[2 * i];
+    usize oldV1 = edges[2 * i + 1];
+
+    // Check if we have already encountered oldV0
+    usize newV0;
+    auto itV0 = vertexMap.find(oldV0);
+    if(itV0 == vertexMap.end())
     {
-      // This edge belongs to the target region
-      size_t oldV0 = edges[2 * i];
-      size_t oldV1 = edges[2 * i + 1];
-
-      // Check if we have already encountered oldV0
-      size_t newV0;
-      auto itV0 = vertexMap.find(oldV0);
-      if(itV0 == vertexMap.end())
-      {
-        // Add new vertex
-        newV0 = outVertices.size() / 3;
-        outVertices.push_back(vertices[oldV0 * 3]);
-        outVertices.push_back(vertices[oldV0 * 3 + 1]);
-        outVertices.push_back(vertices[oldV0 * 3 + 2]);
-        vertexMap[oldV0] = newV0;
-      }
-      else
-      {
-        newV0 = itV0->second;
-      }
-
-      // Check oldV1 similarly
-      size_t newV1;
-      auto itV1 = vertexMap.find(oldV1);
-      if(itV1 == vertexMap.end())
-      {
-        newV1 = outVertices.size() / 3;
-        outVertices.push_back(vertices[oldV1 * 3]);
-        outVertices.push_back(vertices[oldV1 * 3 + 1]);
-        outVertices.push_back(vertices[oldV1 * 3 + 2]);
-
-        vertexMap[oldV1] = newV1;
-      }
-      else
-      {
-        newV1 = itV1->second;
-      }
-
-      // Now add the edge to outEdges
-      outEdges.push_back(newV0);
-      outEdges.push_back(newV1);
+      // Add new vertex
+      newV0 = outVertices.size() / 3;
+      outVertices.push_back(vertices[oldV0 * 3]);
+      outVertices.push_back(vertices[oldV0 * 3 + 1]);
+      outVertices.push_back(vertices[oldV0 * 3 + 2]);
+      vertexMap[oldV0] = newV0;
     }
+    else
+    {
+      newV0 = itV0->second;
+    }
+
+    // Check oldV1 similarly
+    usize newV1;
+    auto itV1 = vertexMap.find(oldV1);
+    if(itV1 == vertexMap.end())
+    {
+      newV1 = outVertices.size() / 3;
+      outVertices.push_back(vertices[oldV1 * 3]);
+      outVertices.push_back(vertices[oldV1 * 3 + 1]);
+      outVertices.push_back(vertices[oldV1 * 3 + 2]);
+
+      vertexMap[oldV1] = newV1;
+    }
+    else
+    {
+      newV1 = itV1->second;
+    }
+
+    // Now add the edge to outEdges
+    outEdges.push_back(newV0);
+    outEdges.push_back(newV1);
   }
 }
 
@@ -378,6 +377,19 @@ Result<> CreateAMScanPaths::operator()()
   numCADLayers += 1;
   numCADRegions += 1;
 
+  // Bucket every CAD edge index by its (region, slice) key in a single ascending pass over the CAD
+  // edge list. extractRegion() previously rescanned all numCADLayerEdges edges for every single
+  // (region, slice) combination -- O(numCADRegions * numCADLayers * numCADLayerEdges) -- which
+  // dominates runtime once the CAD mesh has more than a handful of regions/layers. Indexing the
+  // buckets by [regionId][sliceId] and appending edge indices in ascending order means each bucket
+  // already holds exactly (and only) the edges extractRegion() would have found, in the same order,
+  // so the region/slice loop below performs O(numCADLayerEdges) work in total instead of rescanning.
+  std::vector<std::vector<std::vector<usize>>> edgeBucketsByRegionThenSlice(numCADRegions, std::vector<std::vector<usize>>(numCADLayers));
+  for(usize i = 0; i < numCADLayerEdges; i++)
+  {
+    edgeBucketsByRegionThenSlice[cadRegionIds[i]][cadSliceIds[i]].push_back(i);
+  }
+
   using LineSegmentsType = std::vector<LineSegment>;
 
   // Loop on every Region
@@ -387,16 +399,17 @@ Result<> CreateAMScanPaths::operator()()
     float angle = 0; // Start at zero degree rotation
 
     std::vector<LineSegmentsType> regionHatches(numCADLayers);
+    const std::vector<std::vector<usize>>& sliceBucketsForRegion = edgeBucketsByRegionThenSlice[regionId];
 
     // Loop on every slice within that region
     for(int32 sliceId = 0; sliceId < numCADLayers; sliceId++)
     {
-      // Extract the Edges for just this region and slice
-      // This should be output to its own function
+      // Extract the Edges for just this region and slice, using the pre-computed edge bucket
+      // instead of rescanning every CAD edge.
       std::vector<float> outVertices;
-      std::vector<size_t> outEdges;
+      std::vector<usize> outEdges;
 
-      extractRegion(outlineVertices, outlineEdges, cadRegionIds, cadSliceIds, regionId, sliceId, outVertices, outEdges);
+      extractRegion(outlineVertices, outlineEdges, sliceBucketsForRegion[sliceId], outVertices, outEdges);
 
       regionHatches[sliceId] = ::fillPolygonWithParallelLines(outVertices, outEdges, m_InputValues->HatchSpacing, angle);
 

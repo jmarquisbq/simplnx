@@ -68,8 +68,32 @@ These values may be exposed as user-configurable parameters in a future release.
 - **Features with zero elements:** Features with no elements (phase <= 0 for all voxels) will have their output arrays initialized to NaN (for vMF/Watson) or identity quaternion / zero Euler angles (for Rodrigues).
 - **Phase indexing:** The filter requires that phase values be > 0 for elements to be included in the averaging. Phase index 0 is reserved for "Unknown" in the Crystal Structures array and is always skipped. This applies identically to all three methods.
 - **Invalid phases and crystal structures:** Elements whose phase value lies outside the range of the Crystal Structures array, and elements or features whose crystal structure value is not a supported Laue class (for example 999 = Unknown), are **excluded** from the averaging. The filter emits a warning (-54672 for out-of-range phases, -54671 for unknown crystal structures) reporting how many were dropped — the drop is never silent. A feature whose elements are all excluded finalizes to the identity quaternion (Rodrigues) or NaN (vMF/Watson).
-- **Multi-phase features:** The vMF/Watson methods use a single crystal structure per feature, taken from the phase of the feature's highest-index element; the Rodrigues method uses each element's own phase. Features are normally single-phase, so this distinction rarely matters.
+- **Multi-phase features:** The vMF/Watson methods use a single crystal structure per feature, taken from the highest-index element whose phase is positive and within the Crystal Structures array; the Rodrigues method uses each element's own phase. Features are normally single-phase, so this distinction rarely matters.
 - **No method enabled:** If none of the three averaging methods is enabled the filter fails in preflight with error -54673.
+
+## Algorithm
+
+This filter supports three independent averaging methods that can be enabled in any combination. Each method accumulates per-element quaternion data grouped by feature ID, then produces feature-level outputs.
+
+### In-Core Path
+
+**Rodrigues Average:** Iterates over all elements once, accumulating quaternion sums into a feature-level buffer. For each element, the voxel quaternion is rotated to the nearest symmetry-equivalent orientation of the running average to handle the periodicity of orientation space. After accumulation, each feature's summed quaternion is normalized, forced into the positive hemisphere, and converted to Euler angles.
+
+**Von Mises-Fisher / Watson Average:** A preliminary pass counts elements per feature and maps feature IDs to phases. Features are processed serially because the EbsdLib execution contract has not been established as thread-safe. For each feature, all element quaternions are collected in original tuple order, reduced to the fundamental zone, and passed to the EbsdLib `DirectionalStats` EM algorithm to estimate the mean orientation (mu) and concentration parameter (kappa).
+
+### Out-of-Core Path
+
+The filter selects the out-of-core algorithm when any enabled input or output uses out-of-core storage. This includes Feature IDs, Phases, Quaternions, Crystal Structures, and every output for each enabled averaging method.
+
+The Rodrigues average reads cell-level arrays in sequential 64K-tuple chunks via checked `copyIntoBuffer` calls, accumulating only feature-level counts and quaternion sums. Crystal structures are cached once, and the final quaternion and Euler arrays are written with checked bulk operations.
+
+The vMF/Watson path first scans Feature IDs and Phases in fixed-size chunks to determine counts and the winning phase for each feature. When the storage backend provides external sorting, the algorithm writes fixed-size records containing the feature ID, original tuple index, and quaternion, sorts them by feature and tuple index, and reads the grouped records in bounded batches. This preserves the exact input order used by the original implementation. If external sorting is unavailable, an exact bounded-buffer fallback rescans the input chunks for each feature. All numeric outputs are assembled in feature-level buffers and bulk-written.
+
+The vMF and Watson paths are only **partially bounded-memory**. The existing EbsdLib `DirectionalStats` API requires a complete `std::vector<QuatD>`, so this filter must still materialize the quaternions for one feature at a time. Peak cell-derived memory is therefore proportional to the largest feature. Removing that boundary requires the storage-neutral batch source, bounded DirectionalStats fit, and execution-control APIs tracked as EBSD-OOC-001 through EBSD-OOC-003; the filter does not duplicate those EbsdLib algorithms.
+
+### Performance
+
+Both out-of-core paths avoid per-element DataStore access. Their fixed scan buffers and feature-level accumulators prevent HDF5 chunk thrashing. The vMF/Watson external grouping path also replaces the former scalar full-cell rescan for every feature with sequential bulk reads and a disk-backed stable grouping pass. Its remaining largest-feature allocation is imposed by the unchanged EbsdLib vector API described above.
 
 % Auto generated parameter table will be inserted here
 

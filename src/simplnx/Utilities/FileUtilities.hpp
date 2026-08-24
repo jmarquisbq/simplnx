@@ -35,11 +35,15 @@
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/StringArray.hpp"
 #include "simplnx/Parameters/util/ReadCSVData.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/StringInterpretationUtilities.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <regex>
 #include <string>
+#include <type_traits>
+#include <vector>
 
 namespace nx::core::FileUtilities
 {
@@ -81,7 +85,11 @@ SIMPLNX_EXPORT std::pair<bool, int32> IsUtf8(const std::filesystem::path& filePa
 
 namespace CSV
 {
-class AbstractDataParser
+/**
+ * @brief Parses one CSV column into its destination array and exposes flush
+ * operations so buffered numeric data can be committed in bounded bulk writes.
+ */
+class SIMPLNX_EXPORT AbstractDataParser
 {
 public:
   virtual ~AbstractDataParser() = default;
@@ -97,7 +105,17 @@ public:
 
   [[nodiscard]] const IArray& array() const;
 
-  virtual Result<> parse(const std::string& token, size_t index) = 0;
+  /**
+   * @brief Parses a token for the specified destination array index. In-memory
+   * arrays are written directly; buffered stores set flushRequired when their
+   * fixed-capacity buffer becomes full.
+   */
+  virtual Result<> parse(const std::string& token, usize index, bool& flushRequired) = 0;
+
+  /**
+   * @brief Commits any parsed values that have not yet reached the destination array.
+   */
+  virtual Result<> flush() = 0;
 
 protected:
   AbstractDataParser(IArray& array, const std::string& columnName, usize columnIndex);
@@ -108,6 +126,11 @@ private:
   std::string m_ColumnName;
 };
 
+/**
+ * @brief Parses one CSV column while buffering primitive values for contiguous
+ * bulk writes. String values retain direct assignment because StringArray has
+ * required in-memory storage semantics.
+ */
 template <typename ArrayType, typename T>
 class CSVDataParser : public AbstractDataParser
 {
@@ -116,6 +139,30 @@ public:
   : AbstractDataParser(array, name, index)
   , m_Array(array)
   {
+    if constexpr(!std::is_same_v<T, std::string>)
+    {
+      auto& dataStore = m_Array.getDataStoreRef();
+      bool useBufferedPath = !ForceInCoreAlgorithm() && (ForceOocAlgorithm() || dataStore.getStoreType() != IDataStore::StoreType::InMemory);
+      if(!useBufferedPath)
+      {
+        auto* inCoreStore = dynamic_cast<DataStore<T>*>(&dataStore);
+        if(inCoreStore != nullptr)
+        {
+          m_InCoreData = inCoreStore->data();
+        }
+        else
+        {
+          useBufferedPath = true;
+        }
+      }
+
+      const bool usesOutOfCoreStore = dataStore.getStoreType() == IDataStore::StoreType::OutOfCore;
+      RecordAlgorithmPathExecution(useBufferedPath ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
+      if(useBufferedPath)
+      {
+        m_Buffer = std::make_unique<T[]>(k_BufferCapacity);
+      }
+    }
   }
   ~CSVDataParser() override = default;
 
@@ -124,7 +171,7 @@ public:
   CSVDataParser& operator=(const CSVDataParser&) = delete; // Copy Assignment Not Implemented
   CSVDataParser& operator=(CSVDataParser&&) = delete;      // Move Assignment
 
-  Result<> parse(const std::string& token, size_t index) override
+  Result<> parse(const std::string& token, usize index, bool& flushRequired) override
   {
     if constexpr(std::is_same_v<T, std::string>)
     {
@@ -138,14 +185,55 @@ public:
       {
         return ConvertResult(std::move(parseResult));
       }
-      m_Array[index] = parseResult.value();
+
+      if(m_InCoreData != nullptr)
+      {
+        m_InCoreData[index] = parseResult.value();
+        return {};
+      }
+
+      if(m_BufferSize == 0)
+      {
+        m_BufferStartIndex = index;
+      }
+      m_Buffer[m_BufferSize] = parseResult.value();
+      m_BufferSize++;
+      flushRequired |= m_BufferSize == k_BufferCapacity;
     }
 
     return {};
   }
 
+  Result<> flush() override
+  {
+    if constexpr(std::is_same_v<T, std::string>)
+    {
+      return {};
+    }
+    else
+    {
+      if(m_BufferSize == 0)
+      {
+        return {};
+      }
+
+      Result<> result = m_Array.getDataStoreRef().copyFromBuffer(m_BufferStartIndex, nonstd::span<const T>(m_Buffer.get(), m_BufferSize));
+      if(result.valid())
+      {
+        m_BufferSize = 0;
+      }
+      return result;
+    }
+  }
+
 private:
+  static constexpr usize k_BufferCapacity = 65'536;
+
   ArrayType& m_Array;
+  T* m_InCoreData = nullptr;
+  std::unique_ptr<T[]> m_Buffer;
+  usize m_BufferStartIndex = 0;
+  usize m_BufferSize = 0;
 };
 
 using Int8Parser = CSVDataParser<Int8Array, int8>;
@@ -182,6 +270,12 @@ SIMPLNX_EXPORT Result<ParsersVector> CreateParsers(const std::vector<CSVType>& c
                                                    DataStructure& dataStructure);
 
 /**
+ * @brief Flushes all non-skipped CSV parsers so final partial numeric buffers
+ * are committed and every bulk-write failure is returned to the caller.
+ */
+SIMPLNX_EXPORT Result<> FlushParsers(const ParsersVector& dataParsers);
+
+/**
  *
  * @param inStream
  * @param dataParsers
@@ -190,10 +284,11 @@ SIMPLNX_EXPORT Result<ParsersVector> CreateParsers(const std::vector<CSVType>& c
  * @param consecutiveDelimiters
  * @param lineNumber
  * @param beginIndex
+ * @param flushRequired Set when one or more bounded parser buffers become full.
  * @return
  */
 SIMPLNX_EXPORT Result<> ParseLine(std::fstream& inStream, const ParsersVector& dataParsers, const std::vector<std::string>& headers, const std::vector<char>& delimiters, bool consecutiveDelimiters,
-                                  usize lineNumber, usize beginIndex);
+                                  usize lineNumber, usize beginIndex, bool& flushRequired);
 
 /**
  *

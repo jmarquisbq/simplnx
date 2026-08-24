@@ -25,11 +25,18 @@ struct SIMPLNXCORE_EXPORT WriteAbaqusHexahedronInputValues
 };
 
 /**
- * @class
+ * @class WriteAbaqusHexahedron
+ * @brief Writes an ImageGeom as Abaqus nodes, hexahedral elements, grain
+ * element sets, sections, and a master include file.
+ *
+ * The resident ELSET path groups cells in one pass. Disk-backed FeatureIds use
+ * an external sort so all elements for a grain remain contiguous in the file
+ * without retaining cell-scale buckets in RAM.
  */
 class SIMPLNXCORE_EXPORT WriteAbaqusHexahedron
 {
 public:
+  /** @brief Binds filter-owned geometry, options, progress, and cancellation. */
   WriteAbaqusHexahedron(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WriteAbaqusHexahedronInputValues* inputValues);
   ~WriteAbaqusHexahedron() noexcept;
 
@@ -38,10 +45,13 @@ public:
   WriteAbaqusHexahedron& operator=(const WriteAbaqusHexahedron&) = delete;
   WriteAbaqusHexahedron& operator=(WriteAbaqusHexahedron&&) noexcept = delete;
 
+  /** @brief Creates all five temporary output files and atomically commits them on success. */
   Result<> operator()();
 
+  /** @brief Returns the filter-owned cancellation flag. */
   const std::atomic_bool& getCancel();
 
+  /** @brief Forwards a progress message to the filter's message handler. */
   void sendMessage(const std::string& message);
 
 private:

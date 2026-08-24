@@ -12,6 +12,10 @@ This **Filter** automatically computes a threshold value for a scalar **Attribut
 
 where \f$ a \f$ is the input array, \f$ g \f$ is the gradient magnitude array, \f$ n \f$ is the length of the input array, and \f$ T \f$ is the computed threshold value.  Computing a threshold in this manner will generally partition the input array where its gradient is highest.  Gradients may be computed using the Find Derivatives **Filter**.  The gradient magnitude may then be found by computing the 2-norm of the gradient.
 
+## Algorithm
+
+The filter makes two sequential passes through the input **Data Array**. The first reads bounded input and gradient-magnitude batches to compute the weighted threshold in legacy tuple order. The second rereads bounded input batches and writes the boolean mask. This shared implementation works with both in-memory and out-of-core stores without per-**Cell** storage access or a cell-sized working allocation.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines

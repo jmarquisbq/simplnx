@@ -8,7 +8,6 @@
 #include "simplnx/Filter/Actions/CreateArrayAction.hpp"
 #include "simplnx/Filter/Actions/CreateAttributeMatrixAction.hpp"
 #include "simplnx/Filter/Actions/CreateNeighborListAction.hpp"
-#include "simplnx/Filter/Actions/DeleteDataAction.hpp"
 #include "simplnx/Parameters/ArraySelectionParameter.hpp"
 #include "simplnx/Parameters/AttributeMatrixSelectionParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
@@ -26,7 +25,6 @@ using namespace nx::core;
 
 namespace
 {
-const DataPath k_TempMaskPath = DataPath{{"!_!__Internal__Temp_MASK_Path__Internal__!_!"}};
 struct IsIntegerType
 {
   template <typename T>
@@ -75,15 +73,6 @@ OutputActions CreateCompatibleArrays(const DataStructure& dataStructure, const A
         auto arrayPath = destinationAttributeMatrixValue.createChildPath(filterArgs.value<std::string>(ComputeArrayStatisticsFilter::k_FeatureIdsIndexingName_Key));
         auto action = std::make_unique<CreateArrayAction>(DataType::int32, tupleDims, std::vector<usize>{1}, arrayPath);
         actions.appendAction(std::move(action));
-      }
-
-      {
-        auto action = std::make_unique<CreateArrayAction>(DataType::boolean, std::vector<usize>{inputArray->getNumberOfTuples()}, std::vector<usize>{1}, k_TempMaskPath);
-        actions.appendAction(std::move(action));
-      }
-      {
-        auto action = std::make_unique<DeleteDataAction>(k_TempMaskPath);
-        actions.appendDeferredAction(std::move(action));
       }
     }
   }
@@ -438,11 +427,6 @@ IFilter::PreflightResult ComputeArrayStatisticsFilter::preflightImpl(const DataS
     return MakePreflightErrorResult(-57208, fmt::format(R"(To find the median of the data, the "Find Length" option must also be checked)"));
   }
 
-  if(pFindNumUniqueValuesValue && !pFindLengthValue)
-  {
-    return MakePreflightErrorResult(-57209, fmt::format(R"(To find the number of unique values, the "Find Length" option must also be checked)"));
-  }
-
   if(pFindModeValue && !ExecuteDataFunction(IsIntegerType{}, inputArrayPtr->getDataType()))
   {
     return MakePreflightErrorResult(-57211, "Finding the mode requires selecting an input array with an integer data type (int8, uint8, int16, uint16, int32, uint32, int64, uint64).");
@@ -495,7 +479,6 @@ Result<> ComputeArrayStatisticsFilter::executeImpl(DataStructure& dataStructure,
 
   inputValues.RangeType = filterArgs.value<ChoicesParameter::ValueType>(k_RangeType_Key);
   inputValues.Range = filterArgs.value<VectorInt32Parameter::ValueType>(k_Range_Key);
-  inputValues.TempMaskArrayPath = k_TempMaskPath;
   inputValues.FeatureIdMapArrayPath = inputValues.DestinationAttributeMatrix.createChildPath(filterArgs.value<std::string>(k_FeatureIdsIndexingName_Key));
 
   return ComputeArrayStatistics(dataStructure, messageHandler, shouldCancel, &inputValues)();

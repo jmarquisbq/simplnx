@@ -49,6 +49,8 @@ Supporting Paper: https://www.researchgate.net/publication/308703724_Flying_edge
 #include "simplnx/DataStructure/Geometry/TriangleGeom.hpp"
 #include "simplnx/simplnx_export.hpp"
 
+#include <nonstd/span.hpp>
+
 #include <algorithm>
 #include <array>
 #include <vector>
@@ -604,6 +606,14 @@ const nx::core::uint8 edgeVertices[12][2] = { {0,1}, {1,2}, {3,2},
 
 namespace nx::core
 {
+/**
+ * @brief Four-pass Flying Edges isosurface extraction over an ImageGeom scalar field.
+ *
+ * Input values are supplied through a four-slice ring buffer. That window is
+ * large enough for edge classification and gradient stencils, converting the
+ * original per-voxel store accesses into sequential slice reads while bounding
+ * resident input data independently of volume depth.
+ */
 template <typename T>
 class FlyingEdgesAlgorithm
 {
@@ -611,6 +621,10 @@ class FlyingEdgesAlgorithm
   using TCube = std::array<T, 8>;
 
 public:
+  /**
+   * @brief Binds input/output stores and allocates the fixed four-slice window.
+   * The ImageGeom, stores, and TriangleGeom remain caller-owned.
+   */
   FlyingEdgesAlgorithm(const ImageGeom& image, const AbstractDataStore<T>& dataStore, const T isoVal, TriangleGeom& triangleGeom, Float32AbstractDataStore& normals)
   : m_Image(image)
   , m_DataStore(dataStore)
@@ -621,77 +635,92 @@ public:
   , m_NZ(image.getDimensions()[2])
   , m_GridEdges(m_NY * m_NZ)
   , m_TriCounter((m_NY - 1) * (m_NZ - 1))
-  , m_EdgeCases((m_NX - 1) * m_NY * m_NZ)
-  , m_CubeCases((m_NX - 1) * (m_NY - 1) * (m_NZ - 1))
   , m_PointsStore(m_TriangleGeom.getVertices()->getDataStoreRef())
   , m_TrisStore(m_TriangleGeom.getFaces()->getDataStoreRef())
   , m_NormalsStore(normals)
   {
+    // Ring-buffer slots start empty; sliceData() lazily bulk-loads each Z-slice
+    // (see the member comment on m_SliceBuffers for why this is bounded to
+    // k_MaxResidentSlices * m_NX * m_NY elements rather than the full volume).
+    m_SliceBufferZ.fill(-1);
+    for(auto& buffer : m_SliceBuffers)
+    {
+      buffer.resize(m_NX * m_NY);
+    }
   }
 
-  ///////////////////////////////////////////////////////////////////////////////
-  // Pass 1 of the algorithm
-  ///////////////////////////////////////////////////////////////////////////////
-  void pass1()
+  /**
+   * @brief Pass 1 finds the trimmed X interval containing cut X/Y/Z edges for
+   * every grid row, reading each required Z-slice through the bounded window.
+   */
+  Result<> pass1()
   {
-    // For each (j, k):
-    //  - for each edge i along fixed (j, k) GridEdge, fill m_EdgeCases with
-    //    cut information.
-    //  - find the locations for computational trimming, xl and xr
+    // For each (j, k), find the locations for computational trimming, xl and xr.
+    // Edge cases are derived directly from the resident input slices instead of
+    // retaining one byte for every X edge in the volume.
     //  To properly find xl and xr, have to check along the x-axis,
     //  the y-axis and the z-axis!
     for(usize k = 0; k != m_NZ; ++k)
     {
-      for(usize j = 0; j != m_NY; ++j)
+      // Bulk-load the whole (m_NX * m_NY) Z-slice once per k instead of issuing
+      // one OOC element read per voxel below; every (j, i) in this slice is
+      // scanned from the local buffer, which is byte-identical to the prior
+      // per-voxel m_DataStore[...] reads (see sliceData()).
+      nonstd::span<const T> curKSlice = sliceData(k);
+      nonstd::span<const T> nextKSlice;
+      if(k + 1 < m_NZ)
       {
-        auto curEdgeCases = m_EdgeCases.begin() + (m_NX - 1) * (k * m_NY + j);
-        T curPointValue = m_DataStore[m_NX * (k * m_NY + j)];
-
-        std::array<bool, 2> isGE = {};
-        isGE[0] = (curPointValue >= m_IsoVal);
-        for(int i = 1; i != m_NX; ++i)
-        {
-          isGE[i % 2] = (m_DataStore[(m_NX * (k * m_NY + j)) + i] >= m_IsoVal);
-
-          curEdgeCases[i - 1] = calcCaseEdge(isGE[(i + 1) % 2], isGE[i % 2]);
-        }
+        nextKSlice = sliceData(k + 1);
       }
-    }
+      if(m_ReadResult.invalid())
+      {
+        return std::move(m_ReadResult);
+      }
 
-    for(usize k = 0; k != m_NZ; ++k)
-    {
       for(usize j = 0; j != m_NY; ++j)
       {
         GridEdge& curGridEdge = m_GridEdges[k * m_NY + j];
         curGridEdge.xl = m_NX;
-        for(int i = 1; i != m_NX; ++i)
+        const usize rowOffset = j * m_NX;
+        const usize nextRowOffset = (j + 1) * m_NX;
+        for(usize i = 0; i + 1 < m_NX; ++i)
         {
-          // If the edge is cut
-          if(isCutEdge(i - 1, j, k))
+          const bool originSign = curKSlice[rowOffset + i] >= m_IsoVal;
+          const bool xEdgeCut = originSign != (curKSlice[rowOffset + i + 1] >= m_IsoVal);
+          const bool yEdgeCut = j + 1 < m_NY && originSign != (curKSlice[nextRowOffset + i] >= m_IsoVal);
+          const bool zEdgeCut = k + 1 < m_NZ && originSign != (nextKSlice[rowOffset + i] >= m_IsoVal);
+          if(xEdgeCut || yEdgeCut || zEdgeCut)
           {
             if(curGridEdge.xl == m_NX)
             {
-              curGridEdge.xl = i - 1;
+              curGridEdge.xl = i;
             }
-
-            curGridEdge.xr = i;
+            curGridEdge.xr = i + 1;
           }
         }
       }
     }
+    return {};
   }
   ///////////////////////////////////////////////////////////////////////////////
 
-  ///////////////////////////////////////////////////////////////////////////////
-  // Pass 2 of the algorithm
-  ///////////////////////////////////////////////////////////////////////////////
-  void pass2()
+  /**
+   * @brief Pass 2 classifies cubes and counts their triangle and edge vertices.
+   * Counts are retained at row/grid-edge scale for the prefix pass.
+   */
+  Result<> pass2()
   {
     // For each (j, k):
     //  - for each cube (i, j, k) calculate caseId and number of GridEdge cuts
     //    in the x, y and z direction.
     for(usize k = 0; k != m_NZ - 1; ++k)
     {
+      const nonstd::span<const T> curKSlice = sliceData(k);
+      const nonstd::span<const T> nextKSlice = sliceData(k + 1);
+      if(m_ReadResult.invalid())
+      {
+        return std::move(m_ReadResult);
+      }
       for(usize j = 0; j != m_NY - 1; ++j)
       {
         // find adjusted trim values
@@ -705,17 +734,8 @@ public:
         GridEdge& ge2 = m_GridEdges[(k + 1) * m_NY + j];
         GridEdge& ge3 = m_GridEdges[(k + 1) * m_NY + j + 1];
 
-        // ec0, ec1, ec2 and ec3 were set in pass 1. They are used
-        // to calculate the cell caseId.
-        auto const& ec0 = m_EdgeCases.begin() + (m_NX - 1) * (k * m_NY + j);
-        auto const& ec1 = m_EdgeCases.begin() + (m_NX - 1) * (k * m_NY + j + 1);
-        auto const& ec2 = m_EdgeCases.begin() + (m_NX - 1) * ((k + 1) * m_NY + j);
-        auto const& ec3 = m_EdgeCases.begin() + (m_NX - 1) * ((k + 1) * m_NY + j + 1);
-
         // Count the number of triangles along this row of cubes.
         usize& curTriCounter = *(m_TriCounter.begin() + k * (m_NY - 1) + static_cast<int64>(j));
-
-        auto curCubeCaseIds = m_CubeCases.begin() + (m_NX - 1) * (k * (m_NY - 1) + j);
 
         bool isYEnd = (j == m_NY - 2);
         bool isZEnd = (k == m_NZ - 2);
@@ -724,10 +744,7 @@ public:
         {
           bool isXEnd = (i == m_NX - 2);
 
-          // using m_EdgeCases from pass 2, compute m_CubeCases for this cube
-          uint8 caseId = calcCubeCase(ec0[static_cast<int64>(i)], ec1[static_cast<int64>(i)], ec2[static_cast<int64>(i)], ec3[static_cast<int64>(i)]);
-
-          curCubeCaseIds[static_cast<int64>(i)] = caseId;
+          const uint8 caseId = calcCubeCase(curKSlice, nextKSlice, i, j);
 
           // If the cube has no triangles through it
           if(caseId == 0 || caseId == 255)
@@ -805,12 +822,11 @@ public:
         }
       }
     }
+    return {};
   }
   ///////////////////////////////////////////////////////////////////////////////
 
-  ///////////////////////////////////////////////////////////////////////////////
-  // Pass 3 of the algorithm
-  ///////////////////////////////////////////////////////////////////////////////
+  /** @brief Pass 3 prefix-sums counts into deterministic output offsets and resizes outputs. */
   void pass3()
   {
     // Accumulate triangles into triCounter
@@ -891,10 +907,11 @@ public:
   }
   ///////////////////////////////////////////////////////////////////////////////
 
-  ///////////////////////////////////////////////////////////////////////////////
-  // Pass 4 of the algorithm
-  ///////////////////////////////////////////////////////////////////////////////
-  void pass4()
+  /**
+   * @brief Pass 4 revisits active cubes, interpolates vertices/normals, and
+   * writes connectivity at the deterministic offsets established by pass 3.
+   */
+  Result<> pass4()
   {
     // For each (j, k):
     //  - For each cube at i, fill out points, normals and triangles owned by
@@ -902,6 +919,12 @@ public:
     //    in edge cases does it also fill out other edges.
     for(usize k = 0; k != m_NZ - 1; ++k)
     {
+      const nonstd::span<const T> curKSlice = sliceData(k);
+      const nonstd::span<const T> nextKSlice = sliceData(k + 1);
+      if(m_ReadResult.invalid())
+      {
+        return std::move(m_ReadResult);
+      }
       for(usize j = 0; j != m_NY - 1; ++j)
       {
         // find adjusted trim values
@@ -912,8 +935,6 @@ public:
           continue;
 
         usize triIdx = m_TriCounter[k * (m_NY - 1) + j];
-        auto curCubeCaseIds = m_CubeCases.begin() + (m_NX - 1) * (k * (m_NY - 1) + j);
-
         GridEdge const& ge0 = m_GridEdges[k * m_NY + j];
         GridEdge const& ge1 = m_GridEdges[k * m_NY + j + 1];
         GridEdge const& ge2 = m_GridEdges[(k + 1) * m_NY + j];
@@ -938,7 +959,7 @@ public:
         {
           bool isXEnd = (i == m_NX - 2);
 
-          uint8 caseId = curCubeCaseIds[static_cast<int64>(i)];
+          const uint8 caseId = calcCubeCase(curKSlice, nextKSlice, i, j);
 
           if(caseId == 0 || caseId == 255)
           {
@@ -955,6 +976,10 @@ public:
           cube pointCube = getPosCube(i, j, k);
           TCube isoValCube = getValCube(i, j, k);
           cube gradCube = getGradCube(i, j, k);
+          if(m_ReadResult.invalid())
+          {
+            return std::move(m_ReadResult);
+          }
 
           // Add Points and normals.
           // Calculate global indices for triangles
@@ -1105,6 +1130,7 @@ public:
         }
       }
     }
+    return {};
   }
   ///////////////////////////////////////////////////////////////////////////////
 
@@ -1145,12 +1171,27 @@ private:
   std::vector<GridEdge> m_GridEdges; // size of m_NY*m_NZ
   std::vector<usize> m_TriCounter;   // size of (m_NY-1)*(m_NZ-1)
 
-  std::vector<uint8> m_EdgeCases; // size (m_NX-1)*m_NY*m_NZ
-  std::vector<uint8> m_CubeCases; // size (m_NX-1)*(m_NY-1)*(m_NZ-1)
-
   AbstractDataStore<IGeometry::SharedVertexList::value_type>& m_PointsStore; //
   AbstractDataStore<IGeometry::SharedTriList::value_type>& m_TrisStore;      //
   Float32AbstractDataStore& m_NormalsStore;                                  // The output
+
+  // Bounded-memory cache of Z-slices (each m_NX*m_NY elements of T) backing every
+  // m_DataStore read in passes 1, 2, and 4, including pass4()'s gradient stencil
+  // (getData()/computeGradient()). Passes 1 and 2 need the current and next slices.
+  // Pass 4 processes cube rows in increasing k order, and for the row at k,
+  // computeGradient() touches slices in {k-1, k, k+1, k+2} (fewer at the volume
+  // boundaries) — never more than k_MaxResidentSlices at once. Slots are addressed
+  // by `z % k_MaxResidentSlices`: any k_MaxResidentSlices consecutive integers map
+  // to k_MaxResidentSlices distinct slots, so every access after the first load in
+  // a given cube row is a hit, and advancing to the next row only reloads the one
+  // slice that has newly entered the window. This turns per-voxel m_DataStore[...]
+  // element reads (each paying OOC chunk-cache dispatch overhead) into at most one
+  // bulk copyIntoBuffer() call per newly needed slice, bounded to
+  // O(k_MaxResidentSlices * m_NX * m_NY) memory rather than the full volume.
+  static constexpr usize k_MaxResidentSlices = 4;
+  mutable std::array<std::vector<T>, k_MaxResidentSlices> m_SliceBuffers;
+  mutable std::array<int64, k_MaxResidentSlices> m_SliceBufferZ; // Z index resident in each slot; -1 = not yet loaded
+  mutable Result<> m_ReadResult;
 
   /////////////////////////////////////////////////////////////
 
@@ -1158,6 +1199,7 @@ private:
   // Private helper functions
   ///////////////////////////////////////////////////////////////////////////////
 
+  /** @brief Interpolates one cut edge into the vertex and normal output stores. */
   void InterpolateIntoArrays(cube& pointCube, cube& gradCube, TCube& isoValCube, uint8 edgeNum, usize idx)
   {
     auto pointsArray = interpolateOnCube(pointCube, isoValCube, edgeNum);
@@ -1173,86 +1215,27 @@ private:
     m_NormalsStore[idx + 2] = normalsArray[2];
   }
 
-  [[nodiscard]] bool isCutEdge(usize const& i, usize const& j, usize const& k) const
+  /** @brief Builds the marching-cubes case byte from two already resident slices. */
+  [[nodiscard]] inline uint8 calcCubeCase(nonstd::span<const T> lowerSlice, nonstd::span<const T> upperSlice, usize i, usize j) const
   {
-    // Assuming m_EdgeCases are all set
-    usize edgeCaseIdx = k * (m_NX - 1) * m_NY + j * (m_NX - 1) + i;
-    if(m_EdgeCases[edgeCaseIdx] == 1 || m_EdgeCases[edgeCaseIdx] == 2)
-    {
-      return true;
-    }
-
-    if(j != m_NY - 1)
-    {
-      usize edgeCaseIdxY = k * (m_NX - 1) * m_NY + (j + 1) * (m_NX - 1) + i;
-
-      // If (edgeCaseX, edgeCaseY) is (0, 1), (1, 2), (2, 3), (0, 3)
-      //                              (1, 0), (2, 1), (3, 2), (3, 0)
-      // and not the other options of (0, 2), (1, 3),
-      //                              (2, 0), (3, 1)
-      // then the edge along the y-axis is cut.
-      // So check to see if edgeCaseX + edgeCaseY is odd.
-      if((m_EdgeCases[edgeCaseIdx] + m_EdgeCases[edgeCaseIdxY]) % 2 == 1)
-      {
-        return true;
-      }
-    }
-
-    if(k != m_NZ - 1)
-    {
-      usize edgeCaseIdxZ = (k + 1) * (m_NX - 1) * m_NY + j * (m_NX - 1) + i;
-
-      // Same as above. If it is odd, then there is a cut except this
-      // time along the z axis.
-      if((m_EdgeCases[edgeCaseIdx] + m_EdgeCases[edgeCaseIdxZ]) % 2 == 1)
-      {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  [[nodiscard]] inline uint8 calcCaseEdge(bool const& prevEdge, bool const& currEdge) const
-  {
-    // o -- is greater than or equal to
-    // case 0: (i-1) o-----o (i) | (_,j,k)
-    // case 1: (i-1) x-----o (i) | (_,j+1,k)
-    // case 2: (i-1) o-----x (i) | (_,j,k+1)
-    // case 3: (i-1) x-----x (i) | (_,j+1,k+1)
-    if(prevEdge && currEdge)
-      return 0;
-    if(!prevEdge && currEdge)
-      return 1;
-    if(prevEdge && !currEdge)
-      return 2;
-    else // !prevEdge && !currEdge
-      return 3;
-  }
-
-  [[nodiscard]] inline uint8 calcCubeCase(uint8 const& ec0, uint8 const& ec1, uint8 const& ec2, uint8 const& ec3) const
-  {
-    // ec0 | (_,j,k)
-    // ec1 | (_,j+1,k)
-    // ec2 | (_,j,k+1)
-    // ec3 | (_,j+1,k+1)
-
+    const usize lowerRow = j * m_NX;
+    const usize upperRow = (j + 1) * m_NX;
     uint8 caseId = 0;
-    if((ec0 == 0) || (ec0 == 2)) // 0 | (i,j,k)
+    if(lowerSlice[lowerRow + i] >= m_IsoVal)
       caseId |= 1;
-    if((ec0 == 0) || (ec0 == 1)) // 1 | (i+1,j,k)
+    if(lowerSlice[lowerRow + i + 1] >= m_IsoVal)
       caseId |= 2;
-    if((ec1 == 0) || (ec1 == 1)) // 2 | (i+1,j+1,k)
+    if(lowerSlice[upperRow + i + 1] >= m_IsoVal)
       caseId |= 4;
-    if((ec1 == 0) || (ec1 == 2)) // 3 | (i,j+1,k)
+    if(lowerSlice[upperRow + i] >= m_IsoVal)
       caseId |= 8;
-    if((ec2 == 0) || (ec2 == 2)) // 4 | (i,j,k+1)
+    if(upperSlice[lowerRow + i] >= m_IsoVal)
       caseId |= 16;
-    if((ec2 == 0) || (ec2 == 1)) // 5 | (i+1,j,k+1)
+    if(upperSlice[lowerRow + i + 1] >= m_IsoVal)
       caseId |= 32;
-    if((ec3 == 0) || (ec3 == 1)) // 6 | (i+1,j+1,k+1)
+    if(upperSlice[upperRow + i + 1] >= m_IsoVal)
       caseId |= 64;
-    if((ec3 == 0) || (ec3 == 2)) // 7 | (i,j+1,k+1)
+    if(upperSlice[upperRow + i] >= m_IsoVal)
       caseId |= 128;
     return caseId;
   }
@@ -1366,9 +1349,38 @@ private:
     return grad;
   }
 
+  /**
+   * @brief Returns the buffered contents of Z-slice `z` (m_NX*m_NY elements, X
+   * fastest-varying), bulk-loading it from the OOC-capable m_DataStore on first
+   * access. See the m_SliceBuffers member comment for the ring-buffer addressing
+   * scheme and why it never thrashes for the access patterns used by pass1() and
+   * computeGradient().
+   * @param z Z-slice index in [0, m_NZ)
+   * @return A read-only view of the cached slice, valid until its slot is reused
+   *         for a different z.
+   */
+  nonstd::span<const T> sliceData(usize z) const
+  {
+    const usize slot = z % k_MaxResidentSlices;
+    if(m_SliceBufferZ[slot] != static_cast<int64>(z))
+    {
+      Result<> readResult = m_DataStore.copyIntoBuffer(z * m_NX * m_NY, nonstd::span<T>(m_SliceBuffers[slot].data(), m_SliceBuffers[slot].size()));
+      if(readResult.invalid())
+      {
+        m_ReadResult = std::move(readResult);
+        std::fill(m_SliceBuffers[slot].begin(), m_SliceBuffers[slot].end(), T{});
+      }
+      else
+      {
+        m_SliceBufferZ[slot] = static_cast<int64>(z);
+      }
+    }
+    return nonstd::span<const T>(m_SliceBuffers[slot].data(), m_SliceBuffers[slot].size());
+  }
+
   inline T getData(usize i, usize j, usize k) const
   {
-    return m_DataStore[k * m_NX * m_NY + j * m_NX + i];
+    return sliceData(k)[j * m_NX + i];
   }
 
   [[nodiscard]] std::array<float32, 3> computeGradient(usize i, usize j, usize k) const
@@ -1377,62 +1389,66 @@ private:
     std::array<float32, 3> run = {};
     FloatVec3 spacing = m_Image.getSpacing();
 
-    usize dataIdx = k * m_NX * m_NY + j * m_NX + i;
+    // planeIdx addresses (i, j) within whichever Z-slice is fetched below; this is
+    // the same offset the original flat `dataIdx` used modulo m_NX*m_NY*k, just
+    // resolved per-slice through sliceData() instead of directly against m_DataStore.
+    const usize planeIdx = j * m_NX + i;
+    nonstd::span<const T> curSlice = sliceData(k);
 
     if(i == 0)
     {
-      x[0][0] = m_DataStore[dataIdx + 1];
-      x[0][1] = m_DataStore[dataIdx];
+      x[0][0] = curSlice[planeIdx + 1];
+      x[0][1] = curSlice[planeIdx];
       run[0] = spacing[0];
     }
     else if(i == (m_NX - 1))
     {
-      x[0][0] = m_DataStore[dataIdx];
-      x[0][1] = m_DataStore[dataIdx - 1];
+      x[0][0] = curSlice[planeIdx];
+      x[0][1] = curSlice[planeIdx - 1];
       run[0] = spacing[0];
     }
     else
     {
-      x[0][0] = m_DataStore[dataIdx + 1];
-      x[0][1] = m_DataStore[dataIdx - 1];
+      x[0][0] = curSlice[planeIdx + 1];
+      x[0][1] = curSlice[planeIdx - 1];
       run[0] = 2 * spacing[0];
     }
 
     if(j == 0)
     {
-      x[1][0] = m_DataStore[dataIdx + m_NX];
-      x[1][1] = m_DataStore[dataIdx];
+      x[1][0] = curSlice[planeIdx + m_NX];
+      x[1][1] = curSlice[planeIdx];
       run[1] = spacing[1];
     }
     else if(j == (m_NY - 1))
     {
-      x[1][0] = m_DataStore[dataIdx];
-      x[1][1] = m_DataStore[dataIdx - m_NX];
+      x[1][0] = curSlice[planeIdx];
+      x[1][1] = curSlice[planeIdx - m_NX];
       run[1] = spacing[1];
     }
     else
     {
-      x[1][0] = m_DataStore[dataIdx + m_NX];
-      x[1][1] = m_DataStore[dataIdx - m_NX];
+      x[1][0] = curSlice[planeIdx + m_NX];
+      x[1][1] = curSlice[planeIdx - m_NX];
       run[1] = 2 * spacing[1];
     }
 
     if(k == 0)
     {
-      x[2][0] = m_DataStore[dataIdx + m_NX * m_NY];
-      x[2][1] = m_DataStore[dataIdx];
+      x[2][0] = sliceData(k + 1)[planeIdx];
+      x[2][1] = curSlice[planeIdx];
       run[2] = spacing[2];
     }
     else if(k == (m_NZ - 1))
     {
-      x[2][0] = m_DataStore[dataIdx];
-      x[2][1] = m_DataStore[dataIdx - m_NX * m_NY];
+      x[2][0] = curSlice[planeIdx];
+      x[2][1] = sliceData(k - 1)[planeIdx];
       run[2] = spacing[2];
     }
     else
     {
-      x[2][0] = m_DataStore[dataIdx + m_NX * m_NY];
-      x[2][1] = m_DataStore[dataIdx - m_NX * m_NY];
+      x[2][0] = sliceData(k + 1)[planeIdx];
+      x[2][1] = sliceData(k - 1)[planeIdx];
       run[2] = 2 * spacing[2];
     }
 

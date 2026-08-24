@@ -23,7 +23,11 @@ struct SIMPLNXCORE_EXPORT ExtractComponentAsArrayInputValues
 };
 
 /**
- * @class
+ * @class ExtractComponentAsArray
+ * @brief Extracts one component into a scalar array and/or removes it from its source array.
+ *
+ * Uses direct contiguous access for in-core stores and bounded bulk transfers for out-of-core
+ * stores so large arrays are never accessed element-by-element through a chunked datastore.
  */
 class SIMPLNXCORE_EXPORT ExtractComponentAsArray
 {

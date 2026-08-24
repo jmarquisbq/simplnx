@@ -57,9 +57,15 @@ public:
     auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);
     imageGeom.setUnits(IGeometry::LengthUnit::Micrometer);
 
+    const auto& scanNames = m_InputValues->SelectedScanNames.scanNames;
     int index = 0;
-    for(const auto& currentScanName : m_InputValues->SelectedScanNames.scanNames)
+    for(const auto& currentScanName : scanNames)
     {
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+
       m_MessageHandler({IFilter::Message::Type::Info, fmt::format("Importing Index {}", currentScanName)});
 
       Result<> readResults = readData(currentScanName);

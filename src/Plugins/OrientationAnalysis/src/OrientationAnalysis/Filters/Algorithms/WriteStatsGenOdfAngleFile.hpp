@@ -28,9 +28,9 @@ struct ORIENTATIONANALYSIS_EXPORT WriteStatsGenOdfAngleFileInputValues
 
 /**
  * @class WriteStatsGenOdfAngleFile
- * @brief This filter will generate a synthetic microstructure with an ODF that matches (as closely as possible) an existing experimental data set or other data set that is being mimicked..
+ * @brief Dispatches ODF angle-file generation to a fast contiguous implementation
+ * or a bounded-memory bulk-I/O implementation for out-of-core inputs.
  */
-
 class ORIENTATIONANALYSIS_EXPORT WriteStatsGenOdfAngleFile
 {
 public:

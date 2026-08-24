@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -81,7 +82,10 @@ SIMPLNX_EXPORT int32_t ReadLine(std::istream& in, char* buffer, size_t length);
  * @param skipHeaderLines Number of "header lines" that should be skipped before parsing begins
  * @param delimiter The delimiter to use: Comma, Space, Tab
  * @param inputIsBool Are the values being read Booleans
- * @return Result<> with any errors or warnings that were encountered.
+ * Values are accumulated in a fixed byte-target page and committed through
+ * copyFromBuffer(). This keeps parsing storage-neutral and avoids one OOC write
+ * transaction per token.
+ * @return Result<> with any parse, stream, or destination-store failure.
  */
 template <typename T, typename K>
 Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& data, uint64_t skipHeaderLines, char delimiter, bool inputIsBool = false)
@@ -119,6 +123,25 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
   int scalarNumComp = data.getNumberOfComponents();
 
   size_t totalSize = numTuples * static_cast<size_t>(scalarNumComp);
+  constexpr size_t k_TargetBufferBytes = 1024 * 1024;
+  const size_t bufferSize = std::max<size_t>(1, std::min(totalSize, k_TargetBufferBytes / sizeof(T)));
+  auto valueBuffer = std::make_unique<T[]>(bufferSize);
+  size_t bufferedValues = 0;
+  size_t outputOffset = 0;
+
+  const auto flushBuffer = [&]() -> Result<> {
+    if(bufferedValues == 0)
+    {
+      return {};
+    }
+    Result<> result = data.copyFromBuffer(outputOffset, nonstd::span<const T>(valueBuffer.get(), bufferedValues));
+    if(result.valid())
+    {
+      outputOffset += bufferedValues;
+      bufferedValues = 0;
+    }
+    return result;
+  };
 
   if(inputIsBool)
   {
@@ -129,12 +152,13 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
       in >> value;
       if(*si64Ptr == 0)
       {
-        data[i] = false;
+        valueBuffer[bufferedValues] = false;
       }
       else
       {
-        data[i] = true;
+        valueBuffer[bufferedValues] = true;
       }
+      bufferedValues++;
       err = CheckErrorBits(&in);
       if(err == k_RBR_READ_EOF && i < totalSize - 1)
       {
@@ -143,6 +167,14 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
       if(err == k_RBR_READ_ERROR)
       {
         return MakeErrorResult(k_RBR_READ_ERROR, fmt::format("Read error while parsing file: {}", filename.string()));
+      }
+      if(bufferedValues == bufferSize)
+      {
+        Result<> result = flushBuffer();
+        if(result.invalid())
+        {
+          return result;
+        }
       }
     }
   }
@@ -152,7 +184,7 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
     for(size_t i = 0; i < totalSize; ++i)
     {
       in >> value;
-      data[i] = static_cast<T>(value);
+      valueBuffer[bufferedValues++] = static_cast<T>(value);
       err = CheckErrorBits(&in);
       if(err == k_RBR_READ_EOF && i < totalSize - 1)
       {
@@ -162,10 +194,18 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
       {
         return MakeErrorResult(k_RBR_READ_ERROR, fmt::format("Read error while parsing file: {}", filename.string()));
       }
+      if(bufferedValues == bufferSize)
+      {
+        Result<> result = flushBuffer();
+        if(result.invalid())
+        {
+          return result;
+        }
+      }
     }
   }
 
-  return {};
+  return flushBuffer();
 }
 
 /**
@@ -175,7 +215,9 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
  * @param data The Target DataArray<T>
  * @param skipHeaderLines Number of "header lines" that should be skipped before parsing begins
  * @param delimiter The delimiter to use: Comma, Space, Tab
- * @return Result<> with any errors or warnings that were encountered.
+ * Parsed values are staged in a fixed byte-target page before each bulk store
+ * write, preserving detailed string conversion errors without per-value OOC I/O.
+ * @return Result<> with any parse, stream, or destination-store failure.
  */
 template <typename T>
 Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& data, uint64_t skipHeaderLines, char delimiter)
@@ -213,6 +255,11 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
   int scalarNumComp = data.getNumberOfComponents();
 
   size_t totalSize = numTuples * static_cast<size_t>(scalarNumComp);
+  constexpr size_t k_TargetBufferBytes = 1024 * 1024;
+  const size_t bufferSize = std::max<size_t>(1, std::min(totalSize, k_TargetBufferBytes / sizeof(T)));
+  auto valueBuffer = std::make_unique<T[]>(bufferSize);
+  size_t bufferedValues = 0;
+  size_t outputOffset = 0;
 
   std::string value;
   for(size_t i = 0; i < totalSize; ++i)
@@ -223,7 +270,7 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
     {
       return ConvertResult(std::move(parseResult));
     }
-    data[i] = parseResult.value();
+    valueBuffer[bufferedValues++] = parseResult.value();
     err = CheckErrorBits(&in);
     if(err == k_RBR_READ_EOF && i < totalSize - 1)
     {
@@ -233,8 +280,22 @@ Result<> ReadFile(const std::filesystem::path& filename, AbstractDataStore<T>& d
     {
       return MakeErrorResult(k_RBR_READ_ERROR, fmt::format("Read error while parsing file: {}", filename.string()));
     }
+    if(bufferedValues == bufferSize)
+    {
+      Result<> result = data.copyFromBuffer(outputOffset, nonstd::span<const T>(valueBuffer.get(), bufferedValues));
+      if(result.invalid())
+      {
+        return result;
+      }
+      outputOffset += bufferedValues;
+      bufferedValues = 0;
+    }
   }
 
-  return {};
+  if(bufferedValues == 0)
+  {
+    return {};
+  }
+  return data.copyFromBuffer(outputOffset, nonstd::span<const T>(valueBuffer.get(), bufferedValues));
 }
 } // namespace nx::core::CsvParser

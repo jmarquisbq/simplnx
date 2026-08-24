@@ -5,6 +5,8 @@
 
 #include "simplnx/simplnx_export.hpp"
 
+#include <string>
+
 namespace nx::core
 {
 /**
@@ -21,8 +23,12 @@ public:
    * @param type The data type of the NeighborList
    * @param tupleShape The tuple shape of the NeighborList
    * @param path The path where the NeighborList will be created
+   * @param dataFormat The data store format override. Empty string means "Automatic"
+   *                   (let the format resolver decide). A non-empty value skips the
+   *                   resolver and requests the specified format directly, subject to
+   *                   the unstructured-geometry in-core gate.
    */
-  CreateNeighborListAction(DataType type, const ShapeType& tupleShape, const DataPath& path);
+  CreateNeighborListAction(DataType type, const ShapeType& tupleShape, const DataPath& path, std::string dataFormat = "");
 
   ~CreateNeighborListAction() noexcept override;
 
@@ -70,8 +76,21 @@ public:
    */
   std::vector<DataPath> getAllCreatedPaths() const override;
 
+  /**
+   * @brief Returns the data store format override for this action.
+   *
+   * Empty string means "Automatic" -- the format resolver decides. A non-empty
+   * value skips the resolver and requests the specified format directly (subject
+   * to the unstructured-geometry in-core gate), allowing individual filters to
+   * override the global format policy.
+   *
+   * @return The data format string
+   */
+  std::string dataFormat() const;
+
 private:
   DataType m_Type;
   ShapeType m_TupleShape;
+  std::string m_DataFormat = "";
 };
 } // namespace nx::core

@@ -1,20 +1,35 @@
 #pragma once
 
+#include "simplnx/Common/Result.hpp"
 #include "simplnx/DataStructure/DataObject.hpp"
+#include "simplnx/DataStructure/DataPath.hpp"
 #include "simplnx/DataStructure/IDataStore.hpp"
 #include "simplnx/DataStructure/IListStore.hpp"
 #include "simplnx/DataStructure/IO/Generic/IDataFactory.hpp"
+#include "simplnx/DataStructure/IO/Generic/IExternalSort.hpp"
+#include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
 #include "simplnx/simplnx_export.hpp"
 
 #include "simplnx/Common/Types.hpp"
 
+#include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+namespace nx::core::HDF5
+{
+class DataStructureWriter;
+class FileIO;
+class GroupIO;
+} // namespace nx::core::HDF5
+
 namespace nx::core
 {
+class AbstractStringStore;
+class DataStructure;
 class IDataFactory;
 
 /**
@@ -27,10 +42,35 @@ public:
   using factory_id_type = std::string;
   using factory_ptr = std::shared_ptr<IDataFactory>;
   using factory_collection = std::map<factory_id_type, factory_ptr>;
+  /**
+   * @brief Factory callback for creating a new in-memory DataStore.
+   *
+   * Takes the numeric type, tuple shape, component shape, and an optional chunk
+   * shape hint. Returns a newly allocated IDataStore. Registered by IO managers
+   * that provide writable storage (e.g., CoreDataIOManager for in-memory, or an
+   * OOC manager for chunk-backed stores).
+   */
   using DataStoreCreateFnc = std::function<std::unique_ptr<IDataStore>(DataType, const ShapeType&, const ShapeType&, const std::optional<ShapeType>&)>;
+
+  /**
+   * @brief Factory callback for creating a new in-memory NeighborList store.
+   *
+   * Takes the numeric type and tuple shape. Returns a newly allocated IListStore.
+   * Used by IO managers that can provide writable list-based storage.
+   */
   using ListStoreCreateFnc = std::function<std::unique_ptr<IListStore>(DataType, const ShapeType&)>;
-  using DataStoreCreationMap = std::map<std::string, DataStoreCreateFnc>;
-  using ListStoreCreationMap = std::map<std::string, ListStoreCreateFnc>;
+
+  /**
+   * @brief Factory callback for creating a new StringStore (e.g., for StringArray).
+   *
+   * Takes the tuple shape and returns a newly allocated AbstractStringStore.
+   * Registered by IO managers that support string storage (in-memory or OOC).
+   */
+  using StringStoreCreateFnc = std::function<std::unique_ptr<AbstractStringStore>(const ShapeType& tupleShape)>;
+
+  using DataStoreCreationMap = std::map<std::string, DataStoreCreateFnc>;     ///< Maps format name -> writable DataStore factory
+  using ListStoreCreationMap = std::map<std::string, ListStoreCreateFnc>;     ///< Maps format name -> writable ListStore factory
+  using StringStoreCreationMap = std::map<std::string, StringStoreCreateFnc>; ///< Maps format name -> StringStore factory
 
   virtual ~IDataIOManager() noexcept;
 
@@ -110,6 +150,106 @@ public:
    */
   ListStoreCreateFnc listStoreCreationFnc(const std::string& type) const;
 
+  /**
+   * @brief Checks whether this IO manager has registered a factory for creating
+   * StringStores (stores backing StringArray objects).
+   *
+   * @param type The format name to look up
+   * @return true if a StringStoreCreateFnc is registered for @p type
+   */
+  bool hasStringStoreCreationFnc(const std::string& type) const;
+
+  /**
+   * @brief Returns the factory callback for creating a StringStore. The
+   * resulting store backs a StringArray and may be in-memory or out-of-core
+   * depending on the IO manager that registered it.
+   *
+   * @param type The format name to look up
+   * @return The registered StringStoreCreateFnc, or nullptr if none is registered
+   */
+  StringStoreCreateFnc stringStoreCreationFnc(const std::string& type) const;
+
+  /**
+   * @brief Returns true if this manager finalizes .dream3d imports (provides a real onImportFinalize).
+   * The base returns false. The importer uses DataIOCollection::anyManagerFinalizesImport() to decide
+   * whether to defer data loading to a finalizer (OOC) or eager-load everything in-core.
+   */
+  virtual bool finalizesImport() const
+  {
+    return false;
+  }
+
+  /**
+   * @brief Finalizes placeholder stores after a .dream3d import. An overriding manager replaces the
+   * placeholders it is responsible for (e.g. OOC read-only reference stores, recovery reattachment) and
+   * LEAVES every other placeholder as an Empty store for the importer to eager-load in-core afterward.
+   * Default no-op (returns success); only an OOC-capable manager overrides it.
+   * @param dataStructure The DataStructure containing placeholder stores
+   * @param paths Top-level imported paths (descendants are walked by the implementation)
+   * @param fileReader Open HDF5 reader for the source .dream3d file
+   */
+  virtual Result<> onImportFinalize(DataStructure& /*dataStructure*/, const std::vector<DataPath>& /*paths*/, const HDF5::FileIO& /*fileReader*/)
+  {
+    return {};
+  }
+
+  /**
+   * @brief Intercepts a DataObject write to emit a recovery placeholder instead of full data. Returns
+   * std::nullopt to fall through to the normal write path. Default no-op (std::nullopt).
+   */
+  virtual std::optional<Result<>> onRecoveryWrite(HDF5::DataStructureWriter& /*writer*/, const DataObject* /*dataObject*/, HDF5::GroupIO& /*parentGroup*/)
+  {
+    return std::nullopt;
+  }
+
+  /**
+   * @brief Transitions this manager's stores from write to read-only after pipeline execution. Default no-op.
+   */
+  virtual void onFinalizeStores(DataStructure& /*dataStructure*/)
+  {
+  }
+
+  /**
+   * @brief Sets the base directory for this manager's session working files. Default no-op.
+   */
+  virtual void setBaseDirectory(const std::filesystem::path& /*path*/)
+  {
+  }
+
+  /**
+   * @brief Flushes/clears this manager's caches before shutdown so dirty data is written before temp
+   * cleanup. Default no-op.
+   */
+  virtual void shutdownManager()
+  {
+  }
+
+  /**
+   * @brief Returns whether this manager provides a bounded external-sort implementation.
+   */
+  virtual bool supportsExternalSort() const
+  {
+    return false;
+  }
+
+  /**
+   * @brief Creates a bounded external-sort stream. Managers that do not advertise the capability return an error.
+   */
+  virtual Result<std::unique_ptr<IExternalSort>> createExternalSort(const ExternalSortConfig& /*config*/) const
+  {
+    return MakeErrorResult<std::unique_ptr<IExternalSort>>(-6012, "This I/O manager does not provide external sorting");
+  }
+
+  virtual bool supportsTemporaryRecordStore() const
+  {
+    return false;
+  }
+
+  virtual Result<std::unique_ptr<ITemporaryRecordStore>> createTemporaryRecordStore(const TemporaryRecordStoreConfig& /*config*/) const
+  {
+    return MakeErrorResult<std::unique_ptr<ITemporaryRecordStore>>(-6014, "This I/O manager does not provide temporary record storage");
+  }
+
 protected:
   /**
    * @brief Default constructor.
@@ -130,9 +270,24 @@ protected:
    */
   void addListStoreCreationFnc(const std::string& type, ListStoreCreateFnc creationFnc);
 
+  /**
+   * @brief Registers a factory callback that creates StringStores for the given
+   * format name.
+   *
+   * Derived IO managers call this during construction to advertise their
+   * ability to create StringStores (in-memory or OOC). DataIOCollection::createStringStore()
+   * dispatches to the callback registered here.
+   *
+   * @param type The format name to register under
+   * @param creationFnc The factory callback. Replaces any previously registered
+   *                     callback for the same @p type.
+   */
+  void addStringStoreCreationFnc(const std::string& type, StringStoreCreateFnc creationFnc);
+
 private:
   factory_collection m_FactoryCollection;
   DataStoreCreationMap m_DataStoreCreationMap;
   ListStoreCreationMap m_ListStoreCreationMap;
+  StringStoreCreationMap m_StringStoreCreationMap; ///< StringStore factories keyed by format name
 };
 } // namespace nx::core

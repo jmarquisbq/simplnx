@@ -308,18 +308,18 @@ std::string SIMPLNX_EXPORT GetNameFromFilterType(H5Z_filter_t id);
  * macro; any other code needing the HDF5 lock aliases it rather than defining a
  * second one (two locks guarding one non-thread-safe library would still race).
  *
- * SCOPE — the lock currently guards only the four macro-guarded helpers listed
- * below. The many other direct H5* calls scattered through FileIO, DatasetIO,
- * and Dream3dIO are NOT serialized by it, so this does not by itself make all
- * HDF5 access thread-safe; it makes these four helpers safe and gives the rest a
- * single lock to adopt as they are hardened.
+ * SCOPE — the lock guards the four macro-guarded helpers listed below and the
+ * direct HDF5 call sites that have explicitly adopted ApiLock(). Other direct
+ * H5* calls are not implicitly serialized, so each hardened leaf call must use
+ * this same process-wide mutex rather than introducing another lock.
  *
  * CONTRACT — this is a NON-recursive std::mutex. Lock it ONLY around leaf HDF5
- * C-API calls, and NEVER while calling a function that may re-acquire it — in
- * particular the macro-guarded helpers (IsGroup, GetObjectPath, GetDatasetType,
- * StringForHDFType), which lock it themselves. Re-entering on the same thread
- * would self-deadlock. Never hold it around heavy CPU work (e.g. (de)compression)
- * either — that must run off the lock.
+ * C-API calls, and NEVER while calling a function that may re-acquire it. The
+ * macro-guarded helpers (IsGroup, GetObjectPath, GetDatasetType,
+ * StringForHDFType) and probeSingleDeflateEligibility() lock it themselves.
+ * Re-entering on the same thread would self-deadlock. Never hold it around
+ * heavy CPU work such as compression or decompression; that work stays off the
+ * lock.
  */
 SIMPLNX_EXPORT std::mutex& ApiLock();
 

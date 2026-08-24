@@ -19,7 +19,9 @@ struct SIMPLNXCORE_EXPORT ComputeLargestCrossSectionsInputValues
 };
 
 /**
- * @class
+ * @class ComputeLargestCrossSections
+ * @brief Computes each feature's largest cross-section perpendicular to a
+ * selected image axis by dispatching to storage-appropriate implementations.
  */
 class SIMPLNXCORE_EXPORT ComputeLargestCrossSections
 {
@@ -32,6 +34,10 @@ public:
   ComputeLargestCrossSections& operator=(const ComputeLargestCrossSections&) = delete;
   ComputeLargestCrossSections& operator=(ComputeLargestCrossSections&&) noexcept = delete;
 
+  /**
+   * @brief Uses direct contiguous access for in-memory arrays and bounded plane
+   * bulk reads for out-of-core arrays.
+   */
   Result<> operator()();
 
   const std::atomic_bool& getCancel();

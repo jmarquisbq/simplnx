@@ -21,8 +21,25 @@ struct SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArrayInputValues
 
 /**
  * @class CopyFeatureArrayToElementArray
- * @brief Copies each selected Feature-level array down to the Element (cell) level: for every
- * Element i, the created array's tuple is the source array's tuple at index FeatureIds[i].
+ * @brief Dispatcher that selects between the in-core (Direct) and out-of-core (Scanline)
+ * algorithms for broadcasting feature data down to element (cell) data.
+ *
+ * This class contains no algorithm logic itself. Its operator()() inspects the storage backing
+ * of the FeatureIds array and calls
+ * `DispatchAlgorithm<CopyFeatureArrayToElementArrayDirect, CopyFeatureArrayToElementArrayScanline>(...)`.
+ *
+ * **Algorithm overview**: For each selected feature-level array, create a cell-level array where
+ * every cell receives the value of the feature it belongs to
+ * (created[cell] = selectedFeature[featureIds[cell]]).
+ *
+ * **Dispatch rules** (see AlgorithmDispatch.hpp):
+ * - If the FeatureIds array is backed by in-memory DataStore, the Direct (parallel) variant is used.
+ * - If it uses out-of-core (chunked) storage, the Scanline variant is used to avoid unsafe parallel
+ *   chunk-cache access and per-element chunk lookups.
+ * - Global test-override flags (ForceOocAlgorithm, ForceInCoreAlgorithm) can override the automatic
+ *   detection for unit testing.
+ *
+ * @see CopyFeatureArrayToElementArrayDirect, CopyFeatureArrayToElementArrayScanline, DispatchAlgorithm
  */
 class SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArray
 {

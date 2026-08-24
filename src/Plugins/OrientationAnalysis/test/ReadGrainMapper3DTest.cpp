@@ -1,15 +1,21 @@
 #include <catch2/catch.hpp>
 
+#include "simplnx/Common/ScopeGuard.hpp"
 #include "simplnx/DataStructure/StringArray.hpp"
 #include "simplnx/Parameters/ArrayCreationParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
 #include "simplnx/Parameters/FileSystemPathParameter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
+#include "simplnx/Utilities/Parsing/HDF5/H5DataStore.hpp"
+#include "simplnx/Utilities/Parsing/HDF5/IO/FileIO.hpp"
 
 #include "OrientationAnalysis/Filters/ReadGrainMapper3DFilter.hpp"
 #include "OrientationAnalysis/OrientationAnalysis_test_dirs.hpp"
 
 #include <filesystem>
+#include <numeric>
+#include <vector>
 namespace fs = std::filesystem;
 
 using namespace nx::core;
@@ -19,6 +25,32 @@ namespace
 {
 const std::string k_LabDCTGeometryName("LabDCT");
 const std::string k_AbsorptionCTGeometryName("AbsorptionCT");
+
+template <typename T>
+DataArray<T>& CreateH5ImportArray(DataStructure& dataStructure, const std::string& name, const ShapeType& tupleShape, const ShapeType& componentShape)
+{
+  const DataPath path({name});
+  auto store = DataStoreUtilities::CreateDataStore<T>(dataStructure, path, tupleShape, componentShape, IDataAction::Mode::Execute);
+  auto* array = DataArray<T>::Create(dataStructure, name, store);
+  REQUIRE(array != nullptr);
+  return *array;
+}
+
+template <typename T>
+void WriteH5Dataset(nx::core::HDF5::GroupIO& group, const std::string& name, const std::vector<usize>& dimensions, const std::vector<T>& values)
+{
+  auto dataset = group.createDataset(name);
+  REQUIRE(dataset.isValid());
+  SIMPLNX_RESULT_REQUIRE_VALID(dataset.writeSpan<T>(dimensions, nonstd::span<const T>(values.data(), values.size())));
+}
+
+template <typename T>
+std::vector<T> ReadAllValues(const DataArray<T>& array)
+{
+  std::vector<T> values(array.getSize());
+  SIMPLNX_RESULT_REQUIRE_VALID(array.getDataStoreRef().copyIntoBuffer(0, nonstd::span<T>(values.data(), values.size())));
+  return values;
+}
 
 } // namespace
 

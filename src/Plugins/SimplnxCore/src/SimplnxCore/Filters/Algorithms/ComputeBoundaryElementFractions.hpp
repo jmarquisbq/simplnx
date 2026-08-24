@@ -22,7 +22,11 @@ struct SIMPLNXCORE_EXPORT ComputeBoundaryElementFractionsInputValues
 
 /**
  * @class ComputeBoundaryElementFractions
- * @brief This algorithm implements support code for the ComputeBoundaryElementFractionsFilter
+ * @brief Computes each feature's fraction of cells that are boundary cells.
+ *
+ * Cell arrays are streamed through bounded bulk-I/O buffers so out-of-core
+ * stores avoid per-cell chunk-cache access while feature-level counts remain
+ * in memory.
  */
 
 class SIMPLNXCORE_EXPORT ComputeBoundaryElementFractions

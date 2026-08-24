@@ -18,6 +18,15 @@ public:
   virtual ~IListStore() = default;
 
   /**
+   * @brief Returns whether this list store keeps its data out of core.
+   * @return true when the list data is backed by out-of-core storage.
+   */
+  virtual bool isOutOfCore() const noexcept
+  {
+    return false;
+  }
+
+  /**
    * @brief Returns the number of tuples in the DataStore.
    * @return usize
    */

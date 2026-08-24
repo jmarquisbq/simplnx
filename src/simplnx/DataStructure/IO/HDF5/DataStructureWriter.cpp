@@ -2,6 +2,7 @@
 
 #include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/INeighborList.hpp"
+#include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
 #include "simplnx/DataStructure/IO/HDF5/DataIOManager.hpp"
 #include "simplnx/DataStructure/IO/HDF5/IDataIO.hpp"
 
@@ -147,21 +148,33 @@ Result<> DataStructureWriter::writeDataObject(const DataObject* dataObject, nx::
     // Create an HDF5 link
     return writeDataObjectLink(dataObject, parentGroup);
   }
-  else
-  {
-    // Write new data
-    auto factory = m_IOManager->getFactoryAs<IDataIO>(dataObject->getTypeName());
-    if(factory == nullptr)
-    {
-      std::string ss = fmt::format("Could not find IO factory for datatype: {}", dataObject->getTypeName());
-      return MakeErrorResult(-5, ss);
-    }
 
-    auto result = factory->writeDataObject(*this, dataObject, parentGroup);
-    if(result.invalid())
-    {
-      return result;
-    }
+  // -----------------------------------------------------------------------
+  // Recovery-write override
+  // -----------------------------------------------------------------------
+  // Offer each registered IO manager a chance to override how this object is serialized.
+  // During a recovery WriteFile the out-of-core manager intercepts its disk-backed arrays and
+  // writes a zero-byte placeholder dataset annotated with backing-file metadata (so the recovery
+  // file stays small while preserving enough to reattach on reload). A value means the manager
+  // handled the write; std::nullopt means fall through to the normal write path below. With no
+  // out-of-core manager registered, the fan-out always returns std::nullopt.
+  if(auto overrideResult = Application::GetOrCreateInstance()->getIOCollection().onRecoveryWrite(*this, dataObject, parentGroup); overrideResult.has_value())
+  {
+    return overrideResult.value();
+  }
+
+  // Normal write path
+  auto factory = m_IOManager->getFactoryAs<IDataIO>(dataObject->getTypeName());
+  if(factory == nullptr)
+  {
+    std::string ss = fmt::format("Could not find IO factory for datatype: {}", dataObject->getTypeName());
+    return MakeErrorResult(-5, ss);
+  }
+
+  auto result = factory->writeDataObject(*this, dataObject, parentGroup);
+  if(result.invalid())
+  {
+    return result;
   }
 
   return {};

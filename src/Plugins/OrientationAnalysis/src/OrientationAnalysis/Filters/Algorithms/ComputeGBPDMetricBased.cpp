@@ -71,21 +71,21 @@ public:
 #else
                     std::vector<TriAreaAndNormals>& selectedTriangles,
 #endif
-                    int32_t phaseOfInterest, const UInt32Array& crystalStructures, const Float32Array& euler, const Int32Array& phases, const Int32Array& faceLabels, const Float64Array& faceNormals,
+                    int32 phaseOfInterest, uint32 crystalStruct, const float32* eulerCache, const int32* phasesCache, const Int32Array& faceLabels, const Float64Array& faceNormals,
                     const Float64Array& faceAreas)
   : m_ExcludeTripleLines(excludeTripleLines)
   , m_Triangles(triangles)
   , m_NodeTypes(nodeTypes)
   , m_SelectedTriangles(selectedTriangles)
   , m_PhaseOfInterest(phaseOfInterest)
-  , m_EulerAngles(euler)
-  , m_Phases(phases)
+  , m_EulerCache(eulerCache)
+  , m_PhasesCache(phasesCache)
   , m_FaceLabels(faceLabels)
   , m_FaceNormals(faceNormals)
   , m_FaceAreas(faceAreas)
   {
     m_OrientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
-    m_Crystal = crystalStructures[phaseOfInterest];
+    m_Crystal = crystalStruct;
     m_NSym = m_OrientationOps[m_Crystal]->getNumSymOps();
   }
 
@@ -106,11 +106,11 @@ public:
       {
         continue;
       }
-      if(m_Phases[feature1] != m_Phases[feature2])
+      if(m_PhasesCache[feature1] != m_PhasesCache[feature2])
       {
         continue;
       }
-      if(m_Phases[feature1] != m_PhaseOfInterest || m_Phases[feature2] != m_PhaseOfInterest)
+      if(m_PhasesCache[feature1] != m_PhaseOfInterest || m_PhasesCache[feature2] != m_PhaseOfInterest)
       {
         continue;
       }
@@ -129,8 +129,8 @@ public:
 
       for(int32 whichEa = 0; whichEa < 3; whichEa++)
       {
-        g1ea[whichEa] = m_EulerAngles[3 * feature1 + whichEa];
-        g2ea[whichEa] = m_EulerAngles[3 * feature2 + whichEa];
+        g1ea[whichEa] = m_EulerCache[3 * feature1 + whichEa];
+        g2ea[whichEa] = m_EulerCache[3 * feature2 + whichEa];
       }
 
       auto oMatrix1 = ebsdlib::EulerDType(g1ea[0], g1ea[1], g1ea[2]).toOrientationMatrix();
@@ -162,8 +162,8 @@ private:
   LaueOpsContainerType m_OrientationOps;
   uint32 m_Crystal;
   int32 m_NSym;
-  const Float32Array& m_EulerAngles;
-  const Int32Array& m_Phases;
+  const float32* m_EulerCache;
+  const int32* m_PhasesCache;
   const Int32Array& m_FaceLabels;
   const Float64Array& m_FaceNormals;
   const Float64Array& m_FaceAreas;
@@ -315,12 +315,31 @@ Result<> ComputeGBPDMetricBased::operator()()
   auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
   const IGeometry::SharedFaceList& triangles = triangleGeom.getFacesRef();
 
+  // Bulk-read the feature-level (Euler angles, phases) and ensemble-level (crystal
+  // structures) arrays into local vectors. The parallel TrianglesSelector and the
+  // distinct-boundary loop below index these randomly by feature ID; when these arrays
+  // are out-of-core, leaving them in their DataStores turns every triangle into a
+  // per-element disk/cache lookup (the cause of a measured ~2x slowdown vs in-core).
+  // These are feature/ensemble-sized (orders of magnitude smaller than the mesh), so
+  // caching them is bounded, not an O(mesh) allocation.
+  const usize numEulerElements = eulerAngles.getSize();
+  std::vector<float32> eulerCache(numEulerElements);
+  eulerAngles.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(eulerCache.data(), numEulerElements));
+
+  const usize numPhaseElements = phases.getSize();
+  std::vector<int32> phasesCache(numPhaseElements);
+  phases.getDataStoreRef().copyIntoBuffer(0, nonstd::span<int32>(phasesCache.data(), numPhaseElements));
+
+  const usize numCrystalStructures = crystalStructures.getSize();
+  std::vector<uint32> crystalStructuresCache(numCrystalStructures);
+  crystalStructures.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresCache.data(), numCrystalStructures));
+
   const float64 limitDist = m_InputValues->LimitDist * Constants::k_PiOver180D;
 
-  if(crystalStructures[m_InputValues->PhaseOfInterest] > 10)
+  if(crystalStructuresCache[m_InputValues->PhaseOfInterest] > 10)
   {
     return MakeErrorResult(
-        -8325, fmt::format("Unsupported CrystalStructure value {} for phase index {}.", static_cast<uint32>(crystalStructures[m_InputValues->PhaseOfInterest]), m_InputValues->PhaseOfInterest));
+        -8325, fmt::format("Unsupported CrystalStructure value {} for phase index {}.", static_cast<uint32>(crystalStructuresCache[m_InputValues->PhaseOfInterest]), m_InputValues->PhaseOfInterest));
   }
 
   // -------------------- check if directories are ok and if output files can be opened -----------
@@ -368,7 +387,7 @@ Result<> ComputeGBPDMetricBased::operator()()
 
   // ------------------- before computing the distribution, we must find normalization factors -----
   std::vector<ebsdlib::LaueOps::Pointer> mOrientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
-  auto crystal = static_cast<int32>(crystalStructures[m_InputValues->PhaseOfInterest]);
+  auto crystal = static_cast<int32>(crystalStructuresCache[m_InputValues->PhaseOfInterest]);
   const int32 nSym = mOrientationOps[crystal]->getNumSymOps();
   auto ballVolume = static_cast<float64>(nSym) * 2.0 * (1.0 - std::cos(limitDist));
 
@@ -591,8 +610,8 @@ Result<> ComputeGBPDMetricBased::operator()()
 
     ParallelDataAlgorithm dataAlg;
     dataAlg.setRange(i, i + triChunkSize);
-    dataAlg.execute(gbpd_metric_based::TrianglesSelector(m_InputValues->ExcludeTripleLines, triangles, nodeTypes, selectedTriangles, m_InputValues->PhaseOfInterest, crystalStructures, eulerAngles,
-                                                         phases, faceLabels, faceNormals, faceAreas));
+    dataAlg.execute(gbpd_metric_based::TrianglesSelector(m_InputValues->ExcludeTripleLines, triangles, nodeTypes, selectedTriangles, m_InputValues->PhaseOfInterest,
+                                                         crystalStructuresCache[m_InputValues->PhaseOfInterest], eulerCache.data(), phasesCache.data(), faceLabels, faceNormals, faceAreas));
   }
 
   // ------------------------  find the number of distinct boundaries ------------------------------
@@ -613,11 +632,11 @@ Result<> ComputeGBPDMetricBased::operator()()
     {
       continue;
     }
-    if(phases[feature1] != phases[feature2])
+    if(phasesCache[feature1] != phasesCache[feature2])
     {
       continue;
     }
-    if(phases[feature1] != m_InputValues->PhaseOfInterest || phases[feature2] != m_InputValues->PhaseOfInterest)
+    if(phasesCache[feature1] != m_InputValues->PhaseOfInterest || phasesCache[feature2] != m_InputValues->PhaseOfInterest)
     {
       continue;
     }

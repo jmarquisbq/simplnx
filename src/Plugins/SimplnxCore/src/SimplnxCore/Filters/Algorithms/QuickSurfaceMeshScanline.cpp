@@ -1,0 +1,1794 @@
+/**
+ * @file QuickSurfaceMeshScanline.cpp
+ * @brief Out-of-core (OOC) optimized implementation of the QuickSurfaceMesh algorithm.
+ *
+ * This file implements the scanline variant of QuickSurfaceMesh that avoids
+ * per-element random access to chunked DataStores. Instead of using operator[]
+ * on the FeatureIds array (which triggers chunk load/evict cycles on OOC stores),
+ * this algorithm reads exactly two Z-slices at a time via copyIntoBuffer() and
+ * processes them entirely in local buffers.
+ *
+ * ## Key Differences from QuickSurfaceMeshDirect
+ *
+ * 1. **FeatureIds access**: Direct uses operator[], Scanline uses copyIntoBuffer()
+ *    to bulk-read one Z-slice (xP * yP elements) at a time.
+ *
+ * 2. **Node ID mapping**: Direct allocates an O(volume) nodeIds array of size
+ *    (xP+1)*(yP+1)*(zP+1). Scanline uses two rolling node-plane buffers of
+ *    size O((xP+1)*(yP+1)) each, swapped after each Z-slice. This reduces
+ *    memory from O(volume) to O(slice).
+ *
+ * 3. **Output writes**: Direct writes vertices, triangles, and face labels
+ *    per-element via operator[]. Scanline keeps node state in bounded pages
+ *    over temporary records, while triangle connectivity and face labels are
+ *    buffered per slice and flushed via copyFromBuffer().
+ *
+ * 4. **Problem voxel correction**: Direct reads/writes the DataStore directly.
+ *    Scanline loads Z-slice pairs, mutates the local buffers, and only writes
+ *    back slices that were actually modified (dirty flag optimization).
+ *
+ * 5. **TupleTransfer**: Direct calls quickSurfaceTransfer() per-triangle.
+ *    Scanline uses quickSurfaceTransferBatch() to process all triangles from
+ *    a Z-slice in one call, reducing virtual function call overhead.
+ *
+ * ## Rolling Buffer Diagram
+ *
+ * For Z-slice k, the algorithm needs:
+ *   - curSlice[]:  FeatureIds for Z = k     (xP * yP elements)
+ *   - nextSlice[]: FeatureIds for Z = k+1   (xP * yP elements)
+ *   - nodePlane0[]: Vertex IDs for Z = k    ((xP+1) * (yP+1) elements)
+ *   - nodePlane1[]: Vertex IDs for Z = k+1  ((xP+1) * (yP+1) elements)
+ *
+ * After processing slice k:
+ *   - std::swap(curSlice, nextSlice)   -- old next becomes current
+ *   - std::swap(nodePlane0, nodePlane1) -- plane1 becomes plane0
+ *   - nodePlane1 is reset to sentinel values
+ */
+
+#include "QuickSurfaceMeshScanline.hpp"
+
+#include "QuickSurfaceMesh.hpp"
+#include "TupleTransfer.hpp"
+
+#include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/Geometry/EdgeGeom.hpp"
+#include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
+#include "simplnx/DataStructure/Geometry/TriangleGeom.hpp"
+#include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/BoundedRecordPageCache.hpp"
+#include "simplnx/Utilities/DataArrayUtilities.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
+#include "simplnx/Utilities/InMemoryTemporaryRecordStore.hpp"
+#include "simplnx/Utilities/Meshing/TriangleUtilities.hpp"
+
+#include <fmt/format.h>
+#include <nonstd/span.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <random>
+#include <vector>
+
+using namespace nx::core;
+
+// -----------------------------------------------------------------------------
+namespace
+{
+// RNG constants -- must match QuickSurfaceMeshDirect.cpp to produce identical
+// problem-voxel corrections (same seed, same sequence of random draws).
+constexpr float64 k_RangeMin = 0.0;
+constexpr float64 k_RangeMax = 1.0;
+constexpr std::mt19937_64::result_type k_Seed = 3412341234123412;
+std::mt19937_64 generator(k_Seed);
+std::uniform_real_distribution<> distribution(k_RangeMin, k_RangeMax);
+
+constexpr uint64 k_NodeRecordBatch = 4096;
+constexpr usize k_NodeRecordPages = 16;
+
+/**
+ * @brief Fixed-width external state for one generated mesh vertex.
+ *
+ * Coordinates and the bounded set of incident feature owners replace the
+ * mesh-sized resident owner lists used by the Direct implementation.
+ */
+struct QuickSurfaceNodeRecord
+{
+  std::array<float32, 3> coordinates = {};
+  std::array<int32, 4> owners = {};
+  uint8 ownerCount = 0;
+  uint8 touchesExterior = 0;
+  uint8 assigned = 0;
+  uint8 reserved = 0;
+};
+
+/**
+ * @brief Creates and zero-initializes one external node record per generated vertex.
+ *
+ * Genuine OOC dispatch disallows resident fallback so node-count scratch cannot
+ * exceed RAM merely because the input cells themselves are disk-backed.
+ */
+Result<std::unique_ptr<ITemporaryRecordStore>> CreateNodeRecordStore(uint64 nodeCount, bool allowInMemoryFallback, const std::atomic_bool& shouldCancel)
+{
+  if(nodeCount == 0)
+  {
+    return MakeErrorResult<std::unique_ptr<ITemporaryRecordStore>>(-56342, "QuickSurfaceMesh cannot create node state for an empty mesh.");
+  }
+  TemporaryRecordStoreConfig config;
+  config.recordSize = sizeof(QuickSurfaceNodeRecord);
+  config.maxRecordsPerBatch = k_NodeRecordBatch;
+  config.initialRecordCount = nodeCount;
+  auto result = DataStoreUtilities::GetIOCollection().createTemporaryRecordStore(config);
+  if(result.invalid() && allowInMemoryFallback)
+  {
+    auto fallback = InMemoryTemporaryRecordStore::Create(config);
+    if(fallback.invalid())
+    {
+      return ConvertInvalidResult<std::unique_ptr<ITemporaryRecordStore>>(std::move(fallback));
+    }
+    result = {std::move(fallback.value())};
+  }
+  if(result.invalid())
+  {
+    return result;
+  }
+  if(result.value() == nullptr)
+  {
+    return MakeErrorResult<std::unique_ptr<ITemporaryRecordStore>>(-56343, "QuickSurfaceMesh temporary-record provider returned a null node-state store.");
+  }
+  const QuickSurfaceNodeRecord emptyRecord;
+  auto fillResult = result.value()->fill(0, nodeCount, nonstd::span<const std::byte>(reinterpret_cast<const std::byte*>(&emptyRecord), sizeof(emptyRecord)), shouldCancel);
+  if(fillResult.invalid())
+  {
+    return ConvertInvalidResult<std::unique_ptr<ITemporaryRecordStore>>(std::move(fillResult));
+  }
+  return result;
+}
+
+/**
+ * @brief Adapts bounded external node records to the owner/coordinate interface expected by tuple transfer.
+ *
+ * Errors are captured internally because the legacy transfer callbacks do not
+ * return Result; callers must check invalid()/takeResult() and flush() afterward.
+ */
+class ExternalNodeRecords
+{
+public:
+  /** @brief Lightweight proxy that lets existing transfer code insert an owner for one node. */
+  class OwnerProxy
+  {
+  public:
+    /** @brief Borrows the owning record adapter and identifies the target node. */
+    OwnerProxy(ExternalNodeRecords& records, uint64 nodeId)
+    : m_Records(records)
+    , m_NodeId(nodeId)
+    {
+    }
+
+    /** @brief Adds an owner if it is not already present in the node's bounded owner set. */
+    void insert(int32 owner)
+    {
+      m_Records.insert(m_NodeId, owner);
+    }
+
+  private:
+    ExternalNodeRecords& m_Records;
+    uint64 m_NodeId;
+  };
+
+  /** @brief Binds a non-owning record store to a fixed-size node-page cache. */
+  ExternalNodeRecords(ITemporaryRecordStore& store, const std::atomic_bool& shouldCancel)
+  : m_Cache(store, k_NodeRecordBatch, k_NodeRecordPages)
+  , m_ShouldCancel(shouldCancel)
+  {
+  }
+
+  /** @brief Returns an insertion proxy for one node record. */
+  OwnerProxy operator[](uint64 nodeId)
+  {
+    return OwnerProxy(*this, nodeId);
+  }
+
+  /** @brief Stores one node's coordinates and marks that node assigned. */
+  void setCoordinates(uint64 nodeId, const Point3D<float64>& coordinates)
+  {
+    if(m_ShouldCancel || m_Result.invalid())
+    {
+      return;
+    }
+    auto recordResult = m_Cache.read(nodeId, m_ShouldCancel);
+    if(recordResult.invalid())
+    {
+      m_Result = ConvertResult(std::move(recordResult));
+      return;
+    }
+    auto record = recordResult.value();
+    record.coordinates = {static_cast<float32>(coordinates[0]), static_cast<float32>(coordinates[1]), static_cast<float32>(coordinates[2])};
+    record.assigned = 1;
+    m_Result = m_Cache.write(nodeId, record, m_ShouldCancel);
+  }
+
+  /** @brief Reports whether a callback operation captured an error. */
+  bool invalid() const
+  {
+    return m_Result.invalid();
+  }
+
+  /** @brief Moves the captured callback error to the caller. */
+  Result<> takeResult()
+  {
+    return std::move(m_Result);
+  }
+
+  /** @brief Flushes dirty node pages unless an earlier callback already failed. */
+  Result<> flush()
+  {
+    if(m_Result.invalid())
+    {
+      return std::move(m_Result);
+    }
+    return m_Cache.flush(m_ShouldCancel);
+  }
+
+private:
+  /** @brief Updates exterior and unique-owner metadata for one node through the bounded cache. */
+  void insert(uint64 nodeId, int32 owner)
+  {
+    if(m_ShouldCancel || m_Result.invalid())
+    {
+      return;
+    }
+    auto recordResult = m_Cache.read(nodeId, m_ShouldCancel);
+    if(recordResult.invalid())
+    {
+      m_Result = ConvertResult(std::move(recordResult));
+      return;
+    }
+    auto record = recordResult.value();
+    if(owner == -1)
+    {
+      record.touchesExterior = 1;
+    }
+    const auto ownerEnd = record.owners.cbegin() + record.ownerCount;
+    if(std::find(record.owners.cbegin(), ownerEnd, owner) == ownerEnd && record.ownerCount < record.owners.size())
+    {
+      record.owners[record.ownerCount++] = owner;
+    }
+    m_Result = m_Cache.write(nodeId, record, m_ShouldCancel);
+  }
+
+  BoundedRecordPageCache<QuickSurfaceNodeRecord> m_Cache;
+  const std::atomic_bool& m_ShouldCancel;
+  Result<> m_Result;
+};
+
+/**
+ * @brief Resolves a body-diagonal problem-voxel case in the local slice buffer.
+ *
+ * The choices and RNG sequence match the Direct implementation exactly; only
+ * the storage access changes from DataStore indexing to buffered values.
+ */
+void FlipProblemVoxelCase1(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3,
+                           QuickSurfaceMeshScanline::MeshIndexType v4, QuickSurfaceMeshScanline::MeshIndexType v5, QuickSurfaceMeshScanline::MeshIndexType v6)
+{
+  auto val = static_cast<float32>(distribution(generator));
+
+  if(val < 0.25f)
+  {
+    buf[v6] = buf[v4];
+  }
+  else if(val < 0.5f)
+  {
+    buf[v6] = buf[v5];
+  }
+  else if(val < 0.75f)
+  {
+    buf[v1] = buf[v2];
+  }
+  else
+  {
+    buf[v1] = buf[v3];
+  }
+}
+
+/** @brief Resolves an edge-diagonal conflict in buffered Feature IDs with the Direct path's eight choices. */
+void FlipProblemVoxelCase2(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3,
+                           QuickSurfaceMeshScanline::MeshIndexType v4)
+{
+  auto val = static_cast<float32>(distribution(generator));
+
+  if(val < 0.125f)
+  {
+    buf[v1] = buf[v2];
+  }
+  else if(val < 0.25f)
+  {
+    buf[v1] = buf[v3];
+  }
+  else if(val < 0.375f)
+  {
+    buf[v2] = buf[v1];
+  }
+  if(val < 0.5f)
+  {
+    buf[v2] = buf[v4];
+  }
+  else if(val < 0.625f)
+  {
+    buf[v3] = buf[v1];
+  }
+  else if(val < 0.75f)
+  {
+    buf[v3] = buf[v4];
+  }
+  else if(val < 0.875f)
+  {
+    buf[v4] = buf[v2];
+  }
+  else
+  {
+    buf[v4] = buf[v3];
+  }
+}
+
+/** @brief Resolves the isolated-voxel conflict in buffered Feature IDs with the Direct path's two choices. */
+void FlipProblemVoxelCase3(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3)
+{
+  auto val = static_cast<float32>(distribution(generator));
+
+  if(val < 0.5f)
+  {
+    buf[v2] = buf[v1];
+  }
+  else
+  {
+    buf[v3] = buf[v1];
+  }
+}
+} // namespace
+
+// -----------------------------------------------------------------------------
+QuickSurfaceMeshScanline::QuickSurfaceMeshScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
+                                                   const QuickSurfaceMeshInputValues* inputValues)
+: m_DataStructure(dataStructure)
+, m_InputValues(inputValues)
+, m_ShouldCancel(shouldCancel)
+, m_MessageHandler(mesgHandler)
+{
+  generator.seed(k_Seed);
+}
+
+// -----------------------------------------------------------------------------
+QuickSurfaceMeshScanline::~QuickSurfaceMeshScanline() noexcept = default;
+
+// -----------------------------------------------------------------------------
+/**
+ * @brief Executes the full OOC meshing pipeline.
+ *
+ * Orchestrates three phases: problem voxel correction, node/triangle counting,
+ * and mesh generation. Between the counting and generation phases, the output
+ * TriangleGeom arrays are resized to their final sizes. After mesh generation,
+ * optional winding repair is applied.
+ *
+ * All FeatureIds access uses copyIntoBuffer() for bulk Z-slice reads.
+ * All output writes use copyFromBuffer() for bulk sequential writes.
+ */
+Result<> QuickSurfaceMeshScanline::operator()()
+{
+  auto& grid = m_DataStructure.getDataRefAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
+  auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
+
+  SizeVec3 udims = grid.getDimensions();
+
+  usize xP = udims[0];
+  usize yP = udims[1];
+  usize zP = udims[2];
+
+  MeshIndexType nodeCount = 0;
+  MeshIndexType triangleCount = 0;
+  usize numFeatures = 0;
+
+  // Phase 1: Fix diagonal-conflict voxel configurations (optional)
+  if(m_InputValues->FixProblemVoxels)
+  {
+    auto correctionResult = correctProblemVoxels();
+    if(correctionResult.invalid())
+    {
+      return correctionResult;
+    }
+  }
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+
+  auto countResult = countActiveNodesAndTriangles(nodeCount, triangleCount, numFeatures);
+  if(countResult.invalid())
+  {
+    return countResult;
+  }
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+
+  ShapeType tupleShape = {triangleCount};
+  triangleGeom.resizeFaceList(triangleCount);
+  triangleGeom.resizeVertexList(nodeCount);
+  triangleGeom.getFaceAttributeMatrix()->resizeTuples(tupleShape);
+  triangleGeom.getVertexAttributeMatrix()->resizeTuples({nodeCount});
+
+  for(const auto& dataPath : m_InputValues->CreatedDataArrayPaths)
+  {
+    Result<> result = nx::core::ResizeAndReplaceDataArray(m_DataStructure, dataPath, tupleShape, nx::core::IDataAction::Mode::Execute);
+    if(result.invalid())
+    {
+      return result;
+    }
+  }
+
+  auto generationResult = createNodesAndTriangles(nodeCount, triangleCount, numFeatures);
+  if(generationResult.invalid())
+  {
+    return generationResult;
+  }
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+
+  Result<> windingResult = {};
+  if(m_InputValues->RepairTriangleWinding)
+  {
+    auto& ioCollection = DataStoreUtilities::GetIOCollection();
+    if(ioCollection.hasExternalSortCapability() && ioCollection.hasTemporaryRecordStoreCapability())
+    {
+      windingResult = MeshingUtilities::RepairTriangleWindingExternal(triangleGeom.getFaces()->getDataStoreRef(),
+                                                                      m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsDataPath)->getDataStoreRef(), m_ShouldCancel, m_MessageHandler);
+    }
+    else
+    {
+      const auto isOutOfCore = [](const IArray* array) { return array != nullptr && IsOutOfCore(*array); };
+      bool hasOutOfCoreTarget =
+          isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->FeatureIdsArrayPath)) || isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->NodeTypesDataPath)) ||
+          isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->FaceLabelsDataPath)) || isOutOfCore(triangleGeom.getVertices()) || isOutOfCore(triangleGeom.getFaces());
+      const auto inspectPaths = [this, &hasOutOfCoreTarget, &isOutOfCore](const std::vector<DataPath>& paths) {
+        for(const auto& path : paths)
+        {
+          hasOutOfCoreTarget = hasOutOfCoreTarget || isOutOfCore(m_DataStructure.getDataAs<IDataArray>(path));
+        }
+      };
+      inspectPaths(m_InputValues->SelectedCellDataArrayPaths);
+      inspectPaths(m_InputValues->SelectedFeatureDataArrayPaths);
+      inspectPaths(m_InputValues->CreatedDataArrayPaths);
+      if(hasOutOfCoreTarget)
+      {
+        return MakeErrorResult(
+            -56344, "QuickSurfaceMesh cannot repair triangle winding for an out-of-core target because the active I/O provider does not support external sorting and temporary record stores.");
+      }
+      // Forced-scanline tests may run entirely in memory without an external-storage provider.
+      triangleGeom.findElementNeighbors(true);
+      const auto optionalId = triangleGeom.getElementNeighborsId();
+      if(!optionalId.has_value())
+      {
+        return MakeErrorResult(-56341, fmt::format("Unable to generate the connectivity list for {} geometry.", triangleGeom.getName()));
+      }
+      const auto& connectivity = m_DataStructure.getDataRefAs<IGeometry::ElementDynamicList>(optionalId.value());
+      windingResult = MeshingUtilities::RepairTriangleWinding(triangleGeom.getFaces()->getDataStoreRef(), connectivity,
+                                                              m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsDataPath)->getDataStoreRef(), m_ShouldCancel, m_MessageHandler);
+      m_DataStructure.removeData(triangleGeom.getElementContainingVertId().value());
+      m_DataStructure.removeData(triangleGeom.getElementNeighborsId().value());
+    }
+  }
+
+  return windingResult;
+}
+
+// -----------------------------------------------------------------------------
+/**
+ * @brief OOC problem-voxel correction using double-buffered Z-slice pairs.
+ *
+ * This is the OOC equivalent of QuickSurfaceMeshDirect::correctProblemVoxels().
+ * Instead of using operator[] to read/write the FeatureIds DataStore directly,
+ * it loads two adjacent Z-slices (sliceA = k-1, sliceB = k) into local buffers
+ * via copyIntoBuffer(), performs all the same diagonal-conflict checks and
+ * random reassignments in local memory, then writes back only modified slices
+ * via copyFromBuffer() using dirty flags.
+ *
+ * The problem voxel checks examine 2x2x2 blocks where the 8 voxels span two
+ * adjacent Z-slices. voxels v1-v4 are in sliceA (Z = k-1) and v5-v8 are in
+ * sliceB (Z = k). The Case1/Case2/Case3 flip logic is inlined rather than
+ * delegated to helper functions because the mutations may target either
+ * sliceA or sliceB, and we need to track which slice was modified.
+ *
+ * The doCase2 lambda handles Case2 variants that may target 4 voxels across
+ * either or both slices. It takes buffer pointers and dirty-flag references
+ * for each of the 4 voxel positions, allowing it to work with any combination
+ * of sliceA and sliceB targets.
+ */
+Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
+{
+  m_MessageHandler(IFilter::Message::Type::Info, "Correcting Problem Voxels");
+
+  auto* grid = m_DataStructure.getDataAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
+  auto& featureIdsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
+
+  SizeVec3 udims = grid->getDimensions();
+
+  MeshIndexType xP = udims[0];
+  MeshIndexType yP = udims[1];
+  MeshIndexType zP = udims[2];
+
+  const MeshIndexType sliceSize = xP * yP;
+
+  // Double-buffered Z-slices: sliceA holds Z = (k-1), sliceB holds Z = k.
+  // Each buffer is xP * yP elements (one full Z-slice of FeatureIds).
+  auto sliceA = std::make_unique<int32[]>(sliceSize);
+  auto sliceB = std::make_unique<int32[]>(sliceSize);
+
+  MeshIndexType count = 1;
+  MeshIndexType iter = 0;
+  while(count > 0 && iter < 20)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    iter++;
+    count = 0;
+
+    for(MeshIndexType k = 1; k < zP; k++)
+    {
+      // Load slice (k-1) into sliceA and slice k into sliceB
+      auto readResult = featureIdsStore.copyIntoBuffer((k - 1) * sliceSize, nonstd::span<int32>(sliceA.get(), sliceSize));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+      readResult = featureIdsStore.copyIntoBuffer(k * sliceSize, nonstd::span<int32>(sliceB.get(), sliceSize));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+
+      bool sliceADirty = false;
+      bool sliceBDirty = false;
+
+      for(MeshIndexType j = 1; j < yP; j++)
+      {
+        MeshIndexType row1 = (j - 1) * xP;
+        MeshIndexType row2 = j * xP;
+        for(MeshIndexType i = 1; i < xP; i++)
+        {
+          // v1-v4 are in slice (k-1) = sliceA, v5-v8 are in slice k = sliceB
+          MeshIndexType v1Local = row1 + i - 1;
+          MeshIndexType v2Local = row1 + i;
+          MeshIndexType v3Local = row2 + i - 1;
+          MeshIndexType v4Local = row2 + i;
+
+          int32 f1 = sliceA[v1Local];
+          int32 f2 = sliceA[v2Local];
+          int32 f3 = sliceA[v3Local];
+          int32 f4 = sliceA[v4Local];
+          int32 f5 = sliceB[v1Local];
+          int32 f6 = sliceB[v2Local];
+          int32 f7 = sliceB[v3Local];
+          int32 f8 = sliceB[v4Local];
+
+          // For the flip functions, we need indices into a combined 2-slice buffer.
+          // sliceA occupies [0, sliceSize), sliceB occupies [sliceSize, 2*sliceSize)
+          // But since FlipProblemVoxelCase functions operate on voxels that may be
+          // in either slice, we use a combined buffer approach:
+          // We'll use local indices directly into the correct slice buffer.
+
+          if(f1 == f8 && f1 != f2 && f1 != f3 && f1 != f4 && f1 != f5 && f1 != f6 && f1 != f7)
+          {
+            // v1=plane1+row1+i-1, v2=plane1+row1+i, v3=plane1+row2+i-1
+            // v6=plane2+row1+i, v7=plane2+row2+i-1, v8=plane2+row2+i
+            // FlipProblemVoxelCase1(featureIds, v1, v2, v3, v6, v7, v8)
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.25f)
+            {
+              sliceB[v4Local] = sliceB[v2Local]; // v8 = v6
+              sliceBDirty = true;
+            }
+            else if(val < 0.5f)
+            {
+              sliceB[v4Local] = sliceB[v3Local]; // v8 = v7
+              sliceBDirty = true;
+            }
+            else if(val < 0.75f)
+            {
+              sliceA[v1Local] = sliceA[v2Local]; // v1 = v2
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceA[v1Local] = sliceA[v3Local]; // v1 = v3
+              sliceADirty = true;
+            }
+            count++;
+          }
+          if(f2 == f7 && f2 != f1 && f2 != f3 && f2 != f4 && f2 != f5 && f2 != f6 && f2 != f8)
+          {
+            // FlipProblemVoxelCase1(featureIds, v2, v1, v4, v5, v8, v7)
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.25f)
+            {
+              sliceB[v3Local] = sliceB[v1Local]; // v7 = v5
+              sliceBDirty = true;
+            }
+            else if(val < 0.5f)
+            {
+              sliceB[v3Local] = sliceB[v4Local]; // v7 = v8
+              sliceBDirty = true;
+            }
+            else if(val < 0.75f)
+            {
+              sliceA[v2Local] = sliceA[v1Local]; // v2 = v1
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceA[v2Local] = sliceA[v4Local]; // v2 = v4
+              sliceADirty = true;
+            }
+            count++;
+          }
+          if(f3 == f6 && f3 != f1 && f3 != f2 && f3 != f4 && f3 != f5 && f3 != f7 && f3 != f8)
+          {
+            // FlipProblemVoxelCase1(featureIds, v3, v1, v4, v5, v8, v6)
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.25f)
+            {
+              sliceB[v2Local] = sliceB[v1Local]; // v6 = v5
+              sliceBDirty = true;
+            }
+            else if(val < 0.5f)
+            {
+              sliceB[v2Local] = sliceB[v4Local]; // v6 = v8
+              sliceBDirty = true;
+            }
+            else if(val < 0.75f)
+            {
+              sliceA[v3Local] = sliceA[v1Local]; // v3 = v1
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceA[v3Local] = sliceA[v4Local]; // v3 = v4
+              sliceADirty = true;
+            }
+            count++;
+          }
+          if(f4 == f5 && f4 != f1 && f4 != f2 && f4 != f3 && f4 != f6 && f4 != f7 && f4 != f8)
+          {
+            // FlipProblemVoxelCase1(featureIds, v4, v2, v3, v6, v7, v5)
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.25f)
+            {
+              sliceB[v1Local] = sliceB[v2Local]; // v5 = v6
+              sliceBDirty = true;
+            }
+            else if(val < 0.5f)
+            {
+              sliceB[v1Local] = sliceB[v3Local]; // v5 = v7
+              sliceBDirty = true;
+            }
+            else if(val < 0.75f)
+            {
+              sliceA[v4Local] = sliceA[v2Local]; // v4 = v2
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceA[v4Local] = sliceA[v3Local]; // v4 = v3
+              sliceADirty = true;
+            }
+            count++;
+          }
+
+          // Case2 variants - these use FlipProblemVoxelCase2 which operates on 4 voxels
+          // We inline the RNG consumption but delegate to a helper for the actual mutation
+          auto doCase2 = [&](int32* bufX, MeshIndexType ix1, int32* bufY, MeshIndexType iy1, int32* bufZ, MeshIndexType iz1, int32* bufW, MeshIndexType iw1, bool& dirtyX, bool& dirtyY, bool& dirtyZ,
+                             bool& dirtyW) {
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.125f)
+            {
+              bufX[ix1] = bufY[iy1];
+              dirtyX = true;
+            }
+            else if(val < 0.25f)
+            {
+              bufX[ix1] = bufZ[iz1];
+              dirtyX = true;
+            }
+            else if(val < 0.375f)
+            {
+              bufY[iy1] = bufX[ix1];
+              dirtyY = true;
+            }
+            if(val < 0.5f)
+            {
+              bufY[iy1] = bufW[iw1];
+              dirtyY = true;
+            }
+            else if(val < 0.625f)
+            {
+              bufZ[iz1] = bufX[ix1];
+              dirtyZ = true;
+            }
+            else if(val < 0.75f)
+            {
+              bufZ[iz1] = bufW[iw1];
+              dirtyZ = true;
+            }
+            else if(val < 0.875f)
+            {
+              bufW[iw1] = bufY[iy1];
+              dirtyW = true;
+            }
+            else
+            {
+              bufW[iw1] = bufZ[iz1];
+              dirtyW = true;
+            }
+          };
+
+          // f1==f6: v1(A),v2(A),v5(B),v6(B)
+          if(f1 == f6 && f1 != f2 && f1 != f5)
+          {
+            doCase2(sliceA.get(), v1Local, sliceA.get(), v2Local, sliceB.get(), v1Local, sliceB.get(), v2Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f2 == f5 && f2 != f1 && f2 != f6)
+          {
+            doCase2(sliceA.get(), v2Local, sliceA.get(), v1Local, sliceB.get(), v2Local, sliceB.get(), v1Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f3 == f8 && f3 != f4 && f3 != f7)
+          {
+            doCase2(sliceA.get(), v3Local, sliceA.get(), v4Local, sliceB.get(), v3Local, sliceB.get(), v4Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f4 == f7 && f4 != f3 && f4 != f8)
+          {
+            doCase2(sliceA.get(), v4Local, sliceA.get(), v3Local, sliceB.get(), v4Local, sliceB.get(), v3Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f1 == f7 && f1 != f3 && f1 != f5)
+          {
+            doCase2(sliceA.get(), v1Local, sliceA.get(), v3Local, sliceB.get(), v1Local, sliceB.get(), v3Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f3 == f5 && f3 != f1 && f3 != f7)
+          {
+            doCase2(sliceA.get(), v3Local, sliceA.get(), v1Local, sliceB.get(), v3Local, sliceB.get(), v1Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f2 == f8 && f2 != f4 && f2 != f6)
+          {
+            doCase2(sliceA.get(), v2Local, sliceA.get(), v4Local, sliceB.get(), v2Local, sliceB.get(), v4Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f4 == f6 && f4 != f2 && f4 != f8)
+          {
+            doCase2(sliceA.get(), v4Local, sliceA.get(), v2Local, sliceB.get(), v4Local, sliceB.get(), v2Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          // Same-plane Case2 variants (all in sliceA or all in sliceB)
+          if(f1 == f4 && f1 != f2 && f1 != f3)
+          {
+            doCase2(sliceA.get(), v1Local, sliceA.get(), v2Local, sliceA.get(), v3Local, sliceA.get(), v4Local, sliceADirty, sliceADirty, sliceADirty, sliceADirty);
+            count++;
+          }
+          if(f2 == f3 && f2 != f1 && f2 != f4)
+          {
+            doCase2(sliceA.get(), v2Local, sliceA.get(), v1Local, sliceA.get(), v4Local, sliceA.get(), v3Local, sliceADirty, sliceADirty, sliceADirty, sliceADirty);
+            count++;
+          }
+          if(f5 == f8 && f5 != f6 && f5 != f7)
+          {
+            doCase2(sliceB.get(), v1Local, sliceB.get(), v2Local, sliceB.get(), v3Local, sliceB.get(), v4Local, sliceBDirty, sliceBDirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+          if(f6 == f7 && f6 != f5 && f6 != f8)
+          {
+            doCase2(sliceB.get(), v2Local, sliceB.get(), v1Local, sliceB.get(), v4Local, sliceB.get(), v3Local, sliceBDirty, sliceBDirty, sliceBDirty, sliceBDirty);
+            count++;
+          }
+
+          // Case3 variants
+          if(f2 == f3 && f2 == f4 && f2 == f5 && f2 == f6 && f2 == f7 && f2 != f1 && f2 != f8)
+          {
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.5f)
+            {
+              sliceA[v1Local] = sliceA[v2Local]; // v1 = v2
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceB[v4Local] = sliceA[v2Local]; // v8 = v2
+              sliceBDirty = true;
+            }
+            count++;
+          }
+          if(f1 == f3 && f1 == f4 && f1 == f5 && f1 == f7 && f2 == f8 && f1 != f2 && f1 != f7)
+          {
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.5f)
+            {
+              sliceA[v2Local] = sliceA[v1Local]; // v2 = v1
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceB[v3Local] = sliceA[v1Local]; // v7 = v1
+              sliceBDirty = true;
+            }
+            count++;
+          }
+          if(f1 == f2 && f1 == f4 && f1 == f5 && f1 == f7 && f1 == f8 && f1 != f3 && f1 != f6)
+          {
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.5f)
+            {
+              sliceA[v3Local] = sliceA[v1Local]; // v3 = v1
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceB[v2Local] = sliceA[v1Local]; // v6 = v1
+              sliceBDirty = true;
+            }
+            count++;
+          }
+          if(f1 == f2 && f1 == f3 && f1 == f6 && f1 == f7 && f1 == f8 && f1 != f4 && f1 != f5)
+          {
+            auto val = static_cast<float32>(distribution(generator));
+            if(val < 0.5f)
+            {
+              sliceA[v4Local] = sliceA[v1Local]; // v4 = v1
+              sliceADirty = true;
+            }
+            else
+            {
+              sliceB[v1Local] = sliceA[v1Local]; // v5 = v1
+              sliceBDirty = true;
+            }
+            count++;
+          }
+        }
+      }
+
+      // Write back dirty slices
+      if(sliceADirty)
+      {
+        auto writeResult = featureIdsStore.copyFromBuffer((k - 1) * sliceSize, nonstd::span<const int32>(sliceA.get(), sliceSize));
+        if(writeResult.invalid())
+        {
+          return writeResult;
+        }
+      }
+      if(sliceBDirty)
+      {
+        auto writeResult = featureIdsStore.copyFromBuffer(k * sliceSize, nonstd::span<const int32>(sliceB.get(), sliceSize));
+        if(writeResult.invalid())
+        {
+          return writeResult;
+        }
+      }
+    }
+
+    std::string ss = fmt::format("Correcting Problem Voxels: Iteration - '{}'; Problem Voxels - '{}'", iter, count);
+    m_MessageHandler(IFilter::Message::Type::Info, ss);
+  }
+  return {};
+}
+
+// -----------------------------------------------------------------------------
+/**
+ * @brief Counting pass using rolling 2-plane node buffers and double-buffered
+ * FeatureId Z-slices.
+ *
+ * This is the OOC equivalent of QuickSurfaceMeshDirect::determineActiveNodes().
+ * The key difference is memory reduction: instead of an O(volume) nodeIds array,
+ * this method uses two node-plane buffers of size O((xP+1)*(yP+1)) each.
+ *
+ * ## Rolling Buffer Strategy
+ *
+ * For Z-slice k, the dual-grid nodes lie on two planes:
+ *   - nodePlane0: nodes at Z = k   (the "current" plane)
+ *   - nodePlane1: nodes at Z = k+1 (the "next" plane)
+ *
+ * After processing all voxels in slice k:
+ *   1. nodePlane0 is discarded (all its nodes have been assigned)
+ *   2. nodePlane1 becomes nodePlane0 for the next iteration
+ *   3. A fresh nodePlane1 is initialized with sentinel values
+ *
+ * This works because each node is referenced only by voxels at Z = k and Z = k-1.
+ * Once we advance past Z = k, nodes in the Z = k plane are never accessed again.
+ *
+ * The FeatureIds are double-buffered similarly: curSlice holds Z = k, nextSlice
+ * holds Z = k+1. After processing, they swap so the old next becomes current.
+ *
+ * Also tracks the maximum FeatureId value (numFeatures) for later array sizing.
+ */
+Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& nodeCount, MeshIndexType& triangleCount, usize& numFeatures)
+{
+  auto* grid = m_DataStructure.getDataAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
+  auto& featureIdsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
+
+  SizeVec3 udims = grid->getDimensions();
+
+  MeshIndexType xP = udims[0];
+  MeshIndexType yP = udims[1];
+  MeshIndexType zP = udims[2];
+
+  const MeshIndexType sliceSize = xP * yP;
+  const MeshIndexType nodePlaneSize = (xP + 1) * (yP + 1);
+  constexpr auto kMax = std::numeric_limits<MeshIndexType>::max();
+
+  // Rolling node-plane buffers: O(2 * nodePlaneSize) instead of O((xP+1)*(yP+1)*(zP+1)).
+  // nodePlane0 corresponds to Z = k (current), nodePlane1 to Z = k+1 (next).
+  // Entries start at kMax (sentinel) and are assigned sequential IDs on first use.
+  std::vector<MeshIndexType> nodePlane0(nodePlaneSize, kMax);
+  std::vector<MeshIndexType> nodePlane1(nodePlaneSize, kMax);
+
+  // Lambda to count a node: if not yet assigned in this plane, assign the
+  // next sequential vertex ID and increment the counter.
+  auto countNode = [&](std::vector<MeshIndexType>& plane, MeshIndexType offset) {
+    if(plane[offset] == kMax)
+    {
+      plane[offset] = nodeCount;
+      nodeCount++;
+    }
+  };
+
+  // Double-buffered FeatureId Z-slices: curSlice holds Z = k, nextSlice holds Z = k+1.
+  auto curSlice = std::make_unique<int32[]>(sliceSize);
+  auto nextSlice = std::make_unique<int32[]>(sliceSize);
+
+  // Load the first Z-slice (k = 0) via bulk I/O
+  auto readResult = featureIdsStore.copyIntoBuffer(0, nonstd::span<int32>(curSlice.get(), sliceSize));
+  if(readResult.invalid())
+  {
+    return readResult;
+  }
+
+  numFeatures = 0;
+
+  for(MeshIndexType k = 0; k < zP; k++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    // Load next z-slice if available
+    if(k < zP - 1)
+    {
+      readResult = featureIdsStore.copyIntoBuffer((k + 1) * sliceSize, nonstd::span<int32>(nextSlice.get(), sliceSize));
+      if(readResult.invalid())
+      {
+        return readResult;
+      }
+    }
+
+    for(MeshIndexType j = 0; j < yP; j++)
+    {
+      for(MeshIndexType i = 0; i < xP; i++)
+      {
+        MeshIndexType localIdx = j * xP + i;
+        int32 curFeature = curSlice[localIdx];
+
+        // Track max featureId for numFeatures
+        if(static_cast<usize>(curFeature) > numFeatures)
+        {
+          numFeatures = static_cast<usize>(curFeature);
+        }
+
+        // Node offsets within a plane for node grid position (ni, nj):
+        //   offset = nj * (xP + 1) + ni
+        // Plane 0 corresponds to z=k, Plane 1 corresponds to z=k+1
+
+        if(i == 0)
+        {
+          countNode(nodePlane0, j * (xP + 1) + i);
+          countNode(nodePlane0, (j + 1) * (xP + 1) + i);
+          countNode(nodePlane1, j * (xP + 1) + i);
+          countNode(nodePlane1, (j + 1) * (xP + 1) + i);
+          triangleCount += 2;
+        }
+        if(j == 0)
+        {
+          countNode(nodePlane0, j * (xP + 1) + i);
+          countNode(nodePlane0, j * (xP + 1) + (i + 1));
+          countNode(nodePlane1, j * (xP + 1) + i);
+          countNode(nodePlane1, j * (xP + 1) + (i + 1));
+          triangleCount += 2;
+        }
+        if(k == 0)
+        {
+          countNode(nodePlane0, j * (xP + 1) + i);
+          countNode(nodePlane0, j * (xP + 1) + (i + 1));
+          countNode(nodePlane0, (j + 1) * (xP + 1) + i);
+          countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
+          triangleCount += 2;
+        }
+        if(i == (xP - 1))
+        {
+          countNode(nodePlane0, j * (xP + 1) + (i + 1));
+          countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, j * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          triangleCount += 2;
+        }
+        else if(curFeature != curSlice[localIdx + 1]) // neigh1 = point + 1
+        {
+          countNode(nodePlane0, j * (xP + 1) + (i + 1));
+          countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, j * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          triangleCount += 2;
+        }
+        if(j == (yP - 1))
+        {
+          countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane0, (j + 1) * (xP + 1) + i);
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + i);
+          triangleCount += 2;
+        }
+        else if(curFeature != curSlice[localIdx + xP]) // neigh2 = point + xP
+        {
+          countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane0, (j + 1) * (xP + 1) + i);
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + i);
+          triangleCount += 2;
+        }
+        if(k == (zP - 1))
+        {
+          countNode(nodePlane1, j * (xP + 1) + (i + 1));
+          countNode(nodePlane1, j * (xP + 1) + i);
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + i);
+          triangleCount += 2;
+        }
+        else if(curFeature != nextSlice[localIdx]) // neigh3 = point + xP*yP
+        {
+          countNode(nodePlane1, j * (xP + 1) + (i + 1));
+          countNode(nodePlane1, j * (xP + 1) + i);
+          countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
+          countNode(nodePlane1, (j + 1) * (xP + 1) + i);
+          triangleCount += 2;
+        }
+      }
+    }
+
+    // Rotate planes: plane1 becomes plane0 for next z-step, reinitialize plane1
+    std::swap(nodePlane0, nodePlane1);
+    std::fill(nodePlane1.begin(), nodePlane1.end(), kMax);
+
+    // Swap featureId buffers: current becomes the old "next"
+    std::swap(curSlice, nextSlice);
+  }
+  return {};
+}
+
+// -----------------------------------------------------------------------------
+/**
+ * @brief Generation pass: creates the output triangle mesh with OOC-safe I/O.
+ *
+ * This is the OOC equivalent of QuickSurfaceMeshDirect::createNodesAndTriangles().
+ * It produces identical output but uses bulk I/O for all reads and writes:
+ *
+ * ## Output Buffering Strategy
+ *
+ * - **Vertex coordinates and node ownership**: Stored by vertex ID in
+ *   disk-backed fixed records behind a bounded page cache, then streamed to
+ *   the final arrays in fixed contiguous batches.
+ *
+ * - **Triangle connectivity**: Accumulated in triBuffer per Z-slice, flushed
+ *   via copyFromBuffer() at the end of each slice. This keeps peak memory
+ *   proportional to the number of triangles in one Z-slice.
+ *
+ * - **Face labels**: Accumulated in faceLabelBuf per Z-slice, flushed with
+ *   triangle connectivity.
+ *
+ * - **TupleTransfer**: Arguments accumulated in ttArgsBuf per Z-slice and
+ *   flushed via quickSurfaceTransferBatch() to reduce virtual call overhead.
+ *
+ * - **Node types**: Unique-owner count and exterior contact are accumulated in
+ *   the same bounded node records and streamed with vertex coordinates.
+ *
+ * ## Node Assignment
+ *
+ * Uses the same rolling 2-plane node buffer strategy as countActiveNodesAndTriangles().
+ * The assignNode lambda both assigns sequential vertex IDs and writes vertex
+ * coordinates into vertCoordBuf. Multiple calls to assignNode with the same
+ * plane offset are harmless -- the coordinate write is idempotent (last-write-wins
+ * matches the Direct variant's behavior).
+ */
+Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCount, MeshIndexType triangleCount, usize numFeatures)
+{
+  if(m_ShouldCancel)
+  {
+    return {};
+  }
+  m_MessageHandler(IFilter::Message::Type::Info, "Creating mesh");
+
+  auto& featureIdsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
+
+  auto* grid = m_DataStructure.getDataAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
+
+  SizeVec3 udims = grid->getDimensions();
+
+  MeshIndexType xP = udims[0];
+  MeshIndexType yP = udims[1];
+  MeshIndexType zP = udims[2];
+
+  const MeshIndexType sliceSize = xP * yP;
+  const MeshIndexType nodePlaneSize = (xP + 1) * (yP + 1);
+  constexpr auto kMax = std::numeric_limits<MeshIndexType>::max();
+
+  auto* triangleGeom = m_DataStructure.getDataAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
+
+  ShapeType tDims = {nodeCount};
+  triangleGeom->resizeVertexList(nodeCount);
+  triangleGeom->resizeFaceList(triangleCount);
+  triangleGeom->getFaceAttributeMatrix()->resizeTuples({triangleCount});
+  triangleGeom->getVertexAttributeMatrix()->resizeTuples(tDims);
+
+  auto& faceLabelsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsDataPath)->getDataStoreRef();
+
+  auto& nodeTypesStore = m_DataStructure.getDataAs<Int8Array>(m_InputValues->NodeTypesDataPath)->getDataStoreRef();
+  nodeTypesStore.resizeTuples({nodeCount});
+
+  VertexStore& vertex = triangleGeom->getVertices()->getDataStoreRef();
+  TriStore& triangle = triangleGeom->getFaces()->getDataStoreRef();
+
+  const auto isOutOfCore = [](const IArray* array) { return array != nullptr && IsOutOfCore(*array); };
+  bool hasOutOfCoreTarget = isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->FeatureIdsArrayPath)) ||
+                            isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->NodeTypesDataPath)) ||
+                            isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->FaceLabelsDataPath)) || isOutOfCore(triangleGeom->getVertices()) || isOutOfCore(triangleGeom->getFaces());
+  const auto inspectPaths = [this, &hasOutOfCoreTarget, &isOutOfCore](const std::vector<DataPath>& paths) {
+    for(const auto& path : paths)
+    {
+      hasOutOfCoreTarget = hasOutOfCoreTarget || isOutOfCore(m_DataStructure.getDataAs<IDataArray>(path));
+    }
+  };
+  inspectPaths(m_InputValues->SelectedCellDataArrayPaths);
+  inspectPaths(m_InputValues->SelectedFeatureDataArrayPaths);
+  inspectPaths(m_InputValues->CreatedDataArrayPaths);
+
+  auto nodeRecordStoreResult = CreateNodeRecordStore(nodeCount, !hasOutOfCoreTarget, m_ShouldCancel);
+  if(nodeRecordStoreResult.invalid())
+  {
+    return ConvertResult(std::move(nodeRecordStoreResult));
+  }
+  auto nodeRecordStore = std::move(nodeRecordStoreResult.value());
+  ExternalNodeRecords ownerLists(*nodeRecordStore, m_ShouldCancel);
+
+  std::vector<std::shared_ptr<AbstractTupleTransfer>> tupleTransferFunctions;
+  for(usize i = 0; i < m_InputValues->SelectedCellDataArrayPaths.size(); i++)
+  {
+    ::AddTupleTransferInstance(m_DataStructure, m_InputValues->SelectedCellDataArrayPaths[i], m_InputValues->CreatedDataArrayPaths[i], tupleTransferFunctions);
+  }
+
+  for(usize i = 0; i < m_InputValues->SelectedFeatureDataArrayPaths.size(); i++)
+  {
+    ::AddFeatureTupleTransferInstance(m_DataStructure, m_InputValues->SelectedFeatureDataArrayPaths[i], m_InputValues->CreatedDataArrayPaths[i + m_InputValues->SelectedCellDataArrayPaths.size()],
+                                      m_InputValues->FeatureIdsArrayPath, tupleTransferFunctions);
+  }
+
+  // Buffer current and next z-slices for featureIds
+  auto curSlice = std::make_unique<int32[]>(sliceSize);
+  auto nextSlice = std::make_unique<int32[]>(sliceSize);
+
+  // Rolling node-plane buffers: O(2 * nodePlaneSize) instead of O((xP+1)*(yP+1)*(zP+1))
+  std::vector<MeshIndexType> nodePlane0(nodePlaneSize, kMax);
+  std::vector<MeshIndexType> nodePlane1(nodePlaneSize, kMax);
+
+  // Lambda to assign a node: if not yet assigned, assign sequential ID.
+  // Coordinates and owner state are kept in bounded external records. Repeated
+  // assignments preserve the direct algorithm's last-write-wins behavior.
+  auto assignNode = [&](std::vector<MeshIndexType>& plane, MeshIndexType offset, MeshIndexType& assignedNodeCount, usize coordX, usize coordY, usize coordZ) {
+    if(plane[offset] == kMax)
+    {
+      plane[offset] = assignedNodeCount;
+      assignedNodeCount++;
+    }
+    nx::core::Point3D<float64> tmpCoords = grid->getPlaneCoords(coordX, coordY, coordZ);
+    ownerLists.setCoordinates(plane[offset], tmpCoords);
+  };
+
+  // Load first slice
+  auto featureReadResult = featureIdsStore.copyIntoBuffer(0, nonstd::span<int32>(curSlice.get(), sliceSize));
+  if(featureReadResult.invalid())
+  {
+    return featureReadResult;
+  }
+
+  MeshIndexType triangleIndex = 0;
+  MeshIndexType assignedNodeCount = 0;
+
+  // Per-slice buffers declared outside the loop so vector capacity is reused across slices.
+  std::vector<MeshIndexType> triBuffer;
+  std::vector<int32> faceLabelBuf;
+  std::vector<QuickSurfaceTransferData> ttArgsBuf;
+
+  for(MeshIndexType k = 0; k < zP; k++)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    // Load next z-slice if available
+    if(k < zP - 1)
+    {
+      featureReadResult = featureIdsStore.copyIntoBuffer((k + 1) * sliceSize, nonstd::span<int32>(nextSlice.get(), sliceSize));
+      if(featureReadResult.invalid())
+      {
+        return featureReadResult;
+      }
+    }
+
+    triBuffer.clear();
+    faceLabelBuf.clear();
+    ttArgsBuf.clear();
+
+    for(MeshIndexType j = 0; j < yP; j++)
+    {
+      for(MeshIndexType i = 0; i < xP; i++)
+      {
+        MeshIndexType localIdx = j * xP + i;
+        MeshIndexType point = k * sliceSize + localIdx;
+        int32 curFeature = curSlice[localIdx];
+
+        // Node plane offsets: offset = nj * (xP+1) + ni
+        // nodePlane0 = z=k plane, nodePlane1 = z=k+1 plane
+
+        if(i == 0)
+        {
+          MeshIndexType n1Off = j * (xP + 1) + i;
+          MeshIndexType n2Off = (j + 1) * (xP + 1) + i;
+          MeshIndexType n3Off = j * (xP + 1) + i;
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + i;
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i, j, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i, j + 1, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i, j, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i + 1, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid2);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid4);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        if(j == 0)
+        {
+          MeshIndexType n1Off = j * (xP + 1) + i;
+          MeshIndexType n2Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n3Off = j * (xP + 1) + i;
+          MeshIndexType n4Off = j * (xP + 1) + (i + 1);
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i, j, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i + 1, j, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i, j, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i + 1, j, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid4);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        if(k == 0)
+        {
+          MeshIndexType n1Off = j * (xP + 1) + i;
+          MeshIndexType n2Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n3Off = (j + 1) * (xP + 1) + i;
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + (i + 1);
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i, j, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i + 1, j, k);
+          assignNode(nodePlane0, n3Off, assignedNodeCount, i, j + 1, k);
+          assignNode(nodePlane0, n4Off, assignedNodeCount, i + 1, j + 1, k);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane0[n3Off];
+          MeshIndexType nid4 = nodePlane0[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid2);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid4);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        if(i == (xP - 1))
+        {
+          MeshIndexType n1Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n3Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + (i + 1);
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i + 1, j, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i + 1, j + 1, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i + 1, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid4);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        else if(curFeature != curSlice[localIdx + 1])
+        {
+          int32 neigh1Feature = curSlice[localIdx + 1];
+          MeshIndexType neigh1 = point + 1;
+
+          MeshIndexType n1Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n3Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + (i + 1);
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i + 1, j, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i + 1, j + 1, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i + 1, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          if(curFeature < neigh1Feature)
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid2);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh1Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh1, point, curFeature, neigh1Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid2);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(neigh1Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh1, point, neigh1Feature, curFeature});
+          }
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          if(curFeature < neigh1Feature)
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid4);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh1Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh1, point, curFeature, neigh1Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid4);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(neigh1Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh1, point, neigh1Feature, curFeature});
+          }
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(neigh1Feature);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(neigh1Feature);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(neigh1Feature);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(neigh1Feature);
+        }
+        if(j == (yP - 1))
+        {
+          MeshIndexType n1Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = (j + 1) * (xP + 1) + i;
+          MeshIndexType n3Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + i;
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i + 1, j + 1, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i, j + 1, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j + 1, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid4);
+          triBuffer.push_back(nid3);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        else if(curFeature != curSlice[localIdx + xP])
+        {
+          int32 neigh2Feature = curSlice[localIdx + xP];
+          MeshIndexType neigh2 = point + xP;
+
+          MeshIndexType n1Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = (j + 1) * (xP + 1) + i;
+          MeshIndexType n3Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + i;
+          assignNode(nodePlane0, n1Off, assignedNodeCount, i + 1, j + 1, k);
+          assignNode(nodePlane0, n2Off, assignedNodeCount, i, j + 1, k);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j + 1, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane0[n1Off];
+          MeshIndexType nid2 = nodePlane0[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          if(curFeature < neigh2Feature)
+          {
+            triBuffer.push_back(nid2);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh2Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh2, point, curFeature, neigh2Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid2);
+            faceLabelBuf.push_back(neigh2Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh2, point, neigh2Feature, curFeature});
+          }
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          if(curFeature < neigh2Feature)
+          {
+            triBuffer.push_back(nid4);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh2Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh2, point, curFeature, neigh2Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid4);
+            faceLabelBuf.push_back(neigh2Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh2, point, neigh2Feature, curFeature});
+          }
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(neigh2Feature);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(neigh2Feature);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(neigh2Feature);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(neigh2Feature);
+        }
+        if(k == (zP - 1))
+        {
+          MeshIndexType n1Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = j * (xP + 1) + i;
+          MeshIndexType n3Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + i;
+          assignNode(nodePlane1, n1Off, assignedNodeCount, i + 1, j, k + 1);
+          assignNode(nodePlane1, n2Off, assignedNodeCount, i, j, k + 1);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j + 1, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane1[n1Off];
+          MeshIndexType nid2 = nodePlane1[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid2);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          triBuffer.push_back(nid3);
+          triBuffer.push_back(nid4);
+          faceLabelBuf.push_back(-1);
+          faceLabelBuf.push_back(curFeature);
+          ttArgsBuf.push_back({triangleIndex, point, point, -1, curFeature});
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(-1);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(-1);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(-1);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(-1);
+        }
+        else if(curFeature != nextSlice[localIdx])
+        {
+          int32 neigh3Feature = nextSlice[localIdx];
+          MeshIndexType neigh3 = point + sliceSize;
+
+          MeshIndexType n1Off = j * (xP + 1) + (i + 1);
+          MeshIndexType n2Off = j * (xP + 1) + i;
+          MeshIndexType n3Off = (j + 1) * (xP + 1) + (i + 1);
+          MeshIndexType n4Off = (j + 1) * (xP + 1) + i;
+          assignNode(nodePlane1, n1Off, assignedNodeCount, i + 1, j, k + 1);
+          assignNode(nodePlane1, n2Off, assignedNodeCount, i, j, k + 1);
+          assignNode(nodePlane1, n3Off, assignedNodeCount, i + 1, j + 1, k + 1);
+          assignNode(nodePlane1, n4Off, assignedNodeCount, i, j + 1, k + 1);
+
+          MeshIndexType nid1 = nodePlane1[n1Off];
+          MeshIndexType nid2 = nodePlane1[n2Off];
+          MeshIndexType nid3 = nodePlane1[n3Off];
+          MeshIndexType nid4 = nodePlane1[n4Off];
+
+          triBuffer.push_back(nid1);
+          if(curFeature < neigh3Feature)
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid2);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh3Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh3, point, curFeature, neigh3Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid2);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(neigh3Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh3, point, neigh3Feature, curFeature});
+          }
+          triangleIndex++;
+
+          triBuffer.push_back(nid2);
+          if(curFeature < neigh3Feature)
+          {
+            triBuffer.push_back(nid3);
+            triBuffer.push_back(nid4);
+            faceLabelBuf.push_back(curFeature);
+            faceLabelBuf.push_back(neigh3Feature);
+            ttArgsBuf.push_back({triangleIndex, neigh3, point, curFeature, neigh3Feature});
+          }
+          else
+          {
+            triBuffer.push_back(nid4);
+            triBuffer.push_back(nid3);
+            faceLabelBuf.push_back(neigh3Feature);
+            faceLabelBuf.push_back(curFeature);
+            ttArgsBuf.push_back({triangleIndex, neigh3, point, neigh3Feature, curFeature});
+          }
+          triangleIndex++;
+
+          ownerLists[nid1].insert(curFeature);
+          ownerLists[nid1].insert(neigh3Feature);
+          ownerLists[nid2].insert(curFeature);
+          ownerLists[nid2].insert(neigh3Feature);
+          ownerLists[nid3].insert(curFeature);
+          ownerLists[nid3].insert(neigh3Feature);
+          ownerLists[nid4].insert(curFeature);
+          ownerLists[nid4].insert(neigh3Feature);
+        }
+      }
+    }
+
+    if(ownerLists.invalid())
+    {
+      return ownerLists.takeResult();
+    }
+
+    // Flush buffered triangle connectivity for this z-slice
+    if(!triBuffer.empty())
+    {
+      MeshIndexType sliceTriStart = triangleIndex - (triBuffer.size() / 3);
+      auto triangleWriteResult = triangle.copyFromBuffer(sliceTriStart * 3, nonstd::span<const MeshIndexType>(triBuffer.data(), triBuffer.size()));
+      if(triangleWriteResult.invalid())
+      {
+        return triangleWriteResult;
+      }
+
+      // Flush buffered face labels for this z-slice
+      auto faceLabelsWriteResult = faceLabelsStore.copyFromBuffer(sliceTriStart * 2, nonstd::span<const int32>(faceLabelBuf.data(), faceLabelBuf.size()));
+      if(faceLabelsWriteResult.invalid())
+      {
+        return faceLabelsWriteResult;
+      }
+
+      // Batch TupleTransfer calls with face labels embedded in the records
+      for(const auto& tupleTransferFunction : tupleTransferFunctions)
+      {
+        auto transferResult = tupleTransferFunction->quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData>(ttArgsBuf.data(), ttArgsBuf.size()));
+        if(transferResult.invalid())
+        {
+          return transferResult;
+        }
+      }
+    }
+
+    // Rotate planes: plane1 becomes plane0 for next z-step, reinitialize plane1
+    std::swap(nodePlane0, nodePlane1);
+    std::fill(nodePlane1.begin(), nodePlane1.end(), kMax);
+
+    // Swap featureId buffers
+    std::swap(curSlice, nextSlice);
+  }
+
+  auto nodeFlushResult = ownerLists.flush();
+  if(nodeFlushResult.invalid())
+  {
+    return nodeFlushResult;
+  }
+
+  // Stream the externally stored node state to the output arrays in fixed-size
+  // contiguous batches. No allocation scales with the generated mesh size.
+  auto recordBuffer = std::make_unique<QuickSurfaceNodeRecord[]>(k_NodeRecordBatch);
+  auto coordinateBuffer = std::make_unique<VertexStore::value_type[]>(k_NodeRecordBatch * 3);
+  auto nodeTypeBuffer = std::make_unique<int8[]>(k_NodeRecordBatch);
+  for(uint64 recordOffset = 0; recordOffset < nodeCount; recordOffset += k_NodeRecordBatch)
+  {
+    if(m_ShouldCancel)
+    {
+      return {};
+    }
+    const uint64 recordCount = std::min<uint64>(k_NodeRecordBatch, nodeCount - recordOffset);
+    auto recordBytes = nonstd::span<std::byte>(reinterpret_cast<std::byte*>(recordBuffer.get()), static_cast<usize>(recordCount) * sizeof(QuickSurfaceNodeRecord));
+    auto readResult = nodeRecordStore->read(recordOffset, recordCount, recordBytes, m_ShouldCancel);
+    if(readResult.invalid())
+    {
+      return ConvertResult(std::move(readResult));
+    }
+    if(readResult.value() != recordCount)
+    {
+      return MakeErrorResult(-56344, "QuickSurfaceMesh received a short read from its node-state store.");
+    }
+    for(usize local = 0; local < recordCount; local++)
+    {
+      const auto& record = recordBuffer[local];
+      if(record.assigned == 0)
+      {
+        return MakeErrorResult(-56345, "QuickSurfaceMesh encountered an unassigned node while streaming mesh output.");
+      }
+      coordinateBuffer[local * 3] = record.coordinates[0];
+      coordinateBuffer[local * 3 + 1] = record.coordinates[1];
+      coordinateBuffer[local * 3 + 2] = record.coordinates[2];
+      nodeTypeBuffer[local] = static_cast<int8>(record.ownerCount + (record.touchesExterior != 0 ? 10 : 0));
+    }
+    auto vertexWriteResult = vertex.copyFromBuffer(static_cast<usize>(recordOffset) * 3, nonstd::span<const VertexStore::value_type>(coordinateBuffer.get(), static_cast<usize>(recordCount) * 3));
+    if(vertexWriteResult.invalid())
+    {
+      return vertexWriteResult;
+    }
+    auto nodeTypeWriteResult = nodeTypesStore.copyFromBuffer(static_cast<usize>(recordOffset), nonstd::span<const int8>(nodeTypeBuffer.get(), static_cast<usize>(recordCount)));
+    if(nodeTypeWriteResult.invalid())
+    {
+      return nodeTypeWriteResult;
+    }
+  }
+  return {};
+}

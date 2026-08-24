@@ -8,7 +8,6 @@
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/Filter/Actions/CreateArrayAction.hpp"
 #include "simplnx/Filter/Actions/CreateAttributeMatrixAction.hpp"
-#include "simplnx/Filter/Actions/DeleteDataAction.hpp"
 #include "simplnx/Parameters/ArraySelectionParameter.hpp"
 #include "simplnx/Parameters/BoolParameter.hpp"
 #include "simplnx/Parameters/ChoicesParameter.hpp"
@@ -23,11 +22,6 @@
 #include <random>
 
 using namespace nx::core;
-
-namespace
-{
-const std::string k_MaskName = "temp_mask";
-}
 
 namespace nx::core
 {
@@ -118,9 +112,7 @@ IFilter::PreflightResult ComputeKMeansFilter::preflightImpl(const DataStructure&
                                                             const ExecutionContext& executionContext) const
 {
   auto pInitClustersValue = filterArgs.value<uint64>(k_InitClusters_Key);
-  auto pUseMaskValue = filterArgs.value<bool>(k_UseMask_Key);
   auto pSelectedArrayPathValue = filterArgs.value<DataPath>(k_SelectedArrayPath_Key);
-  auto pMaskArrayPathValue = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
   auto pFeatureIdsArrayNameValue = filterArgs.value<std::string>(k_FeatureIdsArrayName_Key);
   auto pFeatureAMPathValue = filterArgs.value<DataPath>(k_FeatureAMPath_Key);
   auto pMeansArrayNameValue = filterArgs.value<std::string>(k_MeansArrayName_Key);
@@ -137,20 +129,9 @@ IFilter::PreflightResult ComputeKMeansFilter::preflightImpl(const DataStructure&
   }
 
   {
-    auto createAction = std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue),
-                                                            CreateArrayAction::k_DefaultDataFormat, "0");
+    auto createAction =
+        std::make_unique<CreateArrayAction>(DataType::int32, clusterArray->getTupleShape(), std::vector<usize>{1}, pSelectedArrayPathValue.replaceName(pFeatureIdsArrayNameValue), "", "0");
     resultOutputActions.value().appendAction(std::move(createAction));
-  }
-
-  if(!pUseMaskValue)
-  {
-    DataPath tempPath = DataPath({k_MaskName});
-    {
-      auto createAction = std::make_unique<CreateArrayAction>(DataType::boolean, clusterArray->getTupleShape(), std::vector<usize>{1}, tempPath, CreateArrayAction::k_DefaultDataFormat, "true");
-      resultOutputActions.value().appendAction(std::move(createAction));
-    }
-
-    resultOutputActions.value().appendDeferredAction(std::make_unique<DeleteDataAction>(tempPath));
   }
 
   auto tupDims = std::vector<usize>{pInitClustersValue + 1};
@@ -176,12 +157,6 @@ IFilter::PreflightResult ComputeKMeansFilter::preflightImpl(const DataStructure&
 Result<> ComputeKMeansFilter::executeImpl(DataStructure& dataStructure, const Arguments& filterArgs, const PipelineFilter* pipelineNode, const MessageHandler& messageHandler,
                                           const std::atomic_bool& shouldCancel, const ExecutionContext& executionContext) const
 {
-  auto maskPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
-  if(!filterArgs.value<bool>(k_UseMask_Key))
-  {
-    maskPath = DataPath({k_MaskName});
-  }
-
   auto seed = filterArgs.value<std::mt19937_64::result_type>(k_SeedValue_Key);
   if(!filterArgs.value<bool>(k_UseSeed_Key))
   {
@@ -195,7 +170,8 @@ Result<> ComputeKMeansFilter::executeImpl(DataStructure& dataStructure, const Ar
 
   inputValues.InitClusters = filterArgs.value<uint64>(k_InitClusters_Key);
   inputValues.DistanceMetric = static_cast<ClusterUtilities::DistanceMetric>(filterArgs.value<ChoicesParameter::ValueType>(k_DistanceMetric_Key));
-  inputValues.MaskArrayPath = maskPath;
+  inputValues.UseMask = filterArgs.value<bool>(k_UseMask_Key);
+  inputValues.MaskArrayPath = filterArgs.value<DataPath>(k_MaskArrayPath_Key);
   inputValues.MeansArrayPath = filterArgs.value<DataPath>(k_FeatureAMPath_Key).createChildPath(filterArgs.value<std::string>(k_MeansArrayName_Key));
   inputValues.Seed = seed;
 

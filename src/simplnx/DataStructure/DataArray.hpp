@@ -7,6 +7,7 @@
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/DataStructure/EmptyDataStore.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <vector>
 
@@ -212,8 +213,30 @@ public:
     {
       return nullptr;
     }
-    const std::shared_ptr<IDataStore> sharedStore = getDataStore()->deepCopy();
-    std::shared_ptr<store_type> dataStore = std::dynamic_pointer_cast<store_type>(sharedStore);
+
+    std::shared_ptr<store_type> dataStore;
+    if(getDataStore()->getStoreType() == IDataStore::StoreType::Empty)
+    {
+      // Preflight copies must remain metadata-only placeholders.
+      const std::shared_ptr<IDataStore> sharedStore = getDataStore()->deepCopy();
+      dataStore = std::dynamic_pointer_cast<store_type>(sharedStore);
+    }
+    else
+    {
+      // A DataArray copy has destination context that IDataStore::deepCopy()
+      // does not. Resolve that destination's storage, then transfer through
+      // bounded bulk pages so an OOC array never materializes in full.
+      dataStore = DataStoreUtilities::CreateDataStore<T>(dataStruct, copyPath, getTupleShape(), getComponentShape());
+      if(dataStore == nullptr || dataStore->copyFrom(0, *getDataStore(), 0, getNumberOfTuples()).invalid())
+      {
+        return nullptr;
+      }
+    }
+
+    if(dataStore == nullptr)
+    {
+      return nullptr;
+    }
     // Don't construct with identifier since it will get created when inserting into data structure
     std::shared_ptr<DataArray<T>> copy = std::shared_ptr<DataArray<T>>(new DataArray<T>(dataStruct, copyPath.getTargetName(), dataStore));
     if(dataStruct.insert(copy, copyPath.getParent()))

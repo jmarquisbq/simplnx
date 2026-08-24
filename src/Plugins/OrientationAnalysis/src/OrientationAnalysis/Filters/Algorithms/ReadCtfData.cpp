@@ -9,6 +9,7 @@
 #include <EbsdLib/Math/EbsdLibMath.h>
 
 #include <fmt/format.h>
+#include <nonstd/span.hpp>
 
 #include <algorithm>
 #include <string>
@@ -120,6 +121,20 @@ Result<> ReadCtfData::loadMaterialInfo(ebsdlib::CtfReader* reader) const
 }
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Copies raw EBSD data from the EbsdLib CtfReader buffers into the DataStructure arrays.
+ *
+ * @section ooc_strategy OOC Strategy
+ * Same bulk I/O approach as ReadAngData::copyRawEbsdData():
+ *   - Single-component arrays use one copyFromBuffer() call each.
+ *   - Euler angles use chunked interleaving with hex correction and optional degree-to-radian
+ *     conversion applied in-buffer before each chunk write.
+ *   - The crystal structures array is cached locally via copyIntoBuffer() because it is
+ *     ensemble-level (tiny) and is needed for every cell during hex correction checks.
+ *     Reading it once avoids repeated OOC lookups during the per-cell loop.
+ *
+ * @param reader Pointer to the EbsdLib CtfReader that has already parsed the file.
+ */
 Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
 {
   const DataPath cellAttributeMatrixPath = m_InputValues->DataContainerName.createChildPath(m_InputValues->CellAttributeMatrixName);
@@ -199,8 +214,8 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
         return MakeErrorResult(
             -19602, fmt::format("Scan point {} carries phase value {}, which is outside the valid range [0, {}] established by the file's phase definitions.", i, phasePtr[i], ensembleTupleCount - 1));
       }
-      targetArray[i] = phasePtr[i];
     }
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const int32>(phasePtr, totalCells));
   }
 
   // Condense the Euler Angles from 3 separate arrays into a single 3-component array, applying
@@ -218,32 +233,45 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     // DataStructure array (which may be out-of-core backed) through the loop.
     const auto* cellPhases = static_cast<const int32*>(phaseColumnPtr);
 
+    // Cache the small ensemble-level array once to avoid repeated out-of-core lookups.
+    const auto& csStore = crystalStructures.getDataStoreRef();
+    const usize numPhases = csStore.getNumberOfTuples();
+    std::vector<uint32> csCache(numPhases);
+    csStore.copyIntoBuffer(0, nonstd::span<uint32>(csCache.data(), numPhases));
+
     const auto* fComp0 = static_cast<const float32*>(euler1Ptr);
     const auto* fComp1 = static_cast<const float32*>(euler2Ptr);
     const auto* fComp2 = static_cast<const float32*>(euler3Ptr);
 
     auto& cellEulerAngles = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::CtfFile::EulerAngles));
-    for(usize i = 0; i < totalCells; i++)
+    auto& eulerStore = cellEulerAngles.getDataStoreRef();
+
+    // Chunked interleaving with corrections applied in the local buffer before bulk write
+    constexpr usize k_ChunkSize = 65536;
+    std::vector<float32> eulerBuf(k_ChunkSize * 3);
+    for(usize offset = 0; offset < totalCells; offset += k_ChunkSize)
     {
-      float32 euler1 = fComp0[i];
-      float32 euler2 = fComp1[i];
-      float32 euler3 = fComp2[i];
-      // See the filter documentation for this correction factor: Oxford Instruments aligns the
-      // hexagonal crystal x-axis with [10-10] while DREAM3D-NX follows the EDAX/TSL convention
-      // of aligning it with [2-1-10], a 30 degree rotation about [0001] applied to phi2.
-      if(crystalStructures[cellPhases[i]] == ebsdlib::CrystalStructure::Hexagonal_High && m_InputValues->EdaxHexagonalAlignment)
+      const usize count = std::min(k_ChunkSize, totalCells - offset);
+      for(usize i = 0; i < count; i++)
       {
-        euler3 = static_cast<float32>(static_cast<float64>(euler3) + 30.0);
+        float32 euler1 = fComp0[offset + i];
+        float32 euler2 = fComp1[offset + i];
+        float32 euler3 = fComp2[offset + i];
+        if(csCache[static_cast<usize>(cellPhases[offset + i])] == ebsdlib::CrystalStructure::Hexagonal_High && m_InputValues->EdaxHexagonalAlignment)
+        {
+          euler3 = static_cast<float32>(static_cast<float64>(euler3) + 30.0);
+        }
+        if(m_InputValues->DegreesToRadians)
+        {
+          euler1 = static_cast<float32>(static_cast<float64>(euler1) * ebsdlib::constants::k_PiOver180D);
+          euler2 = static_cast<float32>(static_cast<float64>(euler2) * ebsdlib::constants::k_PiOver180D);
+          euler3 = static_cast<float32>(static_cast<float64>(euler3) * ebsdlib::constants::k_PiOver180D);
+        }
+        eulerBuf[3 * i] = euler1;
+        eulerBuf[3 * i + 1] = euler2;
+        eulerBuf[3 * i + 2] = euler3;
       }
-      if(m_InputValues->DegreesToRadians)
-      {
-        euler1 = static_cast<float32>(static_cast<float64>(euler1) * ebsdlib::constants::k_PiOver180D);
-        euler2 = static_cast<float32>(static_cast<float64>(euler2) * ebsdlib::constants::k_PiOver180D);
-        euler3 = static_cast<float32>(static_cast<float64>(euler3) * ebsdlib::constants::k_PiOver180D);
-      }
-      cellEulerAngles[3 * i] = euler1;
-      cellEulerAngles[3 * i + 1] = euler2;
-      cellEulerAngles[3 * i + 2] = euler3;
+      eulerStore.copyFromBuffer(offset * 3, nonstd::span<const float32>(eulerBuf.data(), count * 3));
     }
   }
 
@@ -252,7 +280,7 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     return {};
   }
 
-  // The remaining columns are copied verbatim.
+  // The remaining columns are copied verbatim with one bulk write per array.
   const std::vector<std::pair<std::string, nx::core::DataType>> passthroughColumns = {
       {ebsdlib::Ctf::Bands, DataType::int32}, {ebsdlib::Ctf::Error, DataType::int32}, {ebsdlib::Ctf::MAD, DataType::float32}, {ebsdlib::Ctf::BC, DataType::int32},
       {ebsdlib::Ctf::BS, DataType::int32},    {ebsdlib::Ctf::X, DataType::float32},   {ebsdlib::Ctf::Y, DataType::float32},
@@ -270,13 +298,13 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     {
       const auto* sourcePtr = static_cast<const int32*>(columnPtr);
       auto& targetArray = m_DataStructure.getDataRefAs<Int32Array>(targetPath);
-      std::copy(sourcePtr, sourcePtr + totalCells, targetArray.begin());
+      targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const int32>(sourcePtr, totalCells));
     }
     else
     {
       const auto* sourcePtr = static_cast<const float32*>(columnPtr);
       auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(targetPath);
-      std::copy(sourcePtr, sourcePtr + totalCells, targetArray.begin());
+      targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(sourcePtr, totalCells));
     }
   }
 

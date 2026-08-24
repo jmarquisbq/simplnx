@@ -62,9 +62,9 @@ public:
     {
       int halfDim = m_Config->imageDim / 2;
       double* intensity = m_Intensity->getPointer(0);
-      size_t numCoords = m_XYZCoords->getNumberOfTuples();
-      float* xyzPtr = m_XYZCoords->getPointer(0);
-      for(size_t i = 0; i < numCoords; i++)
+      usize numCoords = m_XYZCoords->getNumberOfTuples();
+      float32* xyzPtr = m_XYZCoords->getPointer(0);
+      for(usize i = 0; i < numCoords; i++)
       {
         if(xyzPtr[i * 3 + 2] < 0.0f) // If the unit sphere data is in the southern hemisphere
         {
@@ -72,13 +72,13 @@ public:
           xyzPtr[i * 3 + 1] *= -1.0f;
           xyzPtr[i * 3 + 2] *= -1.0f;
         }
-        float x = xyzPtr[i * 3] / (1 + xyzPtr[i * 3 + 2]);
-        float y = xyzPtr[i * 3 + 1] / (1 + xyzPtr[i * 3 + 2]);
+        float32 x = xyzPtr[i * 3] / (1 + xyzPtr[i * 3 + 2]);
+        float32 y = xyzPtr[i * 3 + 1] / (1 + xyzPtr[i * 3 + 2]);
 
         int xCoord = static_cast<int>(x * static_cast<float32>(halfDim - 1)) + halfDim;
         int yCoord = static_cast<int>(y * static_cast<float32>(halfDim - 1)) + halfDim;
 
-        size_t index = (yCoord * m_Config->imageDim) + xCoord;
+        usize index = (yCoord * m_Config->imageDim) + xCoord;
 
         intensity[index]++;
       }
@@ -103,25 +103,25 @@ public:
   void unstructuredGridInterpolator(nx::core::IFilter* filter, nx::core::TriangleGeom* delaunayGeom, std::vector<V>& xPositionsPtr, std::vector<V>& yPositionsPtr, T* xyValues,
                                     typename std::vector<W>& outputValues) const
   {
-    using Vec3f = nx::core::Vec3<float>;
-    using RTreeType = RTree<size_t, float, 2, float>;
+    using Vec3f = nx::core::Vec3<float32>;
+    using RTreeType = RTree<usize, float32, 2, float32>;
 
     // filter->notifyStatusMessage(QString("Starting Interpolation...."));
     nx::core::IGeometry::SharedFaceList& delTriangles = delaunayGeom->getFacesRef();
-    size_t numTriangles = delaunayGeom->getNumberOfFaces();
+    usize numTriangles = delaunayGeom->getNumberOfFaces();
     // int percent = 0;
     int counter = xPositionsPtr.size() / 100;
     RTreeType m_RTree;
     // Populate the RTree
 
-    size_t numTris = delaunayGeom->getNumberOfFaces();
-    for(size_t tIndex = 0; tIndex < numTris; tIndex++)
+    usize numTris = delaunayGeom->getNumberOfFaces();
+    for(usize tIndex = 0; tIndex < numTris; tIndex++)
     {
-      std::array<float, 6> boundBox = nx::core::IntersectionUtilities::GetBoundingBoxAtTri(*delaunayGeom, tIndex);
+      std::array<float32, 6> boundBox = nx::core::IntersectionUtilities::GetBoundingBoxAtTri(*delaunayGeom, tIndex);
       m_RTree.Insert(boundBox.data(), boundBox.data() + 3, tIndex); // Note, all values including zero are fine in this version
     }
 
-    for(size_t vertIndex = 0; vertIndex < xPositionsPtr.size(); vertIndex++)
+    for(usize vertIndex = 0; vertIndex < xPositionsPtr.size(); vertIndex++)
     {
       Vec3f rayOrigin(xPositionsPtr[vertIndex], yPositionsPtr[vertIndex], 1.0F);
       Vec3f rayDirection(0.0F, 0.0F, -1.0F);
@@ -141,8 +141,8 @@ public:
 
       // Create these reusable variables to save the reallocation each time through the loop
 
-      std::vector<size_t> hitTriangleIds;
-      std::function<bool(size_t)> func = [&](size_t id) {
+      ShapeType hitTriangleIds;
+      std::function<bool(usize)> func = [&](usize id) {
         hitTriangleIds.push_back(id);
         return true; // keep going
       };
@@ -151,7 +151,7 @@ public:
       for(auto triIndex : hitTriangleIds)
       {
         barycentricCoord = {0.0F, 0.0F, 0.0F};
-        std::array<size_t, 3> triVertIndices;
+        std::array<usize, 3> triVertIndices;
         // Get the Vertex Coordinates for each of the 3 vertices
         std::array<nx::core::Point3Df, 3> verts;
         delaunayGeom->getFaceCoordinates(triIndex, verts);
@@ -166,11 +166,11 @@ public:
         {
           // Linear Interpolate dx and dy values using the barycentric coordinates
           delaunayGeom->getFaceCoordinates(triIndex, verts);
-          float f0 = xyValues[triVertIndices[0]];
-          float f1 = xyValues[triVertIndices[1]];
-          float f2 = xyValues[triVertIndices[2]];
+          float32 f0 = xyValues[triVertIndices[0]];
+          float32 f1 = xyValues[triVertIndices[1]];
+          float32 f2 = xyValues[triVertIndices[2]];
 
-          float interpolatedVal = (barycentricCoord[0] * f0) + (barycentricCoord[1] * f1) + (barycentricCoord[2] * f2);
+          float32 interpolatedVal = (barycentricCoord[0] * f0) + (barycentricCoord[1] * f1) + (barycentricCoord[2] * f2);
 
           outputValues[vertIndex] = interpolatedVal;
 
@@ -190,34 +190,34 @@ public:
 
     // We want half the sphere area for each square because each square represents a hemisphere.
     const float32 sphereRadius = 1.0f;
-    float halfSphereArea = 4.0f * ebsdlib::constants::k_PiF * sphereRadius * sphereRadius / 2.0f;
+    float32 halfSphereArea = 4.0f * ebsdlib::constants::k_PiF * sphereRadius * sphereRadius / 2.0f;
     // The length of a side of the square is the square root of the area
-    float squareEdge = std::sqrt(halfSphereArea);
-    float32 m_StepSize = squareEdge / static_cast<float>(m_Dimension);
+    float32 squareEdge = std::sqrt(halfSphereArea);
+    float32 m_StepSize = squareEdge / static_cast<float32>(m_Dimension);
 
     float32 m_MaxCoord = squareEdge / 2.0f;
     float32 m_MinCoord = -squareEdge / 2.0f;
-    std::array<float, 3> vert = {0.0f, 0.0f, 0.0f};
+    std::array<float32, 3> vert = {0.0f, 0.0f, 0.0f};
 
-    std::vector<float> squareCoords(m_Dimension * m_Dimension * 3);
+    std::vector<float32> squareCoords(m_Dimension * m_Dimension * 3);
 
     // Northern Hemisphere Coordinates
-    std::vector<float> northSphereCoords(m_Dimension * m_Dimension * 3);
-    std::vector<float> northStereoCoords(m_Dimension * m_Dimension * 3);
+    std::vector<float32> northSphereCoords(m_Dimension * m_Dimension * 3);
+    std::vector<float32> northStereoCoords(m_Dimension * m_Dimension * 3);
 
     // Southern Hemisphere Coordinates
-    std::vector<float> southSphereCoords(m_Dimension * m_Dimension * 3);
-    std::vector<float> southStereoCoords(m_Dimension * m_Dimension * 3);
+    std::vector<float32> southSphereCoords(m_Dimension * m_Dimension * 3);
+    std::vector<float32> southStereoCoords(m_Dimension * m_Dimension * 3);
 
-    size_t index = 0;
+    usize index = 0;
 
-    const float origin = m_MinCoord + (m_StepSize / 2.0f);
-    for(int32_t y = 0; y < m_Dimension; ++y)
+    const float32 origin = m_MinCoord + (m_StepSize / 2.0f);
+    for(int32 y = 0; y < m_Dimension; ++y)
     {
       for(int x = 0; x < m_Dimension; ++x)
       {
-        vert[0] = origin + (static_cast<float>(x) * m_StepSize);
-        vert[1] = origin + (static_cast<float>(y) * m_StepSize);
+        vert[0] = origin + (static_cast<float32>(x) * m_StepSize);
+        vert[1] = origin + (static_cast<float32>(y) * m_StepSize);
 
         squareCoords[index * 3] = vert[0];
         squareCoords[index * 3 + 1] = vert[1];
@@ -234,8 +234,8 @@ public:
         northStereoCoords[index * 3 + 2] = 0.0f;
 
         // Reset the Lambert Square Coord
-        vert[0] = origin + (static_cast<float>(x) * m_StepSize);
-        vert[1] = origin + (static_cast<float>(y) * m_StepSize);
+        vert[0] = origin + (static_cast<float32>(x) * m_StepSize);
+        vert[1] = origin + (static_cast<float32>(y) * m_StepSize);
         ebsdlib::LambertUtilities::LambertSquareVertToSphereVert(vert.data(), ebsdlib::LambertUtilities::Hemisphere::South);
 
         southSphereCoords[index * 3] = vert[0];
@@ -263,7 +263,7 @@ public:
     usize numPts = northStereoCoords.size() / 3;
     // Create the default DataArray that will hold the FaceList and Vertices. We
     // size these to 1 because the Csv parser will resize them to the appropriate number of tuples
-    using DimensionType = std::vector<size_t>;
+    using DimensionType = ShapeType;
 
     DimensionType faceTupleShape = {0};
     Result result = ArrayCreationUtilities::CreateArray<IGeometry::MeshIndexType>(dataStructure, faceTupleShape, {3ULL}, sharedFaceListPath, IDataAction::Mode::Execute);
@@ -279,7 +279,7 @@ public:
     DataPath vertexPath({"Delaunay", "SharedVertexList"});
 
     DimensionType vertexTupleShape = {0};
-    result = ArrayCreationUtilities::CreateArray<float>(dataStructure, vertexTupleShape, {3}, vertexPath, IDataAction::Mode::Execute);
+    result = ArrayCreationUtilities::CreateArray<float32>(dataStructure, vertexTupleShape, {3}, vertexPath, IDataAction::Mode::Execute);
     if(result.invalid())
     {
       return -2;
@@ -349,15 +349,15 @@ public:
     //******************************************************************************************************************************
     // Perform a Bi-linear Interpolation
     // Generate a regular grid of XY points
-    size_t numSteps = 1024;
-    float32 stepInc = 2.0f / static_cast<float>(numSteps);
+    usize numSteps = 1024;
+    float32 stepInc = 2.0f / static_cast<float32>(numSteps);
     std::vector<float32> xcoords(numSteps * numSteps);
     std::vector<float32> ycoords(numSteps * numSteps);
-    for(size_t y = 0; y < numSteps; ++y)
+    for(usize y = 0; y < numSteps; ++y)
     {
-      for(size_t x = 0; x < numSteps; x++)
+      for(usize x = 0; x < numSteps; x++)
       {
-        size_t idx = y * numSteps + x;
+        usize idx = y * numSteps + x;
         xcoords[idx] = -1.0f + static_cast<float32>(x) * stepInc;
         ycoords[idx] = -1.0f + static_cast<float32>(y) * stepInc;
       }
@@ -431,13 +431,13 @@ std::vector<ebsdlib::DoubleArrayType::Pointer> createIntensityPoleFigures(ebsdli
     label2 = config.labels.at(2);
   }
 
-  const size_t numOrientations = config.eulers->getNumberOfTuples();
+  const usize numOrientations = config.eulers->getNumberOfTuples();
 
   // Create an Array to hold the XYZ Coordinates which are the coords on the sphere.
   // this is size for CUBIC ONLY, <001> Family
-  std::array<int32_t, 3> symSize = ops.getNumSymmetry();
+  std::array<int32, 3> symSize = ops.getNumSymmetry();
 
-  const std::vector<size_t> dims = {3};
+  const ShapeType dims = {3};
   const ebsdlib::FloatArrayType::Pointer xyz001 = ebsdlib::FloatArrayType::CreateArray(numOrientations * symSize[0], dims, label0 + std::string("xyzCoords"), true);
   // this is size for CUBIC ONLY, <011> Family
   const ebsdlib::FloatArrayType::Pointer xyz011 = ebsdlib::FloatArrayType::CreateArray(numOrientations * symSize[1], dims, label1 + std::string("xyzCoords"), true);
@@ -477,8 +477,8 @@ typename EbsdDataArray<T>::Pointer flipAndMirrorPoleFigure(EbsdDataArray<T>* src
     const int destY = config.imageDim - 1 - y;
     for(int x = 0; x < config.imageDim; x++)
     {
-      const size_t indexSrc = y * config.imageDim + x;
-      const size_t indexDest = destY * config.imageDim + x;
+      const usize indexSrc = y * config.imageDim + x;
+      const usize indexDest = destY * config.imageDim + x;
 
       T* argbPtr = src->getTuplePointer(indexSrc);
       converted->setTuple(indexDest, argbPtr);
@@ -542,9 +542,9 @@ Result<> WritePoleFigure::operator()()
 
   // Find the total number of angles we have based on the number of Tuples of the
   // Euler Angles array
-  const size_t numPoints = eulerAngles.getNumberOfTuples();
+  const usize numPoints = eulerAngles.getNumberOfTuples();
   // Find how many phases we have by getting the number of Crystal Structures
-  const size_t numPhases = crystalStructures.getNumberOfTuples();
+  const usize numPhases = crystalStructures.getNumberOfTuples();
 
   // Create the Image Geometry that will serve as the final storage location for each
   // pole figure. We are just giving it a default size for now, it will be resized
@@ -555,39 +555,66 @@ Result<> WritePoleFigure::operator()()
   imageGeom.setDimensions({static_cast<usize>(m_InputValues->ImageSize), static_cast<usize>(m_InputValues->ImageSize), 1});
   imageGeom.getCellData()->resizeTuples(tupleShape);
 
-  // Loop over all the voxels gathering the Euler angles for a specific phase into an array
-  for(size_t phase = 1; phase < numPhases; ++phase)
+  // Chunk size for streaming reads from (possibly OOC-backed) input arrays.
+  // Sized so each cell's working set (1 int32 phase + 3 float32 eulers +
+  // optional mask) fits comfortably in L2/L3 cache and the HDF5 chunked-
+  // read path hits whole chunks per call rather than per-element.
+  constexpr usize k_StreamChunkTuples = 65536;
+
+  std::vector<int32> phaseChunk(k_StreamChunkTuples);
+  std::vector<float32> eulerChunk(k_StreamChunkTuples * 3);
+
+  // Loop over all the voxels gathering the Euler angles for a specific phase into an array.
+  // Inside the phase loop we stream the input arrays in fixed-size chunks via
+  // copyIntoBuffer() rather than indexing one element at a time, which would
+  // fire one HDF5 read per [] on OOC-backed stores. Streaming keeps peak
+  // memory bounded to k_StreamChunkTuples * 16 bytes (~1 MB) regardless of
+  // input size; we never materialize the full input arrays in-core.
+  for(usize phase = 1; phase < numPhases; ++phase)
   {
-    size_t count = 0;
+    usize count = 0;
     // First find out how many voxels we are going to have. This is probably faster to loop twice than to
     // keep allocating memory everytime we find one.
-    for(size_t i = 0; i < numPoints; ++i)
+    for(usize chunkStart = 0; chunkStart < numPoints; chunkStart += k_StreamChunkTuples)
     {
-      if(phases[i] == phase)
+      const usize chunkLen = std::min(k_StreamChunkTuples, numPoints - chunkStart);
+      phases.getDataStoreRef().copyIntoBuffer(chunkStart, nonstd::span<int32>(phaseChunk.data(), chunkLen));
+      for(usize i = 0; i < chunkLen; ++i)
       {
-        if(!m_InputValues->UseMask || maskCompare->isTrue(i))
+        if(phaseChunk[i] == static_cast<int32>(phase))
         {
-          count++;
+          const usize globalIdx = chunkStart + i;
+          if(!m_InputValues->UseMask || maskCompare->isTrue(globalIdx))
+          {
+            count++;
+          }
         }
       }
     }
-    const std::vector<size_t> eulerCompDim = {3};
+    const ShapeType eulerCompDim = {3};
     const ebsdlib::FloatArrayType::Pointer subEulerAnglesPtr = ebsdlib::FloatArrayType::CreateArray(count, eulerCompDim, "Euler_Angles_Per_Phase", true);
-    subEulerAnglesPtr->initializeWithValue(std::numeric_limits<float>::signaling_NaN());
+    subEulerAnglesPtr->initializeWithValue(std::numeric_limits<float32>::signaling_NaN());
     ebsdlib::FloatArrayType& subEulerAngles = *subEulerAnglesPtr;
 
-    // Now loop through the Euler angles again and this time add them to the sub-Euler angle Array
+    // Now loop through the Euler angles again and this time add them to the sub-Euler angle Array.
     count = 0;
-    for(size_t i = 0; i < numPoints; ++i)
+    for(usize chunkStart = 0; chunkStart < numPoints; chunkStart += k_StreamChunkTuples)
     {
-      if(phases[i] == phase)
+      const usize chunkLen = std::min(k_StreamChunkTuples, numPoints - chunkStart);
+      phases.getDataStoreRef().copyIntoBuffer(chunkStart, nonstd::span<int32>(phaseChunk.data(), chunkLen));
+      eulerAngles.getDataStoreRef().copyIntoBuffer(chunkStart * 3, nonstd::span<float32>(eulerChunk.data(), chunkLen * 3));
+      for(usize i = 0; i < chunkLen; ++i)
       {
-        if(!m_InputValues->UseMask || maskCompare->isTrue(i))
+        if(phaseChunk[i] == static_cast<int32>(phase))
         {
-          subEulerAngles[count * 3] = eulerAngles[i * 3];
-          subEulerAngles[count * 3 + 1] = eulerAngles[i * 3 + 1];
-          subEulerAngles[count * 3 + 2] = eulerAngles[i * 3 + 2];
-          count++;
+          const usize globalIdx = chunkStart + i;
+          if(!m_InputValues->UseMask || maskCompare->isTrue(globalIdx))
+          {
+            subEulerAngles[count * 3] = eulerChunk[i * 3];
+            subEulerAngles[count * 3 + 1] = eulerChunk[i * 3 + 1];
+            subEulerAngles[count * 3 + 2] = eulerChunk[i * 3 + 2];
+            count++;
+          }
         }
       }
     }
@@ -682,9 +709,22 @@ Result<> WritePoleFigure::operator()()
           intensityImages[imageIndex] = flipAndMirrorPoleFigure<double>(intensityImages[imageIndex].get(), config);
         }
 
-        std::copy(intensityImages[0]->begin(), intensityImages[0]->end(), intensityPlot1Array.begin());
-        std::copy(intensityImages[1]->begin(), intensityImages[1]->end(), intensityPlot2Array.begin());
-        std::copy(intensityImages[2]->begin(), intensityImages[2]->end(), intensityPlot3Array.begin());
+        // Bulk-write the intensity plot images into the DataStructure arrays.
+        // std::copy with operator[] iterators falls into per-element writes on
+        // OOC-backed stores (one HDF5 write per pixel). copyFromBuffer issues
+        // a single write per array.
+        {
+          const usize plotElems = static_cast<usize>(intensityImages[0]->getNumberOfTuples()) * intensityImages[0]->getNumberOfComponents();
+          intensityPlot1Array.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float64>(intensityImages[0]->getPointer(0), plotElems));
+        }
+        {
+          const usize plotElems = static_cast<usize>(intensityImages[1]->getNumberOfTuples()) * intensityImages[1]->getNumberOfComponents();
+          intensityPlot2Array.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float64>(intensityImages[1]->getPointer(0), plotElems));
+        }
+        {
+          const usize plotElems = static_cast<usize>(intensityImages[2]->getNumberOfTuples()) * intensityImages[2]->getNumberOfComponents();
+          intensityPlot3Array.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float64>(intensityImages[2]->getPointer(0), plotElems));
+        }
 
         DataPath metaDataPath = m_InputValues->IntensityGeometryDataPath.createChildPath(write_pole_figure::k_MetaDataName);
         auto metaDataArrayRef = m_DataStructure.getDataRefAs<StringArray>(metaDataPath);
@@ -725,7 +765,7 @@ Result<> WritePoleFigure::operator()()
       compositeConfig.layoutType = static_cast<ebsdlib::PoleFigureLayoutType>(m_InputValues->ImageLayout);
       compositeConfig.laueOpsIndex = crystalStructures[phase];
       compositeConfig.phaseName = materialNames[phase];
-      compositeConfig.phaseNumber = static_cast<int32_t>(phase);
+      compositeConfig.phaseNumber = static_cast<int32>(phase);
       compositeConfig.title = m_InputValues->Title;
       compositeConfig.hexConvention = m_InputValues->HexConvention;
 
@@ -758,17 +798,24 @@ Result<> WritePoleFigure::operator()()
           return arrayCreationResult;
         }
 
-        // Get a reference to the RGB final array and then copy ONLY the RGB pixels from the RGBA data.
+        // Get a reference to the RGB final array and then copy ONLY the RGB
+        // pixels from the RGBA data. Build the packed RGB buffer in memory
+        // first, then write it out in a single copyFromBuffer call. Writing
+        // per-element via operator[] would issue one HDF5 hit per byte on
+        // OOC-backed imageData (~786K hits for a 512x512 image); bulk writes
+        // collapse that to one.
         auto& imageData = m_DataStructure.getDataRefAs<UInt8Array>(imageArrayPath);
         imageData.fill(0);
-        const size_t tupleCount = static_cast<size_t>(pageHeight) * pageWidth;
+        const usize tupleCount = static_cast<usize>(pageHeight) * pageWidth;
         const uint8_t* rgbaPtr = compositeResult.image->getPointer(0);
-        for(size_t t = 0; t < tupleCount; t++)
+        std::vector<uint8> rgbBuf(tupleCount * 3);
+        for(usize t = 0; t < tupleCount; t++)
         {
-          imageData[t * 3 + 0] = rgbaPtr[t * 4 + 0];
-          imageData[t * 3 + 1] = rgbaPtr[t * 4 + 1];
-          imageData[t * 3 + 2] = rgbaPtr[t * 4 + 2];
+          rgbBuf[t * 3 + 0] = rgbaPtr[t * 4 + 0];
+          rgbBuf[t * 3 + 1] = rgbaPtr[t * 4 + 1];
+          rgbBuf[t * 3 + 2] = rgbaPtr[t * 4 + 2];
         }
+        imageData.getDataStoreRef().copyFromBuffer(0, nonstd::span<const uint8>(rgbBuf.data(), rgbBuf.size()));
       }
 
       // Write out the full RGBA data

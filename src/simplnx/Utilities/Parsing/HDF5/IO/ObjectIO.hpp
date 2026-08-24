@@ -6,6 +6,7 @@
 
 #include <H5Apublic.h>
 #include <H5Epublic.h>
+#include <H5Ipublic.h>
 #include <H5Opublic.h>
 #include <H5Ppublic.h>
 #include <H5Spublic.h>
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,15 @@ namespace nx::core::HDF5
 {
 class FileIO;
 class GroupIO;
+
+namespace Support
+{
+// The single process-wide HDF5 API lock (defined in H5Support.hpp). Forward-declared here so the
+// attribute-reader templates below can serialize their bare H5A* calls under it WITHOUT including
+// H5Support.hpp — that header includes DatasetIO/FileIO, which include this one, so including it
+// here would form an include cycle.
+SIMPLNX_EXPORT std::mutex& ApiLock();
+} // namespace Support
 
 class SIMPLNX_EXPORT ObjectIO
 {
@@ -165,24 +176,38 @@ public:
   template <typename T>
   Result<std::vector<T>> readVectorAttribute(const std::string& attributeName) const
   {
-    if(getId() <= 0)
+    // getId() self-locks; resolve it before the leaf locks below. HDF5 is not thread-safe, so
+    // every bare H5A* call must run under Support::ApiLock().
+    const hid_t objectId = getId();
+    if(objectId <= 0)
     {
       return MakeErrorResult<std::vector<T>>(-1, fmt::format("Cannot Read Attribute '{}' within Invalid Object '{}'", attributeName, getName()));
     }
 
-    HDF_ERROR_HANDLER_OFF
-    hid_t attribId = H5Aopen(getId(), attributeName.c_str(), H5P_DEFAULT);
-    HDF_ERROR_HANDLER_ON
+    hid_t attribId = H5I_INVALID_HID;
+    {
+      std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+      HDF_ERROR_HANDLER_OFF
+      attribId = H5Aopen(objectId, attributeName.c_str(), H5P_DEFAULT);
+      HDF_ERROR_HANDLER_ON
+    }
     if(attribId < 0)
     {
       return MakeErrorResult<std::vector<T>>(attribId, fmt::format("Error Opening Attribute '{}' within '{}'", attributeName, getName()));
     }
-    hid_t typeId = H5Aget_type(attribId);
+
+    // getNumElementsInAttribute() self-locks, so it runs between the leaf locks (holding the open
+    // attribId across it needs no lock — only the H5 calls do).
     std::vector<T> values(getNumElementsInAttribute(attribId));
 
-    herr_t error = H5Aread(attribId, typeId, values.data());
-    H5Aclose(attribId);
-    H5Tclose(typeId);
+    herr_t error = 0;
+    {
+      std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+      const hid_t typeId = H5Aget_type(attribId);
+      error = H5Aread(attribId, typeId, values.data());
+      H5Aclose(attribId);
+      H5Tclose(typeId);
+    }
     if(error != 0)
     {
       std::string ss = fmt::format("Error Reading Vector Attribute '{}'.", attributeName);
@@ -209,14 +234,20 @@ public:
     /* Create the data space for the attribute. */
     int32_t rank = 1;
     hsize_t dims = 1;
-    hid_t dataspaceId = H5Screate_simple(rank, &dims, nullptr);
+    hid_t dataspaceId = H5I_INVALID_HID;
+    {
+      std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+      dataspaceId = H5Screate_simple(rank, &dims, nullptr);
+    }
     if(dataspaceId >= 0)
     {
       // Delete existing attribute
       deleteAttribute(attributeName);
+      const hid_t selfId = getId();
       {
+        std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
         /* Create the attribute. */
-        hid_t attributeId = H5Acreate(getId(), attributeName.c_str(), dataType, dataspaceId, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t attributeId = H5Acreate(selfId, attributeName.c_str(), dataType, dataspaceId, H5P_DEFAULT, H5P_DEFAULT);
         if(attributeId >= 0)
         {
           /* Write the attribute data. */
@@ -232,12 +263,12 @@ public:
         {
           returnError = MakeErrorResult(error, "Error Closing Attribute");
         }
-      }
-      /* Close the dataspace. */
-      error = H5Sclose(dataspaceId);
-      if(error < 0)
-      {
-        returnError = MakeErrorResult(error, "Error Closing Dataspace");
+        /* Close the dataspace. */
+        error = H5Sclose(dataspaceId);
+        if(error < 0)
+        {
+          returnError = MakeErrorResult(error, "Error Closing Dataspace");
+        }
       }
     }
     else
@@ -264,14 +295,20 @@ public:
     }
     std::vector<hsize_t> hDims(dims.size());
     std::transform(dims.begin(), dims.end(), hDims.begin(), [](usize x) { return static_cast<hsize_t>(x); });
-    hid_t dataspaceId = H5Screate_simple(rank, hDims.data(), nullptr);
+    hid_t dataspaceId = H5I_INVALID_HID;
+    {
+      std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
+      dataspaceId = H5Screate_simple(rank, hDims.data(), nullptr);
+    }
     if(dataspaceId >= 0)
     {
       // Delete any existing attribute
       deleteAttribute(attributeName);
+      const hid_t selfId = getId();
       {
+        std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
         /* Create the attribute. */
-        hid_t attributeId = H5Acreate(getId(), attributeName.c_str(), dataType, dataspaceId, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t attributeId = H5Acreate(selfId, attributeName.c_str(), dataType, dataspaceId, H5P_DEFAULT, H5P_DEFAULT);
         if(attributeId >= 0)
         {
           /* Write the attribute data. */
@@ -287,12 +324,12 @@ public:
         {
           returnError = MakeErrorResult(error, "Error Closing Attribute");
         }
-      }
-      /* Close the dataspace. */
-      error = H5Sclose(dataspaceId);
-      if(error < 0)
-      {
-        returnError = MakeErrorResult(error, "Error Closing Dataspace");
+        /* Close the dataspace. */
+        error = H5Sclose(dataspaceId);
+        if(error < 0)
+        {
+          returnError = MakeErrorResult(error, "Error Closing Dataspace");
+        }
       }
     }
     else

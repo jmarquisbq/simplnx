@@ -3,8 +3,14 @@
 
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
+#include <nonstd/span.hpp>
+
+#include <memory>
+#include <optional>
 
 using namespace nx::core;
 
@@ -12,6 +18,51 @@ namespace
 {
 const DataPath k_BaselinePath = DataPath({"baseline"});
 const DataPath k_ExemplarPath = DataPath({"exemplar"});
+const DataPath k_BulkIntPath = DataPath({"BulkInt"});
+const DataPath k_BulkBoolPath = DataPath({"BulkBool"});
+
+constexpr usize k_BulkTupleCount = 25000;
+constexpr usize k_BulkComponentCount = 3;
+
+DataStructure CreateBulkInitializationData(bool configuredStores)
+{
+  DataStructure dataStructure;
+  std::shared_ptr<AbstractDataStore<int32>> intStore;
+  std::shared_ptr<AbstractDataStore<bool>> boolStore;
+  if(configuredStores)
+  {
+    intStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, k_BulkIntPath, {k_BulkTupleCount}, {k_BulkComponentCount}, IDataAction::Mode::Execute);
+    boolStore = DataStoreUtilities::CreateDataStore<bool>(dataStructure, k_BulkBoolPath, {k_BulkTupleCount}, {k_BulkComponentCount}, IDataAction::Mode::Execute);
+  }
+  else
+  {
+    intStore = std::make_shared<Int32DataStore>(std::vector<usize>{k_BulkTupleCount}, std::vector<usize>{k_BulkComponentCount}, std::optional<int32>{});
+    boolStore = std::make_shared<BoolDataStore>(std::vector<usize>{k_BulkTupleCount}, std::vector<usize>{k_BulkComponentCount}, std::optional<bool>{});
+  }
+  REQUIRE(Int32Array::Create(dataStructure, k_BulkIntPath.getTargetName(), intStore) != nullptr);
+  REQUIRE(BoolArray::Create(dataStructure, k_BulkBoolPath.getTargetName(), boolStore) != nullptr);
+  return dataStructure;
+}
+
+Arguments CreateIncrementalArguments(const DataPath& path, std::string start, std::string step)
+{
+  Arguments args;
+  args.insertOrAssign(InitializeDataFilter::k_ArrayPath_Key, std::make_any<DataPath>(path));
+  args.insertOrAssign(InitializeDataFilter::k_InitType_Key, std::make_any<uint64>(1));
+  args.insertOrAssign(InitializeDataFilter::k_StartingFillValue_Key, std::make_any<std::string>(std::move(start)));
+  args.insertOrAssign(InitializeDataFilter::k_StepOperation_Key, std::make_any<uint64>(0));
+  args.insertOrAssign(InitializeDataFilter::k_StepValue_Key, std::make_any<std::string>(std::move(step)));
+  return args;
+}
+
+template <typename T>
+std::vector<T> ReadBulkValues(const DataStructure& dataStructure, const DataPath& path)
+{
+  const auto& array = dataStructure.getDataRefAs<DataArray<T>>(path);
+  auto values = std::make_unique<T[]>(array.getSize());
+  SIMPLNX_RESULT_REQUIRE_VALID(array.getDataStoreRef().copyIntoBuffer(0, nonstd::span<T>(values.get(), array.getSize())));
+  return std::vector<T>(values.get(), values.get() + array.getSize());
+}
 
 template <typename T, bool Standardized = false>
 void BoundsCheck(const DataArray<T>& dataArray, const std::vector<T>& compBounds)
@@ -758,4 +809,29 @@ TEST_CASE("SimplnxCore::InitializeDataFilter 21: Boolean Single Component Fill I
   UnitTest::CompareArrays<bool>(dataStructure, ::k_ExemplarPath, ::k_BaselinePath);
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
+}
+
+TEST_CASE("SimplnxCore::InitializeDataFilter: Bounded Multi-Component Incremental Writes", "[SimplnxCore][InitializeDataFilter]")
+{
+  UnitTest::LoadPlugins();
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+
+  UnitTest::AlgorithmTestScope scope(scenario);
+  DataStructure dataStructure = CreateBulkInitializationData(false);
+  auto& array = dataStructure.getDataRefAs<IDataArray>(k_BulkIntPath);
+  scope.requireExpectedStore(array);
+
+  InitializeDataFilter filter;
+  const Arguments args = CreateIncrementalArguments(k_BulkIntPath, "1;10;-5", "2;-3;4");
+  auto result = scope.executeFilter(filter, dataStructure, args);
+  SIMPLNX_RESULT_REQUIRE_VALID(result.result);
+
+  const auto values = ReadBulkValues<int32>(dataStructure, k_BulkIntPath);
+  for(usize tuple = 0; tuple < k_BulkTupleCount; tuple++)
+  {
+    REQUIRE(values[tuple * k_BulkComponentCount] == 1 + static_cast<int32>(tuple) * 2);
+    REQUIRE(values[tuple * k_BulkComponentCount + 1] == 10 - static_cast<int32>(tuple) * 3);
+    REQUIRE(values[tuple * k_BulkComponentCount + 2] == -5 + static_cast<int32>(tuple) * 4);
+  }
 }

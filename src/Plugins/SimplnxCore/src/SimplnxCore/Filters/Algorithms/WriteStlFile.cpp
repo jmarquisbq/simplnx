@@ -12,6 +12,7 @@
 #include "simplnx/Utilities/StringUtilities.hpp"
 
 #include <filesystem>
+#include <unordered_map>
 
 namespace fs = std::filesystem;
 
@@ -218,21 +219,65 @@ private:
 };
 
 /**
+ * @brief Buckets every triangle by the grouping label(s) referenced by a per-triangle Int32 array.
+ *
+ * MultiWriteStlFileImpl::write() needs, for a given group (feature id or part number), only the
+ * triangles that reference that label - and for labels stored with two components per triangle
+ * (FeatureIds), which of the two components matched also decides whether the triangle's winding
+ * must be reversed for that group. Re-testing every triangle against every unique label to find
+ * this membership (as a per-label linear scan would) is O(numLabels * numTriangles). This instead
+ * builds every label's triangle-index bucket in a single O(numTriangles) pass before the per-label
+ * parallel writers start, so each writer only ever visits the triangles that belong to its own
+ * group. Total bucket memory is O(numTriangles) (a triangle is recorded in at most two buckets, one
+ * per label component) - acceptable because triangle mesh geometries are always held in-core.
+ * Buckets are filled by scanning triangles in ascending index order, so each bucket lists its
+ * triangles in the same ascending order each output STL file's facets need to appear in.
+ * @param labels Per-triangle label array - FeatureIds (1 or 2 components) or PartNumber (1 component)
+ * @return Every distinct label found in the array mapped to its triangle-index bucket
+ */
+std::unordered_map<int32, std::vector<usize>> BuildTrianglesByLabel(const Int32AbstractDataStore& labels)
+{
+  const usize numComps = labels.getNumberOfComponents();
+  const usize numTriangles = labels.getNumberOfTuples();
+
+  std::unordered_map<int32, std::vector<usize>> trianglesByLabel;
+  for(usize triangle = 0; triangle < numTriangles; triangle++)
+  {
+    const int32 labelA = labels[triangle * numComps];
+    trianglesByLabel[labelA].push_back(triangle);
+    if(numComps > 1)
+    {
+      const int32 labelB = labels[triangle * numComps + 1];
+      // Skip labelB when it duplicates labelA so a triangle is never recorded twice in the same bucket
+      if(labelB != labelA)
+      {
+        trianglesByLabel[labelB].push_back(triangle);
+      }
+    }
+  }
+  return trianglesByLabel;
+}
+
+/**
  * @brief This class provides an interface to write the STL Files in parallel
+ *
+ * Each instance is handed exactly the triangle indices belonging to its group (pre-bucketed by the
+ * caller via BuildTrianglesByLabel()), so write() only ever visits triangles known to belong to this
+ * file's group instead of rescanning the entire mesh and filtering by label.
  */
 class MultiWriteStlFileImpl
 {
 public:
-  MultiWriteStlFileImpl(WriteStlFile* filter, LimitBoundAtomicFile& limitBoundAtomicFile, const IGeometry::MeshIndexType endValue, const std::string header, const TriStore& triangles,
-                        const VertexStore& vertices, const Int32AbstractDataStore& featureIds, const int32 featureId, const usize maxTriangles, const std::atomic_bool& shouldCancel)
+  MultiWriteStlFileImpl(WriteStlFile* filter, LimitBoundAtomicFile& limitBoundAtomicFile, const std::string header, const TriStore& triangles, const VertexStore& vertices,
+                        const Int32AbstractDataStore& featureIds, const int32 featureId, const std::vector<usize>& triangleIndices, const usize maxTriangles, const std::atomic_bool& shouldCancel)
   : m_Filter(filter)
   , m_LimitBoundAtomicFile(limitBoundAtomicFile)
-  , m_EndValue(endValue)
   , m_Header(header)
   , m_Triangles(triangles)
   , m_Vertices(vertices)
   , m_FeatureIds(featureIds)
   , m_FeatureId(featureId)
+  , m_TriangleIndices(triangleIndices)
   , m_MaxTriangles(maxTriangles)
   , m_ShouldCancel(shouldCancel)
   {
@@ -245,7 +290,7 @@ public:
     write(m_LimitBoundAtomicFile.m_AtomicFilesList[0].tempFilePath(), 0);
   }
 
-  void write(const fs::path& activePath, usize startValue) const
+  void write(const fs::path& activePath, usize startIndex) const
   {
     // Create output file writer in binary write out mode to ensure cross-compatibility
     FILE* filePtr = fopen(activePath.string().c_str(), "wb");
@@ -298,8 +343,10 @@ public:
     attrByteCountPtr[0] = 0;
 
     const usize numComps = m_FeatureIds.getNumberOfComponents();
-    // Loop over all the triangles for this spin
-    for(IGeometry::MeshIndexType triangle = startValue; triangle < m_EndValue; triangle++)
+    const usize numGroupTriangles = m_TriangleIndices.size();
+    // Loop over only the triangles that belong to this group (pre-bucketed once in
+    // WriteStlFile::operator() by BuildTrianglesByLabel()) instead of rescanning the whole mesh
+    for(usize idx = startIndex; idx < numGroupTriangles; idx++)
     {
       if(m_ShouldCancel)
       {
@@ -327,29 +374,29 @@ public:
           m_Filter->sendThreadSafeProgressMessage({MakeWarningVoidResult(overflowFileResult.errors()[0].code, overflowFileResult.errors()[0].message)});
           return;
         }
-        write(m_LimitBoundAtomicFile.m_AtomicFilesList[overflowFileResult.value()].tempFilePath(), triangle);
+        write(m_LimitBoundAtomicFile.m_AtomicFilesList[overflowFileResult.value()].tempFilePath(), idx);
         return;
       }
+
+      const IGeometry::MeshIndexType triangle = m_TriangleIndices[idx];
 
       // Get the true indices of the 3 nodes
       IGeometry::MeshIndexType nId0 = m_Triangles[triangle * 3];
       IGeometry::MeshIndexType nId1 = m_Triangles[triangle * 3 + 1];
       IGeometry::MeshIndexType nId2 = m_Triangles[triangle * 3 + 2];
 
+      // Every triangle in m_TriangleIndices was bucketed because one of its label components
+      // matches m_FeatureId (see BuildTrianglesByLabel()), so only the winding decision remains here.
       if(m_FeatureIds[triangle * numComps] == m_FeatureId)
       {
         // winding = 0; // 0 = Write it using forward spin
       }
-      else if(numComps > 1 && m_FeatureIds[triangle * numComps + 1] == m_FeatureId)
+      else
       {
         // Switch the 2 node indices
         IGeometry::MeshIndexType temp = nId1;
         nId1 = nId2;
         nId2 = temp;
-      }
-      else
-      {
-        continue; // We do not match either spin so move to the next triangle
       }
 
       vert1Ptr[0] = static_cast<float>(m_Vertices[nId0 * 3]);
@@ -397,12 +444,12 @@ public:
 private:
   WriteStlFile* m_Filter = nullptr;
   LimitBoundAtomicFile& m_LimitBoundAtomicFile;
-  const IGeometry::MeshIndexType m_EndValue;
   const std::string m_Header;
   const TriStore& m_Triangles;
   const VertexStore& m_Vertices;
   const Int32AbstractDataStore& m_FeatureIds;
   const int32 m_FeatureId;
+  const std::vector<usize>& m_TriangleIndices;
   const usize m_MaxTriangles;
   const std::atomic_bool& m_ShouldCancel;
 };
@@ -555,13 +602,14 @@ Result<> WriteStlFile::operator()()
   {
     const auto& featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsPath)->getDataStoreRef();
 
-    // Faster and more memory efficient since we don't need phases
-    std::unordered_set<int32> uniqueGrainIds(featureIds.cbegin(), featureIds.cend());
+    // Bucket every triangle by the feature id(s) it references in a single O(numTriangles) pass, up
+    // front, so the per-feature writers below never rescan the whole mesh (see BuildTrianglesByLabel()).
+    const std::unordered_map<int32, std::vector<usize>> trianglesByFeature = ::BuildTrianglesByLabel(featureIds);
 
-    fileList.reserve(uniqueGrainIds.size());
+    fileList.reserve(trianglesByFeature.size());
 
     usize fileIndex = 0;
-    for(const auto featureId : uniqueGrainIds)
+    for(const auto& [featureId, featureTriangles] : trianglesByFeature)
     {
       // Generate the output file
       fs::path firstFile = m_InputValues->OutputStlDirectory / fmt::format("{}Feature_{}.stl", m_InputValues->OutputStlPrefix, featureId);
@@ -573,8 +621,8 @@ Result<> WriteStlFile::operator()()
       fileList.emplace_back(std::move(atomicFileResult.value()));
 
       m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Writing STL for Feature Id {}", featureId));
-      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], nTriangles, {"DREAM3D Generated For Feature ID " + StringUtilities::number(featureId)}, triangles, vertices, featureIds,
-                                               featureId, m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
+      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], {"DREAM3D Generated For Feature ID " + StringUtilities::number(featureId)}, triangles, vertices, featureIds, featureId,
+                                               featureTriangles, m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
       fileIndex++;
       if(m_HasErrors)
       {
@@ -597,6 +645,10 @@ Result<> WriteStlFile::operator()()
       uniqueGrainIdToPhase.emplace(featureIds[i * 2 + 1], featurePhases[i * 2 + 1]);
     }
 
+    // Bucket every triangle by the feature id(s) it references - same membership/winding rule as
+    // GroupingType::Features - in a single O(numTriangles) pass, up front (see BuildTrianglesByLabel()).
+    const std::unordered_map<int32, std::vector<usize>> trianglesByFeature = ::BuildTrianglesByLabel(featureIds);
+
     // Loop over the unique feature Ids
     usize fileIndex = 0;
     for(const auto& [featureId, value] : uniqueGrainIdToPhase)
@@ -611,9 +663,8 @@ Result<> WriteStlFile::operator()()
       fileList.emplace_back(std::move(atomicFileResult.value()));
 
       m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Writing STL for Phase {} and Feature Id {}", value, featureId));
-      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], nTriangles,
-                                               {"DREAM3D Generated For Feature ID " + StringUtilities::number(featureId) + " Phase " + StringUtilities::number(value)}, triangles, vertices, featureIds,
-                                               featureId, m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
+      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], {"DREAM3D Generated For Feature ID " + StringUtilities::number(featureId) + " Phase " + StringUtilities::number(value)},
+                                               triangles, vertices, featureIds, featureId, trianglesByFeature.at(featureId), m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
       fileIndex++;
       if(m_HasErrors)
       {
@@ -627,14 +678,15 @@ Result<> WriteStlFile::operator()()
   if(groupingType == GroupingType::PartNumber)
   {
     const auto& partNumbers = m_DataStructure.getDataAs<Int32Array>(m_InputValues->PartNumberPath)->getDataStoreRef();
-    // Faster and more memory efficient since we don't need phases
-    // Build up a list of the unique Part Numbers
-    std::unordered_set<int32> uniquePartNumbers(partNumbers.cbegin(), partNumbers.cend());
-    fileList.reserve(uniquePartNumbers.size()); // Reserved enough file names
+
+    // Bucket every triangle by its part number in a single O(numTriangles) pass, up front, so the
+    // per-part writers below never rescan the whole mesh (see BuildTrianglesByLabel()).
+    const std::unordered_map<int32, std::vector<usize>> trianglesByPartNumber = ::BuildTrianglesByLabel(partNumbers);
+    fileList.reserve(trianglesByPartNumber.size()); // Reserved enough file names
 
     // Loop over each Part Number and write a file
     usize fileIndex = 0;
-    for(const auto currentPartNumber : uniquePartNumbers)
+    for(const auto& [currentPartNumber, partTriangles] : trianglesByPartNumber)
     {
       // Generate the output file
       fs::path firstFile = m_InputValues->OutputStlDirectory / fmt::format("{}{}.stl", m_InputValues->OutputStlPrefix, currentPartNumber);
@@ -646,8 +698,8 @@ Result<> WriteStlFile::operator()()
       fileList.emplace_back(std::move(atomicFileResult.value()));
 
       m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Writing STL for Part Number {}", currentPartNumber));
-      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], nTriangles, {"DREAM3D Generated For Part Number " + StringUtilities::number(currentPartNumber)}, triangles, vertices,
-                                               partNumbers, currentPartNumber, m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
+      taskRunner.execute(MultiWriteStlFileImpl(this, fileList[fileIndex], {"DREAM3D Generated For Part Number " + StringUtilities::number(currentPartNumber)}, triangles, vertices, partNumbers,
+                                               currentPartNumber, partTriangles, m_InputValues->HIDDEN_MaxTrianglesPerFile, m_ShouldCancel));
       fileIndex++;
       if(m_HasErrors)
       {

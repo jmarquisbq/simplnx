@@ -1,6 +1,7 @@
 #include "Dream3dPreflightCache.hpp"
 
 #include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/EmptyStringStore.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/DataStructure/INeighborList.hpp"
 #include "simplnx/DataStructure/NeighborList.hpp"
@@ -105,10 +106,20 @@ void Dream3dPreflightCache::RefreshStores(DataStructure& dataStructure)
     }
     else if(auto* stringArray = dataStructure.getDataAs<StringArray>(path); stringArray != nullptr)
     {
-      // StringArray exposes no store getter; rebuilding from its values gives
-      // an equivalent, independent store. Preflight string stores hold only
-      // placeholder strings, so this copies almost nothing.
-      stringArray->setStore(std::make_shared<StringStore>(stringArray->values(), stringArray->getTupleShape()));
+      // StringArray exposes no store getter, so its store is rebuilt rather than deep-copied
+      // through a pointer as the DataArray/NeighborList branches above do. A preflight StringArray
+      // is backed by an EmptyStringStore placeholder whose element accessors throw ("data not
+      // loaded yet"), so it must NOT be read via values(); hand the copy its own placeholder that
+      // carries the same tuple shape. A materialized (real) store is rebuilt from its values,
+      // giving the handout an equally independent copy.
+      if(stringArray->isPlaceholder())
+      {
+        stringArray->setStore(std::make_shared<EmptyStringStore>(stringArray->getTupleShape()));
+      }
+      else
+      {
+        stringArray->setStore(std::make_shared<StringStore>(stringArray->values(), stringArray->getTupleShape()));
+      }
     }
     else if(auto* neighborList = dataStructure.getDataAs<INeighborList>(path); neighborList != nullptr)
     {

@@ -4,11 +4,19 @@
 #include <fstream>
 
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/AttributeMatrix.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include "SimplnxCore/Filters/ComputeFeaturePhasesBinaryFilter.hpp"
+
+#include <nonstd/span.hpp>
+
+#include <memory>
 
 using namespace nx::core;
 namespace fs = std::filesystem;

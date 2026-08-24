@@ -44,6 +44,7 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
 
 #include <catch2/catch.hpp>
 
@@ -178,6 +179,9 @@ std::array<uint8, 3> EbsdLibReferenceColor(const std::array<double, 3>& euler, u
 
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: Class 1/2/3 Oracle (inline analytical dataset)", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -187,7 +191,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: Class 1/2/3 Oracle (inli
 
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<UInt8Array>(k_IpfColorsPath));
@@ -244,6 +248,9 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: Class 1/2/3 Oracle (inli
 
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: uint8 mask array drives the black-out path", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -254,7 +261,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: uint8 mask array drives 
 
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   const auto& colorStore = dataStructure.getDataRefAs<UInt8Array>(k_IpfColorsPath).getDataStoreRef();
@@ -270,6 +277,9 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: uint8 mask array drives 
 
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: no-mask path colors every valid cell", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -282,7 +292,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: no-mask path colors ever
 
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   const auto& eulerStore = dataStructure.getDataRefAs<Float32Array>(k_EulersPath).getDataStoreRef();
@@ -302,6 +312,9 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: no-mask path colors ever
 
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: reference direction is normalized", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -314,7 +327,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: reference direction is n
     const Arguments args = MakeArgs(true, k_MaskPath, refDir, 0 /*TSL*/, outputName);
     auto preflightResult = f.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-    auto executeResult = f.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(f, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   };
 
@@ -331,6 +344,9 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: reference direction is n
 
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: phase index out of range returns -48000", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -346,7 +362,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: phase index out of range
 
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-  auto executeResult = filter.execute(dataStructure, args);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result);
   REQUIRE(executeResult.result.errors()[0].code == -48000);
 }
@@ -360,6 +376,9 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: phase index out of range
 // default (TSL) run on the same input data.
 TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: ColorKey choice reaches algorithm", "[OrientationAnalysis][ComputeIPFColorsFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   DataStructure dataStructure = BuildAnalyticalDataset();
@@ -369,7 +388,7 @@ TEST_CASE("OrientationAnalysis::ComputeIPFColorsFilter: ColorKey choice reaches 
     const Arguments args = MakeArgs(true, k_MaskPath, {0.0F, 0.0F, 1.0F}, kindIndex, outputName);
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-    auto executeResult = filter.execute(dataStructure, args);
+    auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   };
 

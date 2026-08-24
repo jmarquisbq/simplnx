@@ -9,10 +9,14 @@
 #include <EbsdLib/Core/Orientation.hpp>
 
 #include <fmt/format.h>
+#include <nonstd/span.hpp>
 
 using namespace nx::core;
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Constructs ReadAngData with the given DataStructure, message handler, cancel flag, and input values.
+ */
 ReadAngData::ReadAngData(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ReadAngDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_MessageHandler(msgHandler)
@@ -25,6 +29,14 @@ ReadAngData::ReadAngData(DataStructure& dataStructure, const IFilter::MessageHan
 ReadAngData::~ReadAngData() noexcept = default;
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Reads a .ang EBSD data file and populates the DataStructure with the parsed arrays.
+ *
+ * Delegates to EbsdLib's AngReader for file parsing, then calls loadMaterialInfo()
+ * to populate ensemble-level arrays and copyRawEbsdData() to populate cell-level arrays.
+ *
+ * @return Result<> indicating success or an error from the EbsdLib reader.
+ */
 Result<> ReadAngData::operator()()
 {
   m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Reading .ang file '{}'", m_InputValues->InputFile.string()));
@@ -117,12 +129,33 @@ Result<> ReadAngData::loadMaterialInfo(ebsdlib::AngReader* reader) const
 }
 
 // -----------------------------------------------------------------------------
+/**
+ * @brief Copies raw EBSD data from the EbsdLib AngReader buffers into the DataStructure arrays.
+ *
+ * @section ooc_strategy OOC Strategy
+ * The EbsdLib reader holds the parsed data in contiguous in-memory buffers. We need to
+ * transfer this data into DataStore-backed arrays that may be out-of-core. Rather than
+ * using per-element operator[] (which would trigger a chunk load/evict per write on OOC
+ * stores), we use copyFromBuffer() to write entire contiguous ranges in single bulk
+ * operations.
+ *
+ * For single-component arrays (ImageQuality, ConfidenceIndex, etc.), a single
+ * copyFromBuffer() call writes all values at once since the reader buffer is already
+ * contiguous.
+ *
+ * For the Euler angles (3 separate source arrays that must be interleaved into a
+ * 3-component destination), we use a chunked approach: interleave k_ChunkSize tuples
+ * into a local buffer, then copyFromBuffer() the chunk. This bounds memory usage to
+ * ~768 KB (65536 * 3 * sizeof(float32)) while still achieving bulk I/O efficiency.
+ *
+ * @param reader Pointer to the EbsdLib AngReader that has already parsed the file.
+ */
 Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
 {
   const DataPath cellAttributeMatrixPath = m_InputValues->DataContainerName.createChildPath(m_InputValues->CellAttributeMatrixName);
 
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->DataContainerName);
-  const size_t totalCells = imageGeom.getNumberOfCells();
+  const usize totalCells = imageGeom.getNumberOfCells();
 
   // The Image Geometry was sized in preflight from the file's column/row header (NumEvenCols x NumRows),
   // but the reader allocates its data buffers from NumOddCols x NumRows. Every copy below reads
@@ -137,40 +170,57 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
                                        reader->getNumberOfElements(), totalCells));
   }
 
-  // Adjust the values of the 'phase' data to correct for invalid values and assign the read Phase Data into the actual DataArray
+  // Adjust the values of the 'phase' data to correct for invalid values, then bulk-write
+  // via copyFromBuffer (OOC-safe: single I/O call for the entire array)
   {
     if(m_ShouldCancel)
     {
       return {};
     }
     auto& targetArray = m_DataStructure.getDataRefAs<Int32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::AngFile::Phases));
-    int* phasePtr = reinterpret_cast<int32_t*>(reader->getPointerByName(ebsdlib::Ang::PhaseData));
-    for(size_t i = 0; i < totalCells; i++)
+    auto* phasePtr = reinterpret_cast<int32*>(reader->getPointerByName(ebsdlib::Ang::PhaseData));
+    // Validate phases in-place in the reader's buffer before bulk-writing
+    for(usize i = 0; i < totalCells; i++)
     {
       if(phasePtr[i] < 1)
       {
         phasePtr[i] = 1;
       }
-      targetArray[i] = phasePtr[i];
     }
+    // OOC-safe: single bulk write of the entire phase array
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const int32>(phasePtr, totalCells));
   }
 
-  // Condense the Euler Angles from 3 separate arrays into a single 1x3 array
+  // Condense the Euler Angles from 3 separate source arrays (Phi1, Phi, Phi2) into a
+  // single interleaved 3-component destination array. Uses chunked interleaving to
+  // bound memory while still writing bulk chunks via copyFromBuffer.
   {
     if(m_ShouldCancel)
     {
       return {};
     }
-    const auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::Phi1));
-    const auto* fComp1 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::Phi));
-    const auto* fComp2 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::Phi2));
+    const auto* fComp0 = reinterpret_cast<const float*>(reader->getPointerByName(ebsdlib::Ang::Phi1));
+    const auto* fComp1 = reinterpret_cast<const float*>(reader->getPointerByName(ebsdlib::Ang::Phi));
+    const auto* fComp2 = reinterpret_cast<const float*>(reader->getPointerByName(ebsdlib::Ang::Phi2));
 
     auto& cellEulerAngles = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::AngFile::EulerAngles));
-    for(size_t i = 0; i < totalCells; i++)
+    auto& eulerStore = cellEulerAngles.getDataStoreRef();
+
+    // Chunked interleaving: interleave k_ChunkSize tuples into a local buffer,
+    // then bulk-write the chunk. This avoids both per-element OOC access and
+    // allocating a buffer for the entire volume.
+    constexpr usize k_ChunkSize = 65536;
+    std::vector<float32> eulerBuf(k_ChunkSize * 3);
+    for(usize offset = 0; offset < totalCells; offset += k_ChunkSize)
     {
-      cellEulerAngles[3 * i] = fComp0[i];
-      cellEulerAngles[3 * i + 1] = fComp1[i];
-      cellEulerAngles[3 * i + 2] = fComp2[i];
+      usize count = std::min(k_ChunkSize, totalCells - offset);
+      for(usize i = 0; i < count; i++)
+      {
+        eulerBuf[3 * i] = fComp0[offset + i];
+        eulerBuf[3 * i + 1] = fComp1[offset + i];
+        eulerBuf[3 * i + 2] = fComp2[offset + i];
+      }
+      eulerStore.copyFromBuffer(offset * 3, nonstd::span<const float32>(eulerBuf.data(), count * 3));
     }
   }
 
@@ -179,40 +229,43 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
     return {};
   }
 
+  // OOC-safe bulk writes for single-component float arrays.
+  // Each copyFromBuffer() writes the entire reader buffer in one I/O operation,
+  // which is optimal for both in-memory and OOC DataStore backends.
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::ImageQuality));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::ImageQuality));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::ImageQuality));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::ConfidenceIndex));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::ConfidenceIndex));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::ConfidenceIndex));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::SEMSignal));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::SEMSignal));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::SEMSignal));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::Fit));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::Fit));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::Fit));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::XPosition));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::XPosition));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::XPosition));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   {
-    auto* fComp0 = reinterpret_cast<float*>(reader->getPointerByName(ebsdlib::Ang::YPosition));
+    auto* srcPtr = reinterpret_cast<float32*>(reader->getPointerByName(ebsdlib::Ang::YPosition));
     auto& targetArray = m_DataStructure.getDataRefAs<Float32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::Ang::YPosition));
-    std::copy(fComp0, fComp0 + totalCells, targetArray.begin());
+    targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float32>(srcPtr, totalCells));
   }
 
   return {};

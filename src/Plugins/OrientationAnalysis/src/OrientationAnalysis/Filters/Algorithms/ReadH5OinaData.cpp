@@ -3,46 +3,88 @@
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 
+#include <memory>
+
 using namespace nx::core;
 
 namespace
 {
 
+/**
+ * @brief Copies one EbsdLib-owned OINA channel into its destination array in bounded tuple batches.
+ *
+ * EbsdLib still owns one scan in memory, but simplnx performs no per-value
+ * writes and creates no additional scan-sized array.
+ */
 template <typename T>
-void copyRawData(const ReadH5DataInputValues* m_InputValues, size_t totalPoints, DataStructure& m_DataStructure, ebsdlib::H5OINAReader& m_Reader, const std::string& name, usize offset)
+Result<> copyRawData(const ReadH5DataInputValues* inputValues, usize tupleCount, DataStructure& dataStructure, ebsdlib::H5OINAReader& reader, const std::string& name, usize tupleOffset,
+                     const std::atomic_bool& shouldCancel)
 {
   using ArrayType = DataArray<T>;
-  auto& dataRef = m_DataStructure.getDataRefAs<ArrayType>(m_InputValues->CellAttributeMatrixPath.createChildPath(name));
-  auto* dataStorePtr = dataRef.getDataStore();
-
-  const nonstd::span<T> rawDataPtr(reinterpret_cast<T*>(m_Reader.getPointerByName(name)), totalPoints);
-  std::copy(rawDataPtr.begin(), rawDataPtr.end(), dataStorePtr->begin() + offset);
+  auto& dataRef = dataStructure.getDataRefAs<ArrayType>(inputValues->CellAttributeMatrixPath.createChildPath(name));
+  const usize components = dataRef.getNumberOfComponents();
+  const auto* raw = reinterpret_cast<T*>(reader.getPointerByName(name));
+  constexpr usize kTuplesPerBatch = 65536;
+  for(usize localOffset = 0; localOffset < tupleCount; localOffset += kTuplesPerBatch)
+  {
+    if(shouldCancel)
+      return {};
+    const usize count = std::min(kTuplesPerBatch, tupleCount - localOffset);
+    auto result = dataRef.getDataStoreRef().copyFromBuffer((tupleOffset + localOffset) * components, nonstd::span<const T>(raw + localOffset * components, count * components));
+    if(result.invalid())
+      return result;
+  }
+  return {};
 }
 
+/**
+ * @brief Applies the EDAX 30-degree hexagonal Euler correction through bounded phase/Euler pages.
+ *
+ * The ensemble crystal table is cached because it is small and reused for every
+ * cell; cell phases and Euler triples remain chunked.
+ */
 template <typename T>
-void convertHexEulerAngle(const ReadH5DataInputValues* m_InputValues, size_t totalPoints, DataStructure& m_DataStructure)
+Result<> convertHexEulerAngle(const ReadH5DataInputValues* inputValues, usize tupleCount, usize tupleOffset, DataStructure& dataStructure, const std::atomic_bool& shouldCancel)
 {
-  using ArrayType = DataArray<T>;
-
-  if(m_InputValues->EdaxHexagonalAlignment)
+  if(inputValues->EdaxHexagonalAlignment)
   {
-    auto& crystalStructuresRef = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CellEnsembleAttributeMatrixPath.createChildPath(ebsdlib::AngFile::CrystalStructures));
+    auto& crystalStructuresRef = dataStructure.getDataRefAs<UInt32Array>(inputValues->CellEnsembleAttributeMatrixPath.createChildPath(ebsdlib::AngFile::CrystalStructures));
     auto& crystalStructuresDSRef = crystalStructuresRef.getDataStoreRef();
-
-    auto& cellPhasesRef = m_DataStructure.getDataRefAs<ArrayType>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::Phase));
+    std::vector<uint32> crystalStructures(crystalStructuresDSRef.getNumberOfTuples());
+    auto result = crystalStructuresDSRef.copyIntoBuffer(0, nonstd::span<uint32>(crystalStructures.data(), crystalStructures.size()));
+    if(result.invalid())
+      return result;
+    auto& cellPhasesRef = dataStructure.getDataRefAs<DataArray<T>>(inputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::Phase));
     auto& cellPhasesDSRef = cellPhasesRef.getDataStoreRef();
-
-    auto& eulerRef = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::Euler));
+    auto& eulerRef = dataStructure.getDataRefAs<Float32Array>(inputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::Euler));
     auto& eulerDataStoreRef = eulerRef.getDataStoreRef();
-
-    for(size_t i = 0; i < totalPoints; i++)
+    constexpr usize kTuplesPerBatch = 65536;
+    // Keep the bounded pages resident in RAM without consuming the limited Windows thread stack.
+    auto phases = std::make_unique<T[]>(kTuplesPerBatch);
+    auto eulers = std::make_unique<float32[]>(kTuplesPerBatch * 3);
+    for(usize local = 0; local < tupleCount; local += kTuplesPerBatch)
     {
-      if(crystalStructuresDSRef[cellPhasesDSRef[i]] == ebsdlib::CrystalStructure::Hexagonal_High)
+      if(shouldCancel)
+        return {};
+      const usize count = std::min(kTuplesPerBatch, tupleCount - local);
+      result = cellPhasesDSRef.copyIntoBuffer(tupleOffset + local, nonstd::span<T>(phases.get(), count));
+      if(result.invalid())
+        return result;
+      result = eulerDataStoreRef.copyIntoBuffer((tupleOffset + local) * 3, nonstd::span<float32>(eulers.get(), count * 3));
+      if(result.invalid())
+        return result;
+      for(usize i = 0; i < count; i++)
       {
-        eulerDataStoreRef[3 * i + 2] = eulerDataStoreRef[3 * i + 2] + 30.0F; // See the documentation for this correction factor
+        const usize phase = static_cast<usize>(phases[i]);
+        if(phase < crystalStructures.size() && crystalStructures[phase] == ebsdlib::CrystalStructure::Hexagonal_High)
+          eulers[i * 3 + 2] += 30.0F;
       }
+      result = eulerDataStoreRef.copyFromBuffer((tupleOffset + local) * 3, nonstd::span<const float32>(eulers.get(), count * 3));
+      if(result.invalid())
+        return result;
     }
   }
+  return {};
 }
 
 } // namespace
@@ -69,40 +111,72 @@ Result<> ReadH5OinaData::copyRawEbsdData(int index)
   const usize totalPoints = imageGeom.getNumXCells() * imageGeom.getNumYCells();
   const usize offset = index * totalPoints;
 
-  copyRawData<uint8>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::BandContrast, offset);
-  copyRawData<uint8>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::BandSlope, offset);
-  copyRawData<uint8>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::Bands, offset);
-  copyRawData<uint8>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::Error, offset);
-  copyRawData<float>(m_InputValues, totalPoints * 3, m_DataStructure, *m_Reader, ebsdlib::H5OINA::Euler, offset);
-  copyRawData<float>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::MeanAngularDeviation, offset);
+  const auto copy = [this, totalPoints, offset](auto typeTag, const std::string& name) {
+    return copyRawData<decltype(typeTag)>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, name, offset, m_ShouldCancel);
+  };
+  Result<> result = copy(uint8{}, ebsdlib::H5OINA::BandContrast);
+  if(result.invalid())
+    return result;
+  result = copy(uint8{}, ebsdlib::H5OINA::BandSlope);
+  if(result.invalid())
+    return result;
+  result = copy(uint8{}, ebsdlib::H5OINA::Bands);
+  if(result.invalid())
+    return result;
+  result = copy(uint8{}, ebsdlib::H5OINA::Error);
+  if(result.invalid())
+    return result;
+  result = copy(float32{}, ebsdlib::H5OINA::Euler);
+  if(result.invalid())
+    return result;
+  result = copy(float32{}, ebsdlib::H5OINA::MeanAngularDeviation);
+  if(result.invalid())
+    return result;
   if(m_InputValues->ConvertPhaseToInt32)
   {
     const nonstd::span<uint8> rawDataPtr(reinterpret_cast<uint8*>(m_Reader->getPointerByName(ebsdlib::H5OINA::Phase)), totalPoints);
     using ArrayType = DataArray<int32>;
     auto& dataRef = m_DataStructure.getDataRefAs<ArrayType>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::Phase));
-    auto* dataStorePtr = dataRef.getDataStore();
-    for(size_t i = 0; i < totalPoints; i++)
+    constexpr usize kTuplesPerBatch = 65536;
+    // Keep the conversion page in RAM without growing the caller's stack frame.
+    auto phaseBuffer = std::make_unique<int32[]>(kTuplesPerBatch);
+    for(usize tupleOffset = 0; tupleOffset < totalPoints; tupleOffset += kTuplesPerBatch)
     {
-      dataStorePtr->setValue(i + offset, static_cast<int32>(rawDataPtr[i]));
+      if(m_ShouldCancel)
+        return {};
+      const usize count = std::min(kTuplesPerBatch, totalPoints - tupleOffset);
+      for(usize i = 0; i < count; i++)
+        phaseBuffer[i] = static_cast<int32>(rawDataPtr[tupleOffset + i]);
+      result = dataRef.getDataStoreRef().copyFromBuffer(offset + tupleOffset, nonstd::span<const int32>(phaseBuffer.get(), count));
+      if(result.invalid())
+        return result;
     }
   }
   else
   {
-    copyRawData<uint8>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::Phase, offset);
+    result = copy(uint8{}, ebsdlib::H5OINA::Phase);
+    if(result.invalid())
+      return result;
   }
-  copyRawData<float>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::X, offset);
-  copyRawData<float>(m_InputValues, totalPoints, m_DataStructure, *m_Reader, ebsdlib::H5OINA::Y, offset);
+  result = copy(float32{}, ebsdlib::H5OINA::X);
+  if(result.invalid())
+    return result;
+  result = copy(float32{}, ebsdlib::H5OINA::Y);
+  if(result.invalid())
+    return result;
 
   if(m_InputValues->EdaxHexagonalAlignment)
   {
     if(m_InputValues->ConvertPhaseToInt32)
     {
-      convertHexEulerAngle<int32>(m_InputValues, totalPoints, m_DataStructure);
+      result = convertHexEulerAngle<int32>(m_InputValues, totalPoints, offset, m_DataStructure, m_ShouldCancel);
     }
     else
     {
-      convertHexEulerAngle<uint8>(m_InputValues, totalPoints, m_DataStructure);
+      result = convertHexEulerAngle<uint8>(m_InputValues, totalPoints, offset, m_DataStructure, m_ShouldCancel);
     }
+    if(result.invalid())
+      return result;
   }
 
   if(m_InputValues->ReadPatternData)
@@ -119,14 +193,18 @@ Result<> ReadH5OinaData::copyRawEbsdData(int index)
       std::vector<usize> pDimsV(2);
       pDimsV[0] = pDims[0];
       pDimsV[1] = pDims[1];
-      auto& patternData = m_DataStructure.getDataRefAs<UInt8Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::UnprocessedPatterns));
+      auto& patternData = m_DataStructure.getDataRefAs<UInt16Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5OINA::UnprocessedPatterns));
       const usize numComponents = patternData.getNumberOfComponents();
-      for(usize i = 0; i < totalPoints; i++)
+      constexpr usize kTuplesPerBatch = 65536;
+      for(usize tupleOffset = 0; tupleOffset < totalPoints; tupleOffset += kTuplesPerBatch)
       {
-        for(usize j = 0; j < numComponents; ++j)
-        {
-          patternData[offset + numComponents * i + j] = patternDataPtr[numComponents * i + j];
-        }
+        if(m_ShouldCancel)
+          return {};
+        const usize count = std::min(kTuplesPerBatch, totalPoints - tupleOffset);
+        auto patternResult =
+            patternData.getDataStoreRef().copyFromBuffer((offset + tupleOffset) * numComponents, nonstd::span<const uint16>(patternDataPtr + tupleOffset * numComponents, count * numComponents));
+        if(patternResult.invalid())
+          return patternResult;
       }
     }
   }

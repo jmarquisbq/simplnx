@@ -25,7 +25,10 @@ struct SIMPLNXCORE_EXPORT ReadVtkStructuredPointsInputValues
 };
 
 /**
- * @class
+ * @class ReadVtkStructuredPoints
+ * @brief Reads legacy VTK STRUCTURED_POINTS files into image geometries and
+ * streams attribute arrays through bounded buffers so disk-backed stores are
+ * never accessed one value at a time.
  */
 class SIMPLNXCORE_EXPORT ReadVtkStructuredPoints
 {
@@ -68,6 +71,9 @@ public:
     ReadLookupTableLineErr = -265,
     ReadLookupTableWordCountErr = -266,
     ReadLookupTableKeywordErr = -267,
+    AsciiDataReadErr = -268,
+    AsciiTokenTooLongErr = -269,
+    AsciiStreamPositionErr = -270,
     NumberConvertErr = -10351 // From DataArrayUtilities.hpp
   };
 
@@ -124,14 +130,14 @@ protected:
    * @param nextKeyWord Keyword for data type
    * @return Result object
    */
-  Result<int32> readDataTypeSection(std::istream& in, int numPts, const std::string& nextKeyWord);
+  Result<int32> readDataTypeSection(std::istream& in, int32 numPts, const std::string& nextKeyWord);
 
   /**
    * @brief readScalarData Reads scalar data attribute types
    * @param in Incoming file stream
    * @return Result object
    */
-  Result<> readScalarData(std::istream& in, int numPts);
+  Result<> readScalarData(std::istream& in, int32 numPts);
 
   /**
    * @brief readVectorData Reads vector data attribute types
@@ -139,7 +145,19 @@ protected:
    * @param numPts Number of points
    * @return Result object
    */
-  Result<> readVectorData(std::istream& in, int numPts);
+  Result<> readVectorData(std::istream& in, int32 numPts);
+
+  /**
+   * @brief Creates or reads one scalar or vector data array using the declared
+   * VTK type and component count.
+   * @param in Input VTK stream positioned at the array values.
+   * @param numPts Number of tuples declared for the current data section.
+   * @param name Name of the VTK data array.
+   * @param scalarType VTK scalar type token.
+   * @param numComp Number of components per tuple.
+   * @return Valid on success or an error describing the failed conversion or read.
+   */
+  Result<> readDataArray(std::istream& in, int32 numPts, const std::string& name, const std::string& scalarType, usize numComp);
 
   /**
    * @brief DecodeString Decodes a binary string from the .vtk file

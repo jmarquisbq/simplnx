@@ -14,10 +14,15 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
+#include <array>
 #include <filesystem>
+#include <memory>
+#include <optional>
+#include <vector>
 
 using namespace nx::core;
 using namespace nx::core::UnitTest;
@@ -284,41 +289,143 @@ void RunM3COnToy(usize xDim, usize yDim, usize zDim, LabelFuncT&& labeler, [[may
 // This is the minimal deterministic regression for the null-neighbor crash in treat_anomaly.
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: Toy Checkerboard Saddle", "[SimplnxCore][M3CSurfaceMeshingFilter]")
 {
-  RunM3COnToy(
-      8, 8, 8, [](usize x, usize y, usize z) -> int32 { return static_cast<int32>(((x + y + z) & 1U) + 1); }, "M3CSurfaceMeshingFilterTest_Checkerboard.dream3d");
+  RunM3COnToy(8, 8, 8, [](usize x, usize y, usize z) -> int32 { return static_cast<int32>(((x + y + z) & 1U) + 1); }, "M3CSurfaceMeshingFilterTest_Checkerboard.dream3d");
 }
 
 // 8-label octant pattern (1 + x%2 + 2*(y%2) + 4*(z%2)): a repeating 2x2x2 of 8 distinct labels, so
 // squares present 4 distinct corners (quad points, get_square_index == 19) plus triple configs.
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: Toy Octant Quad Points", "[SimplnxCore][M3CSurfaceMeshingFilter]")
 {
-  RunM3COnToy(
-      8, 8, 8, [](usize x, usize y, usize z) -> int32 { return static_cast<int32>(1 + (x & 1U) + 2 * (y & 1U) + 4 * (z & 1U)); }, "M3CSurfaceMeshingFilterTest_Octant.dream3d");
+  RunM3COnToy(8, 8, 8, [](usize x, usize y, usize z) -> int32 { return static_cast<int32>(1 + (x & 1U) + 2 * (y & 1U) + 4 * (z & 1U)); }, "M3CSurfaceMeshingFilterTest_Octant.dream3d");
 }
 
 // Three regions meeting along a vertical line (L-shaped split) => triple lines
 // (get_square_index in {7,11,13,14}) plus ordinary binary interfaces.
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: Toy Triple Line", "[SimplnxCore][M3CSurfaceMeshingFilter]")
 {
-  RunM3COnToy(
-      8, 8, 8, [](usize x, usize y, usize /*z*/) -> int32 { return (x < 4) ? 1 : ((y < 4) ? 2 : 3); }, "M3CSurfaceMeshingFilterTest_TripleLine.dream3d");
+  RunM3COnToy(8, 8, 8, [](usize x, usize y, usize /*z*/) -> int32 { return (x < 4) ? 1 : ((y < 4) ? 2 : 3); }, "M3CSurfaceMeshingFilterTest_TripleLine.dream3d");
 }
 
 // Single isolated interior voxel in a uniform matrix: the four neighboring squares are [B,A,A,A]
 // rotations, exercising get_square_index in {3,6,9,12} (the single-corner binary configurations).
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: Toy Single Voxel Inclusion", "[SimplnxCore][M3CSurfaceMeshingFilter]")
 {
-  RunM3COnToy(
-      8, 8, 8, [](usize x, usize y, usize z) -> int32 { return (x == 4 && y == 4 && z == 4) ? 2 : 1; }, "M3CSurfaceMeshingFilterTest_Inclusion.dream3d");
+  RunM3COnToy(8, 8, 8, [](usize x, usize y, usize z) -> int32 { return (x == 4 && y == 4 && z == 4) ? 2 : 1; }, "M3CSurfaceMeshingFilterTest_Inclusion.dream3d");
 }
 
 // Interleaved 3-label tiling (rows "1 2" / "3 1"): squares [1,2,1,3] and [2,1,3,1] have all edges
 // differing with exactly one diagonal equal, exercising get_square_index 17 and 18.
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: Toy Interleaved Diagonal", "[SimplnxCore][M3CSurfaceMeshingFilter]")
 {
-  RunM3COnToy(
-      8, 8, 8, [](usize x, usize y, usize /*z*/) -> int32 { return (y % 2 == 0) ? ((x % 2 == 0) ? 1 : 2) : ((x % 2 == 0) ? 3 : 1); }, "M3CSurfaceMeshingFilterTest_Interleaved.dream3d");
+  RunM3COnToy(8, 8, 8, [](usize x, usize y, usize /*z*/) -> int32 { return (y % 2 == 0) ? ((x % 2 == 0) ? 1 : 2) : ((x % 2 == 0) ? 3 : 1); }, "M3CSurfaceMeshingFilterTest_Interleaved.dream3d");
 }
+
+#if SIMPLNX_TEST_ALGORITHM_PATH == 1
+namespace
+{
+const DataPath k_ParityGeomPath({"Parity Image"});
+const DataPath k_ParityCellDataPath = k_ParityGeomPath.createChildPath("Cell Data");
+const DataPath k_ParityFeatureDataPath = k_ParityGeomPath.createChildPath("Feature Data");
+const DataPath k_ParityFeatureIdsPath = k_ParityCellDataPath.createChildPath("FeatureIds");
+const DataPath k_ParityCellVectorsPath = k_ParityCellDataPath.createChildPath("CellVectors");
+const DataPath k_ParityFeatureValuesPath = k_ParityFeatureDataPath.createChildPath("FeatureValues");
+const DataPath k_ParityMeshPath({"Parity Mesh"});
+const DataPath k_ParityFacesPath = k_ParityMeshPath.createChildPath(TriangleGeom::k_SharedFacesListName);
+const DataPath k_ParityVerticesPath = k_ParityMeshPath.createChildPath(TriangleGeom::k_SharedVertexListName);
+const DataPath k_ParityNodeTypesPath = k_ParityMeshPath.createChildPath(k_VertexDataGroupName).createChildPath(k_NodeTypeArrayName);
+const DataPath k_ParityFaceLabelsPath = k_ParityMeshPath.createChildPath(k_FaceDataGroupName).createChildPath(k_Face_Labels);
+const DataPath k_ParityCellOutputPath = k_ParityMeshPath.createChildPath(k_FaceDataGroupName).createChildPath("CellVectors");
+const DataPath k_ParityFeatureOutputPath = k_ParityMeshPath.createChildPath(k_FaceDataGroupName).createChildPath("FeatureValues");
+
+DataStructure CreateM3CParityData(bool useConfiguredCellStores)
+{
+  constexpr usize k_Dim = 8;
+  constexpr usize k_CellCount = k_Dim * k_Dim * k_Dim;
+  const ShapeType tupleShape = {k_Dim, k_Dim, k_Dim};
+
+  DataStructure dataStructure;
+  auto* imageGeom = ImageGeom::Create(dataStructure, k_ParityGeomPath.getTargetName());
+  REQUIRE(imageGeom != nullptr);
+  imageGeom->setDimensions({k_Dim, k_Dim, k_Dim});
+  imageGeom->setSpacing({1.0F, 1.0F, 1.0F});
+  imageGeom->setOrigin({0.0F, 0.0F, 0.0F});
+  auto* cellData = AttributeMatrix::Create(dataStructure, k_ParityCellDataPath.getTargetName(), tupleShape, imageGeom->getId());
+  auto* featureData = AttributeMatrix::Create(dataStructure, k_ParityFeatureDataPath.getTargetName(), {4}, imageGeom->getId());
+  REQUIRE(cellData != nullptr);
+  REQUIRE(featureData != nullptr);
+  imageGeom->setCellData(*cellData);
+
+  std::shared_ptr<AbstractDataStore<int32>> featureIdsStore;
+  std::shared_ptr<AbstractDataStore<int32>> cellVectorsStore;
+  if(useConfiguredCellStores)
+  {
+    featureIdsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, k_ParityFeatureIdsPath, tupleShape, {1}, IDataAction::Mode::Execute);
+    cellVectorsStore = DataStoreUtilities::CreateDataStore<int32>(dataStructure, k_ParityCellVectorsPath, tupleShape, {2}, IDataAction::Mode::Execute);
+  }
+  else
+  {
+    featureIdsStore = std::make_shared<Int32DataStore>(tupleShape, ShapeType{1}, std::optional<int32>{});
+    cellVectorsStore = std::make_shared<Int32DataStore>(tupleShape, ShapeType{2}, std::optional<int32>{});
+  }
+  auto* featureIds = Int32Array::Create(dataStructure, k_ParityFeatureIdsPath.getTargetName(), featureIdsStore, cellData->getId());
+  auto* cellVectors = Int32Array::Create(dataStructure, k_ParityCellVectorsPath.getTargetName(), cellVectorsStore, cellData->getId());
+  auto* featureValues = Float32Array::CreateWithStore<Float32DataStore>(dataStructure, k_ParityFeatureValuesPath.getTargetName(), {4}, {1}, featureData->getId());
+  REQUIRE(featureIds != nullptr);
+  REQUIRE(cellVectors != nullptr);
+  REQUIRE(featureValues != nullptr);
+
+  std::array<int32, k_CellCount> featureIdValues{};
+  std::array<int32, k_CellCount * 2> cellVectorValues{};
+  usize index = 0;
+  for(usize z = 0; z < k_Dim; z++)
+  {
+    for(usize y = 0; y < k_Dim; y++)
+    {
+      for(usize x = 0; x < k_Dim; x++)
+      {
+        featureIdValues[index] = (x < 4) ? 1 : ((y < 4) ? 2 : 3);
+        cellVectorValues[index * 2] = static_cast<int32>(index);
+        cellVectorValues[index * 2 + 1] = static_cast<int32>(1000 + index);
+        index++;
+      }
+    }
+  }
+  const std::array<float32, 4> featureValueBuffer = {0.0F, 1.25F, 2.5F, 3.75F};
+  SIMPLNX_RESULT_REQUIRE_VALID(featureIds->getDataStoreRef().copyFromBuffer(0, featureIdValues));
+  SIMPLNX_RESULT_REQUIRE_VALID(cellVectors->getDataStoreRef().copyFromBuffer(0, cellVectorValues));
+  SIMPLNX_RESULT_REQUIRE_VALID(featureValues->getDataStoreRef().copyFromBuffer(0, featureValueBuffer));
+  return dataStructure;
+}
+
+Arguments CreateM3CParityArguments()
+{
+  Arguments args;
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_RepairTriangleWinding_Key, std::make_any<bool>(true));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_GridGeometryDataPath_Key, std::make_any<DataPath>(k_ParityGeomPath));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(k_ParityFeatureIdsPath));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_SelectedDataArrayPaths_Key, std::make_any<MultiArraySelectionParameter::ValueType>({k_ParityCellVectorsPath}));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_SelectedFeatureDataArrayPaths_Key, std::make_any<MultiArraySelectionParameter::ValueType>({k_ParityFeatureValuesPath}));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_CreatedTriangleGeometryPath_Key, std::make_any<DataPath>(k_ParityMeshPath));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_VertexDataGroupName_Key, std::make_any<std::string>(k_VertexDataGroupName));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_NodeTypesArrayName_Key, std::make_any<std::string>(k_NodeTypeArrayName));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_FaceDataGroupName_Key, std::make_any<std::string>(k_FaceDataGroupName));
+  args.insertOrAssign(M3CSurfaceMeshingFilter::k_FaceLabelsArrayName_Key, std::make_any<std::string>(k_Face_Labels));
+  return args;
+}
+
+void ExecuteM3CParityCase(DataStructure& dataStructure, AlgorithmTestScope& scope)
+{
+  M3CSurfaceMeshingFilter filter;
+  const Arguments args = CreateM3CParityArguments();
+  auto preflightResult = filter.preflight(dataStructure, args);
+  SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
+  auto executeResult = scope.executeFilter(filter, dataStructure, args);
+  SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
+  CheckMeshIntegrity(dataStructure, k_ParityMeshPath, k_ParityFaceLabelsPath, k_ParityNodeTypesPath);
+}
+} // namespace
+
+#endif
 
 TEST_CASE("SimplnxCore::M3CSurfaceMeshingFilter: SIMPL Backwards Compatibility", "[SimplnxCore][M3CSurfaceMeshingFilter][BackwardsCompatibility]")
 {

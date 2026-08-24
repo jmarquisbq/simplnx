@@ -1,7 +1,12 @@
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
+#include <array>
 #include <catch2/catch.hpp>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <nonstd/span.hpp>
+#include <vector>
 
 #include "SimplnxCore/Filters/Algorithms/ComputeMomentInvariants2D.hpp"
 #include "SimplnxCore/Filters/ComputeMomentInvariants2DFilter.hpp"
@@ -12,6 +17,8 @@
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 using namespace nx::core;
 using namespace nx::core::Constants;
@@ -129,6 +136,9 @@ const DataPath k_Omega2Path({k_ImageGeometry, k_FeatureData, k_Omega2});
 
 TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: Valid Filter Execution", "[SimplnxCore][ComputeMomentInvariants2DFilter]")
 {
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
   // Instantiate the filter, a DataStructure object and an Arguments Object
@@ -152,7 +162,7 @@ TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: Valid Filter Execution"
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(ds, args);
+  auto executeResult = scope.executeFilter(filter, ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
   const Float32Array* omega1 = ds.getDataAs<Float32Array>(k_Omega1Path);

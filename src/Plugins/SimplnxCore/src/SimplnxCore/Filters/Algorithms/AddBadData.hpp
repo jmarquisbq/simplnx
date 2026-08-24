@@ -23,7 +23,10 @@ struct SIMPLNXCORE_EXPORT AddBadDataInputValues
 };
 
 /**
- * @class
+ * @brief Adds seeded boundary and Poisson bad data by zeroing selected cell tuples.
+ *
+ * Contiguous stores use a direct pointer path, while disk-backed stores are processed through bounded chunks. Both paths preserve the original random draw
+ * order.
  */
 class SIMPLNXCORE_EXPORT AddBadData
 {

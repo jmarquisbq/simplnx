@@ -43,11 +43,62 @@ struct AxialLengths
   IGeometry::SharedVertexList::value_type zLength = 0.0;
 };
 
-// Eigen implementation of Moller-Trumbore intersection algorithm adapted to account for distance
+/**
+ * @brief Buckets every triangle face by the feature id(s) referenced by its two face labels.
+ *
+ * ComputeShapesTriangleGeomImpl::convert() and FindIntersections() both need, for a given feature,
+ * only the faces that touch that feature. Scanning the full face list once per feature (as a naive
+ * implementation would) is O(numFeatures * numFaces). Instead this builds every feature's face-index
+ * list in a single O(numFaces) pass before the per-feature parallel loop begins, so each feature only
+ * ever visits its own faces afterward. Total memory is O(numFaces) since a face is recorded in at most
+ * two buckets (one per side of the face) - acceptable because triangle mesh geometries are always held
+ * in-core. Faces are appended in ascending face-index order (buckets are filled by scanning faces
+ * 0..numFaces-1), which preserves the original per-feature accumulation order.
+ * @param faceLabels The two-component (owner/neighbor) feature id label for each triangle face
+ * @param numFeatures The number of features (including the invalid id 0), used to size and validate against
+ * @return One face-index bucket per feature id
+ */
+std::vector<std::vector<usize>> BuildFacesByFeature(const AbstractDataStore<int32>& faceLabels, usize numFeatures)
+{
+  const usize numFaces = faceLabels.getNumberOfTuples();
+  std::vector<std::vector<usize>> facesByFeature(numFeatures);
+  for(usize i = 0; i < numFaces; i++)
+  {
+    const int32 labelA = faceLabels[2 * i];
+    const int32 labelB = faceLabels[(2 * i) + 1];
+    if(labelA > 0 && static_cast<usize>(labelA) < numFeatures)
+    {
+      facesByFeature[labelA].push_back(i);
+    }
+    // Skip labelB when it duplicates labelA so a face is never recorded twice in the same feature's bucket
+    if(labelB > 0 && labelB != labelA && static_cast<usize>(labelB) < numFeatures)
+    {
+      facesByFeature[labelB].push_back(i);
+    }
+  }
+  return facesByFeature;
+}
+
+/**
+ * @brief Computes the maximum ray-intersection distance along each principal axis for one feature.
+ *
+ * Casts Moller-Trumbore rays from the feature's centroid, along each of the feature's principal axes,
+ * against only the triangle faces belonging to this feature. The candidate faces are supplied as a
+ * pre-bucketed index list (see BuildFacesByFeature()) instead of being found by rescanning every face
+ * in the mesh, which keeps this to O(faces belonging to the feature) rather than O(total mesh faces).
+ * @param orientationMatrix The feature's principal-axis reference frame
+ * @param featureFaces Face indices belonging to this feature, in ascending order
+ * @param triStore Shared triangle vertex-index list for the mesh
+ * @param vertexStore Shared vertex coordinate list for the mesh
+ * @param centroidsStore Per-feature centroid coordinates
+ * @param featureId The feature currently being processed
+ * @param shouldCancel Cancellation flag, checked once per candidate face
+ * @return The maximum intersection distance found along each principal axis
+ */
 template <typename T = IGeometry::SharedVertexList::value_type>
-AxialLengths FindIntersections(const Eigen::Matrix<T, 3, 3, Eigen::RowMajor>& orientationMatrix, const AbstractDataStore<int32>& faceLabelsStore,
-                               const AbstractDataStore<IGeometry::MeshIndexType>& triStore, const AbstractDataStore<IGeometry::SharedVertexList::value_type>& vertexStore,
-                               const AbstractDataStore<float32>& centroidsStore, IGeometry::MeshIndexType featureId, const std::atomic_bool& shouldCancel)
+AxialLengths FindIntersections(const Eigen::Matrix<T, 3, 3, Eigen::RowMajor>& orientationMatrix, const std::vector<usize>& featureFaces, const AbstractDataStore<IGeometry::MeshIndexType>& triStore,
+                               const AbstractDataStore<IGeometry::SharedVertexList::value_type>& vertexStore, const AbstractDataStore<float32>& centroidsStore, IGeometry::MeshIndexType featureId,
+                               const std::atomic_bool& shouldCancel)
 {
   constexpr T epsilon = std::numeric_limits<T>::epsilon();
 
@@ -65,17 +116,11 @@ AxialLengths FindIntersections(const Eigen::Matrix<T, 3, 3, Eigen::RowMajor>& or
   // Feature Centroid
   cache.origin = PointT{centroidsStore[3 * featureId], centroidsStore[(3 * featureId) + 1], centroidsStore[(3 * featureId) + 2]};
 
-  for(usize i = 0; i < faceLabelsStore.getNumberOfTuples(); i++)
+  for(const usize i : featureFaces)
   {
     if(shouldCancel)
     {
       return lengths;
-    }
-
-    if(faceLabelsStore[2 * i] != featureId && faceLabelsStore[(2 * i) + 1] != featureId)
-    {
-      // Triangle not in feature. Continue
-      continue;
     }
 
     // Here we are manually extracting the vertex points from the SharedVertexList
@@ -232,15 +277,17 @@ private:
   const AbstractDataStore<float32>& m_Centroids;
   const AbstractDataStore<int32>& m_FaceLabels;
   const TriangleGeom& m_TriangleGeom;
+  const std::vector<std::vector<usize>>& m_FacesByFeature;
 
 public:
   ComputeShapesTriangleGeomImpl(ComputeShapesTriangleGeom* filter, const std::atomic_bool& shouldCancel, const AbstractDataStore<float32>& centroids, const AbstractDataStore<int32>& faceLabels,
-                                const TriangleGeom& triangleGeom)
+                                const TriangleGeom& triangleGeom, const std::vector<std::vector<usize>>& facesByFeature)
   : m_FilterPtr(filter)
   , m_ShouldCancel(shouldCancel)
   , m_Centroids(centroids)
   , m_FaceLabels(faceLabels)
   , m_TriangleGeom(triangleGeom)
+  , m_FacesByFeature(facesByFeature)
   {
   }
 
@@ -251,8 +298,6 @@ public:
 
     const TriStore& triangleList = m_TriangleGeom.getFacesRef().getDataStoreRef();
     const VertsStore& verts = m_TriangleGeom.getVerticesRef().getDataStoreRef();
-
-    const usize numFaces = m_FaceLabels.getNumberOfTuples();
 
     Matrix3x3 Cinertia;
     nx::core::Point3Df centroid = {0.0F, 0.0F, 0.0F};
@@ -301,13 +346,11 @@ public:
       centroid[2] = m_Centroids[(3 * featureId) + 2];
 
       // for each triangle we need the transformation matrix A defined by the three points as columns
-      // Loop over all triangle faces
-      for(usize i = 0; i < numFaces; i++)
+      // Loop over only the faces that reference this feature (pre-bucketed once in
+      // ComputeShapesTriangleGeom::operator() by BuildFacesByFeature()) instead of rescanning the whole mesh
+      const std::vector<usize>& featureFaces = m_FacesByFeature[featureId];
+      for(const usize i : featureFaces)
       {
-        if(m_FaceLabels[2 * i] != featureId && m_FaceLabels[(2 * i) + 1] != featureId)
-        {
-          continue;
-        }
         const usize compIndex = (m_FaceLabels[2 * i] == featureId ? 0 : 1);
         std::array<nx::core::Point3Df, 3> vertCoords = GetFaceCoordinates(i, verts, triangleList);
 
@@ -404,7 +447,7 @@ public:
         return;
       }
 
-      const ::AxialLengths lengths = FindIntersections(orientationMatrix, m_FaceLabels, triangleList, verts, m_Centroids, featureId, m_ShouldCancel);
+      const ::AxialLengths lengths = FindIntersections(orientationMatrix, featureFaces, triangleList, verts, m_Centroids, featureId, m_ShouldCancel);
 
       // Check for zeroes (zeroes = probably invalid)
       if(lengths.xLength == 0.0 || lengths.yLength == 0.0 || lengths.zLength == 0.0)
@@ -520,10 +563,14 @@ Result<> ComputeShapesTriangleGeom::operator()()
   }
   m_FeatureUpdateCount = 0;
 
+  // Bucket every triangle face by the feature id(s) it touches in a single O(numFaces) pass, up front,
+  // so the per-feature parallel loop below never has to rescan the whole mesh (see BuildFacesByFeature()).
+  const std::vector<std::vector<usize>> facesByFeature = ::BuildFacesByFeature(faceLabels, m_NumFeatures);
+
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(1, m_NumFeatures);
   dataAlg.setParallelizationEnabled(true);
-  dataAlg.execute(ComputeShapesTriangleGeomImpl(this, m_ShouldCancel, centroids, faceLabels, triangleGeom));
+  dataAlg.execute(ComputeShapesTriangleGeomImpl(this, m_ShouldCancel, centroids, faceLabels, triangleGeom, facesByFeature));
 
   return {};
 }

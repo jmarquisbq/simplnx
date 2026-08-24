@@ -1,3 +1,4 @@
+#include "FeatureRemovalTestUtils.hpp"
 #include "SimplnxCore/Filters/RequireMinimumSizeFeaturesFilter.hpp"
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 
@@ -13,6 +14,7 @@
 
 #include <catch2/catch.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 

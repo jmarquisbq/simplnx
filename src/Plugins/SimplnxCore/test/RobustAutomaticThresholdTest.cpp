@@ -3,14 +3,19 @@
 #include "SimplnxCore/SimplnxCore_test_dirs.hpp"
 
 #include "simplnx/Core/Application.hpp"
+#include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/Pipeline/Pipeline.hpp"
 #include "simplnx/Pipeline/PipelineFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
+#include "simplnx/Utilities/AlgorithmDispatch.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 using namespace nx::core;
@@ -54,6 +59,9 @@ TEST_CASE("SimplnxCore::RobustAutomaticThresholdFilter: Missing/Empty DataPaths"
 TEST_CASE("SimplnxCore::RobustAutomaticThresholdFilter: Test Algorithm", "[RobustAutomaticThresholdFilter]")
 {
   UnitTest::LoadPlugins();
+  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  UnitTest::AlgorithmTestScope algorithmTestScope(scenario);
 
   RobustAutomaticThresholdFilter filter;
   DataStructure dataStructure = UnitTest::CreateDataStructure();
@@ -71,8 +79,10 @@ TEST_CASE("SimplnxCore::RobustAutomaticThresholdFilter: Test Algorithm", "[Robus
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
   // Execute the filter and check the result
-  auto executeResult = filter.execute(dataStructure, args);
+  algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(inputPath));
+  auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
+  algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(inputPath.replaceName("Created Array")));
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }

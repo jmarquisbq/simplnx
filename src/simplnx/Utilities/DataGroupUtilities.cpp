@@ -3,10 +3,38 @@
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
 #include "simplnx/DataStructure/BaseGroup.hpp"
 
+#include <nonstd/span.hpp>
+
+#include <memory>
+
 namespace nx::core
 {
+FeatureRenumbering ComputeFeatureRenumbering(const std::vector<bool>& activeObjects)
+{
+  FeatureRenumbering result;
+  result.newNames.assign(activeObjects.size(), 0);
+  result.keepList.reserve(activeObjects.size());
+
+  size_t goodCount = 1;
+  for(size_t i = 1; i < activeObjects.size(); i++)
+  {
+    if(activeObjects[i])
+    {
+      result.newNames[i] = goodCount;
+      goodCount++;
+      result.keepList.push_back(i);
+    }
+    else
+    {
+      result.newNames[i] = 0;
+      result.anyRemoved = true;
+    }
+  }
+  return result;
+}
+
 bool RemoveInactiveObjects(DataStructure& dataStructure, const DataPath& featureDataGroupPath, const std::vector<bool>& activeObjects, Int32AbstractDataStore& cellFeatureIds,
-                           size_t currentFeatureCount, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
+                           size_t currentFeatureCount, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, bool cellFeatureIdsRenumbered)
 {
   // Get the DataGroup that holds all the feature Data
   const auto* featureLevelBaseGroup = dataStructure.getDataAs<const BaseGroup>(featureDataGroupPath);
@@ -36,29 +64,15 @@ bool RemoveInactiveObjects(DataStructure& dataStructure, const DataPath& feature
   size_t totalTuples = currentFeatureCount;
   if(activeObjects.size() == totalTuples)
   {
-    size_t goodCount = 1;
-    std::vector<size_t> newNames(totalTuples, 0);
-    std::vector<size_t> removeList;
-    std::vector<size_t> keepList;
-    keepList.reserve(activeObjects.size());
-
-    for(int32_t i = 1; i < activeObjects.size(); i++)
-    {
-      if(activeObjects[i])
-      {
-        newNames[i] = goodCount;
-        goodCount++;
-        keepList.push_back(i);
-      }
-      else
-      {
-        removeList.push_back(i);
-        newNames[i] = 0;
-      }
-    }
+    // Single source of truth for the compaction mapping. When cellFeatureIdsRenumbered is true the
+    // caller has already applied this exact mapping to cellFeatureIds, so newNames is used only for
+    // the feature-array compaction below (not to renumber cellFeatureIds again).
+    const FeatureRenumbering renumbering = ComputeFeatureRenumbering(activeObjects);
+    const std::vector<size_t>& newNames = renumbering.newNames;
+    const std::vector<size_t>& keepList = renumbering.keepList;
 
     std::vector<usize> newShape = {keepList.size() + 1};
-    if(!removeList.empty())
+    if(renumbering.anyRemoved)
     {
       for(const auto& dataArray : matchingDataArrayPtrs)
       {
@@ -79,20 +93,42 @@ bool RemoveInactiveObjects(DataStructure& dataStructure, const DataPath& feature
         // dataArray->getIDataStore()->resizeTuples(newShape);
       }
 
-      // Loop over all the points and correct all the feature names
-      size_t totalPoints = cellFeatureIds.getNumberOfTuples();
       bool featureIdsChanged = false;
-      for(size_t i = 0; i < totalPoints; i++)
+      if(!cellFeatureIdsRenumbered)
       {
-        if(cellFeatureIds[i] >= 0 && cellFeatureIds[i] < newNames.size())
+        // Renumber featureIds using chunked bulk I/O
+        constexpr size_t k_ChunkSize = 65536;
+        size_t totalPoints = cellFeatureIds.getNumberOfTuples();
+        auto chunkBuf = std::make_unique<int32_t[]>(k_ChunkSize);
+        for(size_t offset = 0; offset < totalPoints; offset += k_ChunkSize)
         {
-          cellFeatureIds.setValue(i, static_cast<int32_t>(newNames[cellFeatureIds[i]]));
-          featureIdsChanged = true;
+          if(shouldCancel)
+          {
+            return false;
+          }
+          size_t count = std::min(k_ChunkSize, totalPoints - offset);
+          cellFeatureIds.copyIntoBuffer(offset, nonstd::span<int32_t>(chunkBuf.get(), count));
+          bool chunkModified = false;
+          for(size_t i = 0; i < count; i++)
+          {
+            if(chunkBuf[i] >= 0 && static_cast<size_t>(chunkBuf[i]) < newNames.size())
+            {
+              chunkBuf[i] = static_cast<int32_t>(newNames[chunkBuf[i]]);
+              chunkModified = true;
+            }
+          }
+          if(chunkModified)
+          {
+            cellFeatureIds.copyFromBuffer(offset, nonstd::span<const int32_t>(chunkBuf.get(), count));
+            featureIdsChanged = true;
+          }
         }
-        if(shouldCancel)
-        {
-          return false;
-        }
+      }
+      else
+      {
+        // The caller renumbered cellFeatureIds upstream; features were removed, so any dependent
+        // NeighborLists are invalidated just as if we had renumbered here.
+        featureIdsChanged = true;
       }
 
       if(featureIdsChanged)

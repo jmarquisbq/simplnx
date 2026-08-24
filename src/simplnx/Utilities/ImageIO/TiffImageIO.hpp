@@ -23,6 +23,12 @@ public:
 
   Result<ImageMetadata> readMetadata(const std::filesystem::path& filePath) const override;
   Result<> readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const override;
+
+  /**
+   * @brief Streams TIFF scanlines or tile-row segments into the callback so
+   * callers can crop/convert directly into bounded destination pages.
+   */
+  Result<> readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const override;
   Result<> writePixelData(const std::filesystem::path& filePath, std::span<const uint8> buffer, const ImageMetadata& metadata) const override;
   std::set<DataType> supportedWriteDataTypes() const override;
   std::set<usize> supportedWriteComponentCounts() const override;
