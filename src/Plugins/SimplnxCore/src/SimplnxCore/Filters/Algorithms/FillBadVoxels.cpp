@@ -17,12 +17,20 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @struct FillScan
+ * @brief Counts unresolved and currently fillable cells.
+ */
 struct FillScan
 {
   usize badCount = 0;
   usize fillableCount = 0;
 };
 
+/**
+ * @struct NeighborSelection
+ * @brief Identifies the selected neighbor direction and Feature ID.
+ */
 struct NeighborSelection
 {
   int8 direction = -1;
@@ -41,6 +49,7 @@ Result<> WriteSlice(AbstractDataStore<T>& store, usize zIndex, usize sliceValues
   return store.copyFromBuffer(zIndex * sliceValues, nonstd::span<const T>(source, sliceValues));
 }
 
+// Select the first neighbor whose Feature ID reaches the largest vote count.
 inline NeighborSelection SelectNeighbor(const int32* previousSlice, const int32* currentSlice, const int32* nextSlice, usize localIndex, usize xIndex, usize yIndex, usize zIndex,
                                         const std::array<usize, 3>& dimensions)
 {
@@ -174,6 +183,13 @@ Result<> ScanFeatureIds(const Int32AbstractDataStore& featureIds, const std::arr
   return {};
 }
 
+/**
+ * @struct FillArrayFunctor
+ * @brief Copies one sibling array from the current Feature ID snapshot.
+ *
+ * Three Feature ID slices and three target slices bound working memory. Store
+ * errors are returned, and cancellation can leave completed target slices.
+ */
 struct FillArrayFunctor
 {
   template <typename T>

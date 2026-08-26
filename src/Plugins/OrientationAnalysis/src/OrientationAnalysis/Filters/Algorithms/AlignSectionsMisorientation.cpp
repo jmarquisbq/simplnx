@@ -11,7 +11,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 AlignSectionsMisorientation::AlignSectionsMisorientation(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          AlignSectionsMisorientationInputValues* inputValues)
 : AlignSections(dataStructure, shouldCancel, mesgHandler)
@@ -22,14 +21,8 @@ AlignSectionsMisorientation::AlignSectionsMisorientation(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 AlignSectionsMisorientation::~AlignSectionsMisorientation() noexcept = default;
 
-// -----------------------------------------------------------------------------
-// Entry point: delegates to the base AlignSections::execute() which handles
-// the overall alignment pipeline (initialize shift arrays, call findShifts(),
-// apply shifts to the geometry, and optionally subtract a linear background).
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsMisorientation::operator()()
 {
   if(m_ShouldCancel)
@@ -41,16 +34,6 @@ Result<> AlignSectionsMisorientation::operator()()
   return execute(gridGeom.getDimensions(), m_InputValues->ImageGeometryPath);
 }
 
-// -----------------------------------------------------------------------------
-// Computes optimal X-Y shifts for each pair of adjacent Z-slices by minimizing
-// the fraction of sampled voxel pairs whose misorientation exceeds the user
-// tolerance.
-//
-// Dispatch logic: if any of the input arrays (quats, cellPhases) are backed by
-// an OOC DataStore, or if ForceOocAlgorithm() is set, the OOC-optimized
-// findShiftsOoc() path is used instead. The check is done in a limited scope
-// so the temporary references are destroyed before the in-core path begins.
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, std::vector<int64>& yShifts)
 {
   bool usesOutOfCoreStore = false;
@@ -87,8 +70,7 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
       maskCompare = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->MaskArrayPath);
     } catch(const std::out_of_range& exception)
     {
-      // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-      // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+      // This fallback supports callers that bypass parameter preflight.
       std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString());
       return MakeErrorResult(-53900, message);
     }
@@ -110,7 +92,7 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
 
   std::vector<ebsdlib::LaueOps::Pointer> orientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
 
-  // Allocate a 2D Array which will be reused from slice to slice
+  // Reuse candidate flags for each adjacent slice pair.
   std::vector<bool> misorients(dims[0] * dims[1], false);
 
   const auto halfDim0 = static_cast<int64>(dims[0] * 0.5f);
@@ -123,7 +105,6 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
     auto& slicesStore = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->SlicesArrayPath)->getDataStoreRef();
     auto& relativeShiftsStore = m_DataStructure.getDataAs<Int64Array>(m_InputValues->RelativeShiftsArrayPath)->getDataStoreRef();
     auto& cumulativeShiftsStore = m_DataStructure.getDataAs<Int64Array>(m_InputValues->CumulativeShiftsArrayPath)->getDataStoreRef();
-    // Loop over the Z Direction
     for(int64 iter = 1; iter < dims[2]; iter++)
     {
       throttledMessenger.sendThrottledMessage([&]() { return fmt::format("Determining Shifts || {:.2f}% Complete", CalculatePercentComplete(iter, dims[2])); });
@@ -132,14 +113,13 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
         return {};
       }
       float32 minDisorientation = std::numeric_limits<float32>::max();
-      // Work from the largest Slice Value to the lowest Slice Value.
+      // Traverse from the top slice toward the bottom slice.
       int64 slice = (dims[2] - 1) - iter;
       int64 oldxshift = -1;
       int64 oldyshift = -1;
       int64 newxshift = 0;
       int64 newyshift = 0;
 
-      // Initialize everything to false
       std::fill(misorients.begin(), misorients.end(), false);
 
       float32 misorientationTolerance = static_cast<float32>(m_InputValues->misorientationTolerance * deg2Rad);
@@ -231,7 +211,6 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
   }
   else
   {
-    // Loop over the Z Direction
     for(int64 iter = 1; iter < dims[2]; iter++)
     {
       throttledMessenger.sendThrottledMessage([&]() { return fmt::format("Determining Shifts || {:.2f}% Complete", CalculatePercentComplete(iter, dims[2])); });
@@ -240,14 +219,13 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
         return {};
       }
       float32 minDisorientation = std::numeric_limits<float32>::max();
-      // Work from the largest Slice Value to the lowest Slice Value.
+      // Traverse from the top slice toward the bottom slice.
       int64 slice = (dims[2] - 1) - iter;
       int64 oldxshift = -1;
       int64 oldyshift = -1;
       int64 newxshift = 0;
       int64 newyshift = 0;
 
-      // Initialize everything to false
       std::fill(misorients.begin(), misorients.end(), false);
 
       float32 misorientationTolerance = static_cast<float32>(m_InputValues->misorientationTolerance * deg2Rad);
@@ -333,14 +311,9 @@ Result<> AlignSectionsMisorientation::findShifts(std::vector<int64>& xShifts, st
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// OOC-optimized findShifts: buffers 2 adjacent Z-slices of quats, cellPhases,
-// and mask into local vectors before the convergence loop, eliminating random
-// chunk-based DataStore access.
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts, std::vector<int64>& yShifts)
 {
-  // For OOC mask buffering, get the raw mask store for bulk reads instead of per-element isTrue()
+  // Bulk reads avoid per-element OOC mask access.
   const AbstractDataStore<uint8>* maskUInt8StorePtr = nullptr;
   const AbstractDataStore<bool>* maskBoolStorePtr = nullptr;
   if(m_InputValues->UseMask)
@@ -368,7 +341,7 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
   auto& cellPhasesStore = cellPhases.getDataStoreRef();
   auto& quatsStore = quats.getDataStoreRef();
 
-  // Cache ensemble-level array locally to avoid per-element virtual dispatch in hot loop
+  // The local ensemble cache avoids hot-loop store access.
   const auto& crystalStructuresStore = crystalStructuresArray.getDataStoreRef();
   std::vector<uint32> crystalStructures(crystalStructuresStore.getSize());
   auto crystalReadResult = crystalStructuresStore.copyIntoBuffer(0, nonstd::span<uint32>(crystalStructures.data(), crystalStructures.size()));
@@ -396,7 +369,6 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
 
   const int64 sliceVoxels = dims[0] * dims[1];
 
-  // Buffers for 2 Z-slices: reference (slice+1) and current (slice)
   std::vector<float32> refQuatsBuf(sliceVoxels * 4);
   std::vector<float32> curQuatsBuf(sliceVoxels * 4);
   std::vector<int32> refPhasesBuf(sliceVoxels);
@@ -414,7 +386,6 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
     }
   }
 
-  // Optional output stores
   AbstractDataStore<uint32>* slicesStorePtr = nullptr;
   AbstractDataStore<int64>* relativeShiftsStorePtr = nullptr;
   AbstractDataStore<int64>* cumulativeShiftsStorePtr = nullptr;
@@ -425,7 +396,7 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
     cumulativeShiftsStorePtr = &m_DataStructure.getDataAs<Int64Array>(m_InputValues->CumulativeShiftsArrayPath)->getDataStoreRef();
   }
 
-  // Pre-load the first reference slice (the top-most Z-slice) via bulk read
+  // The first pair uses the top slice as its reference.
   {
     int64 firstRefOffset = (dims[2] - 1) * sliceVoxels;
     auto phaseReadResult = cellPhasesStore.copyIntoBuffer(firstRefOffset, nonstd::span<int32>(refPhasesBuf.data(), sliceVoxels));
@@ -464,7 +435,7 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
 
     int64 slice = (dims[2] - 1) - iter;
 
-    // Bulk-read current slice (reference available from pre-load or previous iteration swap)
+    // The reference buffer holds the prior slice after the first iteration.
     int64 curOffset = slice * sliceVoxels;
     auto phaseReadResult = cellPhasesStore.copyIntoBuffer(curOffset, nonstd::span<int32>(curPhasesBuf.data(), sliceVoxels));
     if(phaseReadResult.invalid())
@@ -524,7 +495,6 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
                 if((l + j + oldyshift) >= 0 && (l + j + oldyshift) < dims[1] && (n + k + oldxshift) >= 0 && (n + k + oldxshift) < dims[0])
                 {
                   count++;
-                  // Local buffer indices (within-slice)
                   int64 refLocalIdx = l * dims[0] + n;
                   int64 curLocalIdx = (l + j + oldyshift) * dims[0] + (n + k + oldxshift);
 
@@ -593,7 +563,7 @@ Result<> AlignSectionsMisorientation::findShiftsOoc(std::vector<int64>& xShifts,
       (*cumulativeShiftsStorePtr)[yIndex] = yShifts[iter];
     }
 
-    // Current slice becomes the reference for the next iteration (O(1) pointer swap)
+    // Reuse the current slice as the next reference without another read.
     std::swap(refQuatsBuf, curQuatsBuf);
     std::swap(refPhasesBuf, curPhasesBuf);
     if(m_InputValues->UseMask)

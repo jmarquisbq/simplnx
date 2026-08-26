@@ -29,9 +29,8 @@ Result<> ImportH5ObjectPathsAction::apply(DataStructure& dataStructure, Mode mod
 {
   static constexpr StringLiteral prefix = "ImportH5ObjectPathsAction: ";
 
-  // Preflight metadata comes from the stat-validated cache so repeated pipeline
-  // preflights do not retraverse the HDF5 hierarchy. Execute uses the OOC-aware
-  // loader to attach real stores before the selected objects are merged below.
+  // Preflight uses a stat-validated metadata cache to avoid repeated HDF5
+  // hierarchy scans. Execute loads resolver-selected stores before merging.
   auto result = (mode == Mode::Preflight) ? DREAM3D::Dream3dPreflightCache::Instance().fetch(m_H5FilePath) : DREAM3D::LoadDataStructure(m_H5FilePath);
 
   if(result.invalid())
@@ -40,10 +39,10 @@ Result<> ImportH5ObjectPathsAction::apply(DataStructure& dataStructure, Mode mod
   }
 
   DataStructure sourceStructure = std::move(result.value());
+  // Renumber source objects before merge to avoid collisions with pipeline objects.
   sourceStructure.resetIds(dataStructure.getNextId());
 
-  // Merge source objects into the pipeline's DataStructure.
-  // Sort paths shortest-first so parents are inserted before children.
+  // Insert parents before children because every child requires its parent path.
   auto sortedPaths = m_Paths;
   std::sort(sortedPaths.begin(), sortedPaths.end(), [](const DataPath& a, const DataPath& b) { return a.getLength() < b.getLength(); });
 
@@ -62,9 +61,8 @@ Result<> ImportH5ObjectPathsAction::apply(DataStructure& dataStructure, Mode mod
       continue;
     }
 
-    // Shallow-copy the object from the source structure (which has real stores)
-    // and insert it into the pipeline's DataStructure. Clear children on groups
-    // because child objects will be inserted by their own paths in the loop.
+    // The loaded source owns resolver-selected stores. Copy group shells without
+    // children because selected child paths insert independently.
     const auto sourceObject = sourceStructure.getSharedData(targetPath);
     const auto objectCopy = std::shared_ptr<DataObject>(sourceObject->shallowCopy());
     if(const auto group = std::dynamic_pointer_cast<BaseGroup>(objectCopy); group != nullptr)

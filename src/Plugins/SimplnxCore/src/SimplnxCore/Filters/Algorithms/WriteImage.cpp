@@ -32,7 +32,15 @@ using namespace nx::core;
 
 namespace
 {
-/** @brief Applies the requested horizontal or vertical flip to one packed, row-major slice buffer. */
+/**
+ * @brief Flips one packed row-major slice in place.
+ * @param buffer Provides and receives pixel bytes.
+ * @param width Specifies pixels per row.
+ * @param height Specifies row count.
+ * @param pixelStrideBytes Specifies bytes per pixel.
+ * @param flip Selects horizontal, vertical, or no flip.
+ * @pre buffer contains at least width times height times pixelStrideBytes bytes.
+ */
 void ApplyImageFlip(std::vector<uint8>& buffer, usize width, usize height, usize pixelStrideBytes, ImageFlipTransform flip)
 {
   if(flip == ImageFlipTransform::None || width == 0 || height == 0)
@@ -42,7 +50,7 @@ void ApplyImageFlip(std::vector<uint8>& buffer, usize width, usize height, usize
   const usize rowBytes = width * pixelStrideBytes;
   if(flip == ImageFlipTransform::FlipAboutXAxis)
   {
-    // Reverse row order (mirror top-to-bottom).
+    // Swap top and bottom rows.
     for(usize y = 0; y < height / 2; ++y)
     {
       uint8* rowTop = buffer.data() + y * rowBytes;
@@ -52,7 +60,7 @@ void ApplyImageFlip(std::vector<uint8>& buffer, usize width, usize height, usize
   }
   else if(flip == ImageFlipTransform::FlipAboutYAxis)
   {
-    // Reverse pixel order within each row (mirror left-to-right).
+    // Swap left and right pixels within each row.
     for(usize y = 0; y < height; ++y)
     {
       uint8* row = buffer.data() + y * rowBytes;
@@ -68,6 +76,11 @@ void ApplyImageFlip(std::vector<uint8>& buffer, usize width, usize height, usize
 
 /**
  * @brief Converts one bounded UInt8 grayscale/RGB/RGBA slice to RGB for scale-bar rendering.
+ * @param buffer Provides packed UInt8 pixels.
+ * @param pixelCount Specifies source pixels.
+ * @param numComps Specifies one, three, or four source components.
+ * @return Packed RGB pixels.
+ * @pre buffer contains pixelCount times numComps values.
  *
  * Grayscale is replicated and RGBA alpha is dropped. Preflight guarantees the
  * UInt8 component format whenever this conversion is required.
@@ -93,7 +106,16 @@ std::vector<uint8> ConvertUInt8ToRgb(const std::vector<uint8>& buffer, usize pix
   return rgb;
 }
 
-/** @brief Converts a plane choice and slice index to the exact 3D DataStore extent to bulk-read. */
+/**
+ * @brief Creates the three-dimensional extent for one image slice.
+ * @param planeIndex Selects XY, XZ, or YZ.
+ * @param sliceIndex Specifies the fixed-axis index.
+ * @param dimX Specifies X cells.
+ * @param dimY Specifies Y cells.
+ * @param dimZ Specifies Z cells.
+ * @return Inclusive source extent.
+ * @pre Dimensions are positive and sliceIndex is valid for planeIndex.
+ */
 Extent CreateSliceExtent(usize planeIndex, usize sliceIndex, usize dimX, usize dimY, usize dimZ)
 {
   if(planeIndex == 0)
@@ -108,12 +130,26 @@ Extent CreateSliceExtent(usize planeIndex, usize sliceIndex, usize dimX, usize d
 }
 
 /**
- * @brief Functor that extracts a single 2D slice from a typed DataStore
- * into a raw byte buffer suitable for IImageIO::writePixelData().
+ * @struct ExtractSliceFunctor
+ * @brief Extracts one typed DataStore slice into packed bytes.
  */
 struct ExtractSliceFunctor
 {
-  /** @brief Bulk-reads one typed extent and packs it into bytes, explicitly expanding Bool values. */
+  /**
+   * @brief Reads and packs one typed slice.
+   * @tparam T Specifies the source scalar type.
+   * @param dataArray Provides source values.
+   * @param buffer Receives packed bytes.
+   * @param sliceIndex Specifies the fixed-axis index.
+   * @param planeIndex Selects XY, XZ, or YZ.
+   * @param dimX Specifies X cells.
+   * @param dimY Specifies Y cells.
+   * @param dimZ Specifies Z cells.
+   * @param nComp Specifies components per cell.
+   * @return Size mismatch error, or success.
+   *
+   * Boolean values expand to one byte. Other types preserve native byte order.
+   */
   template <typename T>
   Result<> operator()(const IDataArray& dataArray, std::vector<uint8>& buffer, usize sliceIndex, usize planeIndex, usize dimX, usize dimY, usize dimZ, usize nComp)
   {
@@ -142,7 +178,13 @@ struct ExtractSliceFunctor
   }
 };
 
-/** @brief Reads one optional Bool/UInt8 mask extent into a uniform byte vector. */
+/**
+ * @brief Reads one optional mask extent as bytes.
+ * @param maskArray Provides Boolean or UInt8 mask values, or null.
+ * @param extent Specifies the source slice.
+ * @return Empty vector for no mask, or byte mask values.
+ * @pre A non-null maskArray has Boolean or UInt8 type.
+ */
 Result<std::vector<uint8>> ReadMaskSlice(const IDataArray* maskArray, const Extent& extent)
 {
   if(maskArray == nullptr)
@@ -162,6 +204,7 @@ Result<std::vector<uint8>> ReadMaskSlice(const IDataArray* maskArray, const Exte
 }
 
 /**
+ * @struct ColorizeVolumeFunctor
  * @brief Colorizes and writes a scalar volume one slice at a time.
  *
  * Global min/max is reduced through fixed pages; each scalar and mask slice is
@@ -170,7 +213,28 @@ Result<std::vector<uint8>> ReadMaskSlice(const IDataArray* maskArray, const Exte
  */
 struct ColorizeVolumeFunctor
 {
-  /** @brief Executes paged range reduction followed by bounded slice colorization for one scalar type. */
+  /**
+   * @brief Reduces the global range and colorizes typed slices.
+   * @tparam T Specifies the source scalar type.
+   * @param dataArrayRef Provides scalar cell values.
+   * @param planeIndex Selects XY, XZ, or YZ.
+   * @param dimX Specifies X cells.
+   * @param dimY Specifies Y cells.
+   * @param dimZ Specifies Z cells.
+   * @param sliceCount Specifies output slices.
+   * @param sliceW Specifies output width.
+   * @param sliceH Specifies output height before scale-bar padding.
+   * @param binPoints Provides normalized color-bin positions.
+   * @param controlPoints Provides ARGB control colors.
+   * @param numControlColors Specifies control colors.
+   * @param maskArray Optionally selects valid pixels.
+   * @param invalidColor Provides RGB bytes for invalid pixels.
+   * @param shouldCancel Stops before later colorized slices when true.
+   * @param writeSlice Encodes and commits one RGB slice.
+   * @return Source, mask, colorization, or slice-write error, or success after cancellation.
+   *
+   * Global range reduction includes masked values and does not check cancellation.
+   */
   template <typename T>
   Result<> operator()(const IDataArray& dataArrayRef, usize planeIndex, usize dimX, usize dimY, usize dimZ, usize sliceCount, usize sliceW, usize sliceH, const std::vector<float32>& binPoints,
                       const std::vector<float32>& controlPoints, usize numControlColors, const IDataArray* maskArray, const std::vector<uint8>& invalidColor, const std::atomic_bool& shouldCancel,
@@ -183,7 +247,7 @@ struct ColorizeVolumeFunctor
       return MakeErrorResult(-27020, "Input array is empty.");
     }
 
-    // Global min/max over the whole array (mask ignored) — matches Create Color Map semantics.
+    // Include masked values to match Create Color Map range semantics.
     constexpr usize k_TargetPageBytes = 1024 * 1024;
     const usize pageElements = std::max<usize>(1, std::min(numTuples, k_TargetPageBytes / sizeof(T)));
     auto valuePage = std::make_unique<T[]>(pageElements);
@@ -213,7 +277,6 @@ struct ColorizeVolumeFunctor
       }
     }
 
-    // RGB output: 3 uint8 components per pixel.
     std::vector<uint8> sliceBuffer(sliceW * sliceH * 3);
 
     for(usize slice = 0; slice < sliceCount; ++slice)
@@ -275,7 +338,6 @@ struct ColorizeVolumeFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteImage::WriteImage(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const WriteImageInputValues& inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -284,16 +346,14 @@ WriteImage::WriteImage(DataStructure& dataStructure, const IFilter::MessageHandl
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteImage::~WriteImage() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> WriteImage::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues.imageGeometryPath);
   const auto& imageArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues.imageDataArrayPath);
 
-  // ImageGeometry dimensions are stored fastest-to-slowest (X, Y, Z)
+  // ImageGeom stores dimensions in X, Y, Z order.
   SizeVec3 dims = imageGeom.getDimensions();
   usize dimX = dims[0];
   usize dimY = dims[1];
@@ -339,8 +399,7 @@ Result<> WriteImage::operator()()
     bandRgb = ScaleBarRenderer::RenderScaleBarBandRgb(sliceW, sliceH, unitsPerPixel, imageGeom.getUnits());
   }
 
-  // Loop-invariant: the incoming per-slice buffer's component count and component byte size are the
-  // same for every slice, so compute them once here rather than inside writeSlice on every call.
+  // Component count and byte size stay constant for all output slices.
   const usize incomingComps = m_InputValues.createColorTable ? 3 : nComp;
   const usize incomingTypeSize = m_InputValues.createColorTable ? GetDataTypeSize(DataType::uint8) : bytesPerComponent;
 
@@ -364,7 +423,7 @@ Result<> WriteImage::operator()()
   fs::path ext = m_InputValues.outputFilePath.extension();
   fs::path parent = fs::absolute(m_InputValues.outputFilePath).parent_path();
 
-  // ImageMetadata is invariant across slices; color-table and scale-bar modes always write 3-component uint8.
+  // All slices share metadata. Color and scale-bar modes write three UInt8 components.
   ImageMetadata metadata;
   metadata.width = sliceW;
   metadata.height = sliceH + bandHeight;
@@ -372,11 +431,10 @@ Result<> WriteImage::operator()()
   metadata.dataType = (m_InputValues.createColorTable || addScaleBar) ? DataType::uint8 : dataType;
   metadata.numPages = 1;
 
-  // Shared per-slice writer: names the file, writes via the ImageIO layer, commits atomically.
+  // Encode and atomically commit one independently named slice file.
   auto writeSlice = [&](std::vector<uint8>& sliceBuffer, usize slice) -> Result<> {
     m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Writing slice {}/{}", slice + 1, sliceCount));
-    // A single-slice volume writes exactly the user-specified file name; the index suffix is only
-    // appended when multiple slices are produced.
+    // Add an index only when the selection produces multiple slices.
     fs::path slicePath = parent / fmt::format("{}{}", stem.string(), ext.string());
     if(sliceCount > 1)
     {
@@ -391,15 +449,14 @@ Result<> WriteImage::operator()()
     }
     AtomicFile atomicFile = std::move(atomicFileResult.value());
 
-    // Flip operates on the un-padded slice; the scale-bar band is appended afterwards so the
-    // bar is always upright at the bottom of the written image.
+    // Flip before padding so the scale bar stays upright at the output bottom.
     ApplyImageFlip(sliceBuffer, sliceW, sliceH, incomingComps * incomingTypeSize, m_InputValues.flipMode);
 
     std::vector<uint8>* writeBufferPtr = &sliceBuffer;
     std::vector<uint8> paddedBuffer;
     if(addScaleBar)
     {
-      // Preflight guarantees uint8 input (or color-table RGB) when the scale bar is enabled.
+      // Preflight restricts scale-bar input to UInt8 or color-table RGB.
       paddedBuffer = ConvertUInt8ToRgb(sliceBuffer, sliceW * sliceH, incomingComps);
       paddedBuffer.insert(paddedBuffer.end(), bandRgb.begin(), bandRgb.end());
       writeBufferPtr = &paddedBuffer;
@@ -425,8 +482,7 @@ Result<> WriteImage::operator()()
     {
       return MakeErrorResult(-27021, fmt::format("No valid control points found for preset '{}'", m_InputValues.presetName));
     }
-    // Each control color is 4 floats [A,R,G,B]; interpolation requires at least 2 colors (8 floats),
-    // otherwise ComputeRgbFromControlPoints would read past the end of the control-point array.
+    // Interpolation needs at least two four-value ARGB control colors.
     if(controlPoints.size() < 8)
     {
       return MakeErrorResult(-27022, fmt::format("Preset '{}' must define at least 2 control colors", m_InputValues.presetName));
@@ -444,7 +500,7 @@ Result<> WriteImage::operator()()
                                maskArrayPtr, m_InputValues.invalidColor, m_ShouldCancel, std::function<Result<>(std::vector<uint8>&, usize)>(writeSlice));
   }
 
-  // Non-color path: extract typed slice bytes and write.
+  // The non-color path preserves typed bytes for one slice at a time.
   usize sliceBufferSize = sliceW * sliceH * nComp * bytesPerComponent;
   std::vector<uint8> sliceBuffer(sliceBufferSize);
   for(usize slice = 0; slice < sliceCount; ++slice)

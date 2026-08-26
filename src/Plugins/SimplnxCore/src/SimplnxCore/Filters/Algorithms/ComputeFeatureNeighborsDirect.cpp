@@ -12,9 +12,37 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @struct ComputeFeatureNeighborsFunctor
+ * @brief Computes direct feature-neighbor output for selected optional arrays.
+ * @tparam ProcessSurfaceFeaturesV True to mark surface features.
+ * @tparam ProcessBoundaryCellsV True to write BoundaryCells values.
+ *
+ * The normal dispatcher uses this functor with resident Feature IDs. It performs
+ * serial direct store access and does not establish generic DataArray or DataStore thread safety.
+ */
 template <bool ProcessSurfaceFeaturesV, bool ProcessBoundaryCellsV>
 struct ComputeFeatureNeighborsFunctor
 {
+  /**
+   * @brief Computes selected neighbor output for one image dimensionality.
+   * @tparam ImageDimensionStateT Specifies ImageGeom dimensionality behavior.
+   * @param surfaceFeatures Receives optional surface-feature flags.
+   * @param boundaryCells Receives optional boundary-cell counts.
+   * @param sharedSurfaceAreaList Receives shared surface areas.
+   * @param neighborsList Receives neighboring Feature IDs.
+   * @param numNeighbors Receives neighbor counts.
+   * @param featureIds Supplies Feature IDs.
+   * @param totalFeatures Identifies the feature output count.
+   * @param dims Supplies image dimensions.
+   * @param spacing Supplies image spacing.
+   * @param throttledMessenger Supplies interior progress messages.
+   * @param shouldCancel Signals cancellation in the 3D interior sweep.
+   * @return Success, or an optional-output error.
+   *
+   * Boundary processing completes before cancellation checks begin. A cancellation
+   * return can preserve partial BoundaryCells output.
+   */
   template <detail::ImageDimensionality ImageDimensionStateT>
   Result<> operator()(BoolAbstractDataStore* surfaceFeatures, Int8AbstractDataStore* boundaryCells, Float32NeighborList& sharedSurfaceAreaList, Int32NeighborList& neighborsList,
                       Int32AbstractDataStore& numNeighbors, const Int32AbstractDataStore& featureIds, usize totalFeatures, const std::array<int64, 3>& dims, const std::array<float64, 3> spacing,
@@ -42,33 +70,10 @@ struct ComputeFeatureNeighborsFunctor
     const std::array<float64, k_NeighborCount> precomputedFaceAreas = computeFaceSurfaceAreas<ImageDimensionStateT>(spacing);
     std::vector<std::map<usize, float64>> neighborSurfaceAreas(totalFeatures);
 
-    /**
-     * Stage 1: Process Boundary Cells
-     *
-     * The primary goal of Stage 1 is to isolate border cell specific checks out of Phase 2
-     * (the internal cells). This includes flagging the border cells without needing to
-     * branch, and ignoring invalid voxel faces inherently as much as possible. This segmentation
-     * also allows for removing a branch in the deepest nested loop in Phase 2.
-     *
-     * Stage 1 has been split into 3 parts, the vertex (corner), edge, and face cells.
-     * Of these parts there are two main logic flows defined by `processFrameCell` and
-     * `processFaceCell`, the main difference between the two being that the "Frame" algorithms
-     * (corner and edge are nearly identical minus one dimension case so they are grouped as "Frame")
-     * checks every face neighbor and validates them, whereas the "Face" algorithm removes the
-     * validation check and cuts down the checked faces to only the valid ones. It should also be
-     * noted that, optimization is being left on the table with the frame section. It could be further
-     * broken down into processing each edge/voxel individually to mirror the optimization done to
-     * faces, but the segmentation done here would make it far less readable and in the greater context
-     * the speed gain is minimal considering they are O(n-2) and O(1) respectively and the greater algorithm
-     * is 0(6(n-2)^3).
-     *
-     * Note here that discussions were had of adding Kahan Summation for calculating the surface
-     * areas, but was decided against to conserve memory. At least until the issue presents itself
-     * in a real world dataset.
-     */
+    // Boundary cells validate only faces that exist before the 3D interior sweep.
     constexpr std::array<FaceNeighborType, k_NeighborCount> faceNeighborInternalIdx = initializeFaceNeighborInternalIdx<ImageDimensionStateT>();
 
-    // Process Corners
+    // Process corner cells.
     {
       const auto processCornerCell = [&](const int64 zIndex, const int64 yIndex, const int64 xIndex) -> void {
         int8 numDiffNeighbors = 0;
@@ -82,9 +87,8 @@ struct ComputeFeatureNeighborsFunctor
             surfaceFeatures->setValue(feature, true);
           }
 
-          // Loop over the 6 face neighbors of the voxel
           std::array<bool, k_NeighborCount> isValidFaceNeighbor = computeValidFaceNeighbors<ImageDimensionStateT>(xIndex, yIndex, zIndex, dims);
-          for(const auto faceIndex : faceNeighborInternalIdx) // ref more expensive than trivial copy for scalar types
+          for(const auto faceIndex : faceNeighborInternalIdx)
           {
             if(!isValidFaceNeighbor[faceIndex])
             {
@@ -110,7 +114,7 @@ struct ComputeFeatureNeighborsFunctor
       ImageDimensionalUtilities::ProcessCorners<ImageDimensionStateT>(processCornerCell, dims);
     }
 
-    // Process Edges
+    // Process edge cells.
     if constexpr(!std::is_same_v<ImageDimensionStateT, SingleVoxelImage>)
     {
       const auto processEdgeCell = [&](const int64 zIndex, const int64 yIndex, const int64 xIndex) -> void {
@@ -125,9 +129,8 @@ struct ComputeFeatureNeighborsFunctor
             surfaceFeatures->setValue(feature, true);
           }
 
-          // Loop over the 6 face neighbors of the voxel
           std::array<bool, k_NeighborCount> isValidFaceNeighbor = computeValidFaceNeighbors<ImageDimensionStateT>(xIndex, yIndex, zIndex, dims);
-          for(const auto faceIndex : faceNeighborInternalIdx) // ref more expensive than trivial copy for scalar types
+          for(const auto faceIndex : faceNeighborInternalIdx)
           {
             if(!isValidFaceNeighbor[faceIndex])
             {
@@ -153,7 +156,7 @@ struct ComputeFeatureNeighborsFunctor
       ImageDimensionalUtilities::ProcessEdges<ImageDimensionStateT>(processEdgeCell, dims);
     }
 
-    // Process Planes for 2D and 3D (Stack) Images
+    // Process non-degenerate face cells.
     if constexpr(!ImageDimensionStateT::Is1DImageDimsState() && !std::is_same_v<ImageDimensionStateT, SingleVoxelImage>)
     {
       const auto processFaceCell = [&](const int64 zIndex, const int64 yIndex, const int64 xIndex, const std::vector<FaceNeighborType>& validFaces) -> void {
@@ -168,8 +171,7 @@ struct ComputeFeatureNeighborsFunctor
             surfaceFeatures->setValue(feature, true);
           }
 
-          // Loop over the face neighbors of the voxel
-          for(const auto faceIndex : validFaces) // ref more expensive than trivial copy for scalar types
+          for(const auto faceIndex : validFaces)
           {
             const int64 neighborPoint = voxelIndex + neighborVoxelIndexOffsets[faceIndex];
 
@@ -190,18 +192,11 @@ struct ComputeFeatureNeighborsFunctor
       ImageDimensionalUtilities::ProcessFaces<ImageDimensionStateT>(processFaceCell, dims);
     }
 
-    /**
-     * Stage 2: Process Internal Cells
-     * This stage has a bulk of the computation, and runtime branching has been minimized
-     * to reflect that reality, see comment for Stage 1. This section just walks every
-     * internal cell and checks each of the neighbors, storing them onto the existing
-     * results from the boundary cell phases.
-     */
+    // The 3D interior has six valid face neighbors and needs no validity checks.
     if constexpr(std::is_same_v<ImageDimensionStateT, Image3D>)
     {
       const usize totalPoints = featureIds.getNumberOfTuples();
 
-      // Loop over all internal cells to generate the neighbor lists
       for(int64 zIndex = 1; zIndex < dims[2] - 1; zIndex++)
       {
         const int64 zStride = dims[0] * dims[1] * zIndex;
@@ -218,16 +213,12 @@ struct ComputeFeatureNeighborsFunctor
           {
             int64 voxelIndex = zStride + yStride + xIndex;
 
-            // This value tracks the number of neighboring cells that have feature ids different from itself
             int8 numDiffNeighbors = 0;
             int32 feature = featureIds.getValue(voxelIndex);
             if(feature > 0)
             {
-              // Loop over the face neighbors of the voxel
-              for(const auto faceIndex : faceNeighborInternalIdx) // ref more expensive than trivial copy for scalar types
+              for(const auto faceIndex : faceNeighborInternalIdx)
               {
-                // No need for a face validity check because we are only processing internal cells
-
                 const int64 neighborPoint = voxelIndex + neighborVoxelIndexOffsets[faceIndex];
 
                 const int32 neighborFeatureId = featureIds.getValue(neighborPoint);
@@ -252,7 +243,6 @@ struct ComputeFeatureNeighborsFunctor
       const usize neighborCount = neighborSurfaceAreas[featureIdx].size();
       numNeighbors.setValue(featureIdx, static_cast<int32>(neighborCount));
 
-      // Set the vector for each list into the NeighborList Object
       auto sharedNeiLst = std::make_shared<NeighborList<int32>::VectorType>();
       sharedNeiLst->reserve(neighborCount);
       auto sharedSAL = std::make_shared<NeighborList<float32>::VectorType>();
@@ -270,6 +260,17 @@ struct ComputeFeatureNeighborsFunctor
   }
 };
 
+/**
+ * @brief Selects dimensionality behavior for direct neighbor processing.
+ * @tparam FunctorT Specifies the direct processing functor.
+ * @tparam ArgsT Specifies forwarded processing argument types.
+ * @param functor Supplies the direct processing implementation.
+ * @param imageGeom Supplies image dimensions.
+ * @param args Forwards arguments to the selected dimensionality specialization.
+ * @return Result from the selected specialization.
+ *
+ * Unit dimensions select lower-dimensional behavior before voxel processing starts.
+ */
 template <class FunctorT, class... ArgsT>
 Result<> ProcessVoxels(const FunctorT& functor, const ImageGeom& imageGeom, ArgsT&&... args)
 {
@@ -278,7 +279,7 @@ Result<> ProcessVoxels(const FunctorT& functor, const ImageGeom& imageGeom, Args
   const bool zDimEmpty = imageGeom.getNumZCells() == 1;
   const uint8 emptyDimCount = static_cast<uint8>(xDimEmpty) + static_cast<uint8>(yDimEmpty) + static_cast<uint8>(zDimEmpty);
 
-  // Treat dimensions of 1 as flat for image geom
+  // A unit dimension selects lower-dimensional ImageGeom behavior.
   if(emptyDimCount == 0)
   {
     return functor.template operator()<Image3D>(std::forward<ArgsT>(args)...);
@@ -322,7 +323,6 @@ Result<> ProcessVoxels(const FunctorT& functor, const ImageGeom& imageGeom, Args
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureNeighborsDirect::ComputeFeatureNeighborsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                              const ComputeFeatureNeighborsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -332,10 +332,8 @@ ComputeFeatureNeighborsDirect::ComputeFeatureNeighborsDirect(DataStructure& data
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureNeighborsDirect::~ComputeFeatureNeighborsDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureNeighborsDirect::operator()()
 {
   MessageHelper messageHelper(m_MessageHandler);
@@ -349,7 +347,7 @@ Result<> ComputeFeatureNeighborsDirect::operator()()
 
   usize totalFeatures = numNeighbors.getNumberOfTuples();
 
-  /* Ensure that we will be able to work with the user selected featureId Array */
+  // Validate Feature ID range before indexing feature output.
   const int32 maxFeatureId = *std::max_element(featureIds.cbegin(), featureIds.cend());
   if(static_cast<usize>(maxFeatureId) >= totalFeatures)
   {
@@ -371,7 +369,7 @@ Result<> ComputeFeatureNeighborsDirect::operator()()
 
   if(m_InputValues->StoreSurfaceFeatures && m_InputValues->StoreBoundaryCells)
   {
-    // Surface Features filled with `false` by default during creation in preflight
+    // Preflight initializes surface flags to false. This path marks only geometry-face features.
     auto* surfaceFeatures = m_DataStructure.getDataAs<BoolArray>(m_InputValues->SurfaceFeaturesPath)->getDataStore();
     auto* boundaryCells = m_DataStructure.getDataAs<Int8Array>(m_InputValues->BoundaryCellsPath)->getDataStore();
     return ProcessVoxels(::ComputeFeatureNeighborsFunctor<true, true>{}, imageGeom, surfaceFeatures, boundaryCells, sharedSurfaceAreaList, neighborsList, numNeighbors, featureIds, totalFeatures, dims,
@@ -379,7 +377,7 @@ Result<> ComputeFeatureNeighborsDirect::operator()()
   }
   if(m_InputValues->StoreSurfaceFeatures)
   {
-    // Surface Features filled with `false` by default during creation in preflight
+    // Preflight initializes surface flags to false. This path marks only geometry-face features.
     auto* surfaceFeatures = m_DataStructure.getDataAs<BoolArray>(m_InputValues->SurfaceFeaturesPath)->getDataStore();
     return ProcessVoxels(::ComputeFeatureNeighborsFunctor<true, false>{}, imageGeom, surfaceFeatures, nullptr, sharedSurfaceAreaList, neighborsList, numNeighbors, featureIds, totalFeatures, dims,
                          spacing64, throttledMessenger, m_ShouldCancel);

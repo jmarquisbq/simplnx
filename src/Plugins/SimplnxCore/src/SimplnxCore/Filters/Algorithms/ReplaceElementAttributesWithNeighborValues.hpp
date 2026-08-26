@@ -12,90 +12,71 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core::detail
+ * @brief Contains the shared comparison choices for neighbor replacement.
+ */
 namespace detail
 {
-inline constexpr StringLiteral k_LessThan = "< [Less Than]";
-inline constexpr StringLiteral k_GreaterThan = "> [Greater Than]";
-inline const ChoicesParameter::Choices k_OperationChoices = {k_LessThan, k_GreaterThan};
+inline constexpr StringLiteral k_LessThan = "< [Less Than]";                             ///< Selects replacement below the threshold.
+inline constexpr StringLiteral k_GreaterThan = "> [Greater Than]";                       ///< Selects replacement above the threshold.
+inline const ChoicesParameter::Choices k_OperationChoices = {k_LessThan, k_GreaterThan}; ///< Defines the filter choice order.
 } // namespace detail
 
 /**
  * @struct ReplaceElementAttributesWithNeighborValuesInputValues
- * @brief Holds all user-supplied parameters for the ReplaceElementAttributesWithNeighborValues algorithm.
- *
- * Populated by the filter's preflight/execute methods and passed into the
- * algorithm to decouple it from the parameter system.
+ * @brief Stores the comparison, loop, array, and geometry selections.
  */
 struct SIMPLNXCORE_EXPORT ReplaceElementAttributesWithNeighborValuesInputValues
 {
-  float32 MinConfidence;                          ///< Threshold value for the comparison (e.g., confidence index cutoff)
-  ChoicesParameter::ValueType SelectedComparison; ///< 0 = Less Than (replace voxels below threshold), 1 = Greater Than (replace voxels above threshold)
-  bool Loop;                                      ///< If true, repeat until no voxels remain that fail the threshold test
-  DataPath InputArrayPath;                        ///< Path to the scalar cell array used for the threshold comparison
-  DataPath SelectedImageGeometryPath;             ///< Path to the ImageGeom that defines the voxel grid
+  float32 MinConfidence;
+  ChoicesParameter::ValueType SelectedComparison;
+  bool Loop;
+  DataPath InputArrayPath;
+  DataPath SelectedImageGeometryPath;
 };
 
 /**
  * @class ReplaceElementAttributesWithNeighborValues
- * @brief Iteratively replaces voxel data that fails a threshold comparison with
- *        the best-scoring face-neighbor value, optimized for out-of-core (OOC)
- *        data stores.
+ * @brief Replaces failed cell tuples from a passing face neighbor.
  *
- * ## Algorithm Overview
+ * Less-than mode replaces a value below the threshold from the greatest
+ * neighbor at or above the threshold. Greater-than mode replaces a value above
+ * the threshold from the least neighbor at or below the threshold. The
+ * float32 threshold converts to the selected array's value type.
  *
- * 1. For each voxel whose value fails the threshold test (less-than or
- *    greater-than the user's cutoff), examine its 6 face neighbors.
- * 2. Among neighbors that pass the threshold, find the one with the
- *    best (highest or lowest, depending on comparison direction) value.
- * 3. Mark that voxel to be replaced by the best neighbor's data.
- * 4. After scanning a Z-slice, commit the marks by copying tuple data from
- *    source to destination for ALL arrays in the Attribute Matrix.
- * 5. If Loop is true, repeat until no failing voxels remain.
+ * Each pass keeps three comparison-array Z slices and one int64 source mark per
+ * XY cell. A selected source supplies the complete tuple for every IDataArray
+ * in the ImageGeom cell AttributeMatrix. Arrays process sequentially, so peak
+ * transfer memory also includes as many as four slices of one sibling array.
  *
- * Unlike the ErodeDilateBadData algorithm (which only marks voxels within
- * +/- 1 Z-slice via face neighbors), this algorithm's marks are strictly
- * within the current Z-slice: a failing voxel is replaced by one of its
- * own face neighbors, so the source is always within +/- 1 Z of the
- * destination. This allows each Z-slice to be committed immediately after
- * processing rather than being deferred.
+ * The comparison window preserves values from the start of a pass. The
+ * algorithm commits each destination Z slice immediately to limit mark memory.
+ * A sibling tuple copied from a prior Z slice can therefore contain a value
+ * that this pass already copied. This makes tuple transfer dependent on Z order.
  *
- * ## OOC Optimization Strategy
- *
- * 1. **3-slice rolling window for the input array**: Three Z-slices of the
- *    comparison array (prev, current, next) are held in typed buffers loaded
- *    via copyIntoBuffer(). All face-neighbor comparisons index into these
- *    buffers rather than the OOC store.
- *
- * 2. **Per-slice best-neighbor marks**: A single O(sliceSize) mark array
- *    tracks the best replacement source for each voxel in the current
- *    Z-slice. Marks are committed immediately via SliceBufferedTransferOneZ
- *    and then cleared for the next slice.
- *
- * 3. **Type-dispatched via ExecuteDataFunction**: The inner algorithm is
- *    templated on the input array's element type to avoid virtual dispatch
- *    overhead during the tight comparison loop. The template also handles
- *    the std::vector<bool> bit-packing issue by using unique_ptr<T[]> for
- *    all buffer types.
- *
- * 4. **Per-pass re-read**: Each pass re-loads the rolling window from the
- *    store because the previous pass's SliceBufferedTransferOneZ calls
- *    may have changed the comparison array's values.
+ * Loop mode repeats while any value fails, even when no passing neighbor exists.
+ * It has no independent pass limit and can fail to terminate. Cancellation is
+ * checked only between complete passes. Bulk read and transfer results are
+ * discarded, and the operation does not roll back prior slice writes.
  */
 class SIMPLNXCORE_EXPORT ReplaceElementAttributesWithNeighborValues
 {
 public:
   /**
-   * @brief Constructs the algorithm with all required references and parameters.
-   * @param dataStructure The DataStructure containing all input/output arrays
-   * @param mesgHandler Handler for sending progress messages to the UI
-   * @param shouldCancel Atomic flag checked between iterations to support cancellation
-   * @param inputValues User-supplied parameters controlling the algorithm behavior
+   * @brief Initializes the neighbor-replacement algorithm.
+   * @param dataStructure Contains the ImageGeom and its cell arrays.
+   * @param mesgHandler Receives pass progress messages.
+   * @param shouldCancel Signals cancellation between passes.
+   * @param inputValues Selects comparison and loop behavior.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   ReplaceElementAttributesWithNeighborValues(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                              ReplaceElementAttributesWithNeighborValuesInputValues* inputValues);
 
   /**
-   * @brief Default destructor.
+   * @brief Destroys the neighbor-replacement algorithm.
    */
   ~ReplaceElementAttributesWithNeighborValues() noexcept;
 
@@ -105,29 +86,23 @@ public:
   ReplaceElementAttributesWithNeighborValues& operator=(ReplaceElementAttributesWithNeighborValues&&) noexcept = delete;
 
   /**
-   * @brief Executes the threshold-based neighbor replacement algorithm.
+   * @brief Replaces failed cell tuples for one or more passes.
+   * @return Success after completion or cancellation.
+   * @pre InputArrayPath identifies a scalar cell array.
+   * @pre The input and sibling arrays match the ImageGeom cell dimensions.
    *
-   * Dispatches to a type-specific inner loop via ExecuteDataFunction. Each
-   * pass processes all Z-slices sequentially using a 3-slice rolling window,
-   * committing per-slice marks immediately via SliceBufferedTransferOneZ.
-   * Repeats until no failing voxels remain (if Loop is true) or for one
-   * pass (if Loop is false).
-   *
-   * @return Result<> indicating success or any errors encountered during execution
+   * The method cannot report bulk-I/O failures. A between-pass cancellation
+   * checkpoint returns success and can leave prior slices modified.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns a reference to the cancellation flag.
-   * @return const reference to the atomic cancellation flag
-   */
   const std::atomic_bool& getCancel() const;
 
 private:
-  DataStructure& m_DataStructure;                                                       ///< Reference to the DataStructure holding all arrays
-  const ReplaceElementAttributesWithNeighborValuesInputValues* m_InputValues = nullptr; ///< User-supplied algorithm parameters
-  const std::atomic_bool& m_ShouldCancel;                                               ///< Cancellation flag checked between passes
-  const IFilter::MessageHandler& m_MessageHandler;                                      ///< Handler for progress/status messages
+  DataStructure& m_DataStructure;
+  const ReplaceElementAttributesWithNeighborValuesInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

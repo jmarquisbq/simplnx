@@ -10,41 +10,50 @@ namespace nx::core
 {
 
 /**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
+/**
  * @struct ComputeFeatureCentroidsInputValues
- * @brief Holds all user-configured parameters for the ComputeFeatureCentroids algorithm.
+ * @brief Stores filter values for feature-centroid execution.
  */
 struct SIMPLNXCORE_EXPORT ComputeFeatureCentroidsInputValues
 {
-  DataPath FeatureIdsArrayPath;        ///< Path to the per-cell Feature ID array (int32).
-  DataPath CentroidsArrayPath;         ///< Output: per-feature centroid array (float32, 3-component).
-  DataPath ImageGeometryPath;          ///< Path to the ImageGeom providing voxel coordinates.
-  DataPath FeatureAttributeMatrixPath; ///< Path to the Feature-level Attribute Matrix.
-  bool IsPeriodic = false;             ///< If true, adjust centroids for features wrapping around periodic boundaries.
+  DataPath FeatureIdsArrayPath;
+  DataPath CentroidsArrayPath;
+  DataPath ImageGeometryPath;
+  DataPath FeatureAttributeMatrixPath;
+  bool IsPeriodic = false; ///< True to adjust features that wrap across periodic geometry faces.
 };
 
 /**
  * @class ComputeFeatureCentroids
- * @brief Computes the centroid (average XYZ position) of each feature in an
- * ImageGeom by iterating over all voxels and accumulating coordinates using
- * Kahan summation for numerical stability.
+ * @brief Computes ImageGeom feature centroids with Kahan summation.
  *
- * @section ooc_optimization Out-of-Core Optimization
- * The original implementation used a ParallelDataAlgorithm that accessed the
- * FeatureIds array element-by-element through AbstractDataStore virtual dispatch.
- * For OOC data this caused a chunk load/evict cycle per voxel.
+ * Feature IDs use 65,536-tuple bulk reads. Kahan sums, counts, and periodic ranges use
+ * feature-sized vectors. This avoids per-voxel DataStore access without cell-sized resident memory.
+ * The centroid array uses one final bulk write.
  *
- * The optimized implementation reads the FeatureIds array in fixed-size chunks
- * (64K tuples) via copyIntoBuffer() into a stack-allocated buffer, then processes
- * each chunk purely from local memory. All accumulation arrays (Kahan sums,
- * compensators, voxel counts, XYZ ranges) are plain std::vectors rather than
- * DataStore-backed arrays, eliminating virtual dispatch in the hot loop. The
- * final centroids are written back to the output DataStore in a single
- * copyFromBuffer() call.
+ * Current bulk-I/O Result values are not inspected. A storage failure can leave output state while
+ * the method returns success.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureCentroids
 {
 public:
+  /**
+   * @brief Initializes the feature-centroid algorithm.
+   * @param dataStructure Contains the ImageGeom, Feature IDs, and centroids.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation between Feature ID chunks.
+   * @param inputValues Identifies required objects and periodic behavior.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeFeatureCentroids(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeatureCentroidsInputValues* inputValues);
+  /**
+   * @brief Destroys the feature-centroid algorithm.
+   */
   ~ComputeFeatureCentroids() noexcept;
 
   ComputeFeatureCentroids(const ComputeFeatureCentroids&) = delete;
@@ -53,22 +62,21 @@ public:
   ComputeFeatureCentroids& operator=(ComputeFeatureCentroids&&) noexcept = delete;
 
   /**
-   * @brief Executes the centroid computation over all voxels using chunked bulk I/O.
-   * @return Result<> indicating success or error.
+   * @brief Computes feature centroids.
+   * @return Success, or a Feature ID indexing-validation error.
+   *
+   * When a chunk checkpoint observes cancellation, the method returns success before the centroid
+   * bulk write. The periodic adjustment does not check cancellation after that write starts.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the cancellation flag reference.
-   * @return const reference to the atomic cancellation boolean.
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                                    ///< Reference to the DataStructure.
-  const ComputeFeatureCentroidsInputValues* m_InputValues = nullptr; ///< User-configured parameters.
-  const std::atomic_bool& m_ShouldCancel;                            ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                   ///< Message handler for progress.
+  DataStructure& m_DataStructure;
+  const ComputeFeatureCentroidsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

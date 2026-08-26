@@ -9,6 +9,10 @@
 
 namespace nx::core
 {
+/**
+ * @struct ComputeArrayHistogramByFeatureInputValues
+ * @brief Defines per-feature histogram inputs, outputs, range, mask, and feature IDs.
+ */
 struct SIMPLNXCORE_EXPORT ComputeArrayHistogramByFeatureInputValues
 {
   bool UserDefinedRange = false;
@@ -39,8 +43,12 @@ class SIMPLNXCORE_EXPORT ComputeArrayHistogramByFeature
 {
 public:
   /**
-   * @brief Binds filter-owned data, parameters, progress, and cancellation.
-   * All references and @p inputValues must remain valid through operator()().
+   * @brief Initializes per-feature histogram calculation.
+   * @param dataStructure Provides source, feature, mask, and output arrays.
+   * @param msgHandler Receives phase progress.
+   * @param shouldCancel Signals cancellation between bounded passes.
+   * @param inputValues Defines histogram, feature, and output settings.
+   * @pre All arguments outlive this executor.
    */
   ComputeArrayHistogramByFeature(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ComputeArrayHistogramByFeatureInputValues* inputValues);
   ~ComputeArrayHistogramByFeature() noexcept;
@@ -51,8 +59,10 @@ public:
   ComputeArrayHistogramByFeature& operator=(ComputeArrayHistogramByFeature&&) noexcept = delete;
 
   /**
-   * @brief Discovers the feature count and dispatches each selected array to
-   * the resident or bounded implementation according to all participating stores.
+   * @brief Discovers feature count and computes each selected array.
+   * @return Validation, storage, external-sort, or fallback reduction errors.
+   *
+   * Dispatch includes all participating input and output stores.
    */
   Result<> operator()();
 

@@ -798,17 +798,16 @@ Result<DataStructure> ImportDataStructureV8(const nx::core::HDF5::FileIO& fileRe
   return HDF5::DataStructureReader::ReadFile(fileReader, preflight);
 }
 
-// Begin legacy DCA importing
-
 /**
- * @brief
- * @tparam T
- * @param dataStructure
- * @param name
- * @param parentId
- * @param daId
- * @param tDims
- * @param cDims
+ * @brief Creates one typed legacy DataArray.
+ * @tparam T Specifies the array scalar type.
+ * @param dataStructure Receives the array.
+ * @param parentId Specifies the parent object.
+ * @param dataArrayReader Provides dataset metadata and values.
+ * @param tDims Specifies tuple dimensions.
+ * @param cDims Specifies component dimensions.
+ * @param preflight Creates an EmptyDataStore when true.
+ * @return Created array pointer or read/creation error.
  */
 template <typename T>
 Result<IDataArray*> createLegacyDataArray(DataStructure& dataStructure, DataObject::IdType parentId, const HDF5::DatasetIO& dataArrayReader, const std::vector<usize>& tDims,
@@ -834,7 +833,6 @@ Result<IDataArray*> createLegacyDataArray(DataStructure& dataStructure, DataObje
       std::string ss = fmt::format("Error reading HDF5 Data set: {}", dataArrayReader.getName());
       return nx::core::MakeErrorResult<IDataArray*>(Legacy::k_FailedReadingDataArrayData_Code, ss);
     }
-    // Insert the DataArray into the DataStructure
     dataArray = DataArray<T>::Create(dataStructure, daName, std::move(dataStore), parentId);
   }
 
@@ -848,10 +846,11 @@ Result<IDataArray*> createLegacyDataArray(DataStructure& dataStructure, DataObje
 }
 
 /**
- * @brief
- * @param daId
- * @param tDims
- * @param cDims
+ * @brief Reads legacy tuple and component dimensions.
+ * @param dataArrayReader Provides legacy attributes.
+ * @param tDims Receives tuple dimensions in NX order.
+ * @param cDims Receives component dimensions.
+ * @return Attribute read error or success.
  */
 Result<> readLegacyDataArrayDims(const nx::core::HDF5::DatasetIO& dataArrayReader, std::vector<usize>& tDims, std::vector<usize>& cDims)
 {
@@ -869,7 +868,8 @@ Result<> readLegacyDataArrayDims(const nx::core::HDF5::DatasetIO& dataArrayReade
   }
   tDims = std::move(tDimsResult.value());
 
-  std::ranges::reverse(tDims); // SIMPL writes the Tuple Dimensions in reverse order to this attribute
+  // SIMPL stores tuple dimensions in the reverse of NX order.
+  std::ranges::reverse(tDims);
 
   return {};
 }
@@ -1110,29 +1110,25 @@ Result<UInt64Array*> readLegacyNodeConnectivityList(DataStructure& dataStructure
 }
 
 /**
- * @brief Creates a NeighborList from a legacy DREAM3D (SIMPL) HDF5 dataset.
+ * @brief Creates a NeighborList from a legacy SIMPL dataset.
  *
- * The preflight parameter is forwarded to ReadHdf5Data so that during preflight
- * the function creates the NeighborList with an empty store (just shape metadata)
- * rather than reading the full variable-length data from disk. This avoids
- * materializing potentially large NeighborList data during pipeline validation,
- * which would be wasteful and could exhaust memory in OOC workflows.
+ * Preflight creates only shape metadata in an EmptyListStore. Execution reads
+ * variable-length list data.
  *
- * @tparam T Element type of the NeighborList
- * @param dataStructure Target DataStructure to insert the NeighborList into
- * @param parentId Parent object ID for the new NeighborList
- * @param parentReader HDF5 group reader for the parent AttributeMatrix
- * @param datasetReader HDF5 dataset reader for the NeighborList dataset
- * @param tupleDims Tuple dimensions read from the legacy "TupleDimensions" attribute
- * @param preflight When true, creates an empty store without reading data
- * @return Result<> indicating success or failure
+ * @tparam T Specifies the list scalar type.
+ * @param dataStructure Receives the NeighborList.
+ * @param parentId Specifies the parent object.
+ * @param parentReader Provides the parent AttributeMatrix group.
+ * @param datasetReader Provides list metadata and values.
+ * @param tupleDims Specifies tuple dimensions.
+ * @param preflight Creates an empty placeholder when true.
+ * @return Creation/read error, propagated warnings, or success.
  */
 template <typename T>
 Result<> createLegacyNeighborList(DataStructure& dataStructure, DataObject ::IdType parentId, const nx::core::HDF5::GroupIO& parentReader, const nx::core::HDF5::DatasetIO& datasetReader,
                                   const ShapeType& tupleDims, bool preflight = false)
 {
-  // Read the NeighborList data from HDF5. In preflight mode, this returns
-  // an empty store with the correct tuple count but no actual list data.
+  // Preflight reads shape metadata but no list values.
   std::vector<Warning> warnings;
   auto listStore = HDF5::NeighborListIO<T>::ReadHdf5Data(parentReader, datasetReader, preflight, warnings);
 
@@ -1141,7 +1137,7 @@ Result<> createLegacyNeighborList(DataStructure& dataStructure, DataObject ::IdT
 
   if(listStore == nullptr && !result.m_Warnings.empty())
   {
-    // Placeholder detected — skip without error, propagate warnings
+    // Propagate placeholder warnings without creating an unusable list.
     return result;
   }
 
@@ -1228,7 +1224,7 @@ Result<> finishImportingLegacyNeighborListImpl(DataStructure& dataStructure, con
   {
     if(!result.m_Warnings.empty())
     {
-      // Placeholder detected — skip without error, propagate warnings
+      // Propagate placeholder warnings without creating an unusable list.
       return result;
     }
     return MakeErrorResult(-4210427, fmt::format("Failed to finish importing legacy NeighborList at path '{}'. Failed to import HDF5 data.", dataPath.toString()));
@@ -1624,11 +1620,8 @@ Result<> readLegacyStatsDataArrayChild(DataStructure& dataStructure, const nx::c
 
 Result<> readLegacyStatsDataArray(DataStructure& dataStructure, const nx::core::HDF5::GroupIO& statsReader, DataObject::IdType parentId, bool /*preflight*/)
 {
-  // Always fully import Statistics data (ignoring the preflight parameter) because
-  // the Statistics hierarchy produces DataPaths of depth > 3 (up to depth 6) which
-  // FinishImportingLegacyDataObject cannot handle. Since StatsDataArray data is
-  // relatively small, fully importing during the initial read is safe and avoids
-  // the need for a separate finish-importing step.
+  // Legacy statistics paths can reach depth six, beyond the deferred legacy
+  // materializer. Import this relatively small hierarchy during the metadata pass.
   std::string statsGroupName = "Statistics";
   DataGroup* dataGroup = DataGroup::Create(dataStructure, statsGroupName, parentId);
   if(dataGroup == nullptr)
@@ -2205,10 +2198,7 @@ Result<std::vector<std::shared_ptr<DataObject>>> ImportLegacyDataObjectFromFile(
 
 Result<> FinishImportingLegacyDataObject(DataStructure& dataStructure, const nx::core::HDF5::GroupIO& parentReader, const DataPath& dataPath)
 {
-  // Statistics data is fully imported during the initial read (readLegacyStatsDataArray
-  // always imports with preflight=false), so skip the finish-importing step for all
-  // Statistics paths. The Statistics group is placed as a sibling of the AttributeMatrix
-  // under the DataContainer, so any path with "Statistics" at index 1 is part of this hierarchy.
+  // Statistics is a DataContainer child and is already materialized during metadata import.
   if(dataPath.getLength() >= 2 && dataPath[1] == "Statistics")
   {
     return {};
@@ -2553,12 +2543,8 @@ Result<> DREAM3D::WriteFile(const std::filesystem::path& path, const DataStructu
 
 Result<> DREAM3D::WriteRecoveryFile(const fs::path& path, const DataStructure& dataStructure, const Pipeline& pipeline, std::optional<fs::path> userDataFilePath)
 {
-  // Minimal-redirect variant: the user's pipeline ends with a WriteDREAM3DFilter,
-  // so the authoritative data is at userDataFilePath on disk. Write a tiny HDF5
-  // file that only carries the file-version tag plus a root-level attribute
-  // pointing to the user's file. dataStructure and pipeline are intentionally
-  // ignored — the user's file already has them (or the caller has recorded the
-  // pipeline separately as a paired `.d3dpipeline`).
+  // Redirect mode records only file version and the authoritative user-data path.
+  // The user file or its paired pipeline already owns all serialized content.
   if(userDataFilePath.has_value())
   {
     auto fileWriter = nx::core::HDF5::FileIO::WriteFile(path);
@@ -2571,17 +2557,13 @@ Result<> DREAM3D::WriteRecoveryFile(const fs::path& path, const DataStructure& d
     {
       return versionResult;
     }
-    // Canonicalize to an absolute path at write time so a later cwd change
-    // doesn't invalidate the recovery redirect.
+    // An absolute path keeps the redirect valid after a working-directory change.
     const fs::path absUserPath = fs::absolute(*userDataFilePath);
     return fileWriter.writeStringAttribute(k_UserDataFilePathTag.str(), absUserPath.string());
   }
 
-  // Standard recovery variant: serialize the DataStructure to the recovery file. A registered IO
-  // manager with disk-backed stores activates its own recovery-write mode (so those stores emit a
-  // zero-byte placeholder plus recovery metadata via the onRecoveryWrite fan-out in DataStructureWriter)
-  // around this write; core does not own that bracket. With no such manager registered every array is
-  // in-core, so WriteFile serializes everything normally.
+  // Full recovery delegates OOC placeholder metadata to registered recovery writers.
+  // Without one, WriteFile serializes in-core arrays normally.
   return WriteFile(path, dataStructure, pipeline, false);
 }
 
@@ -2593,10 +2575,8 @@ Result<std::optional<fs::path>> DREAM3D::ReadUserDataFilePathAttribute(const fs:
     return MakeErrorResult<std::optional<fs::path>>(-9047, fmt::format("Failed to open recovery file at path {}", recoveryFilePath.string()));
   }
 
-  // Absent attribute is not an error — it simply means the file is a
-  // standard (data-carrying) recovery file. Distinguish by peeking before
-  // reading: readStringAttribute returns an error result if the attribute
-  // doesn't exist, so probe presence explicitly.
+  // Attribute absence identifies a data-carrying recovery file. Probe before
+  // reading because readStringAttribute reports absence as an error.
   if(!fileReader.hasAttribute(k_UserDataFilePathTag.str()))
   {
     return {std::optional<fs::path>{}};
@@ -2677,12 +2657,10 @@ std::vector<nx::core::DataPath> DREAM3D::ExpandSelectedPathsToDescendants(const 
 
 namespace
 {
-// ---------------------------------------------------------------------------
-// Internal helpers for the new LoadDataStructure* public API
-// ---------------------------------------------------------------------------
-
 /**
- * @brief Builds a metadata-only (preflight) DataStructure from an open HDF5 file.
+ * @brief Builds a metadata-only DataStructure from an open file.
+ * @param fileReader Provides a current or legacy DREAM3D file.
+ * @return Metadata structure or unsupported-version/import error.
  */
 Result<DataStructure> LoadDataStructureMetadataInternal(const nx::core::HDF5::FileIO& fileReader)
 {
@@ -2695,14 +2673,18 @@ Result<DataStructure> LoadDataStructureMetadataInternal(const nx::core::HDF5::Fi
   {
     return ImportLegacyDataStructure(fileReader, true);
   }
-  // Unsupported file version
   return MakeErrorResult<DataStructure>(DREAM3D::k_InvalidDataStructureVersion, fmt::format("Could not parse DataStructure version {}. Expected versions: {} or {}. Actual value: {}", fileVersion,
                                                                                             DREAM3D::k_CurrentFileVersion, DREAM3D::k_LegacyFileVersion, fileVersion));
 }
 
 /**
- * @brief Loads a single DataObject from HDF5 into the target DataStructure.
- * This is a copy of DREAM3D::FinishImportingObject placed in the anonymous namespace.
+ * @brief Inserts and optionally materializes one DataObject.
+ * @param importStructure Provides imported metadata.
+ * @param dataStructure Receives a shallow object copy.
+ * @param dataPath Identifies the object.
+ * @param fileReader Provides stored data during eager loading.
+ * @param preflight Inserts only metadata when true.
+ * @return Lookup, insertion, version, or HDF5 read error, or success.
  */
 Result<> LoadDataObjectFromHDF5(DataStructure& importStructure, DataStructure& dataStructure, const DataPath& dataPath, const nx::core::HDF5::FileIO& fileReader, bool preflight)
 {
@@ -2712,7 +2694,7 @@ Result<> LoadDataObjectFromHDF5(DataStructure& importStructure, DataStructure& d
   }
   const auto importObject = importStructure.getSharedData(dataPath);
   const auto importData = std::shared_ptr<DataObject>(importObject->shallowCopy());
-  // Clear all children before inserting into the DataStructure
+  // Insert group metadata without duplicate child ownership.
   if(const auto importGroup = std::dynamic_pointer_cast<BaseGroup>(importData); importGroup != nullptr)
   {
     importGroup->clear();
@@ -2745,13 +2727,13 @@ Result<> LoadDataObjectFromHDF5(DataStructure& importStructure, DataStructure& d
 }
 
 /**
- * @brief Loads data from HDF5 into an already-inserted DataObject.
+ * @brief Materializes one already-inserted DataObject.
+ * @param dataStructure Provides the destination object.
+ * @param dataPath Identifies the object.
+ * @param fileReader Provides stored data.
+ * @return Lookup, version, or HDF5 read error, or success.
  *
- * Unlike LoadDataObjectFromHDF5, this does NOT insert the object — it only
- * reads the HDF5 data for an object that is already present in dataStructure.
- * Used by the core Empty-placeholder sweep (EagerLoadEmptyPlaceholders) to
- * materialize placeholders in-core, and as the eager-load callback an import
- * finalizer invokes when it decides an array should be loaded in-core.
+ * Empty-placeholder cleanup and import finalizers share this eager-load path.
  */
 Result<> EagerLoadDataFromHDF5(DataStructure& dataStructure, const DataPath& dataPath, const nx::core::HDF5::FileIO& fileReader)
 {
@@ -2775,12 +2757,14 @@ Result<> EagerLoadDataFromHDF5(DataStructure& dataStructure, const DataPath& dat
 }
 
 /**
- * @brief Removes all DataObjects from ds that are not an ancestor of or equal to any path in keepPaths.
+ * @brief Removes objects that are not retained paths or their ancestors.
+ * @param ds Provides and receives the hierarchy.
+ * @param keepPaths Specifies retained paths.
  */
 void PruneDataStructure(DataStructure& ds, const std::vector<DataPath>& keepPaths)
 {
   auto allPaths = ds.getAllDataPaths();
-  // Sort longest-first so children are removed before parents
+  // Remove children before their parent groups.
   std::sort(allPaths.begin(), allPaths.end(), [](const DataPath& a, const DataPath& b) { return a.getLength() > b.getLength(); });
 
   for(const auto& existingPath : allPaths)
@@ -2788,13 +2772,11 @@ void PruneDataStructure(DataStructure& ds, const std::vector<DataPath>& keepPath
     bool isNeeded = false;
     for(const auto& requestedPath : keepPaths)
     {
-      // Keep if it equals a requested path or is an ancestor of one
       if(existingPath == requestedPath)
       {
         isNeeded = true;
         break;
       }
-      // Check if existingPath is an ancestor of requestedPath
       const auto& existingVec = existingPath.getPathVector();
       const auto& requestedVec = requestedPath.getPathVector();
       if(existingVec.size() < requestedVec.size())
@@ -2823,14 +2805,20 @@ void PruneDataStructure(DataStructure& ds, const std::vector<DataPath>& keepPath
 }
 
 /**
- * @brief Type-dispatched predicate: true iff @p neighborList is still backed by an EmptyListStore<T>.
+ * @struct IsEmptyListStoreFunctor
+ * @brief Detects a typed EmptyListStore placeholder.
  *
- * EmptyListStore<T> is templated, so detecting the placeholder requires resolving T from the list's
- * runtime DataType. The deferred-import Empty-sweep and an import finalizer must agree on what counts
- * as an unmaterialized NeighborList placeholder; both key off this same EmptyListStore<T> check.
+ * Runtime dispatch resolves the NeighborList scalar type. Finalizers and core
+ * cleanup use the same placeholder test.
  */
 struct IsEmptyListStoreFunctor
 {
+  /**
+   * @brief Tests one typed NeighborList store.
+   * @tparam T Specifies the list scalar type.
+   * @param neighborList Provides the runtime list.
+   * @return True when the list uses EmptyListStore<T>.
+   */
   template <typename T>
   bool operator()(INeighborList* neighborList) const
   {
@@ -2844,22 +2832,13 @@ struct IsEmptyListStoreFunctor
 };
 
 /**
- * @brief Eager-loads any array still backed by an Empty placeholder after a deferred import.
+ * @brief Materializes Empty placeholders after deferred import finalization.
+ * @param dataStructure Provides and receives arrays.
+ * @param dataFileReader Provides stored data.
+ * @return First eager-load error, or success.
  *
- * When a registered IO manager finalizes the import (anyManagerFinalizesImport()==true), it materializes
- * the arrays it cares about (e.g. attaches disk-backed stores, eager-loads small ones) but leaves the
- * remainder as the in-core Empty placeholders inserted during the metadata pass. This sweep is the
- * core-owned safety net that materializes those leftovers in-core so the returned DataStructure never
- * contains an unusable Empty store. It only touches Empty placeholders, so already-materialized in-core
- * arrays and disk-backed stores left by the finalizer are not disturbed.
- *
- * Placeholder detection per object kind:
- *  - DataArray:    IDataStore::StoreType::Empty
- *  - NeighborList: still backed by EmptyListStore<T> (type-dispatched)
- *  - StringArray:  store reports isPlaceholder() (EmptyStringStore)
- *
- * Materialization reuses EagerLoadDataFromHDF5, which dispatches through the per-type HDF5 IO factory and
- * therefore covers DataArray, NeighborList, and StringArray uniformly.
+ * The sweep changes only Empty DataStores, EmptyListStores, and placeholder
+ * StringArrays. It preserves stores already attached by the finalizer.
  */
 Result<> EagerLoadEmptyPlaceholders(DataStructure& dataStructure, const nx::core::HDF5::FileIO& dataFileReader)
 {
@@ -2883,8 +2862,7 @@ Result<> EagerLoadEmptyPlaceholders(DataStructure& dataStructure, const nx::core
     }
     else if(const auto* stringArray = dynamic_cast<const StringArray*>(dataObj); stringArray != nullptr)
     {
-      // An EmptyStringStore placeholder records the tuple count (so empty() is false for a non-empty
-      // array); isPlaceholder() is the correct "not yet materialized" signal.
+      // Tuple count does not identify an EmptyStringStore. Use its explicit placeholder state.
       isPlaceholder = stringArray->isPlaceholder();
     }
 
@@ -2901,23 +2879,14 @@ Result<> EagerLoadEmptyPlaceholders(DataStructure& dataStructure, const nx::core
 }
 
 /**
- * @brief Shared logic for LoadDataStructure and LoadDataStructureArrays.
+ * @brief Loads selected paths with optional deferred finalization.
+ * @param filePath Identifies the file.
+ * @param paths Specifies objects to insert and arrays to finalize.
+ * @param resolver Specifies per-DataStructure storage policy, or null for default.
+ * @return Materialized DataStructure, propagated warnings, or import error.
  *
- * Builds a metadata skeleton, then either eager-loads everything in-core (the default) or, when a
- * registered IO manager declares it finalizes imports (the out-of-core manager), defers loading to that
- * manager via the DataIOCollection::onImportFinalize fan-out followed by a core Empty-sweep that
- * materializes any placeholders the finalizer left behind.
- *
- * When @p resolver is non-null it is stamped onto the DataStructure immediately after construction and
- * BEFORE the finalize pass runs, so the finalizer can consult dataStructure.formatResolver() to decide
- * per-array storage — e.g. attaching disk-backed out-of-core stores for read-only visualization loads. A null
- * resolver leaves the process-level default in place, preserving the original behavior.
- *
- * Follows the same pattern as ImportH5ObjectPathsAction::apply:
- * 1. Preflight-import to get the metadata skeleton (importStructure)
- * 2. Expand paths to include ancestors, sorted shortest-first
- * 3. Insert each object via LoadDataObjectFromHDF5 (shallow copy + insert + optional data load)
- * 4. When a finalizer is registered, run onImportFinalize, then sweep remaining Empty placeholders in-core
+ * The method builds metadata, inserts ancestors before children, and stamps the
+ * resolver before finalization. Core then materializes placeholders that remain.
  */
 Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, const std::vector<DataPath>& paths, std::shared_ptr<const IDataStoreFormatResolver> resolver = nullptr)
 {
@@ -2927,7 +2896,7 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
     return MakeErrorResult<DataStructure>(-1, fmt::format("Failed to open .dream3d file '{}'. Check that the file exists and is a valid HDF5 file.", filePath.string()));
   }
 
-  // Build placeholder skeleton
+  // Build the placeholder hierarchy before selecting objects.
   auto metadataResult = LoadDataStructureMetadataInternal(fileReader);
   if(metadataResult.invalid())
   {
@@ -2935,25 +2904,19 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
   }
   DataStructure importStructure = std::move(metadataResult.value());
 
-  // Reopen file for data reading
+  // Use a separate handle for the materialization phase.
   auto dataFileReader = nx::core::HDF5::FileIO::ReadFile(filePath);
 
-  // Defer loading only when a registered IO manager (the out-of-core manager) finalizes imports.
-  // Otherwise load eagerly: arrays are inserted with their data already read during the
-  // LoadDataObjectFromHDF5 pass.
+  // Defer only when a registered manager owns import finalization.
   DataIOCollection& ioCollection = Application::GetOrCreateInstance()->getIOCollection();
   const bool useDeferredLoad = ioCollection.anyManagerFinalizesImport();
 
-  // Expand to include ancestor containers, sorted shortest-first
+  // Insert ancestors before their requested descendants.
   auto allPaths = DREAM3D::ExpandSelectedPathsToAncestors(paths);
   std::sort(allPaths.begin(), allPaths.end(), [](const DataPath& a, const DataPath& b) { return a.getLength() < b.getLength(); });
 
-  // Insert each object into the target DataStructure.
-  // When deferring, pass preflight=true to insert placeholders without loading data.
-  // When not deferring, pass preflight=false to insert and load data immediately.
   DataStructure dataStructure;
-  // Stamp the per-DataStructure store-format resolver before the finalize pass so the IO manager
-  // can consult dataStructure.formatResolver() when deciding which arrays become disk-backed stores.
+  // Install storage policy before any finalizer selects array stores.
   dataStructure.setFormatResolver(resolver);
   for(const auto& objectPath : allPaths)
   {
@@ -2967,9 +2930,7 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
   std::vector<Warning> handlerWarnings;
   if(useDeferredLoad)
   {
-    // Hand finalization to the registered manager: it attaches disk-backed reference stores, reattaches
-    // recovery stores, and eager-loads small arrays in-core via the callback. onImportFinalize returns
-    // std::nullopt only if no finalizer is registered, which cannot happen here (useDeferredLoad gated on it).
+    // Let registered managers attach or materialize their selected stores.
     auto handlerResult = ioCollection.onImportFinalize(dataStructure, paths, dataFileReader);
     if(handlerResult.has_value())
     {
@@ -2980,8 +2941,7 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
       handlerWarnings = std::move(handlerResult->warnings());
     }
 
-    // Core Empty-sweep: materialize any DataArray/NeighborList/StringArray the finalizer left as an
-    // Empty placeholder so the returned DataStructure never holds an unusable Empty store.
+    // Core materializes every placeholder left by the finalizer.
     auto sweepResult = EagerLoadEmptyPlaceholders(dataStructure, dataFileReader);
     if(sweepResult.invalid())
     {
@@ -2994,10 +2954,6 @@ Result<DataStructure> LoadDataStructureWithHandler(const fs::path& filePath, con
   return finalResult;
 }
 } // namespace
-
-// ---------------------------------------------------------------------------
-// New public LoadDataStructure* API
-// ---------------------------------------------------------------------------
 
 Result<DataStructure> DREAM3D::LoadDataStructureMetadata(const fs::path& path)
 {

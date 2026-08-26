@@ -19,40 +19,26 @@ namespace
 {
 /**
  * @class ComputeGBCDPoleFigureImpl
- * @brief Threaded worker for generating a GBCD stereographic pole figure (Scanline variant).
+ * @brief Computes one cached GBCD pole-figure page.
  *
- * This is the same pixel-computation logic as the Direct variant's worker. The only
- * difference is in how the GBCD data is provided:
- * - In the Direct variant, m_Gbcd points to the full multi-phase GBCD array, and
- *   m_PhaseOfInterest is used to offset into the correct phase slice.
- * - In the Scanline variant, m_Gbcd points to a pre-extracted single-phase slice
- *   (already offset), and m_PhaseOfInterest is set to 0 so no additional offset
- *   is applied.
- *
- * This shared-worker design means the parallel pixel computation is identical regardless
- * of whether the GBCD was loaded in full (Direct) or as a single-phase slice (Scanline).
- *
- * @see ComputeGBCDPoleFigureScanline::operator()() for the OOC data-loading strategy.
+ * Each parallel range reads immutable local metadata and phase data. It writes a disjoint page
+ * range. It does not access a DataArray or DataStore.
  */
 class ComputeGBCDPoleFigureImpl
 {
 private:
-  float64* m_PoleFigure;                                ///< Output pole figure pixel intensities (xPoints * yPoints).
-  std::array<int32, 2> m_Dimensions;                    ///< [xPoints, yPoints] of the output image.
-  ebsdlib::LaueOps::Pointer m_OrientOps;                ///< LaueOps for the crystal structure of the phase of interest.
-  const std::vector<float32>& m_GbcdDeltas;             ///< Bin width in each of the 5 GBCD dimensions.
-  const std::vector<float32>& m_GbcdLimits;             ///< Lower [0-4] and upper [5-9] bounds for the 5 GBCD dimensions.
-  const std::vector<int32>& m_GbcdSizes;                ///< Number of bins in each of the 5 GBCD dimensions.
-  const float64* m_Gbcd;                                ///< Pointer to the GBCD data (may be phase-offset or single-phase slice).
-  int32 m_PhaseOfInterest = 0;                          ///< Phase index offset (0 when using a pre-extracted phase slice).
-  const std::vector<float32>& m_MisorientationRotation; ///< User-specified misorientation [angle_deg, axis_x, axis_y, axis_z].
-  usize m_OutputOffset = 0;                             ///< Global pixel offset represented by the first element of m_PoleFigure.
+  float64* m_PoleFigure;
+  std::array<int32, 2> m_Dimensions;
+  ebsdlib::LaueOps::Pointer m_OrientOps;
+  const std::vector<float32>& m_GbcdDeltas;
+  const std::vector<float32>& m_GbcdLimits;
+  const std::vector<int32>& m_GbcdSizes;
+  const float64* m_Gbcd;
+  int32 m_PhaseOfInterest = 0;
+  const std::vector<float32>& m_MisorientationRotation;
+  usize m_OutputOffset = 0;
 
 public:
-  /**
-   * @brief Borrows the cached phase slice and one output row-band buffer.
-   * @p outputOffset maps global pixel indices into that bounded local page.
-   */
   ComputeGBCDPoleFigureImpl(float64* poleFigurePtr, const std::array<int32, 2>& dimensions, const ebsdlib::LaueOps::Pointer& orientOps, const std::vector<float32>& gbcdDeltasArray,
                             const std::vector<float32>& gbcdLimitsArray, const std::vector<int32>& gbcdSizesArray, const float64* gbcdPtr, int32 phaseOfInterest,
                             const std::vector<float32>& misorientationRotation, usize outputOffset)
@@ -70,10 +56,6 @@ public:
   }
   ~ComputeGBCDPoleFigureImpl() = default;
 
-  /**
-   * @brief Computes symmetry-averaged intensities for one pixel rectangle using
-   * only locally cached data; no DataStore calls occur in this parallel hot loop.
-   */
   void generate(usize xStart, usize xEnd, usize yStart, usize yEnd) const
   {
     ebsdlib::Matrix3X1<float32> vec = {0.0f, 0.0f, 0.0f};
@@ -156,13 +138,11 @@ public:
                   {
                     hemisphere = 1;
                   }
-                  // m_Gbcd points to the phase-of-interest slice, so index directly without phase offset
                   sum += m_Gbcd[2 * ((location5 * shift4) + (location4 * shift3) + (location3 * shift2) + (location2 * shift1) + location1) + hemisphere];
                   count++;
                 }
               }
 
-              // again in second crystal reference frame
               dg1 = dgt * sym2;
               dg2 = sym1 * dg1;
               misEuler1 = ebsdlib::OrientationMatrixFType(dg2).toEuler();
@@ -199,17 +179,12 @@ public:
     }
   }
 
-  /** @brief ParallelData2DAlgorithm entry point for one disjoint pixel rectangle. */
   void operator()(const Range2D& r) const
   {
     generate(r.minCol(), r.maxCol(), r.minRow(), r.maxRow());
   }
 
 private:
-  /**
-   * @brief Maps a crystal normal onto the Lambert equal-area square and reports
-   * whether it belongs to the northern hemisphere.
-   */
   static bool getSquareCoord(float32* crystalNormal, float32* sqCoord)
   {
     bool nhCheck = false;
@@ -257,21 +232,6 @@ const std::atomic_bool& ComputeGBCDPoleFigureScanline::getCancel()
 }
 
 // -----------------------------------------------------------------------------
-/**
- * @brief OOC-optimized GBCD pole figure generation.
- *
- * The key difference from the Direct variant is the GBCD caching strategy:
- * instead of caching the entire multi-phase GBCD array, this variant extracts
- * only the single-phase slice needed for the requested PhaseOfInterest via a
- * single copyIntoBuffer() call. This dramatically reduces memory consumption
- * when the GBCD has many phases.
- *
- * Once the phase slice is cached locally, the computation is parallelized
- * identically to the Direct path using ParallelData2DAlgorithm on the cached
- * raw pointers. The m_PhaseOfInterest parameter is set to 0 when constructing
- * the worker because the cached buffer already starts at the phase-of-interest
- * offset.
- */
 Result<> ComputeGBCDPoleFigureScanline::operator()()
 {
   auto& gbcd = m_DataStructure.getDataRefAs<Float64Array>(m_InputValues->GBCDArrayPath);
@@ -279,7 +239,7 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
   DataPath cellIntensityArrayPath = m_InputValues->ImageGeometryPath.createChildPath(m_InputValues->CellAttributeMatrixName).createChildPath(m_InputValues->CellIntensityArrayName);
   auto& poleFigure = m_DataStructure.getDataRefAs<Float64Array>(cellIntensityArrayPath);
 
-  // Cache ensemble-level crystal structures (typically < 10 elements).
+  // Cache the small ensemble array before parallel page calculations.
   const usize numCrystalStructures = crystalStructures.getSize();
   auto crystalStructuresCache = std::make_unique<uint32[]>(numCrystalStructures);
   if(Result<> result = crystalStructures.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresCache.get(), numCrystalStructures)); result.invalid())
@@ -287,12 +247,11 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
     return result;
   }
 
-  // ----- GBCD bin configuration (same as Direct variant) -----
   std::vector<float32> gbcdDeltas(5, 0);
   std::vector<float32> gbcdLimits(10, 0);
   std::vector<int32> gbcdSizes(5, 0);
 
-  // Greg Rohrer's ranges for the 5D GBCD parameter space.
+  // These limits define the five-dimensional GBCD parameter domain.
   gbcdLimits[0] = 0.0f;
   gbcdLimits[1] = 0.0f;
   gbcdLimits[2] = 0.0f;
@@ -304,14 +263,12 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
   gbcdLimits[8] = 1.0f;
   gbcdLimits[9] = Constants::k_2PiD;
 
-  // Override the 3rd and 4th dimension bounds to use the Lambert equal-area
-  // square-grid projection.
+  // Boundary-normal coordinates use the Lambert equal-area square.
   gbcdLimits[3] = -sqrtf(Constants::k_PiOver2D);
   gbcdLimits[4] = -sqrtf(Constants::k_PiOver2D);
   gbcdLimits[8] = sqrtf(Constants::k_PiOver2D);
   gbcdLimits[9] = sqrtf(Constants::k_PiOver2D);
 
-  // Extract the 5D component shape from the GBCD DataArray.
   ShapeType cDims = gbcd.getComponentShape();
 
   gbcdSizes[0] = static_cast<int32>(cDims[0]);
@@ -326,15 +283,9 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
   gbcdDeltas[3] = (gbcdLimits[8] - gbcdLimits[3]) / static_cast<float32>(gbcdSizes[3]);
   gbcdDeltas[4] = (gbcdLimits[9] - gbcdLimits[4]) / static_cast<float32>(gbcdSizes[4]);
 
-  // Total number of GBCD bins per phase (both hemispheres).
   int64 totalGbcdBins = gbcdSizes[0] * gbcdSizes[1] * gbcdSizes[2] * gbcdSizes[3] * gbcdSizes[4] * 2;
 
-  // ---- OOC optimization: cache only the single phase slice ----
-  // The full GBCD array has (numPhases * totalGbcdBins) elements. For an OOC store,
-  // reading the entire array would load all phases' bins from disk. Instead, we
-  // compute the element offset for the phase-of-interest and read only that
-  // contiguous slice. This is the critical optimization: one phase's GBCD is
-  // typically 100K-500K float64 elements vs. millions for all phases combined.
+  // Read only the contiguous phase slice required by this pole figure.
   const usize phaseOffset = static_cast<usize>(m_InputValues->PhaseOfInterest) * static_cast<usize>(totalGbcdBins);
   auto gbcdPhaseCache = std::make_unique<float64[]>(static_cast<usize>(totalGbcdBins));
   if(Result<> result = gbcd.getDataStoreRef().copyIntoBuffer(phaseOffset, nonstd::span<float64>(gbcdPhaseCache.get(), static_cast<usize>(totalGbcdBins))); result.invalid())
@@ -342,15 +293,13 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
     return result;
   }
 
-  // Select the LaueOps instance for the phase of interest.
   ebsdlib::LaueOps::Pointer orientOps = ebsdlib::LaueOps::GetAllOrientationOps()[crystalStructuresCache[m_InputValues->PhaseOfInterest]];
 
   int32 xPoints = m_InputValues->OutputImageDimension;
   int32 yPoints = m_InputValues->OutputImageDimension;
 
-  // Bound the output staging memory independently of the image height. A full-width
-  // row band keeps each worker's rectangular range contiguous in the page buffer.
-  constexpr usize k_TargetPagePixels = 131072; // 1 MiB of float64 values
+  // A full-width row band bounds staging memory and gives each worker a disjoint page range.
+  constexpr usize k_TargetPagePixels = 131072;
   const usize xPointCount = static_cast<usize>(xPoints);
   const usize yPointCount = static_cast<usize>(yPoints);
   const usize rowsPerPage = std::max<usize>(1, k_TargetPagePixels / xPointCount);
@@ -368,7 +317,6 @@ Result<> ComputeGBCDPoleFigureScanline::operator()()
     const usize outputOffset = yOffset * xPointCount;
     std::fill_n(poleFigurePage.get(), pageSize, 0.0);
 
-    // Parallel execution is safe because all hot-loop data is locally cached.
     ParallelData2DAlgorithm dataAlg;
     dataAlg.setRange(0, xPoints, yOffset, yOffset + rowCount);
     dataAlg.execute(ComputeGBCDPoleFigureImpl(poleFigurePage.get(), {xPoints, yPoints}, orientOps, gbcdDeltas, gbcdLimits, gbcdSizes, gbcdPhaseCache.get(), 0, m_InputValues->MisorientationRotation,

@@ -142,28 +142,20 @@ Result<> DataStructureWriter::AppendFile(const std::filesystem::path& filepath, 
 
 Result<> DataStructureWriter::writeDataObject(const DataObject* dataObject, nx::core::HDF5::GroupIO& parentGroup)
 {
-  // Check if data has already been written
   if(hasDataBeenWritten(dataObject))
   {
-    // Create an HDF5 link
+    // Reuse the existing object through an HDF5 hard link.
     return writeDataObjectLink(dataObject, parentGroup);
   }
 
-  // -----------------------------------------------------------------------
-  // Recovery-write override
-  // -----------------------------------------------------------------------
-  // Offer each registered IO manager a chance to override how this object is serialized.
-  // During a recovery WriteFile the out-of-core manager intercepts its disk-backed arrays and
-  // writes a zero-byte placeholder dataset annotated with backing-file metadata (so the recovery
-  // file stays small while preserving enough to reattach on reload). A value means the manager
-  // handled the write; std::nullopt means fall through to the normal write path below. With no
-  // out-of-core manager registered, the fan-out always returns std::nullopt.
+  // Recovery writers let registered managers replace disk-backed arrays with
+  // placeholder datasets and backing metadata. This preserves recovery links
+  // without copying data. An empty override uses the normal type factory.
   if(auto overrideResult = Application::GetOrCreateInstance()->getIOCollection().onRecoveryWrite(*this, dataObject, parentGroup); overrideResult.has_value())
   {
     return overrideResult.value();
   }
 
-  // Normal write path
   auto factory = m_IOManager->getFactoryAs<IDataIO>(dataObject->getTypeName());
   if(factory == nullptr)
   {
@@ -214,7 +206,7 @@ Result<> DataStructureWriter::writeDataObjectLink(const DataObject* dataObject, 
     return result;
   }
 
-  // NeighborList extra data link
+  // NeighborList links require the NumNeighbors companion array for reconstruction.
   if(const auto* neighborList = dynamic_cast<const INeighborList*>(dataObject))
   {
     auto numNeighborsName = neighborList->getNumNeighborsArrayName();

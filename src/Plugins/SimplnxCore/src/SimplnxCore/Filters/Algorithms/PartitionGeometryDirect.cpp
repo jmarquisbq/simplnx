@@ -19,7 +19,19 @@ namespace
 {
 constexpr usize k_InvalidPartitionIndex = std::numeric_limits<usize>::max();
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Maps input cell centers on one axis to flattened partition offsets.
+ * @param inputDimension Specifies input cells on the axis.
+ * @param inputOrigin Specifies input origin on the axis.
+ * @param inputSpacing Specifies input spacing on the axis.
+ * @param partitionDimension Specifies partition cells on the axis.
+ * @param partitionOrigin Specifies partition origin on the axis.
+ * @param partitionSpacing Specifies partition spacing on the axis.
+ * @param partitionIndexMultiplier Converts an axis index to a flat-index contribution.
+ * @return Partition offsets, or an invalid sentinel for exterior cell centers.
+ *
+ * Precomputed axis maps avoid repeated coordinate queries in the ImageGeom fast path.
+ */
 std::vector<usize> CreateImageAxisPartitionIndices(usize inputDimension, float32 inputOrigin, float32 inputSpacing, usize partitionDimension, float32 partitionOrigin, float32 partitionSpacing,
                                                    usize partitionIndexMultiplier)
 {
@@ -44,10 +56,26 @@ std::vector<usize> CreateImageAxisPartitionIndices(usize inputDimension, float32
   return partitionIndices;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @class PartitionImageGeometryImpl
+ * @brief Partitions ImageGeom cells from precomputed axis maps.
+ *
+ * Parallel ranges write disjoint output spans through a resident raw pointer.
+ */
 class PartitionImageGeometryImpl
 {
 public:
+  /**
+   * @brief Creates an ImageGeom partition worker.
+   * @param inputDimensions Specifies input cell dimensions.
+   * @param xPartitionIndices Provides X-axis flat-index contributions.
+   * @param yPartitionIndices Provides Y-axis flat-index contributions.
+   * @param zPartitionIndices Provides Z-axis flat-index contributions.
+   * @param partitionIds Receives partition IDs.
+   * @param startingPartitionId Offsets valid flattened partition indexes.
+   * @param outOfBoundsValue Supplies IDs for exterior cells.
+   * @param shouldCancel Stops active ranges when true.
+   */
   PartitionImageGeometryImpl(const SizeVec3& inputDimensions, const std::vector<usize>& xPartitionIndices, const std::vector<usize>& yPartitionIndices, const std::vector<usize>& zPartitionIndices,
                              int32* partitionIds, int startingPartitionId, int outOfBoundsValue, const std::atomic_bool& shouldCancel)
   : m_InputDimensions(inputDimensions)
@@ -61,7 +89,15 @@ public:
   {
   }
 
-  // -----------------------------------------------------------------------------
+  /**
+   * @brief Partitions one rectangular cell range.
+   * @param xStart Specifies inclusive X start.
+   * @param xEnd Specifies exclusive X end.
+   * @param yStart Specifies inclusive Y start.
+   * @param yEnd Specifies exclusive Y end.
+   * @param zStart Specifies inclusive Z start.
+   * @param zEnd Specifies exclusive Z end.
+   */
   void compute(size_t xStart, size_t xEnd, size_t yStart, size_t yEnd, size_t zStart, size_t zEnd) const
   {
     const usize inputPlaneSize = m_InputDimensions[0] * m_InputDimensions[1];
@@ -100,6 +136,10 @@ public:
     }
   }
 
+  /**
+   * @brief Partitions one scheduler range.
+   * @param range Specifies exclusive axis bounds.
+   */
   void operator()(const Range3D& range) const
   {
     compute(range[0], range[1], range[2], range[3], range[4], range[5]);
@@ -116,10 +156,24 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
-// -----------------------------------------------------------------------------
+/**
+ * @class PartitionCellBasedGeometryImpl
+ * @brief Partitions grid cells through IGridGeometry coordinate queries.
+ *
+ * Parallel ranges write disjoint output indexes. All required stores must be resident.
+ */
 class PartitionCellBasedGeometryImpl
 {
 public:
+  /**
+   * @brief Creates a generic grid-geometry partition worker.
+   * @param inputGeometry Provides cell coordinates and dimensions.
+   * @param partitionIdsStore Receives partition IDs.
+   * @param psImageGeom Defines partition-grid cells.
+   * @param startingPartitionId Offsets valid flattened partition indexes.
+   * @param outOfBoundsValue Supplies IDs for exterior cells.
+   * @param shouldCancel Stops active ranges when true.
+   */
   PartitionCellBasedGeometryImpl(const IGridGeometry& inputGeometry, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int startingPartitionId, int outOfBoundsValue,
                                  const std::atomic_bool& shouldCancel)
   : m_InputGeometry(inputGeometry)
@@ -131,7 +185,15 @@ public:
   {
   }
 
-  // -----------------------------------------------------------------------------
+  /**
+   * @brief Partitions one rectangular cell range.
+   * @param xStart Specifies inclusive X start.
+   * @param xEnd Specifies exclusive X end.
+   * @param yStart Specifies inclusive Y start.
+   * @param yEnd Specifies exclusive Y end.
+   * @param zStart Specifies inclusive Z start.
+   * @param zEnd Specifies exclusive Z end.
+   */
   void compute(size_t xStart, size_t xEnd, size_t yStart, size_t yEnd, size_t zStart, size_t zEnd) const
   {
     SizeVec3 dims = m_InputGeometry.getDimensions();
@@ -164,6 +226,10 @@ public:
     }
   }
 
+  /**
+   * @brief Partitions one scheduler range.
+   * @param r Specifies exclusive axis bounds.
+   */
   void operator()(const Range3D& r) const
   {
     compute(r[0], r[1], r[2], r[3], r[4], r[5]);
@@ -178,10 +244,25 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
-// -----------------------------------------------------------------------------
+/**
+ * @class PartitionNodeBasedGeometryImpl
+ * @brief Partitions resident vertices with an optional resident mask.
+ *
+ * Parallel ranges read shared arrays and write disjoint partition-ID indexes.
+ */
 class PartitionNodeBasedGeometryImpl
 {
 public:
+  /**
+   * @brief Creates a node-geometry partition worker.
+   * @param verticesStore Provides flat XYZ vertex coordinates.
+   * @param partitionIdsStore Receives partition IDs.
+   * @param psImageGeom Defines partition-grid cells.
+   * @param startingPartitionId Offsets valid flattened partition indexes.
+   * @param outOfBoundsValue Supplies IDs for masked or exterior vertices.
+   * @param maskArrayOpt Selects vertices when present.
+   * @param shouldCancel Stops active ranges when true.
+   */
   PartitionNodeBasedGeometryImpl(const PartitionGeometryDirect::VertexStore& verticesStore, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int startingPartitionId,
                                  int outOfBoundsValue, const std::optional<const BoolArray>& maskArrayOpt, const std::atomic_bool& shouldCancel)
   : m_VerticesStore(verticesStore)
@@ -194,7 +275,11 @@ public:
   {
   }
 
-  // -----------------------------------------------------------------------------
+  /**
+   * @brief Partitions one vertex range.
+   * @param start Specifies inclusive vertex start.
+   * @param end Specifies exclusive vertex end.
+   */
   void compute(size_t start, size_t end) const
   {
     for(usize idx = start; idx < end; idx++)
@@ -220,6 +305,10 @@ public:
     }
   }
 
+  /**
+   * @brief Partitions one scheduler range.
+   * @param range Specifies inclusive and exclusive vertex bounds.
+   */
   void operator()(const Range& range) const
   {
     compute(range.min(), range.max());
@@ -236,7 +325,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 PartitionGeometryDirect::PartitionGeometryDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                  PartitionGeometryInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -246,16 +334,13 @@ PartitionGeometryDirect::PartitionGeometryDirect(DataStructure& dataStructure, c
 {
 }
 
-// -----------------------------------------------------------------------------
 PartitionGeometryDirect::~PartitionGeometryDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& PartitionGeometryDirect::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryDirect::operator()()
 {
   auto partitioningMode = static_cast<PartitionGeometryFilter::PartitioningMode>(m_InputValues->PartitioningMode);
@@ -327,9 +412,6 @@ Result<> PartitionGeometryDirect::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryDirect::partitionCellBasedGeometry(const IGridGeometry& inputGeometry, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue)
 {
   const SizeVec3 dims = inputGeometry.getDimensions();
@@ -367,9 +449,6 @@ Result<> PartitionGeometryDirect::partitionCellBasedGeometry(const IGridGeometry
   return {};
 }
 
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryDirect::partitionNodeBasedGeometry(const VertexStore& vertexListStore, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue,
                                                              const std::optional<const BoolArray>& maskArrayOpt)
 {
@@ -383,7 +462,6 @@ Result<> PartitionGeometryDirect::partitionNodeBasedGeometry(const VertexStore& 
     algArrays.push_back(&(maskArrayOpt.value()));
   }
 
-  // Allow data-based parallelization
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(0, vertexListStore.getNumberOfTuples());
   dataAlg.requireArraysInMemory(algArrays);

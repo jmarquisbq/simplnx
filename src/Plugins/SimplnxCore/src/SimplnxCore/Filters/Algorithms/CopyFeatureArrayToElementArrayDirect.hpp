@@ -11,21 +11,11 @@ struct CopyFeatureArrayToElementArrayInputValues;
 
 /**
  * @class CopyFeatureArrayToElementArrayDirect
- * @brief In-core (direct memory access) algorithm for broadcasting feature data to element data.
+ * @brief Broadcasts feature tuples through in-memory arrays.
  *
- * For every cell, the value of the feature that the cell belongs to is copied into a new
- * cell-level array (created[cell] = selectedFeature[featureIds[cell]]). The work is parallelized
- * across cells with ParallelDataAlgorithm, reading FeatureIds and the source feature array and
- * writing the created array directly through operator[].
- *
- * **When this variant is selected**: DispatchAlgorithm selects this class when the FeatureIds
- * array is backed by contiguous in-memory storage. With in-memory data, operator[] is a simple
- * pointer dereference and parallel per-cell access saturates memory bandwidth, making this the
- * fastest option for in-core data.
- *
- * **Why a separate OOC variant exists**: For chunked/OOC storage this parallel operator[] pattern
- * is both unsafe (the chunk cache is not thread-safe) and slow (per-element chunk-cache lookups).
- * The Scanline variant avoids both by streaming in bounded chunks on a single thread.
+ * Concrete DataStore instances use raw pointers for parallel ranges. The generic
+ * fallback accesses DataStore instances in parallel and has no general
+ * thread-safety guarantee. Scanline avoids disk-backed per-cell lookups.
  *
  * @see CopyFeatureArrayToElementArrayScanline for the OOC-optimized variant.
  * @see CopyFeatureArrayToElementArray for the dispatcher.
@@ -33,8 +23,19 @@ struct CopyFeatureArrayToElementArrayInputValues;
 class SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArrayDirect
 {
 public:
+  /**
+   * @brief Creates an in-memory feature broadcast algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later ranges when true.
+   * @param inputValues Specifies validated paths and naming. The caller must
+   * keep this object alive for the algorithm lifetime.
+   */
   CopyFeatureArrayToElementArrayDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                        const CopyFeatureArrayToElementArrayInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning in-memory algorithm.
+   */
   ~CopyFeatureArrayToElementArrayDirect() noexcept;
 
   CopyFeatureArrayToElementArrayDirect(const CopyFeatureArrayToElementArrayDirect&) = delete;
@@ -42,6 +43,12 @@ public:
   CopyFeatureArrayToElementArrayDirect& operator=(const CopyFeatureArrayToElementArrayDirect&) = delete;
   CopyFeatureArrayToElementArrayDirect& operator=(CopyFeatureArrayToElementArrayDirect&&) noexcept = delete;
 
+  /**
+   * @brief Broadcasts every selected feature array.
+   * @return Error from Feature Id validation, or success after cancellation.
+   *
+   * Cancellation can retain output from completed parallel ranges.
+   */
   Result<> operator()();
 
 private:

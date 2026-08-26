@@ -58,11 +58,8 @@ namespace nx::core
 // -----------------------------------------------------------------------------
 IParallelAlgorithm::IParallelAlgorithm()
 {
-  // m_RunParallel defaults to true (ifdef SIMPLNX_ENABLE_MULTICORE) or false.
-  // Individual filters disable via requireArraysInMemory()/requireStoresInMemory()
-  // if they genuinely need in-memory data (e.g., ITK filters).
-  // Disk-backed stores serialize their HDF5 access through the process-wide HDF5
-  // lock, so TBB parallelism is safe on them too.
+  // Out-of-core stores do not support concurrent DataArray or IDataStore access.
+  // requireArraysInMemory() and requireStoresInMemory() disable parallel work for these stores.
 }
 
 // -----------------------------------------------------------------------------

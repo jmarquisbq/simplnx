@@ -6,34 +6,32 @@ namespace nx::core
 {
 /**
  * @class NearestPointFuseRegularGridsDirect
- * @brief Resamples resident cell arrays onto a reference image geometry using direct nearest-point access.
+ * @brief Resamples resident cell arrays through direct nearest-cell access.
  *
- * Arrays are processed concurrently and each output cell computes its source
- * coordinate independently. This is the fastest route for contiguous in-memory
- * stores, where direct tuple access is a pointer operation. The dispatcher avoids
- * this implementation for OOC arrays because its per-cell source reads would cause
- * repeated chunk lookup and disk I/O.
+ * Independent arrays run concurrently. Each reference lattice coordinate selects
+ * its containing sampling cell. Direct source reads suit resident stores but cause
+ * repeated chunk access for disk-backed stores.
  *
- * The algorithm borrows the DataStructure, cancellation flag, message handler,
- * and input-values bundle for the duration of execution.
- *
- * @see NearestPointFuseRegularGridsScanline for the row-buffered OOC route.
+ * @see NearestPointFuseRegularGridsScanline
  */
 class SIMPLNXCORE_EXPORT NearestPointFuseRegularGridsDirect
 {
 public:
   /**
-   * @brief Creates the direct, parallel resampling implementation.
-   * @param dataStructure Data structure containing both image geometries and their cell arrays.
-   * @param messageHandler Message callback retained for the common dispatched interface.
-   * @param shouldCancel Cancellation flag checked while traversing arrays and reference slices.
-   * @param inputValues Non-owning pointer to geometry paths and the out-of-bounds fill value.
+   * @brief Creates a direct parallel resampler.
+   * @param dataStructure Provides both image geometries and their cell arrays.
+   * @param messageHandler Is retained for the dispatched interface.
+   * @param shouldCancel Stops later arrays or reference Z slices when true.
+   * @param inputValues Specifies validated paths and the fill value. The caller
+   * must keep this object alive for the resampler lifetime.
    */
   NearestPointFuseRegularGridsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel,
                                      const NearestPointFuseRegularGridsInputValues* inputValues);
   /**
-   * @brief Resamples each numeric sampling-cell array into its corresponding reference-cell array.
-   * @return A valid result after all per-array tasks finish, including when cancellation stops traversal early.
+   * @brief Resamples each numeric or Boolean sampling-cell array.
+   * @return Success after all scheduled tasks finish or observe cancellation.
+   *
+   * Cancellation can leave different destination arrays at different completion points.
    */
   Result<> operator()();
 

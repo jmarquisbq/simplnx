@@ -16,17 +16,31 @@ namespace nx::core
 {
 /**
  * @class ReadStlFile
- * @brief Reads a binary STL mesh file into a TriangleGeom, creating vertices, faces, and face normals.
+ * @brief Reads a binary STL mesh into a TriangleGeom.
  *
- * Handles vendor-specific STL quirks (Magics color encoding, VxElements metadata) by
- * detecting them from the header and adjusting the parse behavior accordingly.
- * After reading, calls GeometryUtilities::EliminateDuplicateNodes to merge shared vertices.
+ * Header markers select compatibility behavior for Magics color attributes and
+ * VXelements metadata. Final node elimination merges shared vertices and applies scaling.
  */
 class SIMPLNXCORE_EXPORT ReadStlFile
 {
 public:
+  /**
+   * @brief Creates a binary STL reader.
+   * @param dataStructure Receives mesh arrays.
+   * @param stlFilePath Identifies the input file.
+   * @param geometryPath Identifies the destination TriangleGeom.
+   * @param faceGroupPath Is retained but not used.
+   * @param faceNormalsDataPath Identifies the destination normal array.
+   * @param scaleOutput Applies scaleFactor during duplicate-node elimination when true.
+   * @param scaleFactor Specifies output coordinate scale.
+   * @param shouldCancel Stops before later triangles when true.
+   * @param mesgHandler Receives progress messages.
+   */
   ReadStlFile(DataStructure& dataStructure, fs::path stlFilePath, const DataPath& geometryPath, const DataPath& faceGroupPath, const DataPath& faceNormalsDataPath, bool scaleOutput,
               float32 scaleFactor, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
+  /**
+   * @brief Destroys the non-owning reader.
+   */
   ~ReadStlFile() noexcept;
 
   ReadStlFile(const ReadStlFile&) = delete;
@@ -34,10 +48,19 @@ public:
   ReadStlFile& operator=(const ReadStlFile&) = delete;
   ReadStlFile& operator=(ReadStlFile&&) noexcept = delete;
 
+  /**
+   * @brief Reads triangles and eliminates duplicate nodes.
+   * @return File, parse, or node-elimination error, or success after cancellation.
+   *
+   * Cancellation and parse errors can retain partially written mesh arrays.
+   * Per-value DataStore writes do not report I/O errors.
+   */
   Result<> operator()();
 
   /**
-   * @brief readFile Reads the .stl file
+   * @brief Reads the configured STL file.
+   * @return Parse or geometry error, or success.
+   * @warning This declaration has no definition in the current library.
    */
   Result<> readFile();
 

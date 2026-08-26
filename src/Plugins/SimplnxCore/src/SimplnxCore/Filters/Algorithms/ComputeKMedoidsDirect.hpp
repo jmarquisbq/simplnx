@@ -11,32 +11,22 @@ struct KMedoidsInputValues;
 
 /**
  * @class ComputeKMedoidsDirect
- * @brief In-core algorithm for K-Medoids clustering using direct per-element array access.
+ * @brief Computes K-Medoids clusters with direct element access.
  *
- * Uses operator[] for distance computation, cluster assignment, and medoid optimization.
- * This is optimal when all arrays reside in memory, where operator[] is essentially a
- * pointer dereference.
- *
- * The algorithm uses Voronoi iteration:
- *   1. Randomly select k initial medoids from masked data points
- *   2. Assign each point to the nearest medoid (findClusters)
- *   3. For each cluster, find the member that minimizes total intra-cluster distance (optimizeClusters)
- *   4. Repeat steps 2-3 until medoids stop changing
- *
- * Selected by DispatchAlgorithm when all input arrays are backed by in-memory DataStore.
- *
- * @see ComputeKMedoidsScanline for the out-of-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * Direct access is efficient for resident arrays. A forced direct path uses the
+ * same element access for out-of-core arrays and can cause chunk thrashing.
+ * Medoid optimization evaluates every cluster member against its peers.
  */
 class SIMPLNXCORE_EXPORT ComputeKMedoidsDirect
 {
 public:
   /**
-   * @brief Constructs the in-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes direct K-Medoids clustering.
+   * @param dataStructure Contains input and output arrays.
+   * @param mesgHandler Receives iteration messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects settings and array paths.
+   * @pre All arguments and the inputValues object outlive this executor.
    */
   ComputeKMedoidsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const KMedoidsInputValues* inputValues);
   ~ComputeKMedoidsDirect() noexcept;
@@ -47,28 +37,25 @@ public:
   ComputeKMedoidsDirect& operator=(ComputeKMedoidsDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core K-Medoids clustering.
-   * @return Result<> with any errors encountered during execution
+   * @brief Executes K-Medoids with direct element access.
+   * @return Success, or an empty-input, invalid-mask, empty-mask, or mask-read error.
+   * @pre The component count is positive and fits in Int32.
+   * @pre The cluster count fits Int32 and output arrays have compatible shapes.
+   *
+   * This path does not validate these cluster and shape preconditions.
+   * Cancellation returns success and can leave partial assignments or medoids.
    */
   Result<> operator()();
 
-  /**
-   * @brief Sends a progress message through the filter's message handler.
-   * @param message The progress message text
-   */
   void updateProgress(const std::string& message);
 
-  /**
-   * @brief Returns a reference to the cancellation flag for checking in inner loops.
-   * @return Reference to the atomic bool cancellation flag
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                     ///< Reference to the DataStructure containing all arrays
-  const KMedoidsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;             ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;    ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const KMedoidsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

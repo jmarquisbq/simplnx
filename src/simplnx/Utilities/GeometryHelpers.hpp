@@ -14,36 +14,57 @@
 #include <set>
 #include <unordered_set>
 
+/**
+ * @namespace nx::core::GeometryHelpers
+ * @brief Provides geometry description, connectivity, and topology utilities.
+ */
 namespace nx::core::GeometryHelpers
 {
+/**
+ * @typedef ErrorCode
+ * @brief Defines integer status values for connectivity utilities.
+ */
 using ErrorCode = int32;
 
+/**
+ * @namespace Description
+ * @brief Provides user-readable geometry descriptions.
+ */
 namespace Description
 {
 
 /**
- * @brief Generates a string description for the given arguments
- * @param dims The dimensions of the image geometry
- * @param spacing The spacing of the image geometry
- * @param origin The origin of the image geomtry
- * @param units The units of the geometry
- * @return
+ * @brief Formats ImageGeom dimensions and spatial metadata.
+ * @param dims Specifies image dimensions.
+ * @param spacing Specifies axis spacing.
+ * @param origin Specifies image origin.
+ * @param units Specifies length units.
+ * @return Geometry description.
  */
 SIMPLNX_EXPORT std::string GenerateGeometryInfo(const nx::core::SizeVec3& dims, const nx::core::FloatVec3& spacing, const nx::core::FloatVec3& origin, IGeometry::LengthUnit units);
 
 } // namespace Description
 
+/**
+ * @namespace Connectivity
+ * @brief Provides mesh adjacency and boundary extraction utilities.
+ */
 namespace Connectivity
 {
+/**
+ * @namespace detail
+ * @brief Provides internal edge-count implementations.
+ */
 namespace detail
 {
 inline constexpr uint64 k_MaxOptimizedValue = static_cast<uint64>(std::numeric_limits<uint32>::max());
 
 /**
- * @brief !!! DO NOT CALL DIRECTLY !!! Prefer FindNumEdges()
- * @tparam T indexing type of the face store
- * @param faceStore This is the  face indexing list containing values that correspond to indices in the SharedVertexList
- * @return usize This is the number of edges
+ * @brief Counts unique edges without narrowing vertex indexes.
+ * @tparam T Specifies the face-index type.
+ * @param faceStore Provides polygon vertex indexes.
+ * @return Unique edge count.
+ * @note Use FindNumEdges() for automatic implementation selection.
  */
 template <typename T>
 usize SafeEdgeCount(const AbstractDataStore<T>& faceStore)
@@ -96,10 +117,11 @@ usize SafeEdgeCount(const AbstractDataStore<T>& faceStore)
 }
 
 /**
- * @brief !!! DO NOT CALL DIRECTLY !!! Prefer FindNumEdges()
- * @tparam T indexing type of the face store
- * @param faceStore This is the  face indexing list containing values that correspond to indices in the SharedVertexList
- * @return usize This is the number of edges
+ * @brief Counts unique edges with packed UInt32 vertex pairs.
+ * @tparam T Specifies the face-index type.
+ * @param faceStore Provides polygon vertex indexes that fit UInt32.
+ * @return Unique edge count.
+ * @note Use FindNumEdges() for range-based implementation selection.
  */
 template <typename T>
 usize FastEdgeCount(const AbstractDataStore<T>& faceStore)
@@ -153,43 +175,44 @@ usize FastEdgeCount(const AbstractDataStore<T>& faceStore)
 } // namespace detail
 
 /**
- * @brief Computes the Euler Characteristic value for a given triangle mesh based on regions/face labels
- * @param triangleGeom
- * @param faceLabelsRef
- * @return A vector of values that represent the Euler Characteristic for each region
+ * @brief Computes one Euler characteristic for each labeled mesh region.
+ * @param triangleGeom Provides triangle connectivity.
+ * @param faceLabelsRef Provides two region labels per face.
+ * @return Euler characteristic values indexed by region ID.
  */
 SIMPLNX_EXPORT std::vector<int32> FindEulerCharacteristicValues(const TriangleGeom& triangleGeom, const Int32Array& faceLabelsRef);
 
 /**
- * @brief !!! EXPENSIVE !!! This function is a wrapper method for implicitly determining the correct edge calculation/counting algorithm
- * @tparam T indexing type of the face store
- * @param faceStore This is the  face indexing list containing values that correspond to indices in the SharedVertexList
- * @param numVertices This value is optional, since it is exclusively used for determining if faster algorithm is viable
- * @return usize This is the number of edges
+ * @brief Selects a unique-edge count implementation from vertex-index range.
+ * @tparam T Specifies the face-index type.
+ * @param faceStore Provides polygon vertex indexes.
+ * @param numVertices Specifies vertex count for packed-index safety.
+ * @return Unique edge count.
+ *
+ * The packed implementation is faster but requires unsigned indexes below UInt32 maximum.
  */
 template <typename T>
 usize FindNumEdges(const AbstractDataStore<T>& faceStore, usize numVertices = (detail::k_MaxOptimizedValue + 1))
 {
-  // This case may seem niche, but it is designed with Indexing types in mind specifically IGeometry::MeshIndexType
   if constexpr(!std::is_signed_v<T>)
   {
     if(numVertices < detail::k_MaxOptimizedValue)
     {
-      // speedier method because max vertices value fits into uint32
       return detail::FastEdgeCount(faceStore);
     }
   }
-  // Slower method to avoid overflow
   return detail::SafeEdgeCount(faceStore);
 }
 
 /**
- * @brief
- * @tparam T
- * @tparam K
- * @param elemList
- * @param dynamicList
- * @param numVerts
+ * @brief Builds the element list for each vertex through two chunked passes.
+ * @tparam T Specifies per-vertex list-size type.
+ * @tparam K Specifies mesh-index type.
+ * @param elemList Provides element vertex indexes.
+ * @param dynamicList Receives element indexes for each vertex.
+ * @param numVerts Specifies vertex count.
+ *
+ * The method does not inspect source bulk-read results.
  */
 template <typename T, typename K>
 void FindElementsContainingVert(const DataArray<K>* elemList, DynamicListArray<T, K>* dynamicList, usize numVerts)
@@ -198,15 +221,14 @@ void FindElementsContainingVert(const DataArray<K>* elemList, DynamicListArray<T
   const usize numVertsPerElem = elemList->getNumberOfComponents();
   const auto& elemStore = elemList->getDataStoreRef();
 
-  // Allocate the basic structures
   std::vector<T> linkCount(numVerts, 0);
   std::vector<K> linkLoc(numVerts, static_cast<K>(0));
 
-  // Use chunked bulk reads instead of per-element operator[] for OOC compatibility
+  // Chunked source reads avoid per-index access to disk-backed connectivity.
   constexpr usize k_ChunkElems = 65536;
   auto chunkBuf = std::make_unique<K[]>(k_ChunkElems * numVertsPerElem);
 
-  // Chunked pass 1: count references to each vertex
+  // The first pass counts references for exact list allocation.
   for(usize start = 0; start < numElems; start += k_ChunkElems)
   {
     usize count = std::min(k_ChunkElems, numElems - start);
@@ -221,10 +243,9 @@ void FindElementsContainingVert(const DataArray<K>* elemList, DynamicListArray<T
     }
   }
 
-  // Now allocate storage for the links
   dynamicList->allocateLists(linkCount);
 
-  // Chunked pass 2: insert cell references
+  // The second pass writes element references.
   for(usize start = 0; start < numElems; start += k_ChunkElems)
   {
     usize count = std::min(k_ChunkElems, numElems - start);
@@ -243,14 +264,17 @@ void FindElementsContainingVert(const DataArray<K>* elemList, DynamicListArray<T
 }
 
 /**
- * @brief
- * @tparam T
- * @tparam K
- * @param elemList
- * @param elemsContainingVert
- * @param dynamicList
- * @param geometryType
- * @return int32
+ * @brief Finds neighboring elements that share a complete boundary entity.
+ * @tparam T Specifies dynamic-list size type.
+ * @tparam K Specifies mesh-index type.
+ * @param elemList Provides element vertex indexes.
+ * @param elemsContainingVert Provides candidate elements for each vertex.
+ * @param dynamicList Receives neighbors for each element.
+ * @param geometryType Selects required shared-vertex count.
+ * @return -1 for an unsupported geometry type, or 0 after processing.
+ *
+ * Outer connectivity reads use chunks. Candidate reads outside the active chunk
+ * use one bulk read. Source read results are not inspected.
  */
 template <typename T, typename K>
 ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListArray<T, K>* elemsContainingVert, DynamicListArray<T, K>* dynamicList, IGeometry::Type geometryType)
@@ -301,16 +325,16 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
 
   dynamicList->allocateLists(linkCount);
 
-  // Allocate an array of bools that we use each iteration so that we don't put duplicates into the array
+  // Track candidates already accepted for the current source element.
   std::vector<uint8> visited(numElems, 0);
 
-  // Reuse this vector for each loop. Avoids re-allocating the memory each time through the loop
+  // Reuse one neighbor vector across source elements.
   std::vector<K> loop_neighbors(32, 0);
 
-  // Buffer for reading a single candidate neighbor element's vertices via bulk I/O
+  // Keep one candidate element outside the active chunk in local memory.
   auto neighborVertsBuf = std::make_unique<K[]>(numVertsPerElem);
 
-  // Process elements in chunks for the sequential outer read (OOC-friendly bulk I/O)
+  // Process source elements in sequential connectivity chunks.
   constexpr usize k_ChunkElems = 65536;
   auto chunkBuf = std::make_unique<K[]>(k_ChunkElems * numVertsPerElem);
 
@@ -341,9 +365,7 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
             continue; // We already added this element so loop again
           }
 
-          // Read the candidate neighbor element's vertices.
-          // If the candidate is within our current chunk, read from the local buffer;
-          // otherwise perform a single bulk read from the store.
+          // Reuse the active chunk or read one exterior candidate.
           K candidateElem = vertIdxs[vt];
           const K* candidateVerts = nullptr;
           if(candidateElem >= chunkStart && candidateElem < chunkStart + chunkCount)
@@ -356,7 +378,7 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
             candidateVerts = neighborVertsBuf.get();
           }
 
-          // Count shared vertices between source element t and the candidate
+          // Count shared vertices between this source and candidate.
           usize vCount = 0;
           for(usize i = 0; i < numVertsPerElem; i++)
           {
@@ -369,7 +391,7 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
             }
           }
 
-          // If vertex match count equals numSharedVerts, this candidate is a neighbor
+          // A complete shared boundary entity defines one neighbor.
           if(vCount == numSharedVerts)
           {
             loop_neighbors[linkCount[t]] = vertIdxs[vt];
@@ -383,12 +405,11 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
         }
       }
 
-      // Reset all the visited cell indices back to false (zero)
+      // Clear only visited indexes recorded for this source element.
       for(int64 k = 0; k < linkCount[t]; k++)
       {
         visited[loop_neighbors[k]] = false;
       }
-      // Allocate the array storage for the current element to hold its neighbor list
       dynamicList->setElementList(t, linkCount[t], &(loop_neighbors[0]));
     }
   }
@@ -397,10 +418,10 @@ ErrorCode FindElementNeighbors(const DataArray<K>* elemList, const DynamicListAr
 }
 
 /**
- * @brief
- * @tparam T
- * @param tetList
- * @param edgeList
+ * @brief Extracts all unique tetrahedron edges.
+ * @tparam T Specifies mesh-index type.
+ * @param tetList Provides four vertex indexes per tetrahedron.
+ * @param edgeList Receives sorted two-index edges.
  */
 template <typename T>
 void FindTetEdges(const DataArray<T>* tetList, DataArray<T>* edgeList)
@@ -444,10 +465,10 @@ void FindTetEdges(const DataArray<T>* tetList, DataArray<T>* edgeList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param hexList
- * @param edge_List
+ * @brief Extracts all unique hexahedron edges.
+ * @tparam T Specifies mesh-index type.
+ * @param hexList Provides eight vertex indexes per hexahedron.
+ * @param edge_List Receives sorted two-index edges.
  */
 template <typename T>
 void FindHexEdges(const DataArray<T>* hexList, DataArray<T>* edge_List)
@@ -502,10 +523,10 @@ void FindHexEdges(const DataArray<T>* hexList, DataArray<T>* edge_List)
 }
 
 /**
- * @brief
- * @tparam T
- * @param tetList
- * @param faceList
+ * @brief Extracts all unique tetrahedron faces.
+ * @tparam T Specifies mesh-index type.
+ * @param tetList Provides four vertex indexes per tetrahedron.
+ * @param faceList Receives sorted three-index faces.
  */
 template <typename T>
 void FindTetFaces(const DataArray<T>* tetList, DataArray<T>* faceList)
@@ -548,10 +569,10 @@ void FindTetFaces(const DataArray<T>* tetList, DataArray<T>* faceList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param hexList
- * @param faceList
+ * @brief Extracts all unique hexahedron faces.
+ * @tparam T Specifies mesh-index type.
+ * @param hexList Provides eight vertex indexes per hexahedron.
+ * @param faceList Receives sorted four-index faces.
  */
 template <typename T>
 void FindHexFaces(const DataArray<T>* hexList, DataArray<T>* faceList)
@@ -598,10 +619,10 @@ void FindHexFaces(const DataArray<T>* hexList, DataArray<T>* faceList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param tetList
- * @param edgeList
+ * @brief Extracts tetrahedron edges referenced exactly once.
+ * @tparam T Specifies mesh-index type and reference-count type.
+ * @param tetList Provides four vertex indexes per tetrahedron.
+ * @param edgeList Receives sorted boundary edges.
  */
 template <typename T>
 void FindUnsharedTetEdges(const DataArray<T>* tetList, DataArray<T>* edgeList)
@@ -659,10 +680,10 @@ void FindUnsharedTetEdges(const DataArray<T>* tetList, DataArray<T>* edgeList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param hexList
- * @param edge_List
+ * @brief Extracts hexahedron edges referenced exactly once.
+ * @tparam T Specifies mesh-index type and reference-count type.
+ * @param hexList Provides eight vertex indexes per hexahedron.
+ * @param edge_List Receives sorted boundary edges.
  */
 template <typename T>
 void FindUnsharedHexEdges(const DataArray<T>* hexList, DataArray<T>* edge_List)
@@ -730,10 +751,10 @@ void FindUnsharedHexEdges(const DataArray<T>* hexList, DataArray<T>* edge_List)
 }
 
 /**
- * @brief
- * @tparam T
- * @param tetList
- * @param faceList
+ * @brief Extracts tetrahedron faces referenced exactly once.
+ * @tparam T Specifies mesh-index type and reference-count type.
+ * @param tetList Provides four vertex indexes per tetrahedron.
+ * @param faceList Receives sorted boundary faces.
  */
 template <typename T>
 void FindUnsharedTetFaces(const DataArray<T>* tetList, DataArray<T>* faceList)
@@ -791,10 +812,10 @@ void FindUnsharedTetFaces(const DataArray<T>* tetList, DataArray<T>* faceList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param hexList
- * @param faceList
+ * @brief Extracts hexahedron faces referenced exactly once.
+ * @tparam T Specifies mesh-index type and reference-count type.
+ * @param hexList Provides eight vertex indexes per hexahedron.
+ * @param faceList Receives sorted boundary faces.
  */
 template <typename T>
 void FindUnsharedHexFaces(const DataArray<T>* hexList, DataArray<T>* faceList)
@@ -856,10 +877,10 @@ void FindUnsharedHexFaces(const DataArray<T>* hexList, DataArray<T>* faceList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param elemList
- * @param edgeList
+ * @brief Extracts all unique polygon edges.
+ * @tparam T Specifies mesh-index type.
+ * @param elemList Provides cyclic polygon vertex indexes.
+ * @param edgeList Receives sorted two-index edges.
  */
 template <typename T>
 void Find2DElementEdges(const DataArray<T>* elemList, DataArray<T>* edgeList)
@@ -911,10 +932,10 @@ void Find2DElementEdges(const DataArray<T>* elemList, DataArray<T>* edgeList)
 }
 
 /**
- * @brief
- * @tparam T
- * @param elemList
- * @param edgeList
+ * @brief Extracts polygon edges referenced exactly once.
+ * @tparam T Specifies mesh-index type and reference-count type.
+ * @param elemList Provides cyclic polygon vertex indexes.
+ * @param edgeList Receives sorted boundary edges.
  */
 template <typename T>
 void Find2DUnsharedEdges(const DataArray<T>* elemList, DataArray<T>* edgeList)
@@ -979,45 +1000,59 @@ void Find2DUnsharedEdges(const DataArray<T>* elemList, DataArray<T>* edgeList)
 }
 } // namespace Connectivity
 
+/**
+ * @namespace Topology
+ * @brief Provides periodic-boundary and geometric-measure utilities.
+ */
 namespace Topology
 {
+/**
+ * @typedef BoundingBoxFaces
+ * @brief Defines a unique set of bounding-box faces.
+ */
 using BoundingBoxFaces = std::unordered_set<BoundingBox3Df::faces_enum>;
 
 /**
- * @brief Checks a set of vertices to see if any of the points lie within one of
- * the faces of the specified BoundingBox. Returns a set of BoundingBox2Df::faces_enum
- * that the selected vertices lie along.
+ * @brief Finds bounding-box faces touched by selected vertices.
  *
- * The vertices are expected to be organized within the specified BoundingBox and
- * not aligned in an abstract shape.
- * @param boundingBox
- * @param vertices
- * @param vertexSet
- * @return BoundingBoxFaces
+ * Vertices must use the bounding box's coordinate system.
+ * @param boundingBox Specifies spatial bounds.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param vertexSet Specifies vertex indexes to test.
+ * @return Unique touched faces.
  */
 BoundingBoxFaces SIMPLNX_EXPORT FindElementPeriodicFaces(const BoundingBox3Df& boundingBox, const Float32AbstractDataStore& vertices, const std::set<IGeometry::MeshIndexType>& vertexSet);
 
 /**
- * @brief Adjusts centroids for periodic edge cases. The data is assumed to
- * match the specified bounding box in shape as abstract shapes are not
- * supported by this function.
- * Returns true if the feature ID is periodic. Otherwise, returns false.
- * @param boundingBox
- * @param faces
- * @param centroids
- * @param featureId
+ * @brief Adjusts one centroid for periodic bounding-box faces.
+ * @param boundingBox Specifies spatial bounds.
+ * @param faces Specifies touched periodic faces.
+ * @param centroids Provides and receives XYZ feature centroids.
+ * @param featureId Specifies the centroid tuple.
+ * @return True when the feature crosses a periodic boundary.
+ *
+ * Centroid coordinates must use the bounding box's coordinate system.
  */
 bool SIMPLNX_EXPORT AdjustCentroidsForPeriodicFaces(const BoundingBox3Df& boundingBox, const BoundingBoxFaces& faces, Float32AbstractDataStore& centroids, IGeometry::MeshIndexType featureId);
 
+/**
+ * @brief Adjusts feature centroids from periodic ImageGeom range arrays.
+ * @param imageGeom Specifies spatial bounds and dimensions.
+ * @param xRanges Provides minimum and maximum X indexes per feature.
+ * @param yRanges Provides minimum and maximum Y indexes per feature.
+ * @param zRanges Provides minimum and maximum Z indexes per feature.
+ * @param centroids Provides and receives XYZ feature centroids.
+ * @return True when any feature crosses a periodic boundary.
+ */
 bool SIMPLNX_EXPORT AdjustCentroidsForPeriodicFaces(const ImageGeom& imageGeom, const UInt64AbstractDataStore& xRanges, const UInt64AbstractDataStore& yRanges, const UInt64AbstractDataStore& zRanges,
                                                     Float32AbstractDataStore& centroids);
 
 /**
- * @brief
- * @tparam T
- * @param elemList
- * @param vertices
- * @param centroids
+ * @brief Computes arithmetic vertex centroids for mesh elements.
+ * @tparam T Specifies mesh-index type.
+ * @param elemList Provides element vertex indexes.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param centroids Receives one XYZ tuple per element.
  */
 template <typename T>
 void FindElementCentroids(const DataArray<T>* elemList, const Float32Array* vertices, Float32Array* centroids)
@@ -1046,11 +1081,11 @@ void FindElementCentroids(const DataArray<T>* elemList, const Float32Array* vert
 }
 
 /**
- * @brief
- * @tparam T
- * @param tetList
- * @param vertices
- * @param volumes
+ * @brief Computes signed tetrahedron volumes.
+ * @tparam T Specifies mesh-index type.
+ * @param tetList Provides four vertex indexes per tetrahedron.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param volumes Receives one signed volume per tetrahedron.
  */
 template <typename T>
 void FindTetVolumes(const DataArray<T>* tetList, const Float32Array* vertices, Float32Array* volumes)
@@ -1078,11 +1113,11 @@ void FindTetVolumes(const DataArray<T>* tetList, const Float32Array* vertices, F
 }
 
 /**
- * @brief
- * @tparam T
- * @param hexList
- * @param vertices
- * @param volumes
+ * @brief Computes signed hexahedron volumes from five tetrahedra.
+ * @tparam T Specifies mesh-index type.
+ * @param hexList Provides eight vertex indexes per hexahedron.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param volumes Receives one signed volume per hexahedron.
  */
 template <typename T>
 void FindHexVolumes(const DataArray<T>* hexList, const Float32Array* vertices, Float32Array* volumes)
@@ -1095,7 +1130,7 @@ void FindHexVolumes(const DataArray<T>* hexList, const Float32Array* vertices, F
 
   for(usize i = 0; i < numHexas; i++)
   {
-    // Subdivide each hexahedron into 5 tetrahedra & sum their volumes
+    // Sum signed volumes from a fixed five-tetrahedron decomposition.
     std::vector<std::vector<uint64>> subTets(5, std::vector<uint64>(4, 0));
     const usize offset = i * numElementsPerHex;
 
@@ -1150,11 +1185,11 @@ void FindHexVolumes(const DataArray<T>* hexList, const Float32Array* vertices, F
 }
 
 /**
- * @brief
- * @tparam T
- * @param elemList
- * @param vertices
- * @param areas
+ * @brief Computes absolute areas for planar polygon elements.
+ * @tparam T Specifies mesh-index type.
+ * @param elemList Provides cyclic polygon vertex indexes.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param areas Receives one area per element.
  */
 template <typename T>
 void Find2DElementAreas(const DataArray<T>* elemList, const Float32Array* vertices, Float32Array* areas)
@@ -1177,8 +1212,7 @@ void Find2DElementAreas(const DataArray<T>* elemList, const Float32Array* vertic
     float32 area = 0.0f;
     const usize offset = i * numVertsPerElem;
 
-    // Create a contiguous vertex coordinates list
-    // This simplifies the pointer arithmetic a bit
+    // Gather coordinates for normal and projection calculations.
     for(usize j = 0; j < numVertsPerElem; j++)
     {
       std::vector<float32> point{vertices->at(3 * elems[offset + j]), vertices->at(3 * elems[offset + j] + 1), vertices->at(3 * elems[offset + j] + 2)};

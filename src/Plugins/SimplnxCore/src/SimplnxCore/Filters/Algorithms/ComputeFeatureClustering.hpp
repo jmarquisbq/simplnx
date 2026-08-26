@@ -11,49 +11,57 @@ namespace nx::core
 {
 
 /**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
+/**
  * @struct ComputeFeatureClusteringInputValues
- * @brief Holds all user-configured parameters for the ComputeFeatureClustering algorithm.
+ * @brief Stores filter values for feature-clustering execution.
  */
 struct SIMPLNXCORE_EXPORT ComputeFeatureClusteringInputValues
 {
-  DataPath ImageGeometryPath;               ///< Path to the ImageGeom providing box dimensions.
-  int32 NumberOfBins;                       ///< Number of histogram bins for the RDF.
-  int32 PhaseNumber;                        ///< Ensemble/phase to compute clustering for.
-  bool RemoveBiasedFeatures;                ///< If true, exclude features flagged as biased.
-  uint64 SeedValue;                         ///< Random seed for the reference random distribution.
-  DataPath FeaturePhasesArrayPath;          ///< Per-feature phase/ensemble ID array.
-  DataPath CentroidsArrayPath;              ///< Per-feature centroid array (float32, 3-component).
-  DataPath BiasedFeaturesArrayPath;         ///< Per-feature bias flag array (used when RemoveBiasedFeatures is true).
-  DataPath CellEnsembleAttributeMatrixName; ///< Ensemble-level Attribute Matrix.
-  DataPath ClusteringListArrayName;         ///< Output: NeighborList of inter-feature distances.
-  DataPath RDFArrayName;                    ///< Output: RDF histogram array (float32).
-  DataPath MaxMinArrayName;                 ///< Output: min/max separation distances (float32, 2-component).
+  DataPath ImageGeometryPath;
+  int32 NumberOfBins;
+  int32 PhaseNumber;
+  bool RemoveBiasedFeatures;
+  uint64 SeedValue; ///< Seeds the deterministic random reference distribution.
+  DataPath FeaturePhasesArrayPath;
+  DataPath CentroidsArrayPath;
+  DataPath BiasedFeaturesArrayPath;
+  DataPath CellEnsembleAttributeMatrixName;
+  DataPath ClusteringListArrayName;
+  DataPath RDFArrayName;
+  DataPath MaxMinArrayName;
 };
 
 /**
  * @class ComputeFeatureClustering
- * @brief Computes the radial distribution function (RDF) for features of a
- * specified phase by measuring all pairwise inter-centroid distances and
- * normalizing against a random reference distribution.
+ * @brief Computes a phase radial distribution function from pair distances.
  *
- * The algorithm has O(n^2) complexity in the number of features of the target
- * phase, since it computes all pairwise distances. The RDF is binned into a
- * user-specified number of equal-width bins spanning the minimum to maximum
- * inter-feature distance, then normalized by a Monte Carlo random distribution.
+ * Feature phases and centroids are copied to local vectors before the O(n^2) pair loop. The RDF
+ * uses a local histogram and one final bulk write. Pair distances remain in per-feature lists, so
+ * this algorithm can use O(n^2) resident memory for the selected phase.
  *
- * @section ooc_optimization Out-of-Core Optimization
- * The feature-level arrays (FeaturePhases, Centroids, RDF) are accessed in the
- * inner O(n^2) loop. For OOC data, per-element virtual dispatch on every access
- * inside a quadratic loop is prohibitively expensive. The optimized implementation
- * bulk-reads the entire FeaturePhases and Centroids arrays into local std::vectors
- * via copyIntoBuffer() at the start, and accumulates RDF bins into a local vector.
- * The final RDF is written back to the output DataStore in a single copyFromBuffer()
- * call after normalization.
+ * Current bulk-I/O Result values are not inspected. A storage failure can leave partial output while
+ * the method returns success.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureClustering
 {
 public:
+  /**
+   * @brief Initializes the feature-clustering algorithm.
+   * @param dataStructure Contains the ImageGeom, feature arrays, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation between outer feature iterations.
+   * @param inputValues Selects phase, bins, and output objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeFeatureClustering(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeatureClusteringInputValues* inputValues);
+  /**
+   * @brief Destroys the feature-clustering algorithm.
+   */
   ~ComputeFeatureClustering() noexcept;
 
   ComputeFeatureClustering(const ComputeFeatureClustering&) = delete;
@@ -62,22 +70,21 @@ public:
   ComputeFeatureClustering& operator=(ComputeFeatureClustering&&) noexcept = delete;
 
   /**
-   * @brief Executes the RDF clustering computation.
-   * @return Result<> indicating success or error.
+   * @brief Computes the selected phase RDF and neighbor lists.
+   * @return Success, or a biased-feature mask error.
+   *
+   * Cancellation returns success between outer feature iterations. Minimum and maximum values can
+   * be written before cancellation prevents RDF or neighbor-list output.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the cancellation flag reference.
-   * @return const reference to the atomic cancellation boolean.
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                                     ///< Reference to the DataStructure.
-  const ComputeFeatureClusteringInputValues* m_InputValues = nullptr; ///< User-configured parameters.
-  const std::atomic_bool& m_ShouldCancel;                             ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                    ///< Message handler for progress.
+  DataStructure& m_DataStructure;
+  const ComputeFeatureClusteringInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

@@ -41,6 +41,11 @@ const DataPath k_LargeGeomPath({"LargeImageGeom"});
 const DataPath k_LargeCellDataPath = k_LargeGeomPath.createChildPath(Constants::k_CellData);
 const DataPath k_LargeFeatureIdsPath = k_LargeCellDataPath.createChildPath(Constants::k_FeatureIds);
 
+/**
+ * @brief Builds a 200-cubed block-patterned feature volume for timing tests.
+ * @param dataStructure Receives the ImageGeom and FeatureIds array.
+ * @param includeBlockedCells True to add a negative-feature barrier with one opening.
+ */
 void BuildLargeTestData(DataStructure& dataStructure, bool includeBlockedCells = false)
 {
   const ShapeType cellTupleShape = {k_LargeDimZ, k_LargeDimY, k_LargeDimX};
@@ -83,6 +88,12 @@ void BuildLargeTestData(DataStructure& dataStructure, bool includeBlockedCells =
   }
 }
 
+/**
+ * @brief Creates arguments for the large distance-map test volume.
+ * @param calcManhattanDist True to calculate integer Manhattan distances.
+ * @param calculateAllMaps True to calculate boundary, triple-line, and quad-point maps.
+ * @return Configured filter arguments.
+ */
 Arguments CreateDistanceMapArguments(bool calcManhattanDist, bool calculateAllMaps)
 {
   Arguments args;
@@ -98,6 +109,13 @@ Arguments CreateDistanceMapArguments(bool calcManhattanDist, bool calculateAllMa
   return args;
 }
 
+/**
+ * @brief Preflights and times one distance-map execution.
+ * @param dataStructure Contains the large test volume and receives output maps.
+ * @param calcManhattanDist True to calculate integer Manhattan distances.
+ * @param calculateAllMaps True to calculate all three map types.
+ * @return Filter execution time in seconds.
+ */
 float64 ExecuteTimedDistanceMap(DataStructure& dataStructure, bool calcManhattanDist, bool calculateAllMaps)
 {
   ComputeEuclideanDistMapFilter filter;
@@ -113,6 +131,11 @@ float64 ExecuteTimedDistanceMap(DataStructure& dataStructure, bool calcManhattan
   return std::chrono::duration<float64>(executeStop - executeStart).count();
 }
 
+/**
+ * @brief Computes a deterministic value hash for an int32 data store.
+ * @param dataStore Store to read in bounded slices.
+ * @return FNV-1a-style hash of the uint32 representation of each value.
+ */
 uint64 HashInt32Store(const AbstractDataStore<int32>& dataStore)
 {
   constexpr uint64 k_OffsetBasis = 1469598103934665603ULL;
@@ -133,6 +156,12 @@ uint64 HashInt32Store(const AbstractDataStore<int32>& dataStore)
   return hash;
 }
 
+/**
+ * @brief Computes a bounded-memory hash of a data store's object bytes.
+ * @tparam T Specifies the store element type.
+ * @param dataStore Store to read in bounded slices.
+ * @return FNV-1a-style hash of the host object representation.
+ */
 template <typename T>
 uint64 HashDataStoreBytes(const AbstractDataStore<T>& dataStore)
 {
@@ -155,6 +184,13 @@ uint64 HashDataStoreBytes(const AbstractDataStore<T>& dataStore)
   return hash;
 }
 
+/**
+ * @brief Hashes the distance maps that one test configuration creates.
+ * @param dataStructure Contains the computed maps.
+ * @param calcManhattanDist True if the maps contain int32 values.
+ * @param calculateAllMaps True if all three map types exist.
+ * @return Hashes in boundary, triple-line, and quad-point order. Missing maps use 0.
+ */
 std::array<uint64, 3> HashDistanceMaps(const DataStructure& dataStructure, bool calcManhattanDist, bool calculateAllMaps)
 {
   const std::array<std::string, 3> k_OutputNames = {k_GBDistancesArrayName, k_TJDistancesArrayName, k_QPDistancesArrayName};
@@ -177,6 +213,11 @@ std::array<uint64, 3> HashDistanceMaps(const DataStructure& dataStructure, bool 
   return hashes;
 }
 
+/**
+ * @brief Builds a 24-cubed block-patterned feature volume for algorithm comparisons.
+ * @param dataStructure Receives the ImageGeom and FeatureIds array.
+ * @param includeBlockedCells True to add a negative-feature barrier with one opening.
+ */
 void BuildComparisonTestData(DataStructure& dataStructure, bool includeBlockedCells)
 {
   constexpr usize k_DimX = 24;
@@ -224,6 +265,10 @@ void BuildComparisonTestData(DataStructure& dataStructure, bool includeBlockedCe
   }
 }
 
+/**
+ * @brief Executes all Euclidean distance maps for an algorithm-comparison volume.
+ * @param dataStructure Contains the input volume and receives the three maps.
+ */
 void ExecuteComparisonDistanceMap(DataStructure& dataStructure)
 {
   ComputeEuclideanDistMapFilter filter;
@@ -244,6 +289,12 @@ void ExecuteComparisonDistanceMap(DataStructure& dataStructure)
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 }
 
+/**
+ * @brief Tests whether a calculated array exists in the Small IN100 CellData group.
+ * @param dataStructure DataStructure to inspect.
+ * @param name Base array name without the calculated prefix.
+ * @return True if the calculated IDataArray exists.
+ */
 bool ArrayExists(const DataStructure& dataStructure, const std::string& name)
 {
   const DataPath calculatedPath({k_DataContainer, k_CellData, std::string(k_CalculatedPrefix) + name});
@@ -260,11 +311,11 @@ TEST_CASE("SimplnxCore::ComputeEuclideanDistMap", "[SimplnxCore][ComputeEuclidea
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_stats_test_v2.tar.gz", "6_6_stats_test_v2.dream3d");
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 exemplar for the output-selection matrix.
   auto baseDataFilePath = fs::path(fmt::format("{}/6_6_stats_test_v2.dream3d", unit_test::k_TestFilesDir));
   const DataPath k_CellFeatureDataAM = k_DataContainerPath.createChildPath("CellFeatureData");
 
-  // Run a matrix of scenarios. In each scenario exactly one calculated output is expected to exist and match its exemplar.
+  // Each scenario creates one selected map and compares it with its exemplar.
   auto [scenarioName, doBoundaries, doTripleLines, doQuadPoints, expectedArrayName] = GENERATE(std::make_tuple("Boundaries only (GB distances)", true, false, false, k_GBDistancesArrayName),
                                                                                                std::make_tuple("Triple lines only (TJ distances)", false, true, false, k_TJDistancesArrayName),
                                                                                                std::make_tuple("Quad points only (QP distances)", false, false, true, k_QPDistancesArrayName));
@@ -277,31 +328,27 @@ TEST_CASE("SimplnxCore::ComputeEuclideanDistMap", "[SimplnxCore][ComputeEuclidea
     ComputeEuclideanDistMapFilter filter;
     Arguments args;
 
-    // Parameters
+    // Select one map type for this scenario.
     args.insert(ComputeEuclideanDistMapFilter::k_CalcManhattanDist_Key, std::make_any<bool>(true));
     args.insert(ComputeEuclideanDistMapFilter::k_DoBoundaries_Key, std::make_any<bool>(doBoundaries));
     args.insert(ComputeEuclideanDistMapFilter::k_DoTripleLines_Key, std::make_any<bool>(doTripleLines));
     args.insert(ComputeEuclideanDistMapFilter::k_DoQuadPoints_Key, std::make_any<bool>(doQuadPoints));
 
-    // Input Arrays
     args.insert(ComputeEuclideanDistMapFilter::k_SelectedImageGeometryPath_Key, std::make_any<DataPath>(k_DataContainerPath));
     args.insert(ComputeEuclideanDistMapFilter::k_CellFeatureIdsArrayPath_Key, std::make_any<DataPath>(k_CellAttributeMatrix.createChildPath(k_FeatureIds)));
 
-    // Output Arrays
     args.insert(ComputeEuclideanDistMapFilter::k_GBDistancesArrayName_Key, std::make_any<std::string>(k_CalculatedPrefix + k_GBDistancesArrayName));
     args.insert(ComputeEuclideanDistMapFilter::k_TJDistancesArrayName_Key, std::make_any<std::string>(k_CalculatedPrefix + k_TJDistancesArrayName));
     args.insert(ComputeEuclideanDistMapFilter::k_QPDistancesArrayName_Key, std::make_any<std::string>(k_CalculatedPrefix + k_QPDistancesArrayName));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
   }
 
-  // Check that the appropriate array exists and the others don't exist
+  // Only the selected map can exist after this scenario.
   for(const auto& outputName : {k_GBDistancesArrayName, k_TJDistancesArrayName, k_QPDistancesArrayName})
   {
     const bool shouldExist = (outputName == expectedArrayName);
@@ -317,7 +364,7 @@ TEST_CASE("SimplnxCore::ComputeEuclideanDistMap", "[SimplnxCore][ComputeEuclidea
     }
   }
 
-  // Check that the currently enabled array matches its exemplar
+  // The selected output must match its exemplar array.
   const DataPath exemplarPath({k_DataContainer, k_CellData, expectedArrayName});
   const DataPath calculatedPath({k_DataContainer, k_CellData, k_CalculatedPrefix + expectedArrayName});
   const auto& exemplarData = dataStructure.getDataRefAs<IDataArray>(exemplarPath);

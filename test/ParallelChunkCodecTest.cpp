@@ -36,19 +36,28 @@ namespace
 {
 const std::string k_DatasetName = "data";
 
+/**
+ * @brief Multiplies all dimensions in a shape.
+ * @param shape Dimensions to multiply.
+ * @return Product of all dimensions, or 1 for an empty shape.
+ */
 usize product(const std::vector<uint64>& shape)
 {
   return std::accumulate(shape.begin(), shape.end(), usize{1}, std::multiplies<usize>());
 }
 
 /**
- * @brief Creates a chunked + deflate dataset directly via the HDF5 C API and writes @p bytes.
+ * @brief Creates a chunked, deflated dataset through the HDF5 C API.
+ * @param filePath Output HDF5 file path.
+ * @param tupleShape Dataset tuple dimensions.
+ * @param componentShape Dataset component dimensions.
+ * @param chunkShape Tuple-space chunk dimensions.
+ * @param h5Type HDF5 element type.
+ * @param bytes Raw element bytes to write.
+ * @param deflateLevel Deflate level from 0 through 9.
  *
- * Writes the raw element bytes for a dataset whose tuple shape is @p tupleShape, component
- * shape @p componentShape, chunk shape @p chunkShape (tuple-space; components form the
- * trailing full chunk dims), and HDF5 type @p h5Type. The full file rank is the tuple rank
- * plus the component rank. Built directly with H5Pset_chunk / H5Pset_deflate so the test is
- * independent of any higher-level compression wiring.
+ * Components form the trailing chunk dimensions. Direct C API calls keep this
+ * test independent of higher-level compression wiring.
  */
 void createChunkedDeflateDataset(const fs::path& filePath, const std::vector<uint64>& tupleShape, const std::vector<uint64>& componentShape, const std::vector<uint64>& chunkShape, hid_t h5Type,
                                  const std::vector<std::byte>& bytes, int deflateLevel = 5)
@@ -86,7 +95,13 @@ void createChunkedDeflateDataset(const fs::path& filePath, const std::vector<uin
   H5Fclose(fileId);
 }
 
-/// Reads the entire dataset with a single serial H5Dread (the independent reference path).
+/**
+ * @brief Reads the entire dataset with one serial H5Dread call.
+ * @param filePath HDF5 file path.
+ * @param totalBytes Number of output bytes.
+ * @param h5Type HDF5 element type.
+ * @return Dataset bytes in file order.
+ */
 std::vector<std::byte> serialReadWhole(const fs::path& filePath, usize totalBytes, hid_t h5Type)
 {
   std::vector<std::byte> out(totalBytes);
@@ -101,11 +116,17 @@ std::vector<std::byte> serialReadWhole(const fs::path& filePath, usize totalByte
 }
 
 /**
- * @brief Creates an EMPTY chunked + deflate dataset (no data written) via the HDF5 C API.
+ * @brief Creates an empty chunked, deflated dataset through the HDF5 C API.
+ * @param filePath Output HDF5 file path.
+ * @param tupleShape Dataset tuple dimensions.
+ * @param componentShape Dataset component dimensions.
+ * @param chunkShape Tuple-space chunk dimensions.
+ * @param h5Type HDF5 element type.
+ * @param fileIdOut Receives an open HDF5 file identifier.
+ * @param datasetIdOut Receives an open HDF5 dataset identifier.
+ * @param deflateLevel Deflate level from 0 through 9.
  *
- * Mirrors createChunkedDeflateDataset's shape/filter setup but leaves the dataset unwritten so
- * the deflate codec is the thing that populates it. Returns the open file id and dataset id (the
- * caller closes them). Used by the deflate round-trip tests, which need a live, writable handle.
+ * The caller owns and closes the returned identifiers.
  */
 void createEmptyChunkedDeflateDataset(const fs::path& filePath, const std::vector<uint64>& tupleShape, const std::vector<uint64>& componentShape, const std::vector<uint64>& chunkShape, hid_t h5Type,
                                       hid_t& fileIdOut, hid_t& datasetIdOut, int deflateLevel = 5)
@@ -140,7 +161,16 @@ void createEmptyChunkedDeflateDataset(const fs::path& filePath, const std::vecto
   H5Sclose(space);
 }
 
-/// Reads one chunk's clamped, in-bounds region with a serial hyperslab H5Dread.
+/**
+ * @brief Reads one clamped chunk region with a serial hyperslab H5Dread.
+ * @param dataset Open HDF5 dataset identifier.
+ * @param bounds Tuple-space region to read.
+ * @param componentShape Dataset component dimensions.
+ * @param elementSize Size of one element in bytes.
+ * @param numComponents Number of components per tuple.
+ * @param h5Type HDF5 element type.
+ * @return Bytes in the selected region.
+ */
 std::vector<std::byte> serialReadChunkRegion(hid_t dataset, const Extent& bounds, const std::vector<uint64>& componentShape, usize elementSize, usize numComponents, hid_t h5Type)
 {
   const usize tupleRank = bounds.min.size();
@@ -174,16 +204,24 @@ std::vector<std::byte> serialReadChunkRegion(hid_t dataset, const Extent& bounds
   return out;
 }
 
+/**
+ * @brief Resolves a test file name in the binary output directory.
+ * @param name File name.
+ * @return Output file path.
+ */
 fs::path testFilePath(const std::string& name)
 {
   return fs::path(unit_test::k_BinaryTestOutputDir.view()) / name;
 }
 
 /**
- * @brief Creates a CONTIGUOUS (unchunked, unfiltered) dataset via the HDF5 C API and writes @p bytes.
+ * @brief Creates an unchunked, unfiltered dataset through the HDF5 C API.
+ * @param filePath Output HDF5 file path.
+ * @param dims Dataset dimensions.
+ * @param h5Type HDF5 element type.
+ * @param bytes Raw element bytes to write.
  *
- * A contiguous dataset has no chunk dimensions, so DatasetIO::readIntoSpan takes the serial
- * H5Dread fallback rather than the parallel codec branch. Used to prove that path stays correct.
+ * DatasetIO must use its serial fallback for this dataset.
  */
 void createContiguousDataset(const fs::path& filePath, const std::vector<uint64>& dims, hid_t h5Type, const std::vector<std::byte>& bytes)
 {
@@ -201,10 +239,14 @@ void createContiguousDataset(const fs::path& filePath, const std::vector<uint64>
 }
 
 /**
- * @brief Creates a chunked SHUFFLE + DEFLATE dataset (multi-filter pipeline) via the HDF5 C API.
+ * @brief Creates a chunked shuffle and deflate dataset through the HDF5 C API.
+ * @param filePath Output HDF5 file path.
+ * @param dims Dataset dimensions.
+ * @param chunkShape Chunk dimensions.
+ * @param h5Type HDF5 element type.
+ * @param bytes Raw element bytes to write.
  *
- * A multi-filter pipeline is ineligible for the parallel codec, so DatasetIO::readIntoSpan takes
- * the serial H5Dread fallback. Used to prove that path stays correct for ineligible chunked data.
+ * The multi-filter pipeline is ineligible for the parallel codec.
  */
 void createShuffleDeflateDataset(const fs::path& filePath, const std::vector<uint64>& dims, const std::vector<uint64>& chunkShape, hid_t h5Type, const std::vector<std::byte>& bytes)
 {
@@ -431,12 +473,10 @@ TEST_CASE("ParallelChunkCodec inflate matches serial H5Dread", "[ParallelChunkCo
 
   SECTION("unallocated chunk falls back to fill-value serial read")
   {
-    // 8x8 (tuple), chunk 4x4 -> 2x2 = 4 chunks, none of which are edge chunks. Incremental
-    // allocation (allocate-on-write) plus explicit H5Dwrite_chunk for a strict subset (chunks
-    // 0 and 3) guarantees the untouched chunks (1 and 2) stay unallocated, so reading the
-    // whole dataset forces the codec's serial fill-value fallback for those chunks. (Note:
-    // H5D_ALLOC_TIME_LATE would NOT work here -- with a deflate filter and a set fill value,
-    // late allocation materializes every chunk; only INCR leaves untouched chunks unallocated.)
+    // The 8 by 8 dataset has four 4 by 4 chunks.
+    // Incremental allocation leaves untouched chunks unallocated.
+    // Writing only chunks 0 and 3 forces the serial fill-value fallback for chunks 1 and 2.
+    // Late allocation would materialize every deflated chunk and would not test this path.
     const std::vector<uint64> tupleShape = {8, 8};
     const std::vector<uint64> componentShape = {1};
     const std::vector<uint64> chunkShape = {4, 4};
@@ -465,8 +505,8 @@ TEST_CASE("ParallelChunkCodec inflate matches serial H5Dread", "[ParallelChunkCo
     const hid_t dataset = H5Dcreate(fileId, k_DatasetName.c_str(), H5T_NATIVE_UINT16, space, H5P_DEFAULT, dcpl, H5P_DEFAULT);
     REQUIRE(dataset >= 0);
 
-    // Write only chunks 0 and 3 via H5Dwrite_chunk, supplying deflate-compressed raw bytes
-    // (the dataset has a deflate filter, so a non-bypassed chunk write stores filtered data).
+    // Write only chunks 0 and 3 with deflate-compressed bytes.
+    // The dataset filter therefore receives already-filtered chunk data.
     const std::vector<uint64> writtenChunks = {0, 3};
     for(const uint64 flatChunk : writtenChunks)
     {
@@ -504,9 +544,8 @@ TEST_CASE("ParallelChunkCodec inflate matches serial H5Dread", "[ParallelChunkCo
     const hid_t rFileId = H5Fopen(filePath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     const hid_t rDataset = H5Dopen(rFileId, k_DatasetName.c_str(), H5P_DEFAULT);
 
-    // Confirm the precondition for this test: only the written subset is allocated, so the
-    // whole-dataset read below genuinely routes the untouched chunks through the codec's
-    // serial fill-value fallback rather than the inflate path.
+    // Confirm that only the written subset is allocated.
+    // The untouched chunks must use the serial fill-value fallback.
     {
       const hid_t allocSpace = H5Dget_space(rDataset);
       hsize_t allocatedChunks = 0;
@@ -532,8 +571,7 @@ TEST_CASE("ParallelChunkCodec inflate matches serial H5Dread", "[ParallelChunkCo
     // byte-equality with HDF5's own fill behavior confirms that path ran and is correct.
     REQUIRE(bufferA == bufferB);
 
-    // Sanity: the reference buffer actually contains the fill value where chunk 1 lives
-    // (rows 0-3, cols 4-7), proving at least one chunk was genuinely left unallocated.
+    // Sample chunk 1 to prove that an unallocated region contains the configured fill value.
     uint16 sampledFill = 0;
     std::memcpy(&sampledFill, bufferA.data() + (0 * tupleShape[1] + 4) * elementSize, elementSize);
     REQUIRE(sampledFill == fillValue);
@@ -642,8 +680,7 @@ TEST_CASE("ParallelChunkCodec deflate round-trips byte-identically", "[ParallelC
     std::vector<std::byte> bandSource(bandValues.size() * elementSize);
     std::memcpy(bandSource.data(), bandValues.data(), bandSource.size());
 
-    // Recreate and exercise the two-chunk batch enough times to catch a regression that sends raw
-    // HDF5 commits back to alternating worker threads; that corruption was timing-sensitive.
+    // Repeat the two-chunk batch to detect unsafe worker-thread commit routing.
     for(usize iteration = 0; iteration < 64; ++iteration)
     {
       INFO("band-write iteration " << iteration);
@@ -709,8 +746,8 @@ TEST_CASE("ParallelChunkCodec deflate round-trips byte-identically", "[ParallelC
 
   SECTION("cross-codec: deflate then inflateChunksIntoSpan equals the source")
   {
-    // Exercises both halves of the codec against each other: write with the deflate path, read
-    // back with the codec's own inflate path, and require the round-trip is byte-identical.
+    // Write with the deflate path and read with the codec inflate path.
+    // The round trip must be byte-identical.
     const std::vector<uint64> tupleShape = {13, 9};
     const std::vector<uint64> componentShape = {2};
     const std::vector<uint64> chunkShape = {5, 5};
@@ -849,9 +886,8 @@ TEST_CASE("ParallelChunkCodec per-chunk compress + write primitives", "[Parallel
 {
   SECTION("compressNominalChunk then writeCompressedChunk round-trips one interior chunk")
   {
-    // 8x8 (tuple), chunk 4x4 -> 2x2 chunks, all interior. Compress one chunk's nominal bytes with
-    // the public primitive, store them with the write primitive, then serial-read that chunk region
-    // back and require byte-equality with the original nominal bytes.
+    // Compress one interior 4 by 4 chunk with the public primitive.
+    // Store it with the write primitive and compare a serial read with the nominal bytes.
     const std::vector<uint64> tupleShape = {8, 8};
     const std::vector<uint64> componentShape = {1};
     const std::vector<uint64> chunkShape = {4, 4};
@@ -876,8 +912,7 @@ TEST_CASE("ParallelChunkCodec per-chunk compress + write primitives", "[Parallel
     ParallelChunkCodec codec(filePath, k_DatasetName, tupleShape, chunkShape, componentShape, elementSize, dataset);
     REQUIRE(codec.isEligible());
 
-    // Target chunk 1 (rows 0-3, cols 4-7): a fully interior chunk, so its nominal bytes ARE its
-    // clamped layout and a clamped serial read returns them verbatim.
+    // Chunk 1 is interior, so its nominal and clamped layouts are identical.
     const uint64 targetChunk = 1;
     std::string errorOut;
     const std::vector<std::byte> compressed = codec.compressNominalChunk(targetChunk, nominalBytes, &errorOut);
@@ -897,8 +932,7 @@ TEST_CASE("ParallelChunkCodec per-chunk compress + write primitives", "[Parallel
 
   SECTION("writeCompressedChunk on a closed dataset handle reports the failure")
   {
-    // Compress a valid nominal chunk, then write it through a CLOSED dataset handle: H5Dwrite_chunk
-    // must fail and populate errorOut, proving the write primitive surfaces the HDF5 diagnostic.
+    // A closed dataset handle must make H5Dwrite_chunk fail and populate errorOut.
     const std::vector<uint64> tupleShape = {8, 8};
     const std::vector<uint64> componentShape = {1};
     const std::vector<uint64> chunkShape = {4, 4};
@@ -936,10 +970,8 @@ TEST_CASE("DatasetIO::readIntoSpan routes compressed chunked reads through the p
 
   SECTION("eligible: DatasetIO write path (compression level > 0) round-trips through the codec branch")
   {
-    // A large enough dataset (> the small-array threshold and > one ~1 MiB target chunk) so the
-    // DatasetIO write path builds a real chunked + deflate dataset and the read goes through the
-    // codec branch. 64 x 999 uint32 = ~255,744 elements (~999 KiB) over multiple chunks, with an
-    // outer dim (64) that is not a multiple of the policy chunk depth so an edge chunk exists.
+    // This dataset exceeds the small-array threshold and uses the compressed chunk path.
+    // Its dimensions produce multiple chunks and an edge chunk under the writer policy.
     const std::vector<usize> dims = {64, 999};
     const usize numElements = std::accumulate(dims.begin(), dims.end(), usize{1}, std::multiplies<usize>());
 
@@ -1112,10 +1144,8 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
 
   SECTION("eligible: single-chunk compressed write (level > 0) round-trips and writes the policy chunk shape")
   {
-    // 64 x 999 uint32 (~999 KiB) is above the small-array threshold but below the ~1 MiB target,
-    // so the BundleOuterSlabs policy bundles the whole array into ONE chunk (chunk == dims). This
-    // exercises the eligible single-chunk write path (gather + compress + H5Dwrite_chunk of one
-    // full chunk); the multi-chunk scatter and edge-chunk gather are covered by the sections below.
+    // This 999 KiB array is above the small-array threshold and below the target chunk size.
+    // BundleOuterSlabs therefore stores it in one chunk and exercises single-chunk gather and write.
     const std::vector<usize> dims = {64, 999};
     const usize numElements = std::accumulate(dims.begin(), dims.end(), usize{1}, std::multiplies<usize>());
 
@@ -1140,8 +1170,8 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
     REQUIRE(fileReader.isValid());
     DatasetIO dataset = fileReader.openDataset(k_DatasetName);
 
-    // The on-disk chunk shape must equal what the shared writer policy prescribes (proves the
-    // write went through the chunked + deflate DCPL, not a fallback contiguous layout).
+    // The on-disk chunk shape must match the shared writer policy.
+    // This proves that the write used chunked deflate rather than contiguous fallback.
     const std::vector<usize> onDiskChunk = dataset.getChunkDimensions();
     REQUIRE_FALSE(onDiskChunk.empty());
     const ShapeType expectedChunk = computeChunkShape(ShapeType(dims.begin(), dims.end()), /*numComponents=*/1, sizeof(uint32), k_WriterRegime);
@@ -1155,11 +1185,9 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
 
   SECTION("eligible: multi-chunk + edge-chunk compressed write round-trips byte-identically")
   {
-    // 1000 x 5000 uint32 (~20 MiB) so the BundleOuterSlabs policy bands the outer dim:
-    // chunk = [52, 5000] (52 * 5000 * 4 = ~1.04 MiB ~= the target). 1000 / 52 = 19 r 12, so
-    // there are 20 chunks and the last is a CLAMPED EDGE chunk (12 rows, not 52). This is the
-    // section that genuinely exercises the codec's parallel multi-chunk scatter AND the
-    // edge-chunk zero-padding tail in gatherChunkBytes (the entire reason the codec exists).
+    // This 20 MiB dataset produces 20 policy chunks.
+    // The final chunk has 12 rows instead of the nominal 52 rows.
+    // This case exercises parallel scatter and edge-chunk padding.
     const std::vector<usize> dims = {1000, 5000};
     const usize numElements = std::accumulate(dims.begin(), dims.end(), usize{1}, std::multiplies<usize>());
 
@@ -1189,9 +1217,8 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
     const ShapeType expectedChunk = computeChunkShape(ShapeType(dims.begin(), dims.end()), /*numComponents=*/1, sizeof(uint32), k_WriterRegime);
     REQUIRE(ShapeType(onDiskChunk.begin(), onDiskChunk.end()) == expectedChunk);
 
-    // Guard the precondition so a future policy change can never silently collapse this back to a
-    // single chunk and quietly stop exercising the parallel/edge paths. Also assert the last chunk
-    // is a clamped edge (the outer dim is not a whole multiple of the chunk's outer extent).
+    // Require multiple chunks and a non-divisible outer extent.
+    // These checks keep this test on the parallel edge-chunk path.
     const std::vector<uint64> chunkU64(onDiskChunk.begin(), onDiskChunk.end());
     const std::vector<uint64> dimsU64(dims.begin(), dims.end());
     REQUIRE(getNumberOfChunks(dimsU64, chunkU64) > 1);
@@ -1294,11 +1321,8 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
     REQUIRE(allMatch);
   }
 
-  // The only ineligible writeSpan paths are uncompressed/contiguous datasets (no chunks), covered
-  // by the two sections below. A chunked-but-codec-ineligible write (e.g. shuffle + deflate or a
-  // multi-filter pipeline) is unreachable here: BuildChunkedDeflateDcpl only ever sets chunking
-  // plus a single deflate filter, which the codec's isEligible always accepts. The codec's own
-  // isEligible predicate test covers the ineligible chunked pipelines directly.
+  // DatasetIO writeSpan creates either eligible compressed chunks or contiguous data.
+  // The sections below verify the contiguous serial fallback.
   SECTION("ineligible: uncompressed write (level 0 -> contiguous) round-trips via the serial path")
   {
     const std::vector<usize> dims = {64, 999};
@@ -1368,25 +1392,10 @@ TEST_CASE("DatasetIO::writeSpan routes compressed chunked writes through the par
   }
 }
 
-// ----------------------------------------------------------------------------------------------
-// Benchmark (hidden: [.benchmark]) — END-TO-END in-core DatasetIO::writeSpan, codec vs serial.
-//
-// Task 11 routed DatasetIO::writeSpan<T> (the whole-array in-core write API every .dream3d saver
-// reaches) through ParallelChunkCodec::deflateSpanIntoChunks for eligible compressed chunked
-// writes. This benchmark measures that END-TO-END API (not the codec in isolation) against the
-// serial H5Dwrite baseline it replaced, on realistic high-entropy data so deflate — the cost the
-// codec parallelizes off the HDF5 API lock — dominates.
-//
-// A/B at the SAME chunk shape (the writer policy's BundleOuterSlabs shape, which is exactly what
-// writeSpan picks) and SAME deflate level:
-//   - codec  : DatasetIO::writeSpan at compression level 5 — current production path.
-//   - serial : a single H5Dwrite into a chunked+deflate dataset of that identical chunk shape
-//              (HDF5 compresses in-library, serialized under the process-wide API lock).
-// Then the codec-written file is read back via DatasetIO::readIntoSpan and asserted byte-identical
-// to the source, proving the parallel write produces a correct, normally-readable .dream3d dataset.
-//
-// Hidden by the leading-dot tag so a normal ctest run never pays the cost; run explicitly with
-//   simplnx_test "[benchmark]"
+// This hidden benchmark compares end-to-end DatasetIO::writeSpan with a serial HDF5 write.
+// Both paths use the same chunk shape and deflate level.
+// The codec-written file must read back byte-identically through DatasetIO.
+// The leading-dot tag excludes the benchmark from normal CTest runs.
 TEST_CASE("DatasetIO::writeSpan in-core write benchmark: codec vs serial", "[.][benchmark]")
 {
   using namespace nx::core::HDF5;
@@ -1398,9 +1407,8 @@ TEST_CASE("DatasetIO::writeSpan in-core write benchmark: codec vs serial", "[.][
 
   WARN("ParallelChunkCodec write benchmark — hardware_concurrency = " << std::thread::hardware_concurrency());
 
-  // Representative single-component float32 sizes spanning ~4M / ~17M / ~67M elements. The outer
-  // dim is the banded dimension; with a ~1 MiB target chunk every case is many chunks, so the
-  // codec genuinely parallelizes (and the last chunk is a clamped edge), mirroring real arrays.
+  // These single-component float32 cases span approximately 4M, 17M, and 67M elements.
+  // Each case produces multiple chunks and a clamped edge chunk.
   struct Case
   {
     std::vector<usize> dims;

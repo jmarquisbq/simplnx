@@ -14,6 +14,10 @@
 namespace nx::core
 {
 
+/**
+ * @struct M3CSurfaceMeshingInputValues
+ * @brief Stores meshing paths and winding-repair options.
+ */
 struct SIMPLNXCORE_EXPORT M3CSurfaceMeshingInputValues
 {
   bool RepairTriangleWinding;
@@ -34,25 +38,34 @@ struct SIMPLNXCORE_EXPORT M3CSurfaceMeshingInputValues
  * @brief Multi-Material Marching Cubes surface meshing with resident and
  * bounded external-scratch implementations.
  *
- * Port of the legacy DREAM3D `M3CEntireVolume` algorithm (the all-in-memory variant, contributed by
- * Dr. Sukbin Lee, CMU; based on Wu & Sullivan 2003). The slice-by-slice disk round-trip of
- * `M3CSliceBySlice` is intentionally NOT ported. Resident inputs use the
- * optimized sliding-window implementation. When any participating array is
- * disk-backed, a two-pass algorithm stores volume/mesh-scale candidate state
- * in temporary record stores and writes TriangleGeom arrays in bounded batches.
+ * This port retains the legacy DREAM3D M3CEntireVolume algorithm, contributed
+ * by Dr. Sukbin Lee at CMU and based on Wu and Sullivan 2003. Resident inputs
+ * use a sliding window. Disk-backed inputs use two passes with temporary record
+ * stores for volume and mesh state.
  *
- * Grafted from the slice variant: ghost-layer wrapping and FeatureId==0 renumbering (on a local copy).
+ * A local ghost layer and Feature Id 0 renumbering preserve legacy interfaces
+ * without changing the input array.
  */
 class SIMPLNXCORE_EXPORT M3CSurfaceMeshing
 {
 public:
+  /**
+   * @brief Defines indexes used by TriangleGeom mesh arrays.
+   */
   using MeshIndexType = IGeometry::MeshIndexType;
 
   /**
-   * @brief Binds the algorithm to filter-owned inputs, outputs, cancellation,
-   * and progress reporting. All references are non-owning and must outlive it.
+   * @brief Creates an M3C surface-meshing algorithm.
+   * @param dataStructure Provides selected geometries and arrays.
+   * @param inputValues Specifies validated meshing paths and options. The caller
+   * must keep this object alive for the algorithm lifetime.
+   * @param shouldCancel Stops later meshing phases when true.
+   * @param mesgHandler Receives progress messages.
    */
   M3CSurfaceMeshing(DataStructure& dataStructure, M3CSurfaceMeshingInputValues* inputValues, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
+  /**
+   * @brief Destroys the non-owning M3C algorithm.
+   */
   ~M3CSurfaceMeshing() noexcept;
 
   M3CSurfaceMeshing(const M3CSurfaceMeshing&) = delete;
@@ -61,8 +74,8 @@ public:
   M3CSurfaceMeshing& operator=(M3CSurfaceMeshing&&) noexcept = delete;
 
   /**
-   * @brief Inspects every dynamic input/output store and selects the resident
-   * sliding-window or bounded external-scratch implementation.
+   * @brief Selects resident or external-scratch meshing.
+   * @return Error from selected meshing, or success after cancellation.
    */
   Result<> operator()();
 
@@ -73,30 +86,30 @@ private:
   const IFilter::MessageHandler& m_MessageHandler;
 
   /**
-   * @brief Serial reference implementation that allocates all per-site scratch
-   * over the entire volume. Retained for validation, not normal dispatch.
+   * @brief Runs the serial whole-volume reference implementation.
+   * @return Error during meshing, or success after cancellation.
+   *
+   * This validation path allocates per-site scratch for the complete volume.
    */
   Result<> runEntireVolume();
 
   /**
-   * @brief Sweeps resident inputs by z window so square scratch scales with
-   * slice area rather than volume; node types still span the volume.
-   * @param parallel False selects the byte-identical serial reference path.
-   * True parallelizes independent cubes and is the normal resident path.
+   * @brief Sweeps resident input with bounded Z-window square scratch.
+   * @param parallel Selects serial legacy or parallel cube processing.
+   * @return Error during meshing, or success after cancellation.
+   *
+   * Node types still span the complete volume.
    */
   Result<> runWindowed(bool parallel);
 
   /**
-   * @brief Bounded, external-scratch implementation selected when any dynamic
-   * cell or mesh target is disk-backed.
+   * @brief Runs bounded external-scratch meshing for disk-backed targets.
    *
-   * The implementation is intentionally separate from the legacy pointer-based
-   * whole-volume code: it keeps volume and mesh state in temporary record stores
-   * and retains only fixed input/output pages in RAM. Genuine OOC execution
-   * fails if the external scratch capabilities are unavailable.
-   * @param dispatchTargets Participating arrays already used to establish residency.
-   * @param usesOutOfCoreStore True when dispatch was caused by an actual disk-backed store.
-   * @return The first storage, topology, or output error; cancellation returns success early.
+   * Temporary record stores hold volume and mesh state. Fixed pages limit RAM.
+   * Genuine OOC execution fails when external scratch storage is unavailable.
+   * @param dispatchTargets Provides residency target arrays.
+   * @param usesOutOfCoreStore Indicates actual disk-backed dispatch.
+   * @return Storage, topology, or output error, or success after cancellation.
    */
   Result<> runOutOfCore(const std::vector<const IArray*>& dispatchTargets, bool usesOutOfCoreStore);
 };

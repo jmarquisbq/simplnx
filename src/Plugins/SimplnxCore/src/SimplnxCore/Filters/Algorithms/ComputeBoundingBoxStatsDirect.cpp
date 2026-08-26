@@ -38,11 +38,19 @@ template <class T>
 concept ArithmeticNotBool = std::is_arithmetic_v<T> && !std::is_same_v<T, bool>;
 /* clang-format on */
 
+/**
+ * @brief Converts one physical bounding box to half-open voxel indices.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param targetBoundsIndex Selects the bounding box.
+ * @param image Supplies the origin, spacing, and dimensions.
+ * @return Clipped minimum and maximum voxel indices in X-Y-Z order.
+ * @pre Preflight has verified nonzero image spacing.
+ */
 std::array<usize, 6> GetVoxelIndices(nonstd::span<const float32> unifiedBounds, usize targetBoundsIndex, const ImageGeom& image)
 {
   std::array<usize, 6> voxelIndices = {};
 
-  // Preflight handles checking that we don't divide by 0 by validating spacing, cutting extra checks here
+  // Preflight verifies nonzero spacing, so this function does not repeat that check.
   FloatVec3 spacing = image.getSpacing();
   FloatVec3 origin = image.getOrigin();
   SizeVec3 dims = image.getDimensions();
@@ -90,10 +98,12 @@ std::array<usize, 6> GetVoxelIndices(nonstd::span<const float32> unifiedBounds, 
 }
 
 /**
+ * @class ContiguousInputAccessor
  * @brief Reads immutable in-memory data directly during parallel execution.
+ * @tparam T Input value type.
  *
- * Non-contiguous stores retain the abstract accessor and are processed serially, avoiding concurrent
- * access to DataStore APIs that do not provide a thread-safety guarantee.
+ * Each worker reads shared contiguous storage and writes only its bound-local
+ * cache entry.
  */
 template <typename T>
 class ContiguousInputAccessor
@@ -113,6 +123,14 @@ private:
   const T* m_InputValues = nullptr;
 };
 
+/**
+ * @class AbstractInputAccessor
+ * @brief Reads values through the generic DataStore interface.
+ * @tparam T Input value type.
+ *
+ * Callers use this accessor serially because generic DataStore access does not
+ * guarantee thread safety.
+ */
 template <typename T>
 class AbstractInputAccessor
 {
@@ -131,14 +149,14 @@ private:
   const AbstractDataStore<T>& m_InputStore;
 };
 
-/** Mode and Std dev are left out of cache intentionally, every other stat can be derived from these.
- * Reasoning:
- * 1. In order to calculate mode you must create a data container to keep track of instances of a value,
- * this would massively bloat memory cost if mode is not selected, thus it cannot be included. Due to
- * the nature mode can be found in the first pass so a specialized function will handle it.
- * 2. The std-deviation requires a second pass, so there is no need to store it a separate function will
- * be run after this cache is calculated upon user request.
- **/
+/**
+ * @struct StatsCache
+ * @brief Stores statistics that one input pass can collect.
+ * @tparam T Input value type.
+ *
+ * Mode storage exists only when mode is requested. Standard deviation uses a
+ * second pass, so this cache does not reserve storage for either result.
+ */
 template <typename T>
 struct StatsCache
 {
@@ -149,6 +167,11 @@ struct StatsCache
   T summationValue = static_cast<T>(0);
 };
 
+/**
+ * @struct CompleteStatsCache
+ * @brief Extends the base cache with frequency-derived statistics.
+ * @tparam T Input value type.
+ */
 template <typename T>
 struct CompleteStatsCache : StatsCache<T>
 {
@@ -156,6 +179,15 @@ struct CompleteStatsCache : StatsCache<T>
   usize uniqueValCount = 0;
 };
 
+/**
+ * @brief Compares values with the ordering used by the frequency algorithms.
+ * @tparam T Input value type.
+ * @param lhs First value.
+ * @param rhs Second value.
+ * @return True when the values compare equal or neither value orders first.
+ * @note Unordered floating-point pairs compare as equivalent. This preserves
+ *       the legacy frequency behavior.
+ */
 template <typename T>
 bool Equivalent(const T& lhs, const T& rhs)
 {
@@ -170,6 +202,11 @@ bool Equivalent(const T& lhs, const T& rhs)
   return false;
 }
 
+/**
+ * @struct FrequencyEntry
+ * @brief Stores one candidate value and its observed frequency.
+ * @tparam T Input value type.
+ */
 template <typename T>
 struct FrequencyEntry
 {
@@ -178,10 +215,13 @@ struct FrequencyEntry
 };
 
 /**
+ * @class FixedFrequencyTable
  * @brief Fixed-capacity frequency table for the common low-cardinality case.
+ * @tparam T Input value type.
  *
- * A flat stack-resident table avoids a tree lookup and allocation per distinct value. The capacity
- * is deliberately fixed so frequency scratch cannot scale with the number of cells.
+ * A flat stack table avoids a tree lookup and allocation for each distinct
+ * value. Fixed capacity keeps frequency scratch independent of the cell count.
+ * Higher-cardinality boxes use repeated bounded scans.
  */
 template <typename T>
 class FixedFrequencyTable
@@ -273,6 +313,15 @@ private:
   usize m_LastIndex = 0;
 };
 
+/**
+ * @brief Applies a function to each value in one clipped bounding box.
+ * @tparam InputAccessorT Input accessor type.
+ * @tparam FunctionT Callback type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputValues Reads input values.
+ * @param voxelIndices Contains half-open voxel bounds.
+ * @param function Receives each value in Z-Y-X order.
+ */
 template <class InputAccessorT, class FunctionT>
 void ForEachBoxValue(const ImageGeom& imageGeom, const InputAccessorT& inputValues, const std::array<usize, 6>& voxelIndices, FunctionT&& function)
 {
@@ -292,6 +341,11 @@ void ForEachBoxValue(const ImageGeom& imageGeom, const InputAccessorT& inputValu
   }
 }
 
+/**
+ * @struct FrequencySummaryState
+ * @brief Tracks ordered frequency statistics across bounded batches.
+ * @tparam T Input value type.
+ */
 template <typename T>
 struct FrequencySummaryState
 {
@@ -301,6 +355,14 @@ struct FrequencySummaryState
   bool medianFound = false;
 };
 
+/**
+ * @brief Adds one ordered frequency batch to the summary state.
+ * @tparam T Input value type.
+ * @param frequencies Supplies one sorted batch of distinct values.
+ * @param stats Receives median and unique-value statistics.
+ * @param state Preserves cumulative state between batches.
+ * @param modes Receives tied modes, or is null when mode is not requested.
+ */
 template <typename T>
 void AccumulateFrequencyBatch(const FixedFrequencyTable<T>& frequencies, CompleteStatsCache<T>& stats, FrequencySummaryState<T>& state, std::vector<T>* modes)
 {
@@ -340,6 +402,15 @@ void AccumulateFrequencyBatch(const FixedFrequencyTable<T>& frequencies, Complet
   }
 }
 
+/**
+ * @brief Applies the legacy modal-frequency width rule.
+ * @tparam T Input value type.
+ * @param state Supplies the maximum frequency.
+ * @param modes Supplies the candidate modes, or is null.
+ *
+ * The legacy output uses an int frequency. Modes are cleared when the maximum
+ * frequency cannot be represented by that type.
+ */
 template <typename T>
 void FinalizeMode(const FrequencySummaryState<T>& state, std::vector<T>* modes)
 {
@@ -356,6 +427,13 @@ void FinalizeMode(const FrequencySummaryState<T>& state, std::vector<T>* modes)
   }
 }
 
+/**
+ * @brief Derives ordered frequency statistics from one complete table.
+ * @tparam T Input value type.
+ * @param frequencies Supplies distinct values and counts.
+ * @param stats Receives median and unique-value statistics.
+ * @param modes Receives tied modes, or is null when mode is not requested.
+ */
 template <typename T>
 void CalculateFrequencyStats(FixedFrequencyTable<T>& frequencies, CompleteStatsCache<T>& stats, std::vector<T>* modes)
 {
@@ -366,10 +444,17 @@ void CalculateFrequencyStats(FixedFrequencyTable<T>& frequencies, CompleteStatsC
 }
 
 /**
- * @brief Exact bounded-memory fallback for bounds with more values than the flat table can hold.
+ * @brief Uses bounded frequency scratch when the flat table overflows.
+ * @tparam T Input value type.
+ * @tparam InputAccessorT Input accessor type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputValues Reads input values.
+ * @param voxelIndices Contains half-open voxel bounds.
+ * @param stats Receives median and unique-value statistics.
+ * @param modes Receives sorted tied modes, or is null when mode is not needed.
  *
- * Distinct values are selected and counted in ordered fixed-size batches. This trades additional
- * direct scans for constant scratch while preserving sorted tied modes and exact median/unique counts.
+ * The function selects and counts distinct values in ordered fixed-size
+ * batches. It trades additional direct scans for constant frequency scratch.
  */
 template <typename T, class InputAccessorT>
 void CalculateFrequencyStatsBounded(const ImageGeom& imageGeom, const InputAccessorT& inputValues, const std::array<usize, 6>& voxelIndices, CompleteStatsCache<T>& stats, std::vector<T>* modes)
@@ -399,15 +484,19 @@ void CalculateFrequencyStatsBounded(const ImageGeom& imageGeom, const InputAcces
 }
 
 /**
- * @brief This computes the basic stats by bounding box that can be derived in a single pass aside from mode
- * @tparam T the type of data for the stats to work from
- * @warning Class assumes that the size of statsVector is equivalent to numTuples in unifiedBounds to maintain parallel nature
+ * @class ComputeBaseStatsImpl
+ * @brief Computes count, extrema, and sum for independent bounding boxes.
+ * @tparam T Input value type.
+ * @tparam InputAccessorT Input accessor type.
+ * @pre The cache vector has one entry for each unified-bounds tuple.
+ *
+ * Parallel workers write disjoint cache entries. The input accessor determines
+ * whether parallel execution is permitted.
  */
 template <typename T, class InputAccessorT>
 class ComputeBaseStatsImpl
 {
 public:
-  // It is expected that the size of statsVector is equivalent to numTuples in unifiedBounds
   ComputeBaseStatsImpl(const ImageGeom& geom, InputAccessorT inputValues, nonstd::span<const float32> unifiedBounds, std::vector<StatsCache<T>>& statsVector)
   : m_Geom(geom)
   , m_InputValues(inputValues)
@@ -427,7 +516,7 @@ public:
     {
       std::array<usize, 6> voxelIndices = GetVoxelIndices(m_UnifiedBounds, targetBoundsIndex, m_Geom);
 
-      // We are working with primitives here for their trivially copyable nature, this lets us cut accesses to output vector
+      // Local primitives reduce writes to the shared cache vector.
       usize count = 0;
       T minValue = std::numeric_limits<T>::max();
       T maxValue = std::numeric_limits<T>::lowest();
@@ -458,7 +547,7 @@ public:
         maxValue = std::numeric_limits<T>::quiet_NaN();
       }
 
-      // Copy primitives of base stats in the output vector
+      // Publish one complete cache entry after the bound traversal.
       m_StatsVector[targetBoundsIndex].count = count;
       m_StatsVector[targetBoundsIndex].minValue = minValue;
       m_StatsVector[targetBoundsIndex].maxValue = maxValue;
@@ -480,16 +569,21 @@ private:
 };
 
 /**
- * @brief This computes the basic stats, frequency map stats, and mode by bounding box that can be derived in a single pass
- * @tparam T the type of data for the stats to work from (bool invalid since we are working with NeighborList as a variable type)
- * @tparam CollectBaseStatsV whether selected outputs require extrema and summation
- * @warning Class assumes that the size of statsVector and modesList is equivalent to numTuples in unifiedBounds to maintain parallel nature
+ * @class ComputeAllStatsImpl
+ * @brief Computes base, frequency, and mode statistics for each bounding box.
+ * @tparam T Input value type. Boolean input is not supported.
+ * @tparam InputAccessorT Input accessor type.
+ * @tparam CollectBaseStatsV Enables extrema and sum collection.
+ * @pre Cache and mode vectors have one entry for each bounds tuple.
+ *
+ * Parallel workers write disjoint cache and mode-vector entries. A box with
+ * more than 32 distinct values uses repeated scans with fixed frequency scratch.
+ * The staged mode output can grow with the number of tied modes.
  */
 template <typename T, class InputAccessorT, bool CollectBaseStatsV>
 class ComputeAllStatsImpl
 {
 public:
-  // It is expected that the size of statsVector is equivalent to numTuples in unifiedBounds
   ComputeAllStatsImpl(const ImageGeom& geom, InputAccessorT inputValues, nonstd::span<const float32> unifiedBounds, std::vector<CompleteStatsCache<T>>& statsVector,
                       std::vector<std::shared_ptr<std::vector<T>>>& modes)
   : m_Geom(geom)
@@ -511,7 +605,7 @@ public:
     {
       std::array<usize, 6> voxelIndices = GetVoxelIndices(m_UnifiedBounds, targetBoundsIndex, m_Geom);
 
-      // We are working with primitives here for their trivially copyable nature, this lets us cut accesses to output vector
+      // Local primitives reduce writes to the shared cache vector.
       usize count = 0;
       [[maybe_unused]] T minValue = std::numeric_limits<T>::max();
       [[maybe_unused]] T maxValue = std::numeric_limits<T>::lowest();
@@ -593,16 +687,17 @@ private:
 };
 
 /**
- * @brief This computes the basic and frequency map stats by bounding box that can be derived in a single pass
- * @tparam T the type of data for the stats to work from (bool invalid since we are working with NeighborList as a variable type)
- * @tparam CollectBaseStatsV whether selected outputs require extrema and summation
- * @warning Class assumes that the size of statsVector and modesList is equivalent to numTuples in unifiedBounds to maintain parallel nature
+ * @class ComputeBasicAndFrequencyStatsImpl
+ * @brief Computes base and frequency statistics without mode output.
+ * @tparam T Input value type. Boolean input is not supported.
+ * @tparam InputAccessorT Input accessor type.
+ * @tparam CollectBaseStatsV Enables extrema and sum collection.
+ * @pre The cache vector has one entry for each bounds tuple.
  */
 template <typename T, class InputAccessorT, bool CollectBaseStatsV>
 class ComputeBasicAndFrequencyStatsImpl
 {
 public:
-  // It is expected that the size of statsVector is equivalent to numTuples in unifiedBounds
   ComputeBasicAndFrequencyStatsImpl(const ImageGeom& geom, InputAccessorT inputValues, nonstd::span<const float32> unifiedBounds, std::vector<CompleteStatsCache<T>>& statsVector)
   : m_Geom(geom)
   , m_InputValues(inputValues)
@@ -622,7 +717,7 @@ public:
     {
       std::array<usize, 6> voxelIndices = GetVoxelIndices(m_UnifiedBounds, targetBoundsIndex, m_Geom);
 
-      // We are working with primitives here for their trivially copyable nature, this lets us cut accesses to output vector
+      // Local primitives reduce writes to the shared cache vector.
       usize count = 0;
       [[maybe_unused]] T minValue = std::numeric_limits<T>::max();
       [[maybe_unused]] T maxValue = std::numeric_limits<T>::lowest();
@@ -705,15 +800,20 @@ template <class Cache>
 concept CacheType = std::is_base_of_v<StatsCache<typename Cache::value_type>, Cache>;
 
 /**
- * @brief This computes the standard deviation by bounding box that can be derived from precalculated base stats
- * @tparam T the type of data for the stats to work from
- * @warning Class assumes that the size of statsVector is equivalent to numTuples in unifiedBounds to maintain parallel nature
+ * @class ComputeStdDevImpl
+ * @brief Computes population standard deviation from cached base statistics.
+ * @tparam T Input value type.
+ * @tparam CacheT Base-statistics cache type.
+ * @tparam InputAccessorT Input accessor type.
+ * @pre Cache and output vectors have one entry for each bounds tuple.
+ *
+ * The second input pass preserves the existing population-deviation formula.
+ * Parallel workers write disjoint output-vector entries.
  */
 template <typename T, CacheType CacheT, class InputAccessorT>
 class ComputeStdDevImpl
 {
 public:
-  // It is expected that the size of statsVector is equivalent to numTuples in unifiedBounds
   ComputeStdDevImpl(const ImageGeom& geom, InputAccessorT inputValues, nonstd::span<const float32> unifiedBounds, const std::vector<CacheT>& statsVector, std::vector<float32>& stdDevValues)
   : m_Geom(geom)
   , m_InputValues(inputValues)
@@ -732,7 +832,7 @@ public:
 
     for(usize targetBoundsIndex = start; targetBoundsIndex < end; targetBoundsIndex++)
     {
-      // Prevents dividing by zero
+      // Skip empty bounds to prevent division by zero.
       if(m_StatsVector[targetBoundsIndex].count == 0)
       {
         continue;
@@ -740,7 +840,7 @@ public:
 
       std::array<usize, 6> voxelIndices = GetVoxelIndices(m_UnifiedBounds, targetBoundsIndex, m_Geom);
 
-      // We are working with primitives here for their trivially copyable nature, this lets us cut accesses to output vector
+      // Accumulate locally and publish one value after the traversal.
       float64 sumOfDiffs = 0.0f;
       float32 meanValue = 0.0f;
       meanValue = m_StatsVector[targetBoundsIndex].summationValue / static_cast<float32>(m_StatsVector[targetBoundsIndex].count);
@@ -761,7 +861,6 @@ public:
         }
       }
 
-      // Copy primitives of base stats in the output vector
       m_StdDevValues[targetBoundsIndex] = static_cast<float32>(std::sqrt(sumOfDiffs / static_cast<float64>(m_StatsVector[targetBoundsIndex].count)));
     }
   }
@@ -780,6 +879,22 @@ private:
   std::vector<float32>& m_StdDevValues;
 };
 
+/**
+ * @brief Computes and serially stores population standard deviations.
+ * @tparam T Input value type.
+ * @tparam StatsCacheT Base-statistics cache type.
+ * @tparam InputAccessorT Input accessor type.
+ * @param dataAlg Configures the bound-level execution range and concurrency.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputAccessor Reads input values.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param statsVector Supplies counts and sums.
+ * @param dataStructure Contains the standard-deviation output.
+ * @param filterValues Identifies the output path.
+ *
+ * Workers write a temporary vector. Serial DataStore writes occur after they
+ * join because the generic output interface does not guarantee thread safety.
+ */
 template <typename T, CacheType StatsCacheT, class InputAccessorT>
 void ComputeAndStoreStdDeviation(ParallelDataAlgorithm& dataAlg, const ImageGeom& imageGeom, InputAccessorT inputAccessor, nonstd::span<const float32> unifiedBounds,
                                  const std::vector<StatsCacheT>& statsVector, DataStructure& dataStructure, const ComputeBoundingBoxStatsInputValues* filterValues)
@@ -797,6 +912,17 @@ void ComputeAndStoreStdDeviation(ParallelDataAlgorithm& dataAlg, const ImageGeom
   }
 }
 
+/**
+ * @brief Writes completed cache values to selected framework outputs.
+ * @tparam T Input value type.
+ * @tparam StatsCacheT Statistics cache type.
+ * @param statsVector Supplies completed values for all boxes.
+ * @param dataStructure Contains output arrays.
+ * @param inputValues Selects outputs and identifies their paths.
+ * @return Success, or an output-store error.
+ *
+ * Serial writes avoid relying on generic DataStore thread safety.
+ */
 template <typename T, CacheType StatsCacheT>
 Result<> FillStatsArrays(const std::vector<StatsCacheT>& statsVector, DataStructure& dataStructure, const ComputeBoundingBoxStatsInputValues* inputValues)
 {
@@ -920,9 +1046,20 @@ Result<> FillStatsArrays(const std::vector<StatsCacheT>& statsVector, DataStruct
 
 /**
  * @brief Computes independent bounds using bound-local state.
+ * @tparam UseModeV Enables mode output.
+ * @tparam T Input value type.
+ * @tparam InputAccessorT Input accessor type.
+ * @param dataStructure Contains output arrays.
+ * @param inputValues Selects statistics and identifies output paths.
+ * @param imageGeom Supplies the image dimensions.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param inputAccessor Reads input values.
+ * @param parallelize Enables parallel bound processing.
+ * @return Success, or an output-store error.
  *
- * Contiguous input enables parallel direct reads. Framework output stores are populated serially
- * after the join because DataStore and NeighborList do not guarantee concurrent access safety.
+ * Contiguous input enables parallel direct reads. Framework output stores are
+ * populated serially after the join because their generic interfaces do not
+ * guarantee concurrent access safety.
  */
 template <bool UseModeV, typename T, class InputAccessorT>
 Result<> ComputeBoundsStats(DataStructure& dataStructure, const ComputeBoundingBoxStatsInputValues* inputValues, const ImageGeom& imageGeom, nonstd::span<const float32> unifiedBounds,
@@ -1000,6 +1137,11 @@ Result<> ComputeBoundsStats(DataStructure& dataStructure, const ComputeBoundingB
   }
 }
 
+/**
+ * @struct ExecuteBoundsStatsCalculations
+ * @brief Dispatches the direct calculation for one runtime value type.
+ * @tparam UseModeV Enables type-dispatched NeighborList mode output.
+ */
 template <bool UseModeV = false>
 struct ExecuteBoundsStatsCalculations
 {

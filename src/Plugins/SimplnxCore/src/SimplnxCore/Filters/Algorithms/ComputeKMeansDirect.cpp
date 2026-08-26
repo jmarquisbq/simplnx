@@ -11,74 +11,46 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// ComputeKMeansDirect — In-Core Algorithm
-//
-// This file implements the in-core (Direct) variant of ComputeKMeans.
-// It is selected by DispatchAlgorithm when all input arrays reside in memory.
-//
-// ALGORITHM OVERVIEW (Lloyd's Algorithm):
-//   1. Randomly select k initial centroids from masked data points
-//   2. Assign each point to the nearest centroid (findClusters)
-//   3. Recompute each centroid as the arithmetic mean of its assigned members
-//      (findMeans)
-//   4. Repeat steps 2-3 until the centroids stop moving (convergence)
-//
-// DATA ACCESS PATTERN:
-//   Uses operator[] for per-element random access to the input array, means
-//   array, and featureIds array. This is optimal for in-memory DataStore where
-//   operator[] is essentially a pointer dereference. For out-of-core data, this
-//   pattern would cause chunk thrashing — see ComputeKMeansScanline instead.
-//
-// COMPLEXITY:
-//   findClusters: O(n * k * d) per iteration
-//   findMeans:    O(n * d) per iteration, but rescans the full input array and
-//                 featureIds array once per component (d full passes)
-//   Total:        O(iter * n * k * d)
-// =============================================================================
-
 namespace
 {
-/** @brief Constant mask adapter used when K-Means masking is disabled. */
+/**
+ * @class AllTrueMaskCompare
+ * @brief Represents an all-selected mask without a synthetic array.
+ *
+ * The adapter reports the real tuple count. setValue() discards writes because
+ * K-Means uses the mask only for selection.
+ */
 class AllTrueMaskCompare final : public MaskCompareUtilities::MaskCompare
 {
 public:
-  /** @brief Records the real tuple count without allocating a synthetic mask array. */
   explicit AllTrueMaskCompare(usize tupleCount)
   : m_TupleCount(tupleCount)
   {
   }
 
-  /** @brief Reports both tuples as enabled. */
   bool bothTrue(usize, usize) const override
   {
     return true;
   }
-  /** @brief No tuple pair is disabled. */
   bool bothFalse(usize, usize) const override
   {
     return false;
   }
-  /** @brief Reports every tuple as enabled. */
   bool isTrue(usize) const override
   {
     return true;
   }
-  /** @brief No-op because the adapter has no writable backing array. */
   void setValue(usize, bool) override
   {
   }
-  /** @brief Returns the input array's tuple count. */
   usize getNumberOfTuples() const override
   {
     return m_TupleCount;
   }
-  /** @brief A logical mask has one component. */
   usize getNumberOfComponents() const override
   {
     return 1;
   }
-  /** @brief Returns the tuple count because every tuple is enabled. */
   usize countTrueValues() const override
   {
     return m_TupleCount;
@@ -89,16 +61,14 @@ private:
 };
 
 /**
- * @brief Type-specialized template that performs the actual K-Means computation
- * for the in-core (Direct) path.
- *
- * @tparam T The element type of the clustering array (e.g., float32, int32)
+ * @class ComputeKMeansTemplate
+ * @brief Performs typed Lloyd iterations with direct element access.
+ * @tparam T Input and centroid value type.
  */
 template <typename T>
 class ComputeKMeansTemplate
 {
 public:
-  /** @brief Borrows resident typed stores, mask state, K-Means settings, and deterministic seed. */
   ComputeKMeansTemplate(ComputeKMeansDirect* filter, const IDataArray* inputIDataArray, IDataArray* meansIDataArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& maskDataArray,
                         usize numClusters, Int32AbstractDataStore& fIds, ClusterUtilities::DistanceMetric distMetric, std::mt19937_64::result_type seed)
   : m_Filter(filter)
@@ -113,13 +83,18 @@ public:
   }
   ~ComputeKMeansTemplate() = default;
 
-  ComputeKMeansTemplate(const ComputeKMeansTemplate&) = delete; // Copy Constructor Not Implemented
-  void operator=(const ComputeKMeansTemplate&) = delete;        // Move assignment Not Implemented
+  ComputeKMeansTemplate(const ComputeKMeansTemplate&) = delete;
+  void operator=(const ComputeKMeansTemplate&) = delete;
 
   // -----------------------------------------------------------------------------
   /**
-   * @brief Main K-Means loop: initialize centroids, then iterate findClusters +
-   * findMeans until convergence (mean values stop changing).
+   * @brief Initializes centroids and runs assignment and mean phases.
+   *
+   * Centroid sampling permits duplicates. For multi-tuple input, the legacy
+   * index formula excludes the final tuple. The convergence test reads flat
+   * means indices 1 through K and does not inspect all components.
+   *
+   * Cancellation can stop an inner phase after it changes part of an output.
    */
   void operator()()
   {
@@ -199,7 +174,14 @@ private:
   std::mt19937_64::result_type m_Seed;
 
   // -----------------------------------------------------------------------------
-  /** @brief Tests whether the centroid shift is within the selected floating-point tolerance. */
+  /**
+   * @brief Tests whether two values differ by less than epsilon.
+   * @tparam K Compared value type.
+   * @param a First value.
+   * @param b Second value.
+   * @param epsilon Exclusive difference limit.
+   * @return True when the absolute difference is less than epsilon.
+   */
   template <typename K>
   bool closeEnough(const K& a, const K& b, const K& epsilon = std::numeric_limits<K>::epsilon())
   {
@@ -208,14 +190,12 @@ private:
 
   // -----------------------------------------------------------------------------
   /**
-   * @brief Assigns each data point to the nearest centroid using direct operator[] access.
+   * @brief Assigns each selected tuple to its nearest centroid.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
    *
-   * For each masked data point, computes the distance to all k centroids and assigns
-   * the point to the cluster of the nearest centroid. Uses direct per-element access
-   * via operator[] — optimal for in-memory data but would cause chunk thrashing for OOC.
-   *
-   * @param tuples Total number of tuples in the input array
-   * @param dims Number of components per tuple
+   * Direct element access is efficient for resident data. Cancellation leaves
+   * earlier assignments in FeatureIds.
    */
   void findClusters(usize tuples, int32 dims)
   {
@@ -243,21 +223,14 @@ private:
 
   // -----------------------------------------------------------------------------
   /**
-   * @brief Recomputes each cluster's centroid as the arithmetic mean of its assigned
-   * members, using direct operator[] access.
+   * @brief Recomputes arithmetic means with direct element access.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
    *
-   * Note that every tuple (masked or not) contributes to its current featureIds bucket
-   * (bucket 0 collects points that findClusters never assigned because they are masked
-   * out), matching the original algorithm's behavior exactly.
-   *
-   * Rescans the full input array and featureIds array once per component (dims passes)
-   * because each accumulator update must go through the DataStore's own +=/-= dispatch,
-   * which operates one component at a time. This is inexpensive for in-memory data but
-   * would multiply chunk reads by dims for out-of-core data — see ComputeKMeansScanline
-   * for the single-pass alternative.
-   *
-   * @param tuples Total number of tuples in the input array
-   * @param dims Number of components per tuple
+   * All tuples contribute to their current assignment. Masked tuples normally
+   * remain in reserved bucket zero. The function rescans input once for each
+   * component to preserve the original direct DataStore accumulation path.
+   * Cancellation can leave a partially recomputed means array.
    */
   void findMeans(usize tuples, int32 dims)
   {

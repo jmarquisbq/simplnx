@@ -20,24 +20,41 @@ using namespace nx::core;
 
 namespace
 {
+// This error reports a feature count that cannot fit in the int32 output array.
 constexpr int32 k_BadFeatureCount = -78231;
+// NumElements stores int32 values.
 constexpr uint64 k_MaxVoxelCount = std::numeric_limits<int32>::max();
-/**
- * Volume of Sphere - `V = 4/3 * pi * r^3`
- * Radius of Sphere - `r = cubed_root(3V / 4pi)`
- * However we can cut a multiplication out of the
- * equation at runtime by isolating the `V`
- * 3V / 4pi == V / (4pi / 3)
- */
+// Equivalent spherical diameter uses d = 2*cbrt(V/(4*pi/3)).
 constexpr float64 k_ESDVolumeDenominator = (4.0 * nx::core::numbers::pi_v<float64>) / 3.0;
+// Equivalent circular diameter uses d = 2*sqrt(A/pi).
 constexpr float64 k_ECDAreaDenominator = nx::core::numbers::pi_v<float64>;
 
+/**
+ * @brief Defines thread-local feature voxel counts.
+ */
 using FeatureVoxelCountsT = tbb::combinable<std::vector<uint64>>;
+/**
+ * @brief Defines thread-local feature volume sums.
+ */
 using FeatureVolumesT = tbb::combinable<std::vector<float64>>;
 
+/**
+ * @class ImageSummationImpl
+ * @brief Counts ImageGeom voxels for each feature.
+ *
+ * Workers use private count vectors. The caller controls parallel scheduling.
+ */
 class ImageSummationImpl
 {
 public:
+  /**
+   * @brief Initializes an ImageGeom count worker.
+   * @param voxelCounts Receives thread-local feature counts.
+   * @param dims Supplies ImageGeom dimensions.
+   * @param featureIds Supplies Feature IDs.
+   * @param shouldCancel Signals cancellation between Z slices.
+   * @pre All arguments outlive the worker execution.
+   */
   ImageSummationImpl(FeatureVoxelCountsT& voxelCounts, const SizeVec3& dims, const Int32AbstractDataStore& featureIds, const std::atomic_bool& shouldCancel)
   : m_VoxelCounts(voxelCounts)
   , m_Dims(dims)
@@ -46,6 +63,11 @@ public:
   {
   }
 
+  /**
+   * @brief Counts features in one Z-slice interval.
+   * @param start Identifies the first Z slice.
+   * @param end Identifies one past the last Z slice.
+   */
   void convert(const usize start, const usize end) const
   {
     std::vector<uint64>& threadLocalVoxelCounts = m_VoxelCounts.local();
@@ -68,6 +90,10 @@ public:
     }
   }
 
+  /**
+   * @brief Counts features in an assigned Z range.
+   * @param range Identifies the Z-slice interval.
+   */
   void operator()(const Range& range) const
   {
     convert(range.min(), range.max());
@@ -80,6 +106,21 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Computes ImageGeom feature sizes with direct feature access.
+ * @param imageGeom Supplies dimensions, spacing, and optional element sizes.
+ * @param volumes Receives feature area or volume.
+ * @param equivalentDiameters Receives equivalent circular or spherical diameter.
+ * @param numElements Receives voxel counts.
+ * @param featureIds Supplies Feature IDs.
+ * @param saveElementSizes True to retain generated element sizes.
+ * @param msgHelper Supplies progress messages.
+ * @param shouldCancel Signals cancellation between Z slices or features.
+ * @return Success, or an element-size or feature-count error.
+ *
+ * requireStoresInMemory() only disables parallel scheduling for a nonresident Feature ID store.
+ * It does not pin or synchronize store access.
+ */
 Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volumes, Float32AbstractDataStore& equivalentDiameters, Int32AbstractDataStore& numElements,
                           const Int32AbstractDataStore& featureIds, const bool saveElementSizes, MessageHelper& msgHelper, const std::atomic_bool& shouldCancel)
 {
@@ -91,13 +132,11 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   std::vector<uint64> featureVoxelCounts(numFeatures, 0);
 
   msgHelper.sendMessage("Finding Voxel Counts...");
-  // Count and store the number of voxels in each feature
+  // Count each feature with thread-local Z-slice accumulators.
   FeatureVoxelCountsT threadLocalVoxelCounts([numFeatures] { return std::vector<uint64>(numFeatures, 0); });
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(0, dims[2]);
-  // The worker reads featureIds concurrently across slices; per the project thread-safety policy a
-  // DataStore is only safe for concurrent access when it is resident in memory, so gate parallelization
-  // on that (an out-of-core store falls back to serial execution).
+  // A nonresident Feature ID store disables parallel scheduling. This does not pin or synchronize access.
   IParallelAlgorithm::AlgorithmStores algStores;
   algStores.push_back(&featureIds);
   dataAlg.requireStoresInMemory(algStores);
@@ -108,7 +147,7 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
     return {};
   }
 
-  // Reduce thread local feature voxel counts
+  // Reduce thread-local counts after all Z ranges complete.
   threadLocalVoxelCounts.combine_each(
       [&](const std::vector<uint64>& localCounts) { std::transform(localCounts.cbegin(), localCounts.cend(), featureVoxelCounts.cbegin(), featureVoxelCounts.begin(), std::plus{}); });
 
@@ -123,43 +162,17 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   const usize yDimSize = imageGeom.getNumYCells();
   const usize zDimSize = imageGeom.getNumZCells();
 
-  // Treat dimensions of 1 as flat for image geom
+  // A unit dimension selects flat ImageGeom area calculation.
   if(xDimSize == 1 || yDimSize == 1 || zDimSize == 1)
   {
     msgHelper.sendMessage("Singular image detected. Proceeding with 2D calculations...");
-    // One of the dimensions is empty, so we will be calculating area instead
-
-    /**
-     * IMPORTANT: Due the nature of ImageGeom the preflight is expected to impose a
-     * restriction on the number of empty dimensions (denoted as `1`) in an input
-     * ImageGeom. To illustrate why this is consider the following cases:
-     *
-     * An ImageGeom with 2 "empty" dimensions, such as 5x1x1. In this case the code would
-     * calculate the area/volume (ie distance between points) by only using the valid dimension.
-     * Functionally flattening the problem to 1D. You may think the solution is to explicitly
-     * define the area cases, but there is a caveat of which of the two empty dimensions to
-     * select for the area calculation. An image with 1x1x5 (XYZ) illustrates this problem,
-     * would you select X or Y for the scaling for area calculation? Clearly it has been rotated,
-     * but you lack the orientation information to determine the proper orientation.
-     *
-     * An ImageGeom with 3 "empty" dimensions, ie 1x1x1. This is a semi-ludicrous case since
-     * the value can be derived directly from the spacing, but the issue previously outlined
-     * will present itself once again. You cannot determine the orientation for proper area
-     * calculation.
-     *
-     * For these two cases the following code would BREAK, so do not enable.
-     **/
-
-    // OPEN DESIGN QUESTION: this includes the flat dimension's spacing, matching the PR #1590
-    // "slab" convention used by ImageGeom::findElementSizes, but it diverges from legacy DREAM3D
-    // 6.5.171 (FindSizes::findSizesImage uses only the two non-flat resolutions) whenever the flat
-    // dimension's spacing != 1. See the "[2DFlatSpacing]" test case, which characterizes the
-    // divergence, and the ComputeFeatureSizesFilter V&V deviations entry.
-    // Calculate the area of a single voxel
+    // Preflight permits one unit dimension. More unit dimensions do not identify a unique area plane.
+    // The slab convention matches ImageGeom::findElementSizes.
+    // It differs from DREAM3D 6.5.171 when flat spacing is not one.
+    // The [2DFlatSpacing] V&V case records this compatibility difference.
     const float64 voxelArea = static_cast<float64>(spacing[0]) * static_cast<float64>(spacing[1]) * static_cast<float64>(spacing[2]);
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Area and ECD...");
-    // Process each feature storing feature voxel counts, areas, and equivalent circular diameter
     for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
     {
       if(shouldCancel)
@@ -167,7 +180,6 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
         return {};
       }
 
-      // Check for integer overflow
       if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
       {
         return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
@@ -175,33 +187,21 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
 
       throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-      // Store the number of voxels in feature as int32
       numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
 
-      // Calculate and store the area of the feature
       const float64 newArea = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelArea;
       volumes.setValue(featureIdx, static_cast<float32>(newArea));
 
-      /** Determine diameter from area:
-       * Area of Circle - `A = pi * r^2`
-       * Radius of Circle - `r = square_root(A / pi)`
-       * Diameter of Circle - `d = 2 * r`
-       * Thus
-       * Equivalent Circular Diameter - `2 * square_root(A / pi)`
-       **/
       equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::sqrt(newArea / k_ECDAreaDenominator)));
     }
   }
   else
   {
-    // If we are here, it is an image stack and thus should be treated as 3D.
     msgHelper.sendMessage("Image Stack detected. Proceeding with 3D calculations...");
 
-    // Calculate the volume of a single voxel
     const float64 voxelVolume = spacing[0] * spacing[1] * spacing[2];
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Volume and ESD...");
-    // Process each feature storing feature voxel counts, volumes, and equivalent spherical diameter
     for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
     {
       if(shouldCancel)
@@ -209,7 +209,6 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
         return {};
       }
 
-      // Check for integer overflow
       if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
       {
         return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
@@ -217,20 +216,11 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
 
       throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-      // Store the number of voxels in feature as int32
       numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
 
-      // Calculate and store the volume of the feature
       const float64 newVolume = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelVolume;
       volumes.setValue(featureIdx, static_cast<float32>(newVolume));
 
-      /** Determine diameter from volume:
-       * Volume of Sphere - `V = 4/3 * pi * r^3`
-       * Radius of Sphere - `r = cubed_root(3V / 4pi)`
-       * Diameter of Sphere - `d = 2 * r`
-       * Thus
-       * Equivalent Spherical Diameter - `2 * cubed_root(V / (4pi / 3))`
-       **/
       equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(newVolume / k_ESDVolumeDenominator)));
     }
   }
@@ -244,9 +234,25 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   return {};
 }
 
+/**
+ * @class RectGridSummationImpl
+ * @brief Counts RectGrid cells and sums their element volumes.
+ *
+ * Workers use thread-local counts, sums, and Kahan compensators.
+ */
 class RectGridSummationImpl
 {
 public:
+  /**
+   * @brief Initializes a RectGrid summation worker.
+   * @param voxelCounts Receives thread-local feature counts.
+   * @param volumes Receives thread-local feature volume sums.
+   * @param dims Supplies RectGrid dimensions.
+   * @param featureIds Supplies Feature IDs.
+   * @param elemSizes Supplies generated element volumes.
+   * @param shouldCancel Signals cancellation between Z slices.
+   * @pre All arguments outlive the worker execution.
+   */
   RectGridSummationImpl(FeatureVoxelCountsT& voxelCounts, FeatureVolumesT& volumes, const SizeVec3& dims, const Int32AbstractDataStore& featureIds, const Float32AbstractDataStore& elemSizes,
                         const std::atomic_bool& shouldCancel)
   : m_VoxelCounts(voxelCounts)
@@ -258,12 +264,17 @@ public:
   {
   }
 
+  /**
+   * @brief Sums one Z-slice interval.
+   * @param start Identifies the first Z slice.
+   * @param end Identifies one past the last Z slice.
+   */
   void convert(const usize start, const usize end) const
   {
     std::vector<uint64>& threadLocalVoxelCounts = m_VoxelCounts.local();
     std::vector<float64>& threadLocalVolumes = m_Volumes.local();
 
-    // Needed for Kahan summation of volumes
+    // Kahan compensation retains low-order volume contributions.
     std::vector<float64> featureCompensators(threadLocalVolumes.size(), 0.0);
     for(usize zIndex = start; zIndex < end; zIndex++)
     {
@@ -281,24 +292,19 @@ public:
           const int32 voxelFeatureId = m_FeatureIds.getValue(voxelIdx);
           threadLocalVoxelCounts[voxelFeatureId]++;
 
-          // Use Kahan summation to determine overall volume
-
-          // Attempt to recover low order into the value. The first instance is 0
           const float64 value = static_cast<float64>(m_ElemSizes.getValue(voxelIdx)) - featureCompensators[voxelFeatureId];
-
-          // low order may be lost
           const float64 volSum = threadLocalVolumes[voxelFeatureId] + value;
-
-          // recover and cache low order
           featureCompensators[voxelFeatureId] = (volSum - threadLocalVolumes[voxelFeatureId]) - value;
-
-          // store volumes
           threadLocalVolumes[voxelFeatureId] = volSum;
         }
       }
     }
   }
 
+  /**
+   * @brief Sums an assigned Z range.
+   * @param range Identifies the Z-slice interval.
+   */
   void operator()(const Range& range) const
   {
     convert(range.min(), range.max());
@@ -313,6 +319,21 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Computes RectGrid feature sizes with direct feature access.
+ * @param rectGridGeom Supplies dimensions and generated element sizes.
+ * @param volumes Receives feature volumes.
+ * @param equivalentDiameters Receives equivalent spherical diameters.
+ * @param numElements Receives voxel counts.
+ * @param featureIds Supplies Feature IDs.
+ * @param saveElementSizes True to retain generated element sizes.
+ * @param msgHelper Supplies progress messages.
+ * @param shouldCancel Signals cancellation between Z slices or features.
+ * @return Success, or an element-size or feature-count error.
+ *
+ * requireStoresInMemory() considers Feature IDs only. It does not pin or synchronize Feature IDs
+ * or element sizes.
+ */
 Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStore& volumes, Float32AbstractDataStore& equivalentDiameters, Int32AbstractDataStore& numElements,
                              const Int32AbstractDataStore& featureIds, const bool saveElementSizes, MessageHelper& msgHelper, const std::atomic_bool& shouldCancel)
 {
@@ -334,13 +355,12 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
   std::vector<float64> featureVolumes(numFeatures, 0.0);
 
   msgHelper.sendMessage("Cell Level: Finding Voxel Counts and Summing Volumes...");
-  // Count and store the number of voxels in each feature
+  // Count each feature and sum element volumes with thread-local Z ranges.
   FeatureVoxelCountsT threadLocalVoxelCounts([numFeatures] { return std::vector<uint64>(numFeatures, 0); });
   FeatureVolumesT threadLocalVolumes([numFeatures] { return std::vector<float64>(numFeatures, 0); });
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(0, dims[2]);
-  // The worker reads featureIds concurrently across slices; gate parallelization on the store being
-  // resident in memory (see the ProcessImageGeom note; project thread-safety policy).
+  // The scheduling guard includes Feature IDs only. It does not pin or synchronize element sizes.
   IParallelAlgorithm::AlgorithmStores algStores;
   algStores.push_back(&featureIds);
   dataAlg.requireStoresInMemory(algStores);
@@ -351,26 +371,17 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
     return {};
   }
 
-  // Reduce thread local voxel counts
+  // Reduce thread-local voxel counts after all Z ranges complete.
   threadLocalVoxelCounts.combine_each(
       [&](const std::vector<uint64>& localCounts) { std::transform(localCounts.cbegin(), localCounts.cend(), featureVoxelCounts.cbegin(), featureVoxelCounts.begin(), std::plus{}); });
-  // Reduce thread local volumes via kahan summation
+  // Combine thread-local volume sums with Kahan compensation.
   std::vector<float64> featureCompensators(numFeatures, 0.0);
   threadLocalVolumes.combine_each([&](const std::vector<float64>& localVolumes) {
     for(usize featureIdx = 0; featureIdx < localVolumes.size(); featureIdx++)
     {
-      // Use Kahan summation to determine overall volume
-
-      // Attempt to recover low order into the value. The first instance is 0
       const float64 value = localVolumes[featureIdx] - featureCompensators[featureIdx];
-
-      // low order may be lost
       const float64 volSum = featureVolumes[featureIdx] + value;
-
-      // recover and cache low order
       featureCompensators[featureIdx] = (volSum - featureVolumes[featureIdx]) - value;
-
-      // store volumes
       featureVolumes[featureIdx] = volSum;
     }
   });
@@ -381,7 +392,6 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
   }
 
   msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating ESD...");
-  // Process each feature storing feature voxel counts and equivalent spherical diameter
   for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
   {
     if(shouldCancel)
@@ -391,24 +401,13 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
 
     throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-    // Check for integer overflow
     if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
     {
       return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
     }
 
-    // Store the number of voxels in feature as int32
     numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
-    // Store the volume of the feature
     volumes.setValue(featureIdx, static_cast<float32>(featureVolumes[featureIdx]));
-
-    /** Determine diameter from volume:
-     * Volume of Sphere - `V = 4/3 * pi * r^3`
-     * Radius of Sphere - `r = cubed_root(3V / 4pi)`
-     * Diameter of Sphere - `d = 2 * r`
-     * Thus
-     * Equivalent Spherical Diameter - `2 * cubed_root(V / (4pi / 3))`
-     **/
     equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(featureVolumes[featureIdx] / k_ESDVolumeDenominator)));
   }
 
@@ -422,7 +421,6 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureSizesDirect::ComputeFeatureSizesDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                      const ComputeFeatureSizesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -432,10 +430,8 @@ ComputeFeatureSizesDirect::ComputeFeatureSizesDirect(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureSizesDirect::~ComputeFeatureSizesDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureSizesDirect::operator()()
 {
   MessageHelper messageHelper(m_MessageHandler);

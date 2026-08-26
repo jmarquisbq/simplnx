@@ -11,16 +11,26 @@ struct CreateColorMapInputValues;
 
 /**
  * @class CreateColorMapScanline
- * @brief Bounded-memory bulk-I/O implementation for out-of-core arrays.
+ * @brief Maps scalar tuples to RGB values through bounded bulk I/O.
  *
- * The first sequential pass computes the exact typed minimum and maximum. A second
- * pass bulk-reads values and an optional mask, computes colors in a bounded buffer,
- * and bulk-writes RGB output. RAM remains O(chunk), independent of tuple count.
+ * The first pass finds the exact typed range. The second pass maps 65,536 tuples
+ * at a time and bulk-writes RGB values. Memory remains independent of tuple count.
  */
 class SIMPLNXCORE_EXPORT CreateColorMapScanline
 {
 public:
+  /**
+   * @brief Creates a bulk-I/O color-map algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param msgHandler Receives progress messages.
+   * @param shouldCancel Stops before later chunks when true.
+   * @param inputValues Specifies validated paths and options. The caller must
+   * keep this object alive for the algorithm lifetime.
+   */
   CreateColorMapScanline(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, const CreateColorMapInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning bulk-I/O algorithm.
+   */
   ~CreateColorMapScanline() noexcept;
 
   CreateColorMapScanline(const CreateColorMapScanline&) = delete;
@@ -28,6 +38,13 @@ public:
   CreateColorMapScanline& operator=(const CreateColorMapScanline&) = delete;
   CreateColorMapScanline& operator=(CreateColorMapScanline&&) noexcept = delete;
 
+  /**
+   * @brief Maps scalar tuples to RGB values.
+   * @return Preset or bulk-I/O error, or success after cancellation.
+   *
+   * Cancellation during mapping retains completed RGB chunks. An unsupported
+   * mask returns success without writing colors.
+   */
   Result<> operator()();
 
 private:

@@ -20,71 +20,41 @@ struct SurfaceNetsInputValues;
 
 /**
  * @class SurfaceNetsScanline
- * @brief Out-of-core (OOC) optimized algorithm for SurfaceNets.
+ * @brief Builds Surface Nets output with sequential I/O and external records.
  *
- * Selected by DispatchAlgorithm when any input array is backed by chunked
- * (OOC) storage. Produces identical output to SurfaceNetsDirect but avoids
- * the O(volume) MMCellMap allocation and per-element FeatureIds access.
+ * Cell classification needs two adjacent Feature ID Z slices. Each padded cell
+ * has one fixed record for its flag, label, local position, vertex ID, and node
+ * type. Genuine out-of-core execution stores O(padded volume) records on disk
+ * and retains eight bounded cache pages. A forced scanline run on resident data
+ * permits an O(padded volume) in-memory record-store fallback.
  *
- * ## OOC Strategy
+ * Optional relaxation updates records in padded raster order. Later phases read
+ * the records instead of materializing a surface-sized vertex map. Vertices,
+ * faces, labels, and selected tuple data write in 4,096-item batches. An error
+ * can occur after an earlier output in the same batch was written.
  *
- * The key insight is that the Surface Nets cell classification only needs
- * the 8 corner labels of each cell, which span at most 2 adjacent Z-slices.
- * The scanline variant exploits this by:
+ * Out-of-core winding repair requires external sorting and temporary-record
+ * capabilities. A forced resident scanline run can use resident connectivity.
+ * Cancellation is checked across classification, smoothing, counting, and
+ * output scans. It returns success at explicit checkpoints without rollback.
  *
- *   - **Bulk I/O**: Reading FeatureIds two Z-slices at a time via
- *     copyIntoBuffer() with a rolling ping-pong buffer. Each cell's 8
- *     corner labels are resolved from the two buffered slices.
- *
- *   - **Bounded temporary storage**: Padded cell records live in a fixed-width
- *     temporary record store. Disk-backed OOC execution pages this record
- *     store through a bounded cache; forced scanline tests with in-memory
- *     arrays use the storage-neutral in-memory fallback.
- *
- *   - **Self-contained smoothing**: The relaxation and all face-neighbor
- *     lookups use the bounded padded-cell record cache, without needing the
- *     full MMCellMap or a resident surface map.
- *
- *   - **Buffered output writes**: Triangle connectivity, face labels, vertex
- *     coordinates, and transfer records are streamed in fixed-size chunks.
- *
- * ## Phases
- *
- *   1. **Cell classification** (operator() main loop) -- Iterates padded cells
- *      in Z-slice order, reads 8 corner labels from rolling slice buffers,
- *      computes MMCellFlag for each cell, and writes fixed-width records.
- *
- *   2A. **Smoothing** (optional) -- Iterative relaxation using face-connected
- *       neighbor positions looked up through the record cache. This preserves
- *       MMSurfaceNet::relax() convergence without resident surface staging.
- *
- *   2B. **Vertex transform** -- Converts local cell-relative positions to
- *       world coordinates and assigns node types from MMCellFlag junction counts.
- *
- *   3A. **Triangle counting** -- Iterates surface vertices checking 3 edges
- *       per cell for crossings. Each crossing produces a quad = 2 triangles.
- *
- *   3B-3E. **Triangle generation** -- Second pass writes triangle connectivity,
- *       face labels, and runs TupleTransfer. All output is buffered and flushed
- *       in bulk via copyFromBuffer().
- *
- *   3F. **Winding repair** (optional) -- Same as SurfaceNetsDirect.
- *
- * Memory: bounded Z-slices, record-cache pages, and fixed output chunks.
- *
- * @see SurfaceNetsDirect for the in-core reference implementation
+ * @see SurfaceNetsDirect for the resident MMCellMap implementation.
  */
 class SIMPLNXCORE_EXPORT SurfaceNetsScanline
 {
 public:
   /**
-   * @brief Constructs the OOC-optimized algorithm.
-   * @param dataStructure The DataStructure containing all input/output objects
-   * @param mesgHandler Callback for progress and status messages
-   * @param shouldCancel Atomic flag checked periodically for user cancellation
-   * @param inputValues Pointer to the parameter struct (must outlive this object)
+   * @brief Initializes the scanline Surface Nets implementation.
+   * @param dataStructure Contains input and output objects.
+   * @param mesgHandler Receives phase and winding messages.
+   * @param shouldCancel Signals cancellation across record and output scans.
+   * @param inputValues Selects smoothing, winding, transfers, and paths.
+   * @pre All arguments outlive this executor.
    */
   SurfaceNetsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const SurfaceNetsInputValues* inputValues);
+  /**
+   * @brief Destroys the scanline Surface Nets implementation.
+   */
   ~SurfaceNetsScanline() noexcept;
 
   SurfaceNetsScanline(const SurfaceNetsScanline&) = delete;
@@ -93,19 +63,21 @@ public:
   SurfaceNetsScanline& operator=(SurfaceNetsScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the full OOC Surface Nets pipeline: cell classification,
-   * optional smoothing, vertex transformation, triangle generation, and optional
-   * winding repair.
-   * @return Result<> indicating success or an error from winding repair
+   * @brief Classifies padded cells, writes mesh output, and optionally repairs winding.
+   * @return Dimension, allocation, record, bulk-I/O, transfer, or winding result.
+   *
+   * Cancellation returns success at explicit checkpoints. Resized or written
+   * output is not restored.
    */
   Result<> operator()();
 
   /**
-   * @brief Per-vertex information stored only for surface cells.
+   * @struct SurfaceCellRecord
+   * @brief Stores fixed state for one padded cell.
    *
-   * This struct replaces the full MMCellMap::Cell for surface cells. It stores
-   * the padded grid coordinates and the MMCellFlag that encodes which edges
-   * and faces of the cell are crossed by the feature boundary.
+   * An invalid VertexId identifies a cell without a surface vertex. The record
+   * store allocates one entry per padded cell so flat neighbor lookup remains
+   * deterministic and does not require a resident cell-to-record map.
    */
   struct SurfaceCellRecord
   {
@@ -118,10 +90,10 @@ public:
   static_assert(std::is_trivially_copyable_v<SurfaceCellRecord>);
 
 private:
-  DataStructure& m_DataStructure;                        ///< Reference to the active DataStructure
-  const SurfaceNetsInputValues* m_InputValues = nullptr; ///< User parameters and created array paths
-  const std::atomic_bool& m_ShouldCancel;                ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;       ///< Progress message callback
+  DataStructure& m_DataStructure;
+  const SurfaceNetsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 
   std::unique_ptr<ITemporaryRecordStore> m_SurfaceCells;
   std::unique_ptr<BoundedRecordPageCache<SurfaceCellRecord>> m_SurfaceCellCache;

@@ -11,21 +11,26 @@ using namespace nx::core;
 
 namespace
 {
-// Number of cell tuples processed per bulk-I/O chunk. Chosen to keep the temporary
-// featureIds/output buffers small (a few hundred KB) regardless of the total cell count,
-// so no allocation ever scales with the size of the volume.
+// Feature Id and output buffers contain at most 65,536 cell tuples.
 constexpr usize k_ChunkTuples = 65536;
 
 /**
- * @brief Broadcasts one feature-level array through sequential Feature-ID reads and cell-output writes.
+ * @struct CopyFeatureToElementScanlineFunctor
+ * @brief Broadcasts one typed feature array through bulk I/O.
  *
- * The feature-scale source is cached once, while Feature IDs and output values
- * use fixed cell chunks. This avoids both random OOC gathers and a cell-count
- * output staging array.
+ * The source cache is feature-scale. Cell reads and writes use fixed chunks.
  */
 struct CopyFeatureToElementScanlineFunctor
 {
-  /** @brief Executes the typed feature-cache, chunked gather, and checked output-transfer loop. */
+  /**
+   * @brief Copies one selected feature array to cells.
+   * @tparam T Specifies the feature and output scalar type.
+   * @param selectedFeatureArray Provides feature tuples.
+   * @param featureIdsStore Provides one Feature Id per cell.
+   * @param createdArray Receives cell tuples.
+   * @param shouldCancel Stops later chunks when true.
+   * @return Error from bulk I/O, or success after cancellation.
+   */
   template <typename T>
   Result<> operator()(const IDataArray* selectedFeatureArray, const Int32AbstractDataStore& featureIdsStore, IDataArray* createdArray, const std::atomic_bool& shouldCancel)
   {
@@ -36,10 +41,8 @@ struct CopyFeatureToElementScanlineFunctor
     const usize numFeatures = selectedFeatureStore.getNumberOfTuples();
     const usize numCells = featureIdsStore.getNumberOfTuples();
 
-    // Cache the entire feature-level source array into a local buffer with a single bulk read.
-    // This is feature-level (numFeatures * numComps), not cell-level, so it is bounded by the
-    // number of features and safe for OOC. std::make_unique<T[]> avoids the std::vector<bool>
-    // specialization when T == bool.
+    // A feature-scale cache avoids random source gathers. It can be large when
+    // feature count approaches cell count. make_unique supports bool values.
     auto featureCache = std::make_unique<T[]>(numFeatures * numComps);
     auto featureReadResult = selectedFeatureStore.copyIntoBuffer(0, nonstd::span<T>(featureCache.get(), numFeatures * numComps));
     if(featureReadResult.invalid())
@@ -47,7 +50,6 @@ struct CopyFeatureToElementScanlineFunctor
       return featureReadResult;
     }
 
-    // Bounded scratch buffers reused for every chunk.
     auto featureIdsBuffer = std::make_unique<int32[]>(k_ChunkTuples);
     auto outputBuffer = std::make_unique<T[]>(k_ChunkTuples * numComps);
 
@@ -59,14 +61,12 @@ struct CopyFeatureToElementScanlineFunctor
       }
 
       const usize chunkTupleCount = std::min(k_ChunkTuples, numCells - chunkStart);
-      // Sequentially read this chunk of FeatureIds.
       auto featureIdsReadResult = featureIdsStore.copyIntoBuffer(chunkStart, nonstd::span<int32>(featureIdsBuffer.get(), chunkTupleCount));
       if(featureIdsReadResult.invalid())
       {
         return featureIdsReadResult;
       }
 
-      // Gather each cell's feature value from the cached feature array.
       for(usize cellIdx = 0; cellIdx < chunkTupleCount; cellIdx++)
       {
         if((cellIdx & 0xFFFULL) == 0 && shouldCancel)
@@ -86,7 +86,6 @@ struct CopyFeatureToElementScanlineFunctor
         return {};
       }
 
-      // Sequentially write this chunk of the created cell array.
       auto outputWriteResult = createdStore.copyFromBuffer(chunkStart * numComps, nonstd::span<const T>(outputBuffer.get(), chunkTupleCount * numComps));
       if(outputWriteResult.invalid())
       {
@@ -99,7 +98,6 @@ struct CopyFeatureToElementScanlineFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 CopyFeatureArrayToElementArrayScanline::CopyFeatureArrayToElementArrayScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                                const CopyFeatureArrayToElementArrayInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -109,10 +107,8 @@ CopyFeatureArrayToElementArrayScanline::CopyFeatureArrayToElementArrayScanline(D
 {
 }
 
-// -----------------------------------------------------------------------------
 CopyFeatureArrayToElementArrayScanline::~CopyFeatureArrayToElementArrayScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> CopyFeatureArrayToElementArrayScanline::operator()()
 {
   if(m_InputValues->SelectedFeatureArrayPaths.empty())

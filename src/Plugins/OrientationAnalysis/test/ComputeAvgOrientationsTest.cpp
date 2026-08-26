@@ -1,27 +1,16 @@
-/* ============================================================================
- * ComputeAvgOrientations V&V test suite.
+/**
+ * @file ComputeAvgOrientationsTest.cpp
+ * @brief Verifies filter-specific orientation-average routing.
  *
- * Verification is established INDEPENDENTLY of legacy DREAM3D, per the V&V
- * policy (src/Plugins/OrientationAnalysis/vv/ComputeAvgOrientationsFilter.md):
+ * Triclinic symmetry gives a closed-form Rodrigues oracle. EbsdLib
+ * DirectionalStats supplies independent vMF and Watson values with numEM=5,
+ * numIter=10, and seed=43514. The tests verify feature voxel gathering,
+ * fundamental-zone (FZ) reduction, phase-to-crystal-structure lookup, single-
+ * and zero-element features, and output-tuple placement.
  *
- *  - Rodrigues average  : Class 1 (analytical) + Class 4 (invariant). Triclinic
- *                         symmetry makes getNearestQuat a no-op, so the running
- *                         quaternion average reduces to the closed form
- *                         normalize(sum(q_i)), positive-oriented.
- *  - vMF / Watson average: Class 2 (EbsdLib reference) + Class 4 (invariant).
- *                         The EM math lives in EbsdLib DirectionalStats and is
- *                         tested by EbsdLib's DirectionalStatsTest.cpp at THIS
- *                         filter's exact config (numEM=5, numIter=10, seed=43514)
- *                         on the 22 reference quaternions reproduced below. We do
- *                         NOT re-test the EM math; we only verify the filter's
- *                         value-add (per-feature voxel gathering, FZ reduction,
- *                         phase->crystal-structure lookup, single/zero-element
- *                         handling, correct output-tuple placement).
- *
- * The prior exemplar archive 7_ComputeAvgOrientation_v2.tar.gz was a CIRCULAR
- * ORACLE (regenerated from this filter's own output in PR #1577) and has been
- * retired in favor of the inline oracle below.
- * ========================================================================== */
+ * 7_ComputeAvgOrientation_v2.tar.gz was retired because PR #1577 regenerated
+ * its values with this filter, making it a circular oracle.
+ */
 
 #include "OrientationAnalysis/Filters/Algorithms/ComputeAvgOrientations.hpp"
 #include "OrientationAnalysis/Filters/ComputeAvgOrientationsFilter.hpp"
@@ -59,7 +48,6 @@ using namespace nx::core;
 
 namespace
 {
-// ---- DataStructure layout -------------------------------------------------
 const std::string k_ImageGeomName = "ImageGeom";
 const std::string k_CellDataName = "Cell Data";
 const std::string k_FeatureDataName = "Cell Feature Data";
@@ -77,7 +65,6 @@ const DataPath k_QuatsPath = k_CellDataPath.createChildPath(k_QuatsName);
 const DataPath k_FeatureDataPath = k_ImageGeomPath.createChildPath(k_FeatureDataName);
 const DataPath k_CrystalStructuresPath = k_ImageGeomPath.createChildPath(k_EnsembleDataName).createChildPath(k_CrystalStructuresName);
 
-// Output array names
 const std::string k_AvgQuatsName = "AvgQuats";
 const std::string k_AvgEulerName = "AvgEulerAngles";
 const std::string k_VMFQuatsName = "vMF Avg Quats";
@@ -87,7 +74,6 @@ const std::string k_WatsonQuatsName = "Watson Avg Quats";
 const std::string k_WatsonEulerName = "Watson Avg EulerAngles";
 const std::string k_WatsonKappaName = "Watson Kappas";
 
-// Crystal structure enumeration (EbsdLib::CrystalStructure)
 constexpr uint32 k_Unknown = 999;
 constexpr uint32 k_CubicHigh = 1;
 constexpr uint32 k_Triclinic = 4;
@@ -108,11 +94,7 @@ constexpr float32 k_Rz210_w = -0.2588190451025208f; // cos(105)
 constexpr float32 k_Rz300_z = 0.5f;                 // sin(150)
 constexpr float32 k_Rz300_w = -0.8660254037844386f; // cos(150)
 
-// ---------------------------------------------------------------------------
-// Build a DataStructure with an ImageGeom, a Cell Data AM (FeatureIds, Phases,
-// Quats), a Cell Feature Data AM (numFeatures tuples, output target), and a
-// Cell Ensemble Data AM (CrystalStructures). All values supplied by the caller.
-// ---------------------------------------------------------------------------
+// Build the image, input arrays, output feature matrix, and crystal structures.
 DataStructure BuildDataStructure(int32 numCells, int32 numFeatures, const std::vector<int32>& featureIds, const std::vector<int32>& phases, const std::vector<float32>& quats,
                                  const std::vector<uint32>& crystalStructures)
 {
@@ -139,10 +121,9 @@ DataStructure BuildDataStructure(int32 numCells, int32 numFeatures, const std::v
     DataArray<float32>::Create(dataStructure, k_QuatsName, std::make_shared<Float32DataStore>(std::move(buffer), cellDataAM->getShape(), ShapeType{4}), cellDataAM->getId());
   }
 
-  // Cell Feature Data AM (output target). Output arrays are created here by preflight.
+  // Preflight creates output arrays in Cell Feature Data.
   AttributeMatrix::Create(dataStructure, k_FeatureDataName, ShapeType{static_cast<usize>(numFeatures)}, imageGeom->getId());
 
-  // Cell Ensemble Data AM + CrystalStructures
   AttributeMatrix* ensembleAM = AttributeMatrix::Create(dataStructure, k_EnsembleDataName, ShapeType{crystalStructures.size()}, imageGeom->getId());
   {
     auto buffer = std::make_unique<uint32[]>(crystalStructures.size());
@@ -153,7 +134,6 @@ DataStructure BuildDataStructure(int32 numCells, int32 numFeatures, const std::v
   return dataStructure;
 }
 
-// Configure common input array arguments.
 void SetInputArgs(Arguments& args)
 {
   args.insertOrAssign(ComputeAvgOrientationsFilter::k_CellFeatureIdsArrayPath_Key, std::make_any<DataPath>(k_FeatureIdsPath));
@@ -163,7 +143,6 @@ void SetInputArgs(Arguments& args)
   args.insertOrAssign(ComputeAvgOrientationsFilter::k_CellFeatureAttributeMatrixPath_Key, std::make_any<DataPath>(k_FeatureDataPath));
 }
 
-// Assert a 4-component quaternion tuple equals (x,y,z,w) within margin.
 void CheckQuat(const Float32Array& arr, usize feature, float32 x, float32 y, float32 z, float32 w, float32 margin)
 {
   const auto& store = arr.getDataStoreRef();
@@ -173,7 +152,6 @@ void CheckQuat(const Float32Array& arr, usize feature, float32 x, float32 y, flo
   REQUIRE(store.getValue(feature * 4 + 3) == Approx(w).margin(margin));
 }
 
-// Assert all components of a quaternion tuple are NaN.
 void CheckQuatNaN(const Float32Array& arr, usize feature)
 {
   const auto& store = arr.getDataStoreRef();
@@ -183,7 +161,6 @@ void CheckQuatNaN(const Float32Array& arr, usize feature)
   }
 }
 
-// Assert a quaternion tuple is unit-norm and northern-hemisphere (w >= 0).
 void CheckUnitNorthern(const Float32Array& arr, usize feature)
 {
   const auto& store = arr.getDataStoreRef();
@@ -469,9 +446,6 @@ private:
 };
 } // namespace
 
-// =============================================================================
-// Class 1 (Analytical) + Class 4 (Invariant) — Rodrigues average, Triclinic
-// =============================================================================
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Oracle", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -479,14 +453,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // 8 cells across 5 active features (+ feature 5 deliberately empty), Triclinic.
-  //  cell : feature, phase, quat(x,y,z,w)
-  //   0   :   0,      0,     identity      (background; phase 0 -> ignored)
-  //   1   :   1,      1,     identity      single-voxel identity
-  //   2   :   2,      1,     Rz(90)        single-voxel non-identity
-  //   3,4 :   3,      1,     identity,Rz90 mean of identity & Rz(90) = Rz(45)
-  //   5,6,7:  4,      1,     3x Rz(90)     N identical -> Rz(90)
-  //   (feature 5 has no cells -> zero-voxel feature)
+  // Triclinic symmetry gives closed-form Rodrigues averages for single, mixed,
+  // repeated, and empty features.
   const int32 numCells = 8;
   const int32 numFeatures = 6;
   const std::vector<int32> featureIds = {0, 1, 2, 3, 3, 4, 4, 4};
@@ -508,7 +476,7 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
   ComputeAvgOrientationsFilter filter;
   Arguments args;
   SetInputArgs(args);
-  // Enable all three methods so we also exercise the vMF/Watson value-add invariants on this data.
+  // Enable all methods to check the vMF and Watson output invariants.
   args.insertOrAssign(ComputeAvgOrientationsFilter::k_UseRodriguesAverage_Key, std::make_any<bool>(true));
   args.insertOrAssign(ComputeAvgOrientationsFilter::k_RodriguesQuatsArrayName_Key, std::make_any<std::string>(k_AvgQuatsName));
   args.insertOrAssign(ComputeAvgOrientationsFilter::k_RodriguesAvgEulerArrayName_Key, std::make_any<std::string>(k_AvgEulerName));
@@ -526,7 +494,6 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
-  // ---- Class 1: Rodrigues exact averages (x,y,z,w) ----
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgQuatsName)));
   const auto& avgQuats = dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgQuatsName));
   constexpr float32 k_QuatTol = 1.0e-6f;
@@ -537,12 +504,10 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
   CheckQuat(avgQuats, 4, 0.0f, 0.0f, k_Rz90_z, k_Rz90_z, k_QuatTol); // F4 3x Rz90 = Rz90
   CheckQuat(avgQuats, 5, 0.0f, 0.0f, 0.0f, 1.0f, k_QuatTol);         // F5 empty -> identity
 
-  // ---- Class 4: Rodrigues invariants ----
   for(usize f = 0; f < static_cast<usize>(numFeatures); f++)
   {
     CheckUnitNorthern(avgQuats, f);
   }
-  // Identity / empty features -> zero Euler.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgEulerName)));
   const auto& avgEuler = dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgEulerName));
   for(usize c = 0; c < 3; c++)
@@ -550,9 +515,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
     REQUIRE(avgEuler.getDataStoreRef().getValue(1 * 3 + c) == Approx(0.0f).margin(1.0e-6f)); // F1 identity
     REQUIRE(avgEuler.getDataStoreRef().getValue(5 * 3 + c) == Approx(0.0f).margin(1.0e-6f)); // F5 empty
   }
-  // z-rotation fixtures (F2, F3, F4): Euler is gimbal-degenerate (only phi1+phi2 is
-  // determined), so assert the invariant — Phi ~= 0 and all components finite — rather
-  // than individual phi1/phi2 values.
+  // Pure z rotations are Euler-gimbal-degenerate. Check Phi and finite values
+  // instead of individual phi1 and phi2 values.
   for(usize f : {static_cast<usize>(2), static_cast<usize>(3), static_cast<usize>(4)})
   {
     REQUIRE(std::isfinite(avgEuler.getDataStoreRef().getValue(f * 3 + 0)));
@@ -560,7 +524,6 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
     REQUIRE(std::isfinite(avgEuler.getDataStoreRef().getValue(f * 3 + 2)));
   }
 
-  // ---- Class 4: vMF / Watson value-add invariants on this small data ----
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_VMFQuatsName)));
   const auto& vmfQuats = dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_VMFQuatsName));
   const auto& vmfKappa = dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_VMFKappaName));
@@ -569,39 +532,25 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Analytical Ora
 
   for(const Float32Array* arr : {&vmfQuats, &watsonQuats})
   {
-    // Zero-voxel features (F0, F5) -> NaN.
     CheckQuatNaN(*arr, 0);
     CheckQuatNaN(*arr, 5);
-    // Single-voxel features (F1 identity, F2 Rz90) -> muhat == FZ(voxel quat).
     CheckQuat(*arr, 1, 0.0f, 0.0f, 0.0f, 1.0f, 1.0e-6f);
     CheckQuat(*arr, 2, 0.0f, 0.0f, k_Rz90_z, k_Rz90_z, 1.0e-6f);
-    // Multi-voxel features (F3, F4) -> unit + northern hemisphere.
     CheckUnitNorthern(*arr, 3);
     CheckUnitNorthern(*arr, 4);
   }
-  // Single-voxel features -> kappa == 0 (EM skipped).
   REQUIRE(vmfKappa.getDataStoreRef().getValue(1) == Approx(0.0f).margin(1.0e-6f));
   REQUIRE(vmfKappa.getDataStoreRef().getValue(2) == Approx(0.0f).margin(1.0e-6f));
   REQUIRE(watsonKappa.getDataStoreRef().getValue(1) == Approx(0.0f).margin(1.0e-6f));
   REQUIRE(watsonKappa.getDataStoreRef().getValue(2) == Approx(0.0f).margin(1.0e-6f));
-  // Zero-voxel features -> kappa NaN.
   REQUIRE(std::isnan(vmfKappa.getDataStoreRef().getValue(0)));
   REQUIRE(std::isnan(vmfKappa.getDataStoreRef().getValue(5)));
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// =============================================================================
-// Class 2 (EbsdLib reference) — vMF / Watson average reproduces EbsdLib's
-// already-asserted DirectionalStatsTest values, proving the filter routes data
-// correctly without re-deriving the EM math.
-//
-// Reference: EbsdLib/Source/Test/DirectionalStatsTest.cpp ("DirectionalStatsTest:VMF"
-// and ":Watson"), which run numEM=5, numIter=10, seed=43514 over these same 22
-// quaternions FZ-reduced with Cubic_High ops. The filter performs the identical
-// pipeline. Tolerances are loosened from EbsdLib's 1e-6 to absorb the float32
-// round-trip of the input quaternions through the DataArray.
-// =============================================================================
+// EbsdLib DirectionalStats supplies the vMF and Watson reference values. The
+// tolerance allows float32 DataArray round-trip error.
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson EbsdLib Reference Oracle", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -690,17 +639,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson EbsdLib Refer
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// =============================================================================
-// Class 4 (Invariant) — Rodrigues under non-trivial (cubic) symmetry (#1660).
-// One Cubic_High feature is fed the SAME physical orientation, Rz(30 deg), as
-// five different representations: cubic-equivalent z-rotations Rz(30+90k) plus
-// the negated double-cover representative -Rz(30). Because Rz(90) is a cubic
-// symmetry operator (and getNearestQuat canonicalizes the sign), every voxel's
-// nearest-equivalent pick is exactly Rz(30), so the running average MUST
-// finalize to Rz(30) — an implementation-independent expectation that exercises
-// the 24-operator symmetry-reduction branch, the reset-to-identity first-voxel
-// branch (on a non-trivial representation), and the count weighting.
-// =============================================================================
+// Cubic-equivalent Rz(30+90k) values and the negative double-cover value must
+// average to Rz(30).
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Cubic Symmetry Invariant", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -761,12 +701,7 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Cubic Symmetry
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// =============================================================================
-// Class 4 (Invariant) — Rodrigues voxel-ordering independence. The F3 fixture
-// of the analytical oracle (mean of identity and Rz(90) = Rz(45)) is run with
-// both voxel orderings; the result must be identical. Both orders accumulate
-// to (0, 0, 0.7071, 1.7071) before normalization (see provenance sidecar).
-// =============================================================================
+// Reversing identity and Rz(90) input order must not change the Rz(45) average.
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Voxel Ordering Independence", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -816,13 +751,7 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Rodrigues Voxel Ordering
   }
 }
 
-// =============================================================================
-// Regression (#1659) — the vMF/Watson voxel gather must ignore phase-0
-// (unindexed) voxels, matching the counting pass and the Rodrigues path.
-// Pre-fix, the gather loop collected every voxel of the feature regardless of
-// phase, so a phase-0 voxel contributed a garbage quaternion to the EM average
-// (and defeated the single-voxel shortcut when featureNumVoxels == 1).
-// =============================================================================
+// vMF and Watson gathering must exclude phase-zero unindexed voxels.
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson Ignores Phase-0 Voxels", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -830,11 +759,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson Ignores Phase
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Two active features, each polluted with a phase-0 voxel carrying a garbage
-  // (non-unit, southern-hemisphere) quaternion. The counting pass gates on
-  // phase > 0, so:
-  //   F1: 1 counted voxel (Rz90)  -> single-voxel shortcut: muhat == Rz90, kappa == 0
-  //   F2: 2 counted voxels (Rz90) -> EM over identical quats: muhat == Rz90
+  // Phase-zero quaternions are garbage. Valid Rz90 samples must determine both
+  // feature outputs.
   const int32 numCells = 5;
   const int32 numFeatures = 3; // F0 has no voxels -> NaN
   const std::vector<int32> featureIds = {1, 1, 2, 2, 2};
@@ -892,7 +818,7 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson Ignores Phase
   REQUIRE(vmfKappa.getDataStoreRef().getValue(1) == Approx(0.0f).margin(1.0e-6f));
   REQUIRE(watsonKappa.getDataStoreRef().getValue(1) == Approx(0.0f).margin(1.0e-6f));
 
-  // Cross-path agreement: the Rodrigues path already excludes phase-0 voxels.
+  // Rodrigues must exclude the same phase-zero voxels.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgQuatsName)));
   const auto& avgQuats = dataStructure.getDataRefAs<Float32Array>(k_FeatureDataPath.createChildPath(k_AvgQuatsName));
   CheckQuat(avgQuats, 1, 0.0f, 0.0f, k_Rz90_z, k_Rz90_z, 1.0e-6f);
@@ -901,13 +827,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: vMF/Watson Ignores Phase
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// =============================================================================
-// Guards (#1661) — unknown/unsupported crystal structures and out-of-range
-// Phases values must be excluded from BOTH averaging paths, must not read out
-// of range on the CrystalStructures array, and the drop must be reported as
-// warnings (-54671 unknown crystal structure, -54672 out-of-range phase) —
-// never a silent drop.
-// =============================================================================
+// Both averaging paths must warn when crystal structures are unknown or phases
+// are out of range.
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Unknown Crystal Structure and Out-Of-Range Phase Guards", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -1265,11 +1186,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: zero-cell and empty-feat
   }
 }
 
-// =============================================================================
-// Error path — no averaging method enabled is now rejected in preflight with
-// -54673 so the GUI surfaces it before execution (issue #1661). The runtime
-// -54670 check in the algorithm remains as a backstop for direct invocation.
-// =============================================================================
+// Preflight rejects no enabled averaging method. Direct execution retains a
+// runtime backstop.
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: No Method Enabled Error", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -1327,11 +1245,9 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: No Method Enabled Error"
   REQUIRE(algoResult.errors()[0].code == -54670);
 }
 
-// =============================================================================
 // Preflight error — mismatched cell-array tuple counts => error -651.
 // (Covers the GCOV target from PR #1644; the duplicate TEST_CASE that #1644
 // added was removed in favor of this one — issue #1661.)
-// =============================================================================
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Cell Array Tuple Mismatch Error (-651)", "[OrientationAnalysis][ComputeAvgOrientationsFilter]")
 {
   UnitTest::LoadPlugins();
@@ -1374,10 +1290,8 @@ TEST_CASE("OrientationAnalysis::ComputeAvgOrientations: Cell Array Tuple Mismatc
   REQUIRE(preflightResult.outputActions.errors()[0].code == -651);
 }
 
-// =============================================================================
 // SIMPL Backwards Compatibility (kept, unchanged) — validates UUID + parameter
 // conversion of the legacy six-parameter (Rodrigues) filter.
-// =============================================================================
 TEST_CASE("OrientationAnalysis::ComputeAvgOrientationsFilter: SIMPL Backwards Compatibility", "[OrientationAnalysis][ComputeAvgOrientationsFilter][BackwardsCompatibility]")
 {
   auto app = Application::GetOrCreateInstance();

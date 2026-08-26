@@ -11,16 +11,27 @@ struct CreateColorMapInputValues;
 
 /**
  * @class CreateColorMapDirect
- * @brief Original parallel, direct-store implementation for in-memory arrays.
+ * @brief Maps scalar tuples to RGB values through in-memory arrays.
  *
- * This path preserves the existing per-element access and parallel transformation for
- * contiguous stores, avoiding an in-core regression from staging data through buffers.
- * CreateColorMap dispatches OOC stores to CreateColorMapScanline instead.
+ * Concrete stores use raw pointers for parallel mapping. The abstract fallback
+ * accesses DataStore instances in parallel and has no general thread-safety
+ * guarantee. Disk-backed arrays dispatch to Scanline.
  */
 class SIMPLNXCORE_EXPORT CreateColorMapDirect
 {
 public:
+  /**
+   * @brief Creates an in-memory color-map algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param msgHandler Receives progress messages.
+   * @param shouldCancel Is retained but not checked by this direct path.
+   * @param inputValues Specifies validated paths and options. The caller must
+   * keep this object alive for the algorithm lifetime.
+   */
   CreateColorMapDirect(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, const CreateColorMapInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning in-memory algorithm.
+   */
   ~CreateColorMapDirect() noexcept;
 
   CreateColorMapDirect(const CreateColorMapDirect&) = delete;
@@ -28,6 +39,12 @@ public:
   CreateColorMapDirect& operator=(const CreateColorMapDirect&) = delete;
   CreateColorMapDirect& operator=(CreateColorMapDirect&&) noexcept = delete;
 
+  /**
+   * @brief Maps scalar tuples to RGB values.
+   * @return Preset error, or success.
+   *
+   * The current caller discards typed-generator errors, including empty inputs.
+   */
   Result<> operator()();
 
 private:

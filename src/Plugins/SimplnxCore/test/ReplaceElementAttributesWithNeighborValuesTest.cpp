@@ -23,7 +23,6 @@ using namespace nx::core::UnitTest;
 
 namespace
 {
-// ---- branch OOC test helpers ----
 const std::string k_GeomName("DataContainer");
 const std::string k_CellDataName("CellData");
 
@@ -31,6 +30,13 @@ const DataPath k_GeomPath({k_GeomName});
 const DataPath k_CellDataPath = k_GeomPath.createChildPath(k_CellDataName);
 const DataPath k_ConfidencePath = k_CellDataPath.createChildPath("Confidence Index");
 
+/**
+ * @brief Builds deterministic confidence, Euler-angle, and phase arrays for OOC tests.
+ * @param dataStructure Receives the image geometry and cell arrays.
+ * @param dimX Number of cells on the X axis.
+ * @param dimY Number of cells on the Y axis.
+ * @param dimZ Number of cells on the Z axis.
+ */
 void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize dimZ)
 {
   const ShapeType cellTupleShape = {dimZ, dimY, dimX};
@@ -84,6 +90,15 @@ void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize d
   }
 }
 
+/**
+ * @brief Counts confidence values that are less than a selected threshold.
+ * @param dataStructure Contains the confidence array.
+ * @param threshold Exclusive upper limit.
+ * @param dimX Number of cells on the X axis.
+ * @param dimY Number of cells on the Y axis.
+ * @param dimZ Number of cells on the Z axis.
+ * @return Number of values below the threshold.
+ */
 usize CountVoxelsBelowThreshold(const DataStructure& dataStructure, float32 threshold, usize dimX, usize dimY, usize dimZ)
 {
   const auto& conf = dataStructure.getDataRefAs<Float32Array>(k_ConfidencePath).getDataStoreRef();
@@ -104,6 +119,15 @@ usize CountVoxelsBelowThreshold(const DataStructure& dataStructure, float32 thre
   return count;
 }
 
+/**
+ * @brief Counts confidence values that are greater than a selected threshold.
+ * @param dataStructure Contains the confidence array.
+ * @param threshold Exclusive lower limit.
+ * @param dimX Number of cells on the X axis.
+ * @param dimY Number of cells on the Y axis.
+ * @param dimZ Number of cells on the Z axis.
+ * @return Number of values above the threshold.
+ */
 usize CountVoxelsAboveThreshold(const DataStructure& dataStructure, float32 threshold, usize dimX, usize dimY, usize dimZ)
 {
   const auto& conf = dataStructure.getDataRefAs<Float32Array>(k_ConfidencePath).getDataStoreRef();
@@ -124,11 +148,9 @@ usize CountVoxelsAboveThreshold(const DataStructure& dataStructure, float32 thre
   return count;
 }
 
-// ---- develop synthetic/exemplar test helpers ----
 const DataPath k_ConfidenceIndexPath = k_CellAttributeMatrix.createChildPath(Constants::k_Confidence_Index);
 const std::string k_ExemplarDataContainer2("DataContainer");
 
-// Names for the self-contained synthetic test below.
 const std::string k_SyntheticImageGeomName("Image3D");
 const std::string k_SyntheticCellAMName("CellData");
 const std::string k_SyntheticConfName("Confidence Index");
@@ -136,10 +158,16 @@ const std::string k_SyntheticMarkerName("Marker");
 const DataPath k_SyntheticConfPath({k_SyntheticImageGeomName, k_SyntheticCellAMName, k_SyntheticConfName});
 const DataPath k_SyntheticMarkerPath({k_SyntheticImageGeomName, k_SyntheticCellAMName, k_SyntheticMarkerName});
 
-// Build a 3x3x3 Image geometry with a float32 "Confidence Index" comparison array and a second
-// int32 "Marker" array (each tuple initialized to its own linear index) so the multi-array copy
-// loop in the algorithm is exercised. Every voxel gets goodValue; the voxels listed in badIndices
-// get badValue instead.
+/**
+ * @brief Builds a 3-cubed fixture that exposes the selected neighbor for each replacement.
+ * @param goodValue Confidence value for retained cells.
+ * @param badValue Confidence value for cells that require replacement.
+ * @param badIndices Linear indices that receive badValue.
+ * @return A DataStructure with confidence and marker arrays.
+ *
+ * Each marker starts with its linear index. A replaced marker therefore
+ * identifies the exact neighbor that supplied the copied tuple.
+ */
 DataStructure BuildSyntheticDataStructure(float32 goodValue, float32 badValue, const std::vector<usize>& badIndices)
 {
   DataStructure dataStructure;
@@ -167,21 +195,21 @@ DataStructure BuildSyntheticDataStructure(float32 goodValue, float32 badValue, c
 }
 } // namespace
 
-// ============================ Branch OOC tests ============================
+// These hidden cases generate small and large OOC fixtures.
 
 TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Generate Test Data", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter][.GenerateTestData]")
 {
   const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "replace_element_attributes";
   fs::create_directories(outputDir);
 
-  // Small input data (20x20x20)
+  // The small fixture supports focused correctness tests.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 20, 20, 20);
     UnitTest::WriteTestDataStructure(buildDS, outputDir / "small_input.dream3d");
   }
 
-  // Large input data (200x200x200)
+  // The large fixture exercises bounded OOC processing.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 200, 200, 200);
@@ -189,7 +217,7 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Genera
   }
 }
 
-// ==================== Develop synthetic / backwards-compat tests ====================
+// The remaining cases verify exemplars, synthetic edge cases, and conversion.
 TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter]")
 {
   UnitTest::LoadPlugins();
@@ -197,31 +225,31 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter", "[Sim
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_replace_element_attributes_with_neighbor.tar.gz",
                                                               "6_6_replace_element_attributes_with_neighbor");
 
-  // Read Exemplar DREAM3D File Filter
+  // Load the exemplar and its related input fixture.
   auto exemplarFilePath = fs::path(fmt::format("{}/TestFiles/6_6_replace_element_attributes_with_neighbor/6_6_replace_element_attributes_with_neighbor.dream3d", unit_test::k_DREAM3DDataDir));
   DataStructure exemplarDataStructure = nx::core::UnitTest::LoadDataStructure(exemplarFilePath);
 
-  // Read the Test Data set
+  // Load the input fixture before executing the filter.
   auto baseDataFilePath = fs::path(fmt::format("{}/TestFiles/6_6_replace_element_attributes_with_neighbor/6_6_replace_element_attributes_with_neighbor.dream3d", unit_test::k_DREAM3DDataDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
 
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
+    // Configure the filter for the exemplar comparison.
     ReplaceElementAttributesWithNeighborValuesFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
+    // Confidence selects replacements, and all cell arrays copy with each tuple.
     args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_MinConfidence_Key, std::make_any<float32>(0.1F));
     args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_SelectedComparison_Key, std::make_any<ChoicesParameter::ValueType>(0));
     args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_Loop_Key, std::make_any<bool>(true));
     args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_ComparisonDataPath, std::make_any<DataPath>(k_ConfidenceIndexPath));
     args.insertOrAssign(ReplaceElementAttributesWithNeighborValuesFilter::k_SelectedImageGeometryPath_Key, std::make_any<DataPath>(k_DataContainerPath));
 
-    // Preflight the filter and check result
+    // Preflight must accept the complete cell-array selection.
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
+    // Execution must reproduce the exemplar arrays.
     auto executeResult = filter.execute(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
   }
@@ -237,8 +265,8 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter", "[Sim
 
 TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthetic neighbor replacement", "[SimplnxCore][ReplaceElementAttributesWithNeighborValuesFilter]")
 {
-  // Bad voxels at the center (all six face neighbors in-bounds) plus two opposite corners
-  // (each missing three neighbors) so both sides of every neighbor-edge branch are exercised.
+  // The center has six in-bounds neighbors. Each opposite corner has three missing neighbors.
+  // Together, these cells exercise both sides of each neighbor-boundary condition.
   const std::vector<usize> badIndices = {0, 13, 26};
   constexpr float32 k_Threshold = 0.5F;
 
@@ -263,7 +291,7 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthe
 
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath));
     const auto& confStore = dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath).getDataStoreRef();
-    // Every voxel is now "good" (>= threshold): all bad voxels were filled from a neighbor.
+    // Every low-confidence cell must receive a value that meets the threshold.
     for(usize i = 0; i < confStore.getNumberOfTuples(); i++)
     {
       REQUIRE(confStore[i] >= k_Threshold);
@@ -272,8 +300,8 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthe
     {
       REQUIRE(confStore[idx] == Approx(k_Good));
     }
-    // The Marker array (a non-comparison cell array) must also be copied from the chosen neighbor,
-    // so the center bad voxel's marker no longer equals its own original linear index.
+    // Tuple replacement also copies the marker array from the selected neighbor.
+    // Thus, the center marker must differ from its original linear index.
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<Int32Array>(k_SyntheticMarkerPath));
     const auto& markerStore = dataStructure.getDataRefAs<Int32Array>(k_SyntheticMarkerPath).getDataStoreRef();
     REQUIRE(markerStore[13] != 13);
@@ -331,7 +359,7 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthe
 
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath));
     const auto& confStore = dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath).getDataStoreRef();
-    // The single interior bad voxel is surrounded by good voxels, so one pass fills it.
+    // One pass fills the isolated interior cell because all face neighbors are good.
     REQUIRE(confStore[13] == Approx(k_Good));
     UnitTest::CheckArraysInheritTupleDims(dataStructure);
   }
@@ -340,10 +368,9 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthe
   {
     constexpr float32 k_Good = 0.9F;
     constexpr float32 k_Bad = 0.1F;
-    // Center voxel 13=(1,1,1) and its 6 face neighbors {4,10,12,14,16,22} are all bad.
-    // In the scan pass every compare1 call for voxel 13 returns false, so bestNeighbor[13]
-    // stays -1 and voxel 13 is not copied. The six ring voxels each have at least one good
-    // face neighbor outside the cluster and are replaced in the same pass.
+    // Center cell 13 and its six face neighbors all start below the threshold.
+    // The scan finds no source for the center, so its best-neighbor index stays -1.
+    // Each surrounding cell has an exterior good neighbor and is replaced in the same pass.
     const std::vector<usize> clusterIndices = {4, 10, 12, 13, 14, 16, 22};
     DataStructure dataStructure = BuildSyntheticDataStructure(k_Good, k_Bad, clusterIndices);
 
@@ -363,11 +390,10 @@ TEST_CASE("SimplnxCore::ReplaceElementAttributesWithNeighborValuesFilter: Synthe
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath));
     const auto& confStore = dataStructure.getDataRefAs<Float32Array>(k_SyntheticConfPath).getDataStoreRef();
 
-    // Center voxel: all six face neighbors were bad, so compare1 returned false for each
-    // and bestNeighbor[13] stayed -1. Voxel 13 must remain unchanged.
+    // The center has no selected source, so its value must remain unchanged.
     REQUIRE(confStore[13] == Approx(k_Bad));
 
-    // Ring voxels: each had at least one good face neighbor outside the cluster; all replaced.
+    // Each surrounding cell has an exterior source, so every surrounding value changes.
     for(usize idx : {4UL, 10UL, 12UL, 14UL, 16UL, 22UL})
     {
       REQUIRE(confStore[idx] == Approx(k_Good));

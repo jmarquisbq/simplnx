@@ -28,23 +28,48 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @concept GeometryType
+ * @brief Restricts feature-bound helpers to geometry types.
+ * @tparam T Specifies the candidate geometry type.
+ */
 template <typename T>
 concept GeometryType = std::is_base_of_v<IGeometry, T>;
 
+// This sentinel marks a feature with no observed image cell.
 constexpr usize k_InvalidIndex = std::numeric_limits<usize>::max();
 
+/**
+ * @struct ImageFeatureIndexBounds
+ * @brief Stores minimum and maximum cell indices for one feature.
+ */
 struct ImageFeatureIndexBounds
 {
   std::array<usize, 3> minIndices = {k_InvalidIndex, k_InvalidIndex, k_InvalidIndex};
   std::array<usize, 3> maxIndices = {0, 0, 0};
 };
 
+/**
+ * @struct ImageBoundsResult
+ * @brief Stores direct ImageGeom bounds and observed feature count.
+ */
 struct ImageBoundsResult
 {
   std::vector<float32> bounds;
   int32 numFeatures = 0;
 };
 
+/**
+ * @brief Computes direct ImageGeom bounds from resident Feature IDs.
+ * @param imageGeom Supplies dimensions, origin, and spacing.
+ * @param featureIds Supplies contiguous Feature IDs.
+ * @param featureTupleCount Limits valid Feature IDs.
+ * @return Bounds and the observed feature count.
+ * @pre featureIds contains one value per ImageGeom cell.
+ *
+ * X-axis runs update index extrema once per repeated Feature ID. This reduces
+ * repeated bounds updates for contiguous image regions.
+ */
 ImageBoundsResult ComputeImageBounds(const ImageGeom& imageGeom, const int32* featureIds, usize featureTupleCount)
 {
   const usize xPoints = imageGeom.getNumXCells();
@@ -121,6 +146,16 @@ ImageBoundsResult ComputeImageBounds(const ImageGeom& imageGeom, const int32* fe
   return result;
 }
 
+/**
+ * @brief Computes direct bounds for one supported geometry type.
+ * @tparam GeomT Specifies the geometry type.
+ * @param geom Supplies cells and vertex coordinates.
+ * @param featureIds Supplies one Feature ID per cell.
+ * @param numFeatures Identifies the allocated feature count.
+ * @return Six bounds values per feature. Unobserved features retain NaN values.
+ *
+ * This helper uses direct element access and does not inspect cancellation.
+ */
 template <GeometryType GeomT>
 std::vector<float32> ComputeBounds(const GeomT& geom, const Int32AbstractDataStore& featureIds, usize numFeatures)
 {
@@ -265,6 +300,13 @@ std::vector<float32> ComputeBounds(const GeomT& geom, const Int32AbstractDataSto
   return bounds;
 }
 
+/**
+ * @brief Selects a direct bounds helper for a geometry type.
+ * @tparam ArgsT Specifies forwarded helper argument types.
+ * @param geom Supplies the input geometry.
+ * @param args Forwards arguments to the selected helper.
+ * @return Bounds values for a supported geometry. Returns an empty vector otherwise.
+ */
 template <class... ArgsT>
 std::vector<float32> ExecuteComputeBounds(const IGeometry& geom, ArgsT&&... args)
 {
@@ -292,7 +334,6 @@ std::vector<float32> ExecuteComputeBounds(const IGeometry& geom, ArgsT&&... args
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBoundsDirect::ComputeFeatureBoundsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                        const ComputeFeatureBoundsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -302,10 +343,8 @@ ComputeFeatureBoundsDirect::ComputeFeatureBoundsDirect(DataStructure& dataStruct
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBoundsDirect::~ComputeFeatureBoundsDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureBoundsDirect::operator()()
 {
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
@@ -386,21 +425,10 @@ Result<> ComputeFeatureBoundsDirect::operator()()
 
   if(m_InputValues->CreateEdgeGeometry)
   {
-    static constexpr std::array<std::pair<int, int>, 12> k_CubeEdges = {{// bottom face
-                                                                         {0, 1},
-                                                                         {1, 2},
-                                                                         {2, 3},
-                                                                         {3, 0},
-                                                                         // top face
-                                                                         {4, 5},
-                                                                         {5, 6},
-                                                                         {6, 7},
-                                                                         {7, 4},
-                                                                         // vertical sides
-                                                                         {0, 4},
-                                                                         {1, 5},
-                                                                         {2, 6},
-                                                                         {3, 7}}};
+    /**
+     * @brief Connects the eight bounding-box vertices into twelve edges.
+     */
+    static constexpr std::array<std::pair<int, int>, 12> k_CubeEdges = {{{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}};
     std::array<usize, 2> vertPair = {0, 0};
 
     const usize numVerts = numFeatures * 8;

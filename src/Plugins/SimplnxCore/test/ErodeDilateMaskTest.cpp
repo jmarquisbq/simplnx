@@ -48,7 +48,7 @@ void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize d
   auto* maskArray = DataArray<bool>::Create(dataStructure, "Mask", maskDataStore, cellAM->getId());
   auto& maskStore = maskArray->getDataStoreRef();
 
-  // Use Z-slice buffered writes for OOC efficiency (bool needs raw array, not vector<bool>)
+  // Use Z-slice buffered writes. Bool data requires a raw array instead of vector<bool>.
   auto maskBuf = std::make_unique<bool[]>(sliceSize);
 
   for(usize z = 0; z < dimZ; z++)
@@ -91,14 +91,14 @@ TEST_CASE("SimplnxCore::ErodeDilateMaskFilter: Generate Test Data", "[SimplnxCor
   const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "erode_dilate_mask";
   fs::create_directories(outputDir);
 
-  // Small input data (20x20x20)
+  // The small fixture uses a 20-cubed volume.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 20, 20, 20);
     UnitTest::WriteTestDataStructure(buildDS, outputDir / "small_input.dream3d");
   }
 
-  // Large input data (200x200x200)
+  // The large fixture uses a 200-cubed volume.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 200, 200, 200);

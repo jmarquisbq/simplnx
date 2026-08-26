@@ -36,6 +36,15 @@ float32 GetConversionFactor(uint64 conversionType)
   return 1.0f;
 }
 
+/**
+ * @brief Converts one data store in sequential bounded pages.
+ * @param angles Stores the in-place Float32 values.
+ * @param conversionFactor Multiplier for each value.
+ * @param shouldCancel Signals cancellation between pages.
+ * @return Source or destination bulk-I/O errors.
+ *
+ * Cancellation returns success after pages that are already written.
+ */
 Result<> ConvertValuesInChunks(Float32AbstractDataStore& angles, float32 conversionFactor, const std::atomic_bool& shouldCancel)
 {
   const usize totalValues = angles.getSize();
@@ -74,6 +83,12 @@ Result<> ConvertValuesInChunks(Float32AbstractDataStore& angles, float32 convers
   return {};
 }
 
+/**
+ * @class ConvertContiguousValuesImpl
+ * @brief Multiplies one disjoint range in a stable contiguous allocation.
+ *
+ * Each worker checks cancellation before its range, not during the range.
+ */
 class ConvertContiguousValuesImpl
 {
 public:
@@ -104,6 +119,12 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ChangeAngleRepresentationDirect
+ * @brief Uses direct parallel access for a concrete Float32DataStore.
+ *
+ * Other store implementations delegate to the bounded page function.
+ */
 class ChangeAngleRepresentationDirect
 {
 public:
@@ -141,6 +162,10 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ChangeAngleRepresentationScanline
+ * @brief Uses sequential bounded pages for storage-neutral conversion.
+ */
 class ChangeAngleRepresentationScanline
 {
 public:
@@ -163,7 +188,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ChangeAngleRepresentation::ChangeAngleRepresentation(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                      ChangeAngleRepresentationInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -173,10 +197,8 @@ ChangeAngleRepresentation::ChangeAngleRepresentation(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 ChangeAngleRepresentation::~ChangeAngleRepresentation() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ChangeAngleRepresentation::operator()()
 {
   auto& angles = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->AnglesArrayPath);

@@ -11,14 +11,24 @@ struct ComputeBoundingBoxStatsInputValues;
 
 /**
  * @class ComputeBoundingBoxStatsDirect
- * @brief Computes exact bounding-box statistics with direct in-memory access.
+ * @brief Computes bounding-box statistics with direct element access.
  *
- * This preserves the original parallel implementation because direct DataStore access is fastest
- * for contiguous in-core arrays; out-of-core arrays use ComputeBoundingBoxStatsScanline instead.
+ * Contiguous in-memory input permits parallel reads. A forced direct path uses
+ * serial abstract-store reads for non-contiguous input because generic
+ * DataStore access does not guarantee thread safety. Framework output stores
+ * are populated serially after the workers join.
  */
 class SIMPLNXCORE_EXPORT ComputeBoundingBoxStatsDirect
 {
 public:
+  /**
+   * @brief Initializes direct bounding-box statistics.
+   * @param dataStructure Contains the geometry, arrays, and outputs.
+   * @param mesgHandler Supplies the common interface. This path emits no messages.
+   * @param shouldCancel Supplies the common algorithm interface.
+   * @param inputValues Selects statistics and identifies required paths.
+   * @pre All arguments outlive this executor.
+   */
   ComputeBoundingBoxStatsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeBoundingBoxStatsInputValues* inputValues);
   ~ComputeBoundingBoxStatsDirect() noexcept;
 
@@ -27,6 +37,11 @@ public:
   ComputeBoundingBoxStatsDirect& operator=(const ComputeBoundingBoxStatsDirect&) = delete;
   ComputeBoundingBoxStatsDirect& operator=(ComputeBoundingBoxStatsDirect&&) noexcept = delete;
 
+  /**
+   * @brief Computes the selected statistics with direct element access.
+   * @return Success, or an input or output-store error.
+   * @warning This implementation does not inspect the cancellation flag.
+   */
   Result<> operator()();
 
 private:

@@ -14,27 +14,13 @@ struct ComputeGBCDPoleFigureInputValues;
 
 /**
  * @class ComputeGBCDPoleFigureScanline
- * @brief Out-of-core (Scanline) algorithm for generating a GBCD stereographic pole figure.
+ * @brief Generates a pole figure from one cached OOC phase slice.
  *
- * This algorithm is selected by the dispatcher when the GBCD array is backed by
- * chunked (OOC) storage on disk. The full GBCD array can be very large (millions of
- * float64 elements across all phases), but for a single pole figure only the bins
- * belonging to one phase are accessed.
- *
- * **OOC optimization**: Instead of caching the entire GBCD array (as the Direct
- * variant does), this algorithm caches only the single-phase slice of the GBCD via
- * a single copyIntoBuffer() call. For a typical GBCD with 5D bin resolution, one
- * phase slice is on the order of hundreds of thousands of float64 elements -- far
- * smaller than the full multi-phase array. This dramatically reduces the memory
- * footprint and avoids random-access chunk thrashing across phase boundaries.
- *
- * Once the phase slice is cached in a local buffer, the actual pole-figure
- * computation is identical to the Direct variant and runs multi-threaded using
- * ParallelData2DAlgorithm on the cached raw pointers.
- *
- * **Memory footprint**: O(totalGbcdBins) for one phase, plus O(outputDim^2) for
- * the pole figure cache. Both are bounded by the GBCD bin resolution, not by the
- * total number of phases.
+ * The dispatcher normally selects this class when the GBCD is OOC. It reads
+ * the selected contiguous phase slice instead of all phase data. Full-width
+ * output pages bound output staging memory. Workers access read-only local
+ * caches and disjoint page elements. They do not access DataArray or DataStore
+ * objects. Cancellation returns success with completed output pages preserved.
  *
  * @see ComputeGBCDPoleFigureDirect for the in-core variant that caches the full GBCD.
  */
@@ -42,13 +28,19 @@ class ORIENTATIONANALYSIS_EXPORT ComputeGBCDPoleFigureScanline
 {
 public:
   /**
-   * @brief Constructs the OOC GBCD pole figure algorithm.
-   * @param dataStructure The DataStructure containing all input/output arrays.
-   * @param mesgHandler Message handler for progress/info messages.
-   * @param shouldCancel Atomic cancellation flag.
-   * @param inputValues Pointer to the shared parameter struct; must outlive this object.
+   * @brief Initializes the scanline GBCD pole-figure executor.
+   * @param dataStructure Provides the selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies pole-figure settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   ComputeGBCDPoleFigureScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeGBCDPoleFigureInputValues* inputValues);
+
+  /**
+   * @brief Destroys the scanline GBCD pole-figure executor.
+   */
   ~ComputeGBCDPoleFigureScanline() noexcept;
 
   ComputeGBCDPoleFigureScanline(const ComputeGBCDPoleFigureScanline&) = delete;
@@ -57,22 +49,21 @@ public:
   ComputeGBCDPoleFigureScanline& operator=(ComputeGBCDPoleFigureScanline&&) noexcept = delete;
 
   /**
-   * @brief Generates the pole figure by caching only the phase-of-interest GBCD slice.
-   * @return Result<> (currently always succeeds).
+   * @brief Generates the pole figure.
+   * @return Success, or an error from crystal-structure, phase-slice, or output
+   *         bulk I/O.
+   *
+   * Cancellation returns success and preserves completed output pages.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the cancellation flag reference.
-   * @return const reference to the atomic cancellation flag.
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                                  ///< Reference to the live DataStructure.
-  const ComputeGBCDPoleFigureInputValues* m_InputValues = nullptr; ///< Borrowed pointer to input parameters.
-  const std::atomic_bool& m_ShouldCancel;                          ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                 ///< Message handler for user-facing messages.
+  DataStructure& m_DataStructure;
+  const ComputeGBCDPoleFigureInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

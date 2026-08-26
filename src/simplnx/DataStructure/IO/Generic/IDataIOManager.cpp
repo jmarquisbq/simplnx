@@ -56,10 +56,6 @@ void IDataIOManager::addListStoreCreationFnc(const std::string& type, ListStoreC
   m_ListStoreCreationMap[type] = creationFnc;
 }
 
-// ---------------------------------------------------------------------------
-// StringStore factory (StringArray backing store)
-// ---------------------------------------------------------------------------
-
 bool IDataIOManager::hasStringStoreCreationFnc(const std::string& type) const
 {
   return m_StringStoreCreationMap.find(type) != m_StringStoreCreationMap.cend();
@@ -67,8 +63,6 @@ bool IDataIOManager::hasStringStoreCreationFnc(const std::string& type) const
 
 IDataIOManager::StringStoreCreateFnc IDataIOManager::stringStoreCreationFnc(const std::string& type) const
 {
-  // Look up the factory by format name; return nullptr if this manager does
-  // not provide StringStore support for the requested format.
   auto iter = m_StringStoreCreationMap.find(type);
   if(iter == m_StringStoreCreationMap.cend())
   {
@@ -79,7 +73,6 @@ IDataIOManager::StringStoreCreateFnc IDataIOManager::stringStoreCreationFnc(cons
 
 void IDataIOManager::addStringStoreCreationFnc(const std::string& type, StringStoreCreateFnc creationFnc)
 {
-  // Register (or replace) the StringStore factory for this format name.
   m_StringStoreCreationMap[type] = std::move(creationFnc);
 }
 } // namespace nx::core

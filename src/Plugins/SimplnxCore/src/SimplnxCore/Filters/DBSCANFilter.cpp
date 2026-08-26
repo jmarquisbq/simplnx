@@ -66,11 +66,10 @@ Parameters DBSCANFilter::parameters() const
 {
   Parameters params;
 
-  // Create the parameter descriptors that are needed for this filter
   params.insertSeparator(Parameters::Separator{"Random Number Seed Parameters"});
   params.insertLinkableParameter(std::make_unique<ChoicesParameter>(
       k_ParseOrderIndex_Key, "Parse Order", "Whether to use random or low density first for parse order. See Documentation for further detail", to_underlying(DBSCAN::ParseOrder::LowDensityFirst),
-      ChoicesParameter::Choices{"Low Density First", "Random", "Seeded Random"})); // sequence dependent DO NOT REORDER
+      ChoicesParameter::Choices{"Low Density First", "Random", "Seeded Random"})); // Choice order matches DBSCAN::ParseOrder values.
   params.insert(std::make_unique<NumberParameter<uint64>>(k_SeedValue_Key, "Seed Value", "The seed fed into the random generator", std::mt19937::default_seed));
   params.insert(std::make_unique<DataObjectNameParameter>(k_SeedArrayName_Key, "Stored Seed Value Array Name", "Name of array holding the seed value", "DBSCAN SeedValue"));
 
@@ -79,9 +78,9 @@ Parameters DBSCANFilter::parameters() const
       k_Epsilon_Key, "Epsilon", "The epsilon-neighborhood around each point is queried (i.e., the maximum acceptable distance between points to be considered `connected`)", 0.0001f));
   params.insert(std::make_unique<Int32Parameter>(k_MinPoints_Key, "Minimum Points",
                                                  "The minimum number of points needed to form a 'dense region' (i.e., the minimum number of points needed to be called a cluster)", 2));
-  params.insert(
-      std::make_unique<ChoicesParameter>(k_DistanceMetric_Key, "Distance Metric", "Distance Metric type to be used for calculations", to_underlying(ClusterUtilities::DistanceMetric::Euclidean),
-                                         ChoicesParameter::Choices{"Euclidean", "Squared Euclidean", "Manhattan", "Cosine", "Pearson", "Squared Pearson"})); // sequence dependent DO NOT REORDER
+  params.insert(std::make_unique<ChoicesParameter>(
+      k_DistanceMetric_Key, "Distance Metric", "Distance Metric type to be used for calculations", to_underlying(ClusterUtilities::DistanceMetric::Euclidean),
+      ChoicesParameter::Choices{"Euclidean", "Squared Euclidean", "Manhattan", "Cosine", "Pearson", "Squared Pearson"})); // Choice order matches ClusterUtilities::DistanceMetric values.
 
   params.insertSeparator(Parameters::Separator{"Optional Data Mask"});
   params.insertLinkableParameter(std::make_unique<BoolParameter>(k_UseMask_Key, "Use Mask Array", "Specifies whether or not to use a mask array", false));
@@ -99,7 +98,6 @@ Parameters DBSCANFilter::parameters() const
   params.insert(
       std::make_unique<DataGroupCreationParameter>(k_FeatureAMPath_Key, "Cluster Attribute Matrix", "The complete path to the attribute matrix in which to store to hold Cluster Data", DataPath{}));
 
-  // Associate the Linkable Parameter(s) to the children parameters that they control
   params.linkParameters(k_ParseOrderIndex_Key, k_SeedArrayName_Key, static_cast<ChoicesParameter::ValueType>(to_underlying(DBSCAN::ParseOrder::Random)));
   params.linkParameters(k_ParseOrderIndex_Key, k_SeedValue_Key, static_cast<ChoicesParameter::ValueType>(to_underlying(DBSCAN::ParseOrder::SeededRandom)));
   params.linkParameters(k_ParseOrderIndex_Key, k_SeedArrayName_Key, static_cast<ChoicesParameter::ValueType>(to_underlying(DBSCAN::ParseOrder::SeededRandom)));
@@ -165,20 +163,19 @@ IFilter::PreflightResult DBSCANFilter::preflightImpl(const DataStructure& dataSt
     resultOutputActions.value().appendAction(std::move(createAction));
   }
 
-  // Resized later
+  // The algorithm resizes the cluster AttributeMatrix after it determines the cluster count.
   {
     auto createAction = std::make_unique<CreateAttributeMatrixAction>(pFeatureAMPathValue, std::vector<usize>{1});
     resultOutputActions.value().appendAction(std::move(createAction));
   }
 
-  // For caching seed run to run
+  // Randomized parse-order modes create a top-level seed output.
   if(static_cast<DBSCAN::ParseOrder>(filterArgs.value<ChoicesParameter::ValueType>(k_ParseOrderIndex_Key)) != DBSCAN::ParseOrder::LowDensityFirst)
   {
     auto createAction = std::make_unique<CreateArrayAction>(DataType::uint64, std::vector<usize>{1}, std::vector<usize>{1}, DataPath({filterArgs.value<std::string>(k_SeedArrayName_Key)}));
     resultOutputActions.value().appendAction(std::move(createAction));
   }
 
-  // Return both the resultOutputActions and the preflightUpdatedValues via std::move()
   return {std::move(resultOutputActions), std::move(preflightUpdatedValues)};
 }
 
@@ -197,7 +194,7 @@ Result<> DBSCANFilter::executeImpl(DataStructure& dataStructure, const Arguments
 
   if(static_cast<DBSCAN::ParseOrder>(filterArgs.value<ChoicesParameter::ValueType>(k_ParseOrderIndex_Key)) != DBSCAN::ParseOrder::LowDensityFirst)
   {
-    // Store Seed Value in Top Level Array
+    // The seed output records the selected or generated seed value.
     dataStructure.getDataRefAs<UInt64Array>(DataPath({filterArgs.value<std::string>(k_SeedArrayName_Key)}))[0] = seed;
   }
 

@@ -23,8 +23,8 @@ class PreferencesSentinel;
  */
 enum class AlgorithmTestScenario : uint8
 {
-  InCoreAlgorithmOnInMemoryStore,
-  OutOfCoreAlgorithmOnInMemoryStore
+  InCoreAlgorithmOnInMemoryStore,   ///< Runs the in-core path with in-memory stores.
+  OutOfCoreAlgorithmOnInMemoryStore ///< Runs the OOC path with in-memory stores.
 };
 
 /**
@@ -75,8 +75,9 @@ inline std::vector<AlgorithmTestScenario> SelectAlgorithmTestScenariosForInMemor
  * @brief Configures a readable unit-test scenario and proves the target algorithm/store combination.
  *
  * The scope controls backing-store preferences for its lifetime. executeFilter()
- * and execute() apply the algorithm force flags and runtime witness only around
- * the target call, preventing setup filters from satisfying the witness.
+ * and execute() apply force flags and collect runtime evidence only during the
+ * target call. This limit prevents setup filters from satisfying the runtime
+ * check.
  */
 class AlgorithmTestScope
 {
@@ -99,6 +100,8 @@ public:
 
   /**
    * @brief Executes a target filter and verifies that only the requested algorithm path ran.
+   * @tparam FilterT Specifies the filter type.
+   * @tparam ArgsT Specifies the forwarded argument types.
    * @param filter The target filter.
    * @param args Arguments forwarded to filter.execute().
    * @return The value returned by filter.execute().
@@ -111,6 +114,7 @@ public:
 
   /**
    * @brief Executes a target callable and verifies that only the requested algorithm path ran.
+   * @tparam CallableT Specifies the callable type.
    * @param callable A callable containing the target filter execution.
    * @return The value returned by the callable, or void when the callable returns void.
    */
@@ -144,17 +148,28 @@ public:
    */
   void requireExpectedStore(const INeighborList& array) const;
 
-  /**
-   * @brief Returns the scenario configured by this scope.
-   * @return The selected algorithm and backing-store combination.
-   */
   AlgorithmTestScenario scenario() const noexcept;
 
 private:
+  /**
+   * @class ExecutionStateGuard
+   * @brief Limits algorithm force flags and execution counters to one target call.
+   *
+   * The guard restores prior global test state so setup and subsequent filters do
+   * not inherit the selected algorithm path or its runtime evidence.
+   */
   class ExecutionStateGuard
   {
   public:
+    /**
+     * @brief Selects the requested algorithm path and clears its execution counters.
+     * @param scenario Algorithm path to select.
+     */
     explicit ExecutionStateGuard(AlgorithmTestScenario scenario);
+
+    /**
+     * @brief Restores the algorithm force flags and counters that the constructor saved.
+     */
     ~ExecutionStateGuard();
 
     ExecutionStateGuard(const ExecutionStateGuard&) = delete;

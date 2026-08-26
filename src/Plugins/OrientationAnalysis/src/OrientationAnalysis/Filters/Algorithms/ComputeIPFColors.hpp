@@ -15,51 +15,50 @@ namespace nx::core
 
 /**
  * @struct ComputeIPFColorsInputValues
- * @brief Holds the user-facing parameters for the Compute IPF Colors algorithm.
+ * @brief Identifies IPF color inputs.
  *
- * Inverse Pole Figure (IPF) colors map a crystal orientation to a position on the
- * unit stereographic triangle for the crystal's Laue class, producing a unique RGB
- * color. The reference direction determines which sample axis is projected into the
- * crystal frame before the color lookup.
+ * referenceDirection identifies the sample direction. Cell phases use zero for
+ * unindexed cells.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeIPFColorsInputValues
 {
-  std::vector<float> referenceDirection;                       ///< Sample-frame reference direction (typically [0,0,1]) that is projected into the crystal frame for IPF color computation.
-  bool useMask = false;                                        ///< When true, voxels whose mask value is false/0 are colored black (skipped).
-  DataPath maskArrayPath;                                      ///< Path to the boolean or uint8 mask array. Only used when useMask is true.
-  DataPath cellPhasesArrayPath;                                ///< Path to the Int32 array of per-voxel phase IDs (1-based; 0 = unindexed).
-  DataPath cellEulerAnglesArrayPath;                           ///< Path to the Float32 array of Euler angles (phi1, Phi, phi2) in radians, 3 components per tuple.
-  DataPath crystalStructuresArrayPath;                         ///< Path to the UInt32 ensemble array mapping phase ID -> EbsdLib crystal structure enum.
-  DataPath cellIpfColorsArrayPath;                             ///< Path to the output UInt8 array of RGB colors, 3 components per tuple.
-  ebsdlib::ColorKeyKind colorKey = ebsdlib::ColorKeyKind::TSL; ///< Which EbsdLib IPF color key (legend convention) to use when mapping orientations to colors.
+  std::vector<float> referenceDirection;
+  bool useMask = false;
+  DataPath maskArrayPath;
+  DataPath cellPhasesArrayPath;
+  DataPath cellEulerAnglesArrayPath;
+  DataPath crystalStructuresArrayPath;
+  DataPath cellIpfColorsArrayPath;
+  ebsdlib::ColorKeyKind colorKey = ebsdlib::ColorKeyKind::TSL;
 };
 
 /**
  * @class ComputeIPFColors
- * @brief Dispatcher that selects between in-core and out-of-core IPF color algorithms.
+ * @brief Dispatches IPF color computation.
  *
- * This class serves as the entry point called by ComputeIPFColorsFilter::executeImpl().
- * It inspects the backing storage of the Euler-angle, phase, and IPF-color arrays using
- * DispatchAlgorithm<ComputeIPFColorsDirect, ComputeIPFColorsScanline>:
+ * The direct executor uses the resident path. The scanline executor uses fixed
+ * bulk-I/O pages for OOC targets. The direct executor gives no generic
+ * DataArray or DataStore thread-safety guarantee.
  *
- * - **In-core (ComputeIPFColorsDirect)**: Uses ParallelDataAlgorithm for multi-threaded
- *   random access when all arrays reside in contiguous RAM.
- * - **Out-of-core (ComputeIPFColorsScanline)**: Reads and writes data in fixed-size
- *   chunks via copyIntoBuffer()/copyFromBuffer() to avoid OOC chunk thrashing.
- *
- * @see ComputeIPFColorsDirect, ComputeIPFColorsScanline, DispatchAlgorithm
+ * @see ComputeIPFColorsDirect
+ * @see ComputeIPFColorsScanline
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeIPFColors
 {
 public:
   /**
-   * @brief Constructs the dispatcher.
-   * @param dataStructure The DataStructure containing all input and output arrays.
-   * @param msgHandler Message handler for progress/info messages.
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation.
-   * @param inputValues Pointer to the parameter struct; must outlive this object.
+   * @brief Initializes IPF color dispatch.
+   * @param dataStructure Provides selected arrays.
+   * @param msgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and color settings.
+   * @pre dataStructure, msgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   ComputeIPFColors(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ComputeIPFColorsInputValues* inputValues);
+  /**
+   * @brief Destroys the IPF color dispatcher.
+   */
   ~ComputeIPFColors() noexcept;
 
   ComputeIPFColors(const ComputeIPFColors&) = delete;
@@ -68,17 +67,16 @@ public:
   ComputeIPFColors& operator=(ComputeIPFColors&&) = delete;
 
   /**
-   * @brief Dispatches to ComputeIPFColorsDirect or ComputeIPFColorsScanline based
-   *        on whether any of the involved arrays use out-of-core storage.
-   * @return Result<> with any errors (e.g., phase mismatch warnings).
+   * @brief Dispatches IPF color computation.
+   * @return Result from the selected executor.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                             ///< Reference to the live DataStructure.
-  const IFilter::MessageHandler& m_MessageHandler;            ///< Message handler for user-facing messages.
-  const std::atomic_bool& m_ShouldCancel;                     ///< Cancellation flag.
-  const ComputeIPFColorsInputValues* m_InputValues = nullptr; ///< Borrowed pointer to input parameters.
+  DataStructure& m_DataStructure;
+  const IFilter::MessageHandler& m_MessageHandler;
+  const std::atomic_bool& m_ShouldCancel;
+  const ComputeIPFColorsInputValues* m_InputValues = nullptr;
 };
 
 } // namespace nx::core

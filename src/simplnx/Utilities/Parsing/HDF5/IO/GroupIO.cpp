@@ -14,24 +14,27 @@
 
 namespace nx::core::HDF5
 {
+/**
+ * @brief Opens an existing group or creates a missing group.
+ * @param parentId Identifies the parent object. It must remain valid.
+ * @param groupName Identifies the child group.
+ * @return Open group identifier, or a negative HDF5 identifier on failure.
+ * @pre The caller does not hold Support::ApiLock().
+ */
 IdType getGroupId(IdType parentId, const std::string& groupName)
 {
-  // Self-locks: the whole probe-then-open/create sequence is bare HDF5 C calls and
-  // touches no other lock-taking function, so it is one leaf critical section. HDF5
-  // requires only that one thread at a time be inside any C call, which one held lock
-  // across these consecutive calls satisfies.
+  // Keep the probe and its dependent open or create operation atomic to HDF5 callers.
   std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
 
-  // Check if group exists
   HDF_ERROR_HANDLER_OFF
   auto status = H5Gget_objinfo(parentId, groupName.c_str(), 0, NULL);
   HDF_ERROR_HANDLER_ON
 
-  if(status == 0) // if group exists...
+  if(status == 0)
   {
     return H5Gopen(parentId, groupName.c_str(), H5P_DEFAULT);
   }
-  else // if group does not exist...
+  else
   {
     return H5Gcreate(parentId, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
   }
@@ -56,7 +59,7 @@ hid_t GroupIO::open() const
   {
     return getId();
   }
-  // Resolve the parent id and path (no HDF5 work) before locking the bare H5Gopen leaf.
+  // Resolve wrapper state before the non-recursive HDF5 lock.
   const hid_t parentId = getParentId();
   const std::string namePath = getNamePath();
   hid_t id = H5I_INVALID_HID;
@@ -70,10 +73,8 @@ hid_t GroupIO::open() const
 
 void GroupIO::close()
 {
-  // Self-locks the bare H5Gclose leaf call. Invoked by ~GroupIO, so destroying a GroupIO
-  // on any thread serializes its close against every other HDF5 C call. The id is captured
-  // before the lock (isOpen() already guarantees it is open) so nothing lock-taking runs
-  // inside the leaf scope.
+  // Resolve the identifier before the non-recursive lock. This also serializes
+  // destruction with other HDF5 calls.
   if(isOpen())
   {
     const hid_t selfId = getId();
@@ -87,9 +88,7 @@ void GroupIO::close()
 
 GroupIO GroupIO::openGroup(const std::string& name) const
 {
-  // isGroup() self-locks (it routes through getObjectType), so it is resolved BEFORE the
-  // leaf lock here; only the bare H5Gopen is wrapped. getId() also self-locks (it lazily
-  // opens this group), so it too is resolved outside the lock.
+  // Type checks and lazy opens acquire the lock. Complete them before the leaf call.
   if(!isGroup(name))
   {
     std::string ss = fmt::format("Could not open Group '{}'. Child object does not exist or object is not a Group", name);
@@ -113,8 +112,7 @@ GroupIO GroupIO::openGroup(const std::string& name) const
 
 DatasetIO GroupIO::openDataset(const std::string& name) const
 {
-  // isDataset() self-locks (via getObjectType); resolve it before constructing the
-  // DatasetIO. The DatasetIO is opened lazily on first use, so no HDF5 work happens here.
+  // The type check can acquire the lock. The returned DatasetIO opens lazily.
   if(!isDataset(name))
   {
     std::string ss = fmt::format("Could not open Dataset '{}'. Child object does not exist or object is not a Dataset", name);
@@ -131,7 +129,7 @@ usize GroupIO::getNumChildren() const
     return 0;
   }
 
-  // getId() self-locks; resolve it before the leaf-locked bare H5Gget_num_objs.
+  // A lazy open can acquire the lock. Resolve it before the leaf call.
   const hid_t selfId = getId();
   hsize_t numChildren = 0;
   {
@@ -143,7 +141,7 @@ usize GroupIO::getNumChildren() const
 
 std::string GroupIO::getChildNameByIdx(hsize_t idx) const
 {
-  // getId() self-locks; resolve it before the leaf-locked bare H5Gget_objname_by_idx.
+  // A lazy open can acquire the lock. Resolve it before the leaf call.
   const hid_t selfId = getId();
   const size_t size = 1024;
   char buffer[size];
@@ -187,9 +185,7 @@ bool GroupIO::exists(const std::string& childName) const
 
 ObjectIO::ObjectType GroupIO::getObjectType(const std::string& childName) const
 {
-  // open() self-locks its own H5Gopen leaf, so it runs BEFORE this method's leaf lock
-  // (holding the non-recursive ApiLock across it would self-deadlock). The query and the
-  // error-handler toggles around it are then one leaf critical section.
+  // A lazy open acquires the non-recursive lock. Complete it before the query.
   open();
   if(!isValid())
   {
@@ -236,9 +232,7 @@ GroupIO GroupIO::createGroup(const std::string& childName)
     std::cout << ss << std::endl;
     return {};
   }
-  // isGroup()/exists() self-lock (via getObjectType), so the type probe is resolved
-  // BEFORE this method's leaf lock; getId() self-locks too, so it is resolved first. Only
-  // the bare H5Gopen/H5Gcreate is wrapped.
+  // Type checks and lazy opens acquire the lock. Complete them before the leaf calls.
   const bool childIsGroup = isGroup(childName);
   const bool childExists = childIsGroup || exists(childName);
   const hid_t selfId = getId();
@@ -299,7 +293,7 @@ std::shared_ptr<DatasetIO> GroupIO::openDatasetPtr(const std::string& childName)
 
 std::shared_ptr<GroupIO> GroupIO::openGroupPtr(const std::string& name) const
 {
-  // isGroup() and getId() self-lock; both are resolved before the leaf-locked H5Gopen.
+  // The type check and lazy open can acquire the lock. Complete them first.
   if(!isGroup(name))
   {
     std::string ss = fmt::format("Could not open Group '{}'. Child object does not exist or object is not a Group", name);
@@ -357,8 +351,7 @@ Result<> GroupIO::createLink(const std::string& objectPath)
   }
   std::string objectName = objectPath.substr(index);
 
-  // getId() self-locks (it may lazily open this group); resolve both ids before the
-  // leaf-locked bare H5Lcreate_hard.
+  // A lazy open can acquire the lock. Resolve both identifiers before the leaf call.
   const hid_t parentId = getParentId();
   const hid_t selfId = getId();
   herr_t errorCode = 0;
@@ -372,5 +365,4 @@ Result<> GroupIO::createLink(const std::string& objectPath)
   }
   return {};
 }
-// -----------------------------------------------------------------------------
 } // namespace nx::core::HDF5

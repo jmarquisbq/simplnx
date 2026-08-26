@@ -13,25 +13,13 @@ namespace nx::core
 
 /**
  * @struct ComputeVectorColorsInputValues
- * @brief Input paths and options used to compute RGB colors from vector tuples.
+ * @brief Stores validated vector, mask, and color-output paths.
  */
 struct SIMPLNXCORE_EXPORT ComputeVectorColorsInputValues
 {
-  /**
-   * @brief When true, only tuples with a nonzero mask value receive a color.
-   */
   bool UseMask;
-  /**
-   * @brief Path to the float32 input array containing three components per tuple.
-   */
   DataPath VectorsArrayPath;
-  /**
-   * @brief Path to the bool or uint8 mask array used when UseMask is true.
-   */
   DataPath MaskArrayPath;
-  /**
-   * @brief Path where the three-component uint8 RGB output is written.
-   */
   DataPath CellVectorColorsArrayPath;
 };
 
@@ -39,56 +27,41 @@ struct SIMPLNXCORE_EXPORT ComputeVectorColorsInputValues
  * @class ComputeVectorColors
  * @brief Converts vector directions to RGB colors using bounded chunk buffers.
  *
- * The algorithm streams input vectors and an optional mask through fixed-size buffers before bulk-writing RGB tuples. This preserves the established color mapping while avoiding per-cell datastore
- * access for out-of-core arrays.
+ * The algorithm bulk-reads 65,536 vector tuples per chunk and bulk-writes RGB
+ * tuples. This preserves color mapping without per-tuple disk access. A zero
+ * mask value leaves the corresponding RGB tuple black.
  */
 class SIMPLNXCORE_EXPORT ComputeVectorColors
 {
 public:
   /**
-   * @brief Constructs the vector-color algorithm.
-   * @param dataStructure Data structure containing the input and output arrays.
-   * @param mesgHandler Handler used for progress messages.
-   * @param shouldCancel Cancellation flag checked between chunks.
-   * @param inputValues Paths and options controlling the conversion.
+   * @brief Creates a vector-color algorithm.
+   * @param dataStructure Provides the selected arrays.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later chunks when true.
+   * @param inputValues Specifies validated paths and options. The caller must
+   * keep this object alive for the algorithm lifetime.
    */
   ComputeVectorColors(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeVectorColorsInputValues* inputValues);
 
   /**
-   * @brief Destroys the algorithm instance.
+   * @brief Destroys the non-owning vector-color algorithm.
    */
   ~ComputeVectorColors() noexcept;
 
-  /**
-   * @brief Copy construction is disabled.
-   */
   ComputeVectorColors(const ComputeVectorColors&) = delete;
-
-  /**
-   * @brief Move construction is disabled.
-   */
   ComputeVectorColors(ComputeVectorColors&&) noexcept = delete;
-
-  /**
-   * @brief Copy assignment is disabled.
-   */
   ComputeVectorColors& operator=(const ComputeVectorColors&) = delete;
-
-  /**
-   * @brief Move assignment is disabled.
-   */
   ComputeVectorColors& operator=(ComputeVectorColors&&) noexcept = delete;
 
   /**
-   * @brief Executes the bounded-memory vector-to-color conversion.
-   * @return A valid result, or the first datastore/mask error encountered.
+   * @brief Converts vector tuples to RGB colors.
+   * @return Error from bulk I/O or mask validation, or success after cancellation.
+   *
+   * Cancellation retains colors from completed chunks.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the cancellation flag associated with this execution.
-   * @return Reference to the cancellation flag.
-   */
   const std::atomic_bool& getCancel();
 
 private:

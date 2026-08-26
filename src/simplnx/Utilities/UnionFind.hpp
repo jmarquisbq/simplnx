@@ -12,32 +12,26 @@ namespace nx::core
 
 /**
  * @class UnionFind
- * @brief Vector-based Union-Find (Disjoint Set) data structure for tracking
- * connected component equivalences during chunk-sequential processing.
+ * @brief Tracks connected-component equivalences with dense integer labels.
  *
- * Uses union-by-rank and path-halving compression for near-O(1) amortized
- * find() and unite() operations. Internal storage uses contiguous vectors
- * indexed by label for cache-friendly access (no hash map overhead).
+ * Union by rank and path halving give near-constant amortized operations.
+ * Contiguous vectors avoid hash lookup. Storage grows with the largest label,
+ * so callers must use dense positive labels. Label zero is invalid.
  *
- * Key features:
- * - Labels are contiguous integers starting from 1 (0 is unused/invalid)
- * - Grows dynamically as new labels are encountered
- * - Path halving in find() for near-O(1) amortized lookups
- * - Union-by-rank for balanced merges
- * - Accumulates sizes at each label during construction
- * - Single-pass flatten() for full path compression and size accumulation
+ * addSize() records counts at the supplied labels. flatten() moves all counts to
+ * roots and fully compresses paths. The class is mutable and not thread-safe.
  */
 class SIMPLNX_EXPORT UnionFind
 {
 public:
   UnionFind()
   {
-    // Index 0 is unused (labels start at 1). Initialize with a small capacity.
+    // Reserve index zero and a small initial range for positive labels.
     constexpr usize k_InitialCapacity = 64;
     m_Parent.resize(k_InitialCapacity);
     m_Rank.resize(k_InitialCapacity, 0);
     m_Size.resize(k_InitialCapacity, 0);
-    // Initialize all entries as self-parents
+    // New label slots start as independent sets.
     for(usize i = 0; i < k_InitialCapacity; i++)
     {
       m_Parent[i] = static_cast<int64>(i);
@@ -52,17 +46,16 @@ public:
   UnionFind& operator=(UnionFind&&) noexcept = default;
 
   /**
-   * @brief Find the root label with path-halving compression.
-   * Each node on the path is redirected to its grandparent, giving
-   * near-O(1) amortized performance.
-   * @param x Label to find
-   * @return Root label
+   * @brief Finds a root and applies path-halving compression.
+   * @param x Specifies a positive label.
+   * @return Root label for x.
+   * @pre x is greater than zero and is representable as usize.
    */
   int64 find(int64 x)
   {
     ensureCapacity(x);
 
-    // Path halving: point each node to its grandparent while walking
+    // Point each visited label to its grandparent while walking to the root.
     while(m_Parent[x] != x)
     {
       m_Parent[x] = m_Parent[m_Parent[x]];
@@ -72,9 +65,12 @@ public:
   }
 
   /**
-   * @brief Unite two labels into the same equivalence class using union-by-rank.
-   * @param a First label
-   * @param b Second label
+   * @brief Unites two equivalence classes by rank.
+   * @param a Specifies the first positive label.
+   * @param b Specifies the second positive label.
+   * @pre Both labels are greater than zero and are representable as usize.
+   *
+   * This operation does not move size counts. Call flatten() after all unions.
    */
   void unite(int64 a, int64 b)
   {
@@ -102,11 +98,12 @@ public:
   }
 
   /**
-   * @brief Add to the size count for a label.
-   * Sizes are accumulated at each label, not the root. They are
-   * accumulated to roots during flatten().
-   * @param label Label to update
-   * @param count Number of voxels to add
+   * @brief Adds a count to one label before flattening.
+   * @param label Specifies a positive label.
+   * @param count Specifies the count to add.
+   * @pre label is representable as usize. The addition does not overflow uint64.
+   *
+   * The count stays at label until flatten() accumulates it at the root.
    */
   void addSize(int64 label, uint64 count)
   {
@@ -115,10 +112,11 @@ public:
   }
 
   /**
-   * @brief Get the total size of a label's equivalence class.
-   * Should only be called after flatten() for accurate totals.
-   * @param label Label to query
-   * @return Total number of voxels in the equivalence class
+   * @brief Gets the accumulated size of one equivalence class.
+   * @param label Specifies a positive label.
+   * @return Count stored at the label root.
+   * @pre label is greater than zero and is representable as usize.
+   * @pre flatten() completed after the most recent union or size addition.
    */
   uint64 getSize(int64 label)
   {
@@ -127,13 +125,11 @@ public:
   }
 
   /**
-   * @brief Flatten the union-find structure with full path compression
-   * and accumulate all sizes to root labels.
+   * @brief Fully compresses paths and accumulates sizes at roots.
+   * @pre The accumulated size for each root fits uint64.
    *
-   * After flatten():
-   * - Every label points directly to its root
-   * - All sizes are accumulated at root labels
-   * - Subsequent find() calls are O(1) (single lookup)
+   * Each allocated label points directly to its root after this call. A later
+   * union or size addition requires another flatten() before accurate size queries.
    */
   void flatten()
   {
@@ -156,8 +152,11 @@ public:
 
 private:
   /**
-   * @brief Ensure the internal vectors can hold index x.
-   * Grows by doubling to amortize allocation cost.
+   * @brief Grows internal vectors to contain one label.
+   * @param x Specifies a positive label index.
+   * @pre x is representable as usize. Growth arithmetic and allocation succeed.
+   *
+   * Capacity doubles when that is larger than the required label range.
    */
   void ensureCapacity(int64 x)
   {
@@ -173,7 +172,7 @@ private:
     m_Rank.resize(newSize, 0);
     m_Size.resize(newSize, 0);
 
-    // Initialize new entries as self-parents
+    // New label slots start as independent sets.
     for(usize i = oldSize; i < newSize; i++)
     {
       m_Parent[i] = static_cast<int64>(i);

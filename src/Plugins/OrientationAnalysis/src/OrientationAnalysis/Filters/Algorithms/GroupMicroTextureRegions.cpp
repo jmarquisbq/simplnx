@@ -354,9 +354,7 @@ bool GroupMicroTextureRegions::determineGrouping(int32 referenceFeature, int32 n
     if(!m_InputValues->UseRunningAverage)
     {
       const usize index = referenceFeature * 4;
-      // Get the orientation matrix (which is passive) and then transpose it to make it active transform
-      // transpose the g matrix so when c-axis is multiplied by it,
-      // it will give the sample direction that the c-axis is along
+      // The transposed matrix maps crystal [001] into the sample frame.
       ebsdlib::Matrix3X3F g1t =
           ebsdlib::Quaternion<float32>(m_AvgQuatsCache[index + 0], m_AvgQuatsCache[index + 1], m_AvgQuatsCache[index + 2], m_AvgQuatsCache[index + 3]).toOrientationMatrix().toGMatrix().transpose();
       c1 = (g1t * cAxis).normalize();
@@ -366,9 +364,7 @@ bool GroupMicroTextureRegions::determineGrouping(int32 referenceFeature, int32 n
     if(phase1 == phase2 && (phase1 == ebsdlib::CrystalStructure::Hexagonal_High))
     {
       const usize index = neighborFeature * 4;
-      // Get the orientation matrix (which is passive) and then transpose it to make it active transform
-      // transpose the g matrix so when c-axis is multiplied by it,
-      // it will give the sample direction that the c-axis is along
+      // The transposed matrix maps crystal [001] into the sample frame.
       ebsdlib::Matrix3X3F g2t =
           ebsdlib::Quaternion<float32>(m_AvgQuatsCache[index + 0], m_AvgQuatsCache[index + 1], m_AvgQuatsCache[index + 2], m_AvgQuatsCache[index + 3]).toOrientationMatrix().toGMatrix().transpose();
       ebsdlib::Matrix3X1F c2 = (g2t * cAxis).normalize();

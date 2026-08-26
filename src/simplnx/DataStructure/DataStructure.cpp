@@ -28,8 +28,13 @@ namespace
 {
 const std::string k_Delimiter = "|--";
 
-// Process-wide default resolver. Lazily initialized to InMemoryFormatResolver so a DataStructure
-// created before app startup still resolves sanely (in-core). Replaced once at startup.
+/**
+ * @brief Returns the lazy process-wide storage-format resolver.
+ * @return Mutable reference to the default resolver pointer.
+ *
+ * In-memory storage keeps DataStructure usable before application startup sets
+ * the resolver.
+ */
 std::shared_ptr<const nx::core::IDataStoreFormatResolver>& DefaultFormatResolverRef()
 {
   static std::shared_ptr<const nx::core::IDataStoreFormatResolver> s_Default = std::make_shared<nx::core::InMemoryFormatResolver>();
@@ -51,8 +56,7 @@ DataStructure::DataStructure(const DataStructure& dataStructure)
 , m_NextId(dataStructure.m_NextId)
 , m_FormatResolver(dataStructure.m_FormatResolver)
 {
-  // Hold a shared_ptr copy of the DataObjects long enough for
-  // m_RootGroup.setDataStructure(this) to operate.
+  // Keep copied objects alive while the root map rebinds their DataStructure.
   std::map<DataObject::IdType, std::shared_ptr<DataObject>> sharedData;
   for(const auto& [identifier, dataWkPtr] : dataStructure.m_DataObjects)
   {
@@ -64,8 +68,6 @@ DataStructure::DataStructure(const DataStructure& dataStructure)
       m_DataObjects[identifier] = copy;
     }
   }
-  // Updates all DataMaps with the corresponding m_DataObjects pointers.
-  // Updates all DataObjects with their new DataStructure
   m_RootGroup.setDataStructure(this);
 }
 
@@ -655,7 +657,7 @@ bool DataStructure::insert(const std::shared_ptr<DataObject>& dataObject, const 
     dataObject->setId(generateId());
   }
 
-  // Clears the DataObject's parent IDs to avoid clashes.
+  // A new insertion starts with one requested placement and no inherited parents.
   dataObject->clearParents();
 
   if(dataPath.empty())
@@ -774,8 +776,7 @@ DataStructure& DataStructure::operator=(const DataStructure& rhs)
   m_NextId = rhs.m_NextId;
   m_FormatResolver = rhs.m_FormatResolver;
 
-  // Hold a shared_ptr copy of the DataObjects long enough for
-  // m_RootGroup.setDataStructure(this) to operate.
+  // Keep copied objects alive while the root map rebinds their DataStructure.
   std::map<DataObject::IdType, std::shared_ptr<DataObject>> sharedData;
   for(auto& [identifier, dataWkPtr] : rhs.m_DataObjects)
   {
@@ -787,8 +788,6 @@ DataStructure& DataStructure::operator=(const DataStructure& rhs)
       m_DataObjects[identifier] = copy;
     }
   }
-  // Updates all DataMaps with the corresponding m_DataObjects pointers.
-  // Updates all DataObjects with their new DataStructure
   applyAllDataStructure();
   return *this;
 }
@@ -831,7 +830,7 @@ nonstd::expected<void, std::string> DataStructure::validateNumberOfTuples(const 
       const auto* dataArrayPtr = getDataAs<IArray>(dataPath);
       numTuples = dataArrayPtr->getNumberOfTuples();
     }
-    else // We can only check DataObject subclasses that hold items that can be expressed as getNumberOfTuples();
+    else
     {
       message << "Only NeighborList, StringArray and DataArray can be validated for tuple counts\n";
       return {nonstd::make_unexpected(message.str())};
@@ -843,7 +842,7 @@ nonstd::expected<void, std::string> DataStructure::validateNumberOfTuples(const 
       message << "DataPath: " << path.toString() << "    | Tuple Count: " << numTuples << "\n";
     }
 
-    // Check equality if not first item
+    // The first array establishes the tuple count for all later comparisons.
     if(tupleCount == std::numeric_limits<usize>::max())
     {
       tupleCount = numTuples;
@@ -858,7 +857,7 @@ nonstd::expected<void, std::string> DataStructure::validateNumberOfTuples(const 
 
 void DataStructure::resetIds(DataObject::IdType startingId)
 {
-  // 0 is reserved
+  // Zero is the root identifier and cannot identify an inserted object.
   if(startingId == 0)
   {
     startingId = 1;
@@ -866,7 +865,7 @@ void DataStructure::resetIds(DataObject::IdType startingId)
 
   m_NextId = startingId;
 
-  // Update DataObject IDs and track changes
+  // Build an old-to-new map before updating hierarchy references.
   WeakCollectionType newCollection;
   std::unordered_map<DataObject::IdType, DataObject::IdType> updatedIdsMap;
   for(auto& dataObjectIter : m_DataObjects)
@@ -886,10 +885,8 @@ void DataStructure::resetIds(DataObject::IdType startingId)
     newCollection.insert({newId, dataObjectPtr});
   }
 
-  // Update m_DataObjects collection
   m_DataObjects = newCollection;
 
-  // Update ID references between DataObjects
   for(auto& dataObjectIter : m_DataObjects)
   {
     auto dataObjectPtr = dataObjectIter.second.lock();
@@ -903,7 +900,6 @@ void DataStructure::resetIds(DataObject::IdType startingId)
 
 void DataStructure::exportHierarchyAsGraphViz(std::ostream& outputStream) const
 {
-  // initialize dot file
   outputStream << "digraph DataGraph {\n"
                << "\tlabelloc =\"t\"\n"
                << "\trankdir=LR;\n"
@@ -914,7 +910,6 @@ void DataStructure::exportHierarchyAsGraphViz(std::ostream& outputStream) const
                << "\tgraph [splines=true bgcolor=\"#242627\"]\n"
                << "\tnode [shape=record style=\"filled\" fillcolor=\"#1D7ECD\" fontsize=12 fontcolor=\"#FFFFFA\"]\n"
                << "\tedge [dir=front arrowtail=empty style=\"\" color=\"#FFFFFA\"]\n\n";
-  // set base case
   for(const auto* object : getTopLevelData())
   {
     auto topLevelPath = DataPath::FromString(object->getDataPaths()[0].getTargetName()).value();
@@ -923,18 +918,15 @@ void DataStructure::exportHierarchyAsGraphViz(std::ostream& outputStream) const
 
     if(optionalDataPaths.has_value() && !optionalDataPaths.value().empty())
     {
-      // Begin recursion
       recurseHierarchyToGraphViz(outputStream, optionalDataPaths.value(), topLevelPath.getTargetName());
     }
   }
 
-  // close dot file
-  outputStream << "}\n"; // for readability
+  outputStream << "}\n";
 }
 
 void DataStructure::exportHierarchyAsText(std::ostream& outputStream) const
 {
-  // set base case
   for(const auto* object : getTopLevelData())
   {
     auto topLevelPath = DataPath::FromString(object->getDataPaths()[0].getTargetName()).value();
@@ -943,7 +935,6 @@ void DataStructure::exportHierarchyAsText(std::ostream& outputStream) const
 
     if(optionalDataPaths.has_value() && !optionalDataPaths.value().empty())
     {
-      // Begin recursion
       recurseHierarchyToText(outputStream, optionalDataPaths.value(), "");
     }
   }
@@ -953,17 +944,14 @@ void DataStructure::recurseHierarchyToGraphViz(std::ostream& outputStream, const
 {
   for(const auto& path : paths)
   {
-    // Output parent node, child node, and edge connecting them in .dot format
     outputStream << "\"" << parent << "\" -> \"" << path.getTargetName() << "\"\n";
 
-    // pull child paths or skip to next iteration
     auto optionalChildPaths = GetAllChildDataPaths(*this, path);
     if(!optionalChildPaths.has_value() || optionalChildPaths.value().empty())
     {
       continue;
     }
 
-    // recurse
     recurseHierarchyToGraphViz(outputStream, optionalChildPaths.value(), path.getTargetName());
   }
   // outputStream << "\n"; // for readability
@@ -975,17 +963,14 @@ void DataStructure::recurseHierarchyToText(std::ostream& outputStream, const std
 
   for(const auto& path : paths)
   {
-    // Output parent node, child node, and edge connecting them in .dot format
     outputStream << indent << k_Delimiter << path.getTargetName() << "\n";
 
-    // pull child paths or skip to next iteration
     auto optionalChildPaths = GetAllChildDataPaths(*this, path);
     if(!optionalChildPaths.has_value() || optionalChildPaths.value().empty())
     {
       continue;
     }
 
-    // recurse
     recurseHierarchyToText(outputStream, optionalChildPaths.value(), indent);
   }
 }
@@ -1022,11 +1007,8 @@ Result<> DataStructure::transferDataArraysOoc()
 {
   Result<> result;
 
-  // Route each array through the SAME decision used at array creation:
-  // ArrayCreationUtilities::ResolveStorageFormat applies the unstructured-geometry
-  // gate, then the explicit-format override, then this DataStructure's format
-  // resolver. This keeps the spill-to-disk path consistent with creation and keeps
-  // core OOC-free — the resolver (not core) names any concrete on-disk format.
+  // Resolve each array with the creation-time geometry gate and format resolver.
+  // The resolver keeps core independent of concrete out-of-core formats.
   for(const auto& dataIter : m_DataObjects)
   {
     auto dataPtr = dataIter.second.lock();
@@ -1036,8 +1018,8 @@ Result<> DataStructure::transferDataArraysOoc()
       continue;
     }
 
-    // Use the first path as the array's representative location for the geometry gate;
-    // an array linked under multiple geometries is not a supported configuration here.
+    // The first path supplies the geometry context. Multiple geometry links are
+    // not a supported conversion configuration.
     const std::vector<DataPath> paths = getDataPathsForId(dataIter.first);
     if(paths.empty())
     {
@@ -1046,7 +1028,7 @@ Result<> DataStructure::transferDataArraysOoc()
 
     const std::string resolvedFormat = ArrayCreationUtilities::ResolveStorageFormat(*this, paths.front(), dataArrayPtr->getDataType(), dataArrayPtr->memoryUsage(), "");
 
-    // An empty format means the resolver chose in-core for this array; leave it as-is.
+    // An empty format selects in-core storage, so conversion is not required.
     if(resolvedFormat.empty())
     {
       continue;
@@ -1063,10 +1045,8 @@ Result<> DataStructure::transferDataArraysOoc()
 
 Result<> DataStructure::validateGeometries() const
 {
-  /** There is an assumption about the range of the DataObject::Type enumeration. That assumption
-   * is backed up by a static_assert test case for the unit tests. If the enumeration is changed
-   * the compile will fail if the unit tests are enabled. Which they are on all the CI machines.
-   */
+  // Geometry DataObject::Type values form a contiguous range. Unit tests assert
+  // this range so a changed enumeration cannot silently skip validation.
   Result<> result;
   for(const auto& dataObject : m_RootGroup)
   {

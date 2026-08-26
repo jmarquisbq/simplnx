@@ -6,7 +6,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ReadH5EspritData::ReadH5EspritData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ReadH5DataInputValues* inputValues,
                                    ReadH5EspritDataInputValues* espritInputValues)
 : IEbsdOemReader<ebsdlib::H5EspritReader>(dataStructure, mesgHandler, shouldCancel, inputValues)
@@ -14,34 +13,13 @@ ReadH5EspritData::ReadH5EspritData(DataStructure& dataStructure, const IFilter::
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadH5EspritData::~ReadH5EspritData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ReadH5EspritData::operator()()
 {
   return execute();
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Copies raw EBSD data from the H5Esprit reader buffers into the DataStructure arrays.
- *
- * This is called once per slice (z-layer) in a multi-slice H5OINA/Esprit dataset.
- * The offset parameter positions each slice's data at the correct location in the
- * volume-wide arrays.
- *
- * @section ooc_strategy OOC Strategy
- * Same approach as ReadAngData and ReadCtfData:
- *   - Euler angles: chunked interleaving of 3 source arrays into a 3-component destination
- *     with optional degree-to-radian conversion, written via copyFromBuffer() per chunk.
- *   - Single-component arrays (MAD, Phase, etc.): one copyFromBuffer() call each, writing
- *     the entire per-slice reader buffer in a single bulk operation. The offset parameter
- *     ensures each slice lands at the correct position in the volume-wide array.
- *
- * @param index The zero-based slice index, used to compute the tuple offset for this slice.
- * @return Result<> indicating success or an error if pattern data is missing.
- */
 Result<> ReadH5EspritData::copyRawEbsdData(int index)
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);
@@ -76,9 +54,7 @@ Result<> ReadH5EspritData::copyRawEbsdData(int index)
     const auto* yBm = reinterpret_cast<int32*>(m_Reader->getPointerByName(ebsdlib::H5Esprit::YBEAM));
     auto& yBeam = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::H5Esprit::YBEAM));
 
-    // Interleave 3 separate Euler angle arrays into a 3-component destination using
-    // bounded chunks. Applies degree-to-radian conversion in the local buffer before
-    // each bulk write via copyFromBuffer.
+    // Interleave Euler channels and apply the unit conversion in bounded pages.
     {
       constexpr usize k_ChunkTuples = 65536;
       std::vector<float32> eulerChunk(k_ChunkTuples * 3);
@@ -96,8 +72,8 @@ Result<> ReadH5EspritData::copyRawEbsdData(int index)
       }
     }
 
-    // OOC-safe bulk copy of single-component arrays: each copyFromBuffer() writes the
-    // entire per-slice reader buffer at the correct offset in the volume-wide array.
+    // Each scalar channel uses one scan-sized transfer. These Result values are
+    // not inspected by the current API.
     mad.getDataStoreRef().copyFromBuffer(offset, nonstd::span<const float32>(m1, totalPoints));
     nIndexBands.getDataStoreRef().copyFromBuffer(offset, nonstd::span<const int32>(nIndBands, totalPoints));
     phase.getDataStoreRef().copyFromBuffer(offset, nonstd::span<const int32>(p1, totalPoints));

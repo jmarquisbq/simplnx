@@ -7,32 +7,43 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
 struct ComputeFeatureSizesInputValues;
 
 /**
  * @class ComputeFeatureSizesDirect
- * @brief In-core algorithm for computing per-feature volume, equivalent diameter,
- * and voxel count using parallel, thread-local accumulation.
+ * @brief Computes feature sizes with direct parallel accumulation.
  *
- * This is the in-memory variant. The per-voxel counting (and, for a RectGridGeom,
- * Kahan volume summation) is parallelized across Z-slices using ParallelDataAlgorithm
- * with tbb::combinable thread-local accumulators that are reduced after the parallel
- * region. Each worker reads FeatureIds / element sizes through getValue(), which is a
- * cheap pointer dereference when the DataStore is a contiguous in-memory buffer.
+ * Workers use thread-local feature counts and RectGrid Kahan volume sums. The normal dispatcher
+ * selects this path for resident Feature IDs. requireStoresInMemory() only disables parallel
+ * scheduling for a nonresident Feature ID store. It does not make generic DataArray or DataStore
+ * concurrent access safe.
  *
- * **When this variant is selected**: DispatchAlgorithm selects this class when the
- * FeatureIds array is backed by an in-memory DataStore (the common case). It must not
- * be used for out-of-core data: concurrent getValue() calls across worker threads are
- * not safe on chunked stores and would also thrash the chunk cache. The
- * ComputeFeatureSizesScanline variant handles OOC data with sequential bulk I/O.
+ * RectGrid workers also access generated element sizes. The direct scheduling guard does not include
+ * that store. A forced direct out-of-core run can use per-element access.
  *
- * @see ComputeFeatureSizesScanline for the out-of-core variant.
- * @see ComputeFeatureSizes for the dispatcher.
+ * @see ComputeFeatureSizesScanline.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureSizesDirect
 {
 public:
+  /**
+   * @brief Initializes the direct feature-size algorithm.
+   * @param dataStructure Contains geometry, Feature IDs, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation between Z slices or features.
+   * @param inputValues Selects outputs and required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeFeatureSizesDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeFeatureSizesInputValues* inputValues);
+  /**
+   * @brief Destroys the direct feature-size algorithm.
+   */
   ~ComputeFeatureSizesDirect() noexcept;
 
   ComputeFeatureSizesDirect(const ComputeFeatureSizesDirect&) = delete;
@@ -41,16 +52,19 @@ public:
   ComputeFeatureSizesDirect& operator=(ComputeFeatureSizesDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the feature size computation using parallel in-core accumulation.
-   * @return Result<> indicating success or error.
+   * @brief Computes feature sizes with direct accumulation.
+   * @return Success, or a validation, geometry, or feature-count error.
+   *
+   * Cancellation stops workers at Z-slice checks and output loops at feature checks. Earlier
+   * feature output remains written. Generated RectGrid element sizes can remain after cancellation.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                ///< Reference to the DataStructure.
-  const ComputeFeatureSizesInputValues* m_InputValues = nullptr; ///< User-configured parameters.
-  const std::atomic_bool& m_ShouldCancel;                        ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;               ///< Message handler for progress.
+  DataStructure& m_DataStructure;
+  const ComputeFeatureSizesInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

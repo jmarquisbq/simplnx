@@ -23,71 +23,31 @@
 
 using namespace nx::core;
 
-// ----------------------------------------------------------------------------
-// RemoveFlaggedFeaturesScanline -- Out-of-Core Algorithm
-//
-// Produces the same output as RemoveFlaggedFeaturesDirect. All FeatureIds and
-// companion cell-array access is done through sequential, chunk-aligned bulk
-// I/O (copyIntoBuffer/copyFromBuffer) rather than per-voxel operator[]/copyTuple, so that out-of-core
-// (chunked) storage is served with large sequential reads/writes instead of
-// scattered single-element accesses.
-//
-// See RemoveFlaggedFeaturesScanline.hpp for the rolling-window / deferred-write
-// design that keeps the "fill removed features" pass bounded to O(slice) memory.
-// ----------------------------------------------------------------------------
+// The scanline path uses bulk I/O and a write-behind Z window. This design
+// keeps fill scratch proportional to slice area instead of total voxel count.
 
 namespace
 {
 /**
- * @brief Fused, rolling-window equivalent of RemoveFlaggedFeaturesDirect's
- * IdentifyNeighbors + FindVoxelArrays for a single convergence iteration. For every
- * voxel whose FeatureId is <= 0, tallies its (up to 6) face-connected neighbors and,
- * for voxels whose FeatureId is strictly negative (i.e. actually flagged for removal),
- * commits the majority Feature's data into that voxel across every kept cell array.
+ * @struct TransferMarkedSlice
+ * @brief Applies one slice of neighbor-source marks to a typed cell array.
  *
- * @section why_rolling_window Why a rolling window
- * FeatureIds votes are read one Z-slice at a time via copyIntoBuffer into three buffers
- * (prevSlice/curSlice/nextSlice), exactly as ComputeBoundaryCellsScanline does. This
- * avoids per-voxel operator[] on the (potentially out-of-core) FeatureIds store, which
- * would otherwise trigger a chunk load for nearly every voxel -- especially costly for
- * the +/-Z neighbors, which are a full Z-slice away in the flat index space.
- *
- * @section bounded_marks Bounded per-slice marks
- * Every vote computed here targets the CURRENT voxel's own slot only -- this algorithm
- * never writes a mark into a neighbor's slot (unlike ErodeDilateBadData's dilate mode).
- * That means slice z's marks are fully resolved the instant z's XY scan completes, so
- * only two O(sliceSize) buffers are needed: curMarks (being filled for the slice just
- * scanned) and prevMarks (fully resolved, awaiting commit). The commit for prevMarks is
- * deferred by one Z-slice -- mirroring the sibling rolling-window algorithms
- * (ErodeDilateBadData, FillBadDataCCL) -- purely so the read (vote) side of the
- * algorithm never has to reason about a write that raced ahead of it: by the time
- * prevMarks is committed, every vote that could ever have read that slice's original
- * FeatureIds value has already been computed from the in-memory rolling window, which
- * never re-reads a slice from disk after it has advanced past it. Writes therefore stay
- * strictly behind the slice the read frontier still needs, with memory bounded to two
- * slice-sized buffers regardless of the dataset's total voxel count.
- *
- * @section tie_breaking Tie-breaking fidelity
- * The 6 face neighbors are checked in the SAME order as the Direct algorithm
- * (-Z, -Y, -X, +X, +Y, +Z, matching NeighborUtilities' initializeFaceNeighborInternalIdx
- * for Image3D) using the SAME discovered-features/hit-count bookkeeping, so that ties
- * (multiple candidate Features reaching the same vote count) resolve identically: the
- * first candidate to reach a given count wins and is not displaced by a later candidate
- * that only ties it.
- *
- * @param imageGeom Geometry defining the voxel grid dimensions.
- * @param featureIdsStore FeatureIds data store (read for votes; written via voxelArrays).
- * @param voxelArrays Every kept cell-level array (including FeatureIds itself, unless
- *   the user explicitly ignored it) that must receive the winning neighbor's data.
- * @param shouldCancel Cooperative cancellation flag, checked once per Z-slice.
- * @param messageHelper Used to build a throttled progress messenger.
- * @return true if any voxel with FeatureId <= 0 was found (mirrors the Direct
- *   algorithm's "shouldLoop" result, including background/id==0 voxels that are
- *   never actually filled -- see the class-level Doxygen comment).
+ * The transfer loads one destination slice and only the referenced adjacent
+ * source slices. It writes the destination only when a mark changes a tuple.
  */
 struct TransferMarkedSlice
 {
-  /** @brief Applies one destination slice's source marks to every component of one typed cell array. */
+  /**
+   * @brief Transfers marked tuples for one destination slice.
+   * @tparam T Specifies the cell-array scalar type.
+   * @param dataArray Provides source tuples and receives destination tuples.
+   * @param marks Provides one flat source index or -1 per destination tuple.
+   * @param sliceSize Specifies tuples per Z slice.
+   * @param destinationZ Specifies the destination Z index.
+   * @param dimZ Specifies total Z slices.
+   * @param shouldCancel Stops before read or write work when true.
+   * @return First bulk-I/O or source-range error, or success after cancellation.
+   */
   template <typename T>
   Result<> operator()(IDataArray& dataArray, const std::vector<int64>& marks, usize sliceSize, usize destinationZ, usize dimZ, const std::atomic_bool& shouldCancel) const
   {
@@ -156,7 +116,16 @@ struct TransferMarkedSlice
   }
 };
 
-/** @brief Dispatches a runtime cell-array type to the single-slice buffered transfer. */
+/**
+ * @brief Dispatches one marked-slice transfer from the runtime array type.
+ * @param dataArray Provides source tuples and receives destination tuples.
+ * @param marks Provides one flat source index or -1 per destination tuple.
+ * @param sliceSize Specifies tuples per Z slice.
+ * @param destinationZ Specifies the destination Z index.
+ * @param dimZ Specifies total Z slices.
+ * @param shouldCancel Stops before read or write work when true.
+ * @return First bulk-I/O or source-range error, or success after cancellation.
+ */
 Result<> TransferMarkedSliceForArray(IDataArray& dataArray, const std::vector<int64>& marks, usize sliceSize, usize destinationZ, usize dimZ, const std::atomic_bool& shouldCancel)
 {
   return ExecuteDataFunction(TransferMarkedSlice{}, dataArray.getDataType(), dataArray, marks, sliceSize, destinationZ, dimZ, shouldCancel);
@@ -164,10 +133,19 @@ Result<> TransferMarkedSliceForArray(IDataArray& dataArray, const std::vector<in
 
 /**
  * @brief Selects and applies majority face-neighbor fills with a three-slice Feature-ID window.
+ * @param imageGeom Defines voxel dimensions.
+ * @param featureIdsStore Provides Feature IDs for neighbor votes.
+ * @param voxelArrays Provides and receives each retained cell array.
+ * @param shouldCancel Stops before later Z slices when true.
+ * @param messageHelper Creates a throttled progress messenger.
+ * @return First bulk-I/O error, or whether any nonpositive Feature ID exists.
  *
- * Commits lag the read frontier by one slice, ensuring every vote in an iteration
- * observes the same pre-iteration Feature IDs while all companion arrays receive
- * the identical source tuple.
+ * Three input slices preserve the Feature-ID state at iteration start. Two mark
+ * slices keep writes behind the vote frontier. This order prevents earlier writes
+ * from changing later votes.
+ *
+ * Face neighbors use the direct algorithm's order. The first feature to exceed
+ * the current vote count wins. A later tie does not replace that feature.
  */
 Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32AbstractDataStore& featureIdsStore, const std::vector<std::shared_ptr<IDataArray>>& voxelArrays,
                                               const std::atomic_bool& shouldCancel, MessageHelper& messageHelper)
@@ -181,11 +159,8 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
   const usize sliceSize = static_cast<usize>(dimX) * static_cast<usize>(dimY);
   const usize dimZUnsigned = static_cast<usize>(dimZ);
 
-  // 3-slot rolling window for FeatureIds votes: prevSlice = z-1, curSlice = z, nextSlice = z+1.
-  // Populated via in-memory std::swap plus a single disk read per Z-slice (the "ahead"
-  // read below); a slice is never re-read from disk once the window has advanced past
-  // it, so votes always see the pre-iteration FeatureIds state regardless of what has
-  // since been committed to disk for earlier slices.
+  // The rolling window keeps previous, current, and next Feature-ID slices.
+  // Each advance needs at most one new disk read.
   std::vector<int32> prevSlice(sliceSize);
   std::vector<int32> curSlice(sliceSize);
   std::vector<int32> nextSlice(sliceSize);
@@ -208,9 +183,8 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
     }
   }
 
-  // Per-slice destination marks: O(sliceSize) instead of O(n_cells). curMarks[inSlice] is
-  // the global flat index of the winning neighbor for the voxel currently being scanned,
-  // or -1. prevMarks holds the previous slice's fully-resolved marks, awaiting commit.
+  // A mark stores the winning flat source index, or -1. Current and previous
+  // mark slices keep scratch proportional to slice area.
   std::vector<int64> curMarks(sliceSize, -1);
   std::vector<int64> prevMarks(sliceSize, -1);
 
@@ -219,9 +193,7 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
   auto progressIncrement = dimZ / 100;
   usize progressCounter = 0;
 
-  // Commits one fully-resolved Z-slice of marks across every kept cell-level array via
-  // the local typed bulk transfer. It reads a destination slice per array, but only
-  // writes it back when at least one voxel in the slice needs filling.
+  // Commit one resolved mark slice across all retained cell arrays.
   auto commitSlice = [&](usize z, const std::vector<int64>& marks) -> Result<> {
     for(const auto& voxelArray : voxelArrays)
     {
@@ -271,11 +243,8 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
         std::array<int32, 6> discoveredFeatures = {0, 0, 0, 0, 0, 0};
         usize discoveredFeatureCount = 0;
 
-        // Mirrors IdentifyNeighbors' inner discovery loop exactly, but sources the
-        // candidate feature value from the rolling-window buffers instead of a
-        // per-voxel OOC store read, and only persists the winning global index when
-        // featureName is strictly negative (the commit step never copies into
-        // background/id==0 voxels, even though they are tallied into shouldLoop above).
+        // Preserve the direct algorithm's vote rule. Only negative destinations
+        // receive a source mark, although zero IDs still request another iteration.
         auto considerNeighbor = [&](int32 feature, int64 neighborGlobalIndex) {
           if(feature < 0)
           {
@@ -302,8 +271,7 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
           discoveredFeatureCount++;
         };
 
-        // Check the 6 face neighbors in the same order as the Direct algorithm:
-        // -Z, -Y, -X, +X, +Y, +Z.
+        // Check face neighbors in direct-path order: -Z, -Y, -X, +X, +Y, +Z.
         if(zIdx > 0)
         {
           considerNeighbor(prevSlice[sliceIndex], voxelIndex - dimX * dimY);
@@ -331,10 +299,7 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
       }
     }
 
-    // Commit the previous slice (z-1) now that this slice's scan is done. prevMarks was
-    // already fully resolved at the end of the previous iteration (this algorithm never
-    // writes into a neighbor's mark slot), so deferring by exactly one slice is enough to
-    // mirror the sibling rolling-window algorithms' write-behind-the-read-frontier shape.
+    // Commit the previous slice after all votes that need its original IDs are complete.
     if(zIdx > 0)
     {
       auto commitResult = commitSlice(static_cast<usize>(zIdx - 1), prevMarks);
@@ -345,8 +310,7 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
     }
     std::swap(prevMarks, curMarks);
 
-    // Rotate the rolling window forward: prevSlice <- curSlice <- nextSlice, then load
-    // the next-next Z-slice into the freed buffer (the only disk read this iteration).
+    // Rotate the window and read the next required slice into the free buffer.
     std::swap(prevSlice, curSlice);
     std::swap(curSlice, nextSlice);
     if(zIdx + 2 < dimZ)
@@ -359,8 +323,7 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
     }
   }
 
-  // Flush the final slice's marks: after the loop exits, prevMarks holds slice dimZ-1's
-  // fully-resolved marks (from the last rotation) but they have not yet been committed.
+  // Commit the final resolved mark slice after the read frontier exits the volume.
   if(dimZ > 0)
   {
     auto commitResult = commitSlice(static_cast<usize>(dimZ - 1), prevMarks);
@@ -374,19 +337,15 @@ Result<bool> IdentifyAndFillNeighborsScanline(const ImageGeom& imageGeom, Int32A
 }
 
 /**
- * @brief Chunked bulk-I/O equivalent of RemoveFlaggedFeaturesDirect's FlagFeatures.
+ * @brief Marks cells that belong to flagged features through bounded I/O.
+ * @param featureIdsStore Provides and receives cell Feature IDs.
+ * @param flaggedFeatures Identifies features selected for removal.
+ * @param fillRemovedFeatures Uses -1 marks for later filling when true.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return First bulk-I/O error, active-feature flags, or an empty vector when all are flagged.
  *
- * Marks inactive Features' voxels for removal (-1 if they will be filled back in later,
- * 0 otherwise), reading and writing FeatureIds in fixed-size chunks via
- * copyIntoBuffer/copyFromBuffer instead of per-voxel operator[]. activeObjects is
- * feature-level (typically thousands of entries at most), so the per-feature isTrue()
- * scan above the chunk loop is not an OOC concern.
- *
- * @param featureIdsStore FeatureIds data store (read and written in place).
- * @param flaggedFeatures Per-feature removal flags.
- * @param fillRemovedFeatures When true, removed voxels are marked -1 (to be filled back
- *   in later); when false, they are marked 0 (permanently removed background).
- * @return Per-feature active flags, or an empty vector if every Feature would be removed.
+ * Feature-level flags remain resident. Cell Feature IDs use 65,536-tuple chunks.
+ * IDs outside the flag range remain unchanged.
  */
 Result<std::vector<bool>> FlagFeaturesScanline(Int32AbstractDataStore& featureIdsStore, std::unique_ptr<MaskCompareUtilities::MaskCompare>& flaggedFeatures, const bool fillRemovedFeatures,
                                                const std::atomic_bool& shouldCancel)
@@ -448,7 +407,15 @@ Result<std::vector<bool>> FlagFeaturesScanline(Int32AbstractDataStore& featureId
   return {activeObjects};
 }
 
-/** @brief Applies the feature-scale renumbering map to Feature IDs through bounded read/modify/write chunks. */
+/**
+ * @brief Applies active-feature renumbering through bounded I/O.
+ * @param featureIdsStore Provides and receives cell Feature IDs.
+ * @param activeObjects Selects feature tuples retained after removal.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return First bulk-I/O error, or success after completion or cancellation.
+ *
+ * Negative and out-of-range IDs remain unchanged.
+ */
 Result<> RenumberFeatureIdsScanline(Int32AbstractDataStore& featureIdsStore, const std::vector<bool>& activeObjects, const std::atomic_bool& shouldCancel)
 {
   const FeatureRenumbering renumbering = ComputeFeatureRenumbering(activeObjects);
@@ -496,15 +463,24 @@ Result<> RenumberFeatureIdsScanline(Int32AbstractDataStore& featureIdsStore, con
 }
 
 /**
- * @brief Runs CropImageGeometryFilter to extract one flagged Feature into its own
- * cropped ImageGeom. Identical orchestration to RemoveFlaggedFeaturesDirect's copy --
- * this delegates entirely to CropImageGeometryFilter and only touches the small,
- * feature-level bounds array, so it is not itself an OOC-sensitive code path.
+ * @class RunCropImageGeometryImpl
+ * @brief Runs one CropImageGeometryFilter task for a flagged feature.
+ *
+ * The caller executes each task synchronously. This protects DataStructure mutation
+ * and keeps borrowed loop-local paths and bounds alive.
  */
 class RunCropImageGeometryImpl
 {
 public:
-  /** @brief Captures the borrowed crop paths, bounds, data structure, and cancellation state. */
+  /**
+   * @brief Creates one borrowed crop task.
+   * @param dataStructure Receives the cropped geometry.
+   * @param shouldCancel Stops before delegated execution when true.
+   * @param imageGeometryPath Identifies the source ImageGeom.
+   * @param minVoxelVector Specifies inclusive minimum voxel indexes.
+   * @param maxVoxelVector Specifies inclusive maximum voxel indexes.
+   * @param createdImgGeomPath Identifies the cropped ImageGeom.
+   */
   RunCropImageGeometryImpl(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const DataPath& imageGeometryPath, const std::vector<uint64>& minVoxelVector,
                            const std::vector<uint64>& maxVoxelVector, const DataPath& createdImgGeomPath)
   : m_DataStructure(dataStructure)
@@ -516,9 +492,17 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the borrowed crop task.
+   */
   ~RunCropImageGeometryImpl() = default;
 
-  /** @brief Preflights and executes the delegated crop using the captured bounds. */
+  /**
+   * @brief Preflights and executes the delegated crop.
+   *
+   * The task throws after a preflight failure. The implementation does not inspect
+   * the execute result and can therefore ignore an execution failure.
+   */
   void operator()() const
   {
     CropImageGeometryFilter filter;
@@ -562,7 +546,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 RemoveFlaggedFeaturesScanline::RemoveFlaggedFeaturesScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                              const RemoveFlaggedFeaturesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -572,10 +555,8 @@ RemoveFlaggedFeaturesScanline::RemoveFlaggedFeaturesScanline(DataStructure& data
 {
 }
 
-// -----------------------------------------------------------------------------
 RemoveFlaggedFeaturesScanline::~RemoveFlaggedFeaturesScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> RemoveFlaggedFeaturesScanline::operator()()
 {
   auto& featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
@@ -588,8 +569,8 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
     flaggedFeatures = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->FlaggedFeaturesArrayPath);
   } catch(const std::out_of_range& exception)
   {
-    // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-    // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+    // Normal filter execution validates this path. Direct algorithm callers can
+    // still supply a missing or unsupported mask.
     std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->FlaggedFeaturesArrayPath.toString());
     return MakeErrorResult(-53900, message);
   }
@@ -601,7 +582,7 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
 
   MessageHelper messageHelper(m_MessageHandler);
 
-  // Valid values Functionality::Extract and Functionality::ExtractThenRemove
+  // Extract and ExtractThenRemove create one cropped geometry per flagged feature.
   if(function != Functionality::Remove)
   {
     m_MessageHandler(IFilter::ProgressMessage{IFilter::Message::Type::Info, fmt::format("Beginning Feature Extraction")});
@@ -626,6 +607,7 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
       }
 
       auto executeResult = filter.execute(m_DataStructure, args);
+      // Only preflight status controls this path. The delegated execute result is not inspected.
       if(preflightResult.outputActions.invalid())
       {
         throw std::runtime_error("Execute failed when cropping the geometry in extract flagged features!");
@@ -640,7 +622,8 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
     }
 
     ParallelTaskAlgorithm taskRunner;
-    // This has to be run in serial for the time being because adding to the dataStructure is not thread-safe
+    // Crop tasks mutate DataStructure and borrow loop-local bounds. Synchronous
+    // execution satisfies both thread-safety and lifetime requirements.
     taskRunner.setParallelizationEnabled(false);
 
     usize maxTuple = flaggedFeatures->getNumberOfTuples();
@@ -676,7 +659,7 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
     return {};
   }
 
-  // Valid values Functionality::Remove and Functionality::ExtractThenRemove
+  // Remove and ExtractThenRemove modify the source feature data.
   if(function != Functionality::Extract)
   {
     m_MessageHandler(IFilter::ProgressMessage{IFilter::Message::Type::Info, fmt::format("Beginning Feature Removal")});
@@ -706,11 +689,8 @@ Result<> RemoveFlaggedFeaturesScanline::operator()()
         count++;
         m_MessageHandler(IFilter::ProgressMessage{IFilter::Message::Type::Info, fmt::format("Entering iteration number {}...", count)});
 
-        // Every kept cell-level array (including FeatureIds itself, unless the user
-        // explicitly ignored it) that must receive the winning neighbor's data.
-        // Gathered once per convergence iteration -- mirrors the Direct algorithm's
-        // per-iteration regeneration and is not itself an OOC concern (feature-level
-        // list, not cell-level data).
+        // Rebuild the retained cell-array list for each convergence iteration.
+        // Feature IDs must remain in this list for negative IDs to be replaced.
         std::vector<std::shared_ptr<IDataArray>> voxelArrays = GenerateDataArrayList(m_DataStructure, m_InputValues->FeatureIdsArrayPath, m_InputValues->IgnoredDataArrayPaths);
         auto fillResult = IdentifyAndFillNeighborsScanline(imageGeom, featureIds, voxelArrays, m_ShouldCancel, messageHelper);
         if(fillResult.invalid())

@@ -15,6 +15,10 @@
 namespace nx::core
 {
 
+/**
+ * @struct GroupMicroTextureRegionsInputValues
+ * @brief Identifies microtexture-region grouping inputs.
+ */
 struct ORIENTATIONANALYSIS_EXPORT GroupMicroTextureRegionsInputValues
 {
   bool UseNonContiguousNeighbors;
@@ -44,7 +48,19 @@ struct ORIENTATIONANALYSIS_EXPORT GroupMicroTextureRegionsInputValues
 class ORIENTATIONANALYSIS_EXPORT GroupMicroTextureRegions
 {
 public:
+  /**
+   * @brief Initializes microtexture-region grouping.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies grouping settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   GroupMicroTextureRegions(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, GroupMicroTextureRegionsInputValues* inputValues);
+  /**
+   * @brief Destroys the microtexture-region executor.
+   */
   ~GroupMicroTextureRegions() noexcept;
 
   GroupMicroTextureRegions(const GroupMicroTextureRegions&) = delete;
@@ -52,8 +68,16 @@ public:
   GroupMicroTextureRegions& operator=(const GroupMicroTextureRegions&) = delete;
   GroupMicroTextureRegions& operator=(GroupMicroTextureRegions&&) noexcept = delete;
 
+  /**
+   * @brief Groups compatible features.
+   * @return Result from grouping and cell-parent remapping.
+   */
   Result<> operator()();
 
+  /**
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 protected:
@@ -74,8 +98,6 @@ private:
   ebsdlib::Matrix3X1F m_AvgCAxes = {0.0f, 0.0f, 0.0f};
   std::mt19937_64 m_Generator = {};
   std::uniform_real_distribution<float32> m_Distribution = {};
-
-  // These are so that we don't have to keep getting the references while we are running
 
   Int32Array& m_FeaturePhases;
   Int32Array& m_FeatureParentIds;

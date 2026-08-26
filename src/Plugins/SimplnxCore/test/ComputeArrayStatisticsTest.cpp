@@ -1062,7 +1062,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm", "[Simplnx
   const std::string standardization = "Standardization";
   const std::string numUniqueValues = "NumUniqueValues";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -1093,16 +1093,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm", "[Simplnx
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);
@@ -1241,7 +1238,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index", 
   const std::string standardization = "Standardization";
   const std::string numUniqueValues = "NumUniqueValues";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -1272,16 +1269,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index", 
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);
@@ -1470,7 +1464,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
   const std::string numUniqueValues = "NumUniqueValues";
   const std::string featureIdMapping = "FeatureIdMapping";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -1505,16 +1499,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);
@@ -1690,7 +1681,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
   const std::string numUniqueValues = "NumUniqueValues";
   const std::string featureIdMapping = "FeatureIdMapping";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -1725,16 +1716,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);
@@ -1933,7 +1921,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
   const std::string featureIdMapping = "FeatureIdMapping";
   const std::string featureHasData = "FeatureHasData";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -1970,16 +1958,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);
@@ -2170,7 +2155,7 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
   const std::string numUniqueValues = "NumUniqueValues";
   const std::string featureIdMapping = "FeatureIdMapping";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayStatisticsFilter filter;
     Arguments args;
@@ -2206,16 +2191,13 @@ TEST_CASE("SimplnxCore::ComputeArrayStatisticsFilter: Test Algorithm By Index - 
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_StandardizedArrayName_Key, std::make_any<std::string>(standardization));
     args.insertOrAssign(ComputeArrayStatisticsFilter::k_NumUniqueValuesName_Key, std::make_any<std::string>(numUniqueValues));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     auto* amPtr = dataStructure.getDataAs<AttributeMatrix>(statsDataPath);
     REQUIRE(amPtr != nullptr);

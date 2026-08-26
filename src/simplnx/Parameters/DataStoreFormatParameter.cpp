@@ -29,7 +29,6 @@ IParameter::AcceptedTypes DataStoreFormatParameter::acceptedTypes() const
   return {typeid(ValueType)};
 }
 
-//------------------------------------------------------------------------------
 IParameter::VersionType DataStoreFormatParameter::getVersion() const
 {
   return 1;
@@ -84,7 +83,7 @@ std::vector<std::pair<std::string, std::string>> DataStoreFormatParameter::avail
 Result<> DataStoreFormatParameter::validate(const std::any& value) const
 {
   [[maybe_unused]] const auto& stringValue = GetAnyRef<ValueType>(value);
-  // Empty string is always valid — it means "Automatic" (let the resolver decide)
+  // An empty value delegates storage selection to the data-structure resolver.
   if(stringValue.empty())
   {
     return {};

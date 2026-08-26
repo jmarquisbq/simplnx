@@ -17,6 +17,7 @@ namespace
 {
 /**
  * @brief Minimal mock data store that reports StoreType::OutOfCore.
+ * @tparam T Specifies the stored element type.
  *
  * Only getStoreType() is meaningful; every other method throws because
  * the tests never access actual element data.

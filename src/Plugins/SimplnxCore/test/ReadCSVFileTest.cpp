@@ -46,6 +46,10 @@ constexpr int32 k_StartImportRowOutOfRange = -121;
 constexpr int32 k_EmptyHeaders = -122;
 constexpr int32 k_FileDoesNotExist = -300;
 
+/**
+ * @class ScopedBenchmarkDirectory
+ * @brief Creates and removes the ReadCSV benchmark directory.
+ */
 class ScopedBenchmarkDirectory
 {
 public:
@@ -80,13 +84,23 @@ private:
   fs::path m_Path;
 };
 
+/**
+ * @brief Computes the deterministic signal used by the OOC benchmark.
+ * @param tupleIndex Zero-based tuple index.
+ * @return Signal value in the benchmark range.
+ */
 uint32 ExpectedBenchmarkSignal(usize tupleIndex)
 {
   return static_cast<uint32>((tupleIndex * 37ULL + 11ULL) % 8000000ULL);
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Writes a comma-separated test file with one header row.
+ * @param inputFilePath Output file path.
+ * @param colValues Row values to repeat for each header.
+ * @param headers Column names.
+ */
 void CreateTestDataFile(const fs::path& inputFilePath, nonstd::span<std::string> colValues, const std::vector<std::string>& headers)
 {
   if(fs::exists(inputFilePath))
@@ -128,19 +142,19 @@ void CreateTestDataFile(const fs::path& inputFilePath, nonstd::span<std::string>
 }
 
 /**
- *
- * @param inputFilePath
- * @param startImportRow
- * @param headerMode
- * @param headersLine
- * @param delimiters
- * @param customHeaders
- * @param dataTypes
- * @param skippedArrayMask
- * @param tupleDims
- * @param values
- * @param newGroupName
- * @return
+ * @brief Creates ReadCSVFileFilter arguments for one test case.
+ * @param inputFilePath Input CSV path.
+ * @param startImportRow First data row to import.
+ * @param headerMode Header interpretation mode.
+ * @param headersLine Header row index.
+ * @param delimiters Delimiter characters.
+ * @param customHeaders Replacement header names.
+ * @param dataTypes Output array types.
+ * @param skippedArrayMask True for columns to skip.
+ * @param tupleDims Output tuple dimensions.
+ * @param values Column values used by the test file.
+ * @param newGroupName Output group name.
+ * @return Configured filter arguments.
  */
 Arguments createArguments(const std::string& inputFilePath, usize startImportRow, ReadCSVData::HeaderMode headerMode, usize headersLine, const std::vector<char>& delimiters,
                           const std::vector<std::string>& customHeaders, const std::vector<CSVType>& dataTypes, const std::vector<bool>& skippedArrayMask, const ShapeType& tupleDims,
@@ -166,7 +180,7 @@ Arguments createArguments(const std::string& inputFilePath, usize startImportRow
   return args;
 }
 
-// -----------------------------------------------------------------------------
+// Run primitive type cases through the selected algorithm scope.
 template <typename T>
 void TestCase_TestPrimitives(UnitTest::AlgorithmTestScope& scope, nonstd::span<std::string> values)
 {
@@ -183,18 +197,16 @@ void TestCase_TestPrimitives(UnitTest::AlgorithmTestScope& scope, nonstd::span<s
   Arguments args =
       createArguments(k_TestInput.string(), 2, ReadCSVData::HeaderMode::LINE, 1, {','}, {arrayName}, {GetCSVType<T>()}, {false}, {static_cast<usize>(values.size())}, values, newGroupName);
 
-  // Create the test input data file
+  // Write the test input file.
   CreateTestDataFile(k_TestInput, values, {arrayName});
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
-  // Check the results
+  // Compare the generated arrays.
   const DataArray<T>* array = dataStructure.getDataAs<DataArray<T>>(arrayPath);
   REQUIRE(array != nullptr);
   scope.requireExpectedStore(*array);
@@ -212,7 +224,6 @@ void TestCase_TestPrimitives(UnitTest::AlgorithmTestScope& scope, nonstd::span<s
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 void TestCase_TestPrimitives_Error(UnitTest::AlgorithmTestScope& scope, nonstd::span<std::string> values, int32 expectedErrorCode)
 {
@@ -230,22 +241,19 @@ void TestCase_TestPrimitives_Error(UnitTest::AlgorithmTestScope& scope, nonstd::
   DataStructure dataStructure;
   Arguments args = createArguments(k_TestInput.string(), 2, ReadCSVData::HeaderMode::LINE, 1, {','}, {arrayName}, {GetCSVType<T>()}, {false}, {tupleCount}, values, newGroupName);
 
-  // Create the test input data file
+  // Write the test input file.
   fs::create_directories(k_TestInput.parent_path());
   CreateTestDataFile(k_TestInput, values, {arrayName});
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result);
   REQUIRE(executeResult.result.errors().size() == 1);
   REQUIRE(executeResult.result.errors()[0].code == expectedErrorCode);
 }
 
-// -----------------------------------------------------------------------------
 void TestCase_TestImporterData_Error(const std::string& inputFilePath, usize startImportRow, ReadCSVData::HeaderMode headerMode, usize headersLine, const std::vector<char>& delimiters,
                                      const std::vector<std::string>& headers, const std::vector<CSVType>& dataTypes, const std::vector<bool>& skippedArrayMask, const ShapeType& tupleDims,
                                      nonstd::span<std::string> values, int32 expectedErrorCode)
@@ -255,7 +263,6 @@ void TestCase_TestImporterData_Error(const std::string& inputFilePath, usize sta
   DataStructure dataStructure;
   Arguments args = createArguments(inputFilePath, startImportRow, headerMode, headersLine, delimiters, headers, dataTypes, skippedArrayMask, tupleDims, values, newGroupName);
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   if(expectedErrorCode == 0)
   {
@@ -276,7 +283,7 @@ TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 1): Valid filter execution")
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Create the parent directory path
+  // Create the parent output directory.
   fs::create_directories(k_TestInput.parent_path());
 
   std::vector<std::string> v = {std::to_string(std::numeric_limits<int8>::min()), std::to_string(std::numeric_limits<int8>::max())};
@@ -327,14 +334,12 @@ TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 2): Valid filter execution - Ski
   std::vector<std::string> values = {"0"};
   Arguments args = createArguments(k_TestInput.string(), 2, ReadCSVData::HeaderMode::LINE, 1, {','}, {arrayName}, {CSVType::int8}, {true}, {static_cast<usize>(values.size())}, values, newGroupName);
 
-  // Create the test input data file
+  // Write the test input file.
   CreateTestDataFile(k_TestInput, values, {arrayName});
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
@@ -352,7 +357,7 @@ TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 3): Invalid filter execution - O
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Create the parent directory path
+  // Create the parent output directory.
   fs::create_directories(k_TestInput.parent_path());
 
   // Int8 - Out of bounds
@@ -433,7 +438,7 @@ TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 4): Invalid filter execution - I
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Create the parent directory path
+  // Create the parent output directory.
   fs::create_directories(k_TestInput.parent_path());
 
   std::vector<std::string> v = {" "};
@@ -576,16 +581,14 @@ TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 6): Invalid filter execution - B
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Create the parent directory path
+  // Create the parent output directory.
   fs::create_directories(k_TestInput.parent_path());
 
-  // First line blank tests
+  // The first row is blank.
   std::vector<std::string> v = {"", std::to_string(std::numeric_limits<int8>::min()), std::to_string(std::numeric_limits<int8>::max())};
   TestCase_TestPrimitives_Error<int8>(scope, v, k_BlankLineErrorCode);
-  // ... (rest of this test case unchanged, truncated for brevity)
 }
 
-// -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::ReadCSVFileFilter (Case 7): Valid filter execution - String Data")
 {
   const std::vector<std::string> arrayNames = {"Name", "City"};

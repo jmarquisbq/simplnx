@@ -7,18 +7,20 @@
 #include <stdexcept>
 #include <vector>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
+
 /**
  * @class InMemoryTemporaryRecordStore
- * @brief Resident implementation of ITemporaryRecordStore for explicitly allowed provider-free fallback paths.
+ * @brief Stores fixed-width temporary records in resident memory.
  *
- * The same fixed-record and bounded-transfer contract is used by both resident
- * and file-backed providers, allowing algorithms to remain storage-neutral.
- * Callers must not select this class merely because construction is convenient.
- * Each algorithm decides whether a resident fallback is permissible; genuine OOC
- * routes in the original filter optimization fail closed when no external provider
- * is registered so their scratch cannot silently consume cell-count RAM.
+ * Resident and file-backed providers use the same bounded-transfer contract.
+ * An algorithm can use this fallback only when record-count memory is permitted.
+ * A path that requires external scratch must fail if no external provider exists.
  *
  * The object owns its byte vector and is not thread-safe.
  */
@@ -27,6 +29,7 @@ class InMemoryTemporaryRecordStore : public ITemporaryRecordStore
 public:
   /**
    * @brief Validates the fixed-record configuration and allocates the initial resident byte range.
+   * @param config Specifies record width, batch limit, initial count, and read-only state.
    * @return An owned store or a configuration, size-overflow, or allocation error.
    */
   static Result<std::unique_ptr<InMemoryTemporaryRecordStore>> Create(TemporaryRecordStoreConfig config)
@@ -47,27 +50,30 @@ public:
       return MakeErrorResult<std::unique_ptr<InMemoryTemporaryRecordStore>>(-6045, "In-memory temporary record-store allocation failed");
     }
   }
-  /** @brief Returns the configured fixed record width in bytes. */
   uint64 recordSize() const override
   {
     return m_Config.recordSize;
   }
-  /** @brief Returns the current logical number of resident records. */
   uint64 recordCount() const override
   {
     return m_Count;
   }
-  /** @brief Returns the configured per-read/write record limit. */
   uint64 maxRecordsPerBatch() const override
   {
     return m_Config.maxRecordsPerBatch;
   }
-  /** @brief Returns whether mutation was disabled by the configuration. */
   bool isReadOnly() const override
   {
     return m_Config.readOnly;
   }
-  /** @brief Copies a validated bounded record range into caller-owned bytes. */
+  /**
+   * @brief Reads a bounded record range into caller-owned storage.
+   * @param offset Zero-based first record.
+   * @param count Number of requested records, bounded by maxRecordsPerBatch().
+   * @param bytes Receives at least the requested fixed-width record bytes.
+   * @param cancel Cancellation flag.
+   * @return Number of records read, or a cancellation, range, batch, overflow, or buffer-size error.
+   */
   Result<uint64> read(uint64 offset, uint64 count, nonstd::span<std::byte> bytes, const std::atomic_bool& cancel) const override
   {
     if(auto r = validate(offset, count, bytes.size(), false, cancel); r.invalid())
@@ -79,7 +85,14 @@ public:
     std::memcpy(bytes.data(), m_Bytes.data() + offset * m_Config.recordSize, count * m_Config.recordSize);
     return {count};
   }
-  /** @brief Replaces a validated bounded record range from caller-owned bytes. */
+  /**
+   * @brief Writes a bounded range from caller-owned storage.
+   * @param offset Zero-based first record.
+   * @param count Number of records, bounded by maxRecordsPerBatch().
+   * @param bytes Contains exactly the requested fixed-width record bytes.
+   * @param cancel Cancellation flag.
+   * @return Valid result or a read-only, cancellation, range, batch, overflow, or buffer-size error.
+   */
   Result<> write(uint64 offset, uint64 count, nonstd::span<const std::byte> bytes, const std::atomic_bool& cancel) override
   {
     if(m_Config.readOnly)
@@ -93,7 +106,14 @@ public:
     std::memcpy(m_Bytes.data() + offset * m_Config.recordSize, bytes.data(), bytes.size());
     return {};
   }
-  /** @brief Repeats one fixed-width record over a validated logical range. */
+  /**
+   * @brief Repeats one complete record across a logical range.
+   * @param offset Zero-based first record.
+   * @param count Number of records to fill.
+   * @param record Contains one complete fixed-width record.
+   * @param cancel Cancellation flag.
+   * @return Valid result or a read-only, cancellation, range, overflow, or record-width error.
+   */
   Result<> fill(uint64 offset, uint64 count, nonstd::span<const std::byte> record, const std::atomic_bool& cancel) override
   {
     if(record.size() != m_Config.recordSize)
@@ -108,7 +128,12 @@ public:
       std::memcpy(m_Bytes.data() + (offset + i) * m_Config.recordSize, record.data(), static_cast<usize>(m_Config.recordSize));
     return {};
   }
-  /** @brief Resizes resident storage after checking read-only, cancellation, and byte-count overflow. */
+  /**
+   * @brief Changes the logical record count without changing record width.
+   * @param count New logical record count.
+   * @param cancel Cancellation flag.
+   * @return Valid result or a read-only, cancellation, overflow, or allocation error.
+   */
   Result<> resize(uint64 count, const std::atomic_bool& cancel) override
   {
     if(m_Config.readOnly)
@@ -130,14 +155,26 @@ public:
   }
 
 private:
-  /** @brief Constructs a store after Create() has validated all size products. */
+  /**
+   * @brief Constructs a store after Create() validates all size products.
+   * @param config Specifies the validated store configuration.
+   */
   explicit InMemoryTemporaryRecordStore(TemporaryRecordStoreConfig config)
   : m_Config(config)
   , m_Count(config.initialRecordCount)
   , m_Bytes(static_cast<usize>(config.initialRecordCount * config.recordSize))
   {
   }
-  /** @brief Applies the shared cancellation, batch, range, overflow, and buffer-width checks for transfers. */
+  /**
+   * @brief Validates one transfer request.
+   * @param offset Zero-based first record.
+   * @param count Number of requested records.
+   * @param bytes Number of caller-buffer bytes.
+   * @param exact Requires bytes to equal the requested byte count when true.
+   * @param cancel Cancellation flag.
+   * @param enforceBatch Applies maxRecordsPerBatch() when true.
+   * @return Valid result or a cancellation, range, batch, overflow, or buffer-size error.
+   */
   Result<> validate(uint64 offset, uint64 count, usize bytes, bool exact, const std::atomic_bool& cancel, bool enforceBatch = true) const
   {
     if(cancel || (enforceBatch && count > m_Config.maxRecordsPerBatch) || offset > m_Count || count > m_Count - offset || count > std::numeric_limits<usize>::max() / m_Config.recordSize ||

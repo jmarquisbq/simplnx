@@ -17,7 +17,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 AlignSectionsMutualInformation::AlignSectionsMutualInformation(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                AlignSectionsMutualInformationInputValues* inputValues)
 : AlignSections(dataStructure, shouldCancel, mesgHandler)
@@ -28,10 +27,8 @@ AlignSectionsMutualInformation::AlignSectionsMutualInformation(DataStructure& da
 {
 }
 
-// -----------------------------------------------------------------------------
 AlignSectionsMutualInformation::~AlignSectionsMutualInformation() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsMutualInformation::operator()()
 {
   if(m_ShouldCancel)
@@ -43,7 +40,6 @@ Result<> AlignSectionsMutualInformation::operator()()
   return execute(gridGeom.getDimensions(), m_InputValues->ImageGeometryPath);
 }
 
-// -----------------------------------------------------------------------------
 int32 AlignSectionsMutualInformation::formFeaturesForSlice(const float32* quats, const int32* phases, const uint8* mask, std::vector<int32>& featureIds, int64 dimX, int64 dimY,
                                                            float32 misorientationTolerance, bool useMask, const std::vector<ebsdlib::LaueOps::Pointer>& orientationOps,
                                                            const std::vector<uint32>& crystalStructures)
@@ -152,7 +148,14 @@ int32 AlignSectionsMutualInformation::formFeaturesForSlice(const float32* quats,
 namespace
 {
 /**
- * @brief Helper to buffer one slice of mask data into a uint8 vector.
+ * @brief Copies one mask slice to uint8 local storage.
+ * @param maskUInt8StorePtr Provides uint8 mask values, or null.
+ * @param maskBoolStorePtr Provides bool mask values, or null.
+ * @param sliceOffset Identifies the first mask tuple in the slice.
+ * @param sliceVoxels Specifies the number of slice tuples.
+ * @param maskBuf Receives uint8 mask values.
+ *
+ * Bool values convert to zero or one for the feature flood fill.
  */
 void bufferMaskSlice(const AbstractDataStore<uint8>* maskUInt8StorePtr, const AbstractDataStore<bool>* maskBoolStorePtr, int64 sliceOffset, int64 sliceVoxels, std::vector<uint8>& maskBuf)
 {
@@ -174,7 +177,6 @@ void bufferMaskSlice(const AbstractDataStore<uint8>* maskUInt8StorePtr, const Ab
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts, std::vector<int64>& yShifts)
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);
@@ -188,7 +190,6 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
 
   const int64 sliceVoxels = dims[0] * dims[1];
 
-  // Set up orientation ops and crystal structures
   auto orientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
   const auto& crystalStructuresArray = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
   const auto& crystalStructuresStore = crystalStructuresArray.getDataStoreRef();
@@ -197,13 +198,12 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
 
   float32 misorientationTolerance = m_InputValues->MisorientationTolerance * nx::core::Constants::k_PiOver180F;
 
-  // Get store refs for bulk reads (copyIntoBuffer works for both in-core and OOC)
+  // Local buffers use bulk reads for both in-memory and OOC stores.
   const auto& quats = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath);
   const auto& cellPhases = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath);
   auto& quatsStore = quats.getDataStoreRef();
   auto& cellPhasesStore = cellPhases.getDataStoreRef();
 
-  // For bulk mask reads
   const AbstractDataStore<uint8>* maskUInt8StorePtr = nullptr;
   const AbstractDataStore<bool>* maskBoolStorePtr = nullptr;
   if(m_InputValues->UseMask)
@@ -219,13 +219,11 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
     }
   }
 
-  // Rolling buffers for 2-slice approach
   std::vector<int32> refFeatureIds(sliceVoxels, 0);
   std::vector<int32> curFeatureIds(sliceVoxels, 0);
   int32 refFeatureCount = 0;
   int32 curFeatureCount = 0;
 
-  // Per-slice buffers for bulk reads
   std::vector<float32> quatsBuf(sliceVoxels * 4);
   std::vector<int32> phasesBuf(sliceVoxels);
   std::vector<uint8> maskBuf;
@@ -234,13 +232,11 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
     maskBuf.resize(sliceVoxels, 1);
   }
 
-  // Lambda to flood-fill a single slice into a feature ID buffer, returning the feature count
   auto floodFillSlice = [&](int64 sliceIndex, std::vector<int32>& featureIds) -> int32 {
     std::fill(featureIds.begin(), featureIds.end(), 0);
 
     int64 sliceOffset = sliceIndex * sliceVoxels;
 
-    // Bulk-read this slice's data into local buffers
     cellPhasesStore.copyIntoBuffer(sliceOffset, nonstd::span<int32>(phasesBuf.data(), sliceVoxels));
     quatsStore.copyIntoBuffer(sliceOffset * 4, nonstd::span<float32>(quatsBuf.data(), sliceVoxels * 4));
 
@@ -254,9 +250,7 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
     return formFeaturesForSlice(quatsBuf.data(), phasesBuf.data(), sliceMask, featureIds, dims[0], dims[1], misorientationTolerance, m_InputValues->UseMask, orientationOps, crystalStructures);
   };
 
-  // Pre-flood-fill the topmost slice (slice = dims[2]-1) into refFeatureIds.
-  // The iteration goes from iter=1..dims[2]-1, where slice = (dims[2]-1) - iter.
-  // The reference slice is slice+1; for iter=1, that's slice+1 = dims[2]-1.
+  // The first adjacent pair uses the top slice as its reference.
   int64 topSlice = dims[2] - 1;
   refFeatureCount = floodFillSlice(topSlice, refFeatureIds);
 
@@ -284,7 +278,6 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
 
       int64 slice = (dims[2] - 1) - iter;
 
-      // Flood-fill the current slice
       curFeatureCount = floodFillSlice(slice, curFeatureIds);
 
       m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Determining Shifts: Slice {}/{} complete", iter, dims[2]));
@@ -403,7 +396,7 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
       cumulativeShiftsStore[xIndex] = xShifts[iter];
       cumulativeShiftsStore[yIndex] = yShifts[iter];
 
-      // Roll: current slice becomes reference for the next iteration
+      // Reuse the current feature IDs for the next reference slice.
       std::swap(refFeatureIds, curFeatureIds);
       refFeatureCount = curFeatureCount;
     }
@@ -419,7 +412,6 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
 
       int64 slice = (dims[2] - 1) - iter;
 
-      // Flood-fill the current slice
       curFeatureCount = floodFillSlice(slice, curFeatureIds);
 
       m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Determining Shifts: Slice {}/{} complete", iter, dims[2]));
@@ -529,7 +521,7 @@ Result<> AlignSectionsMutualInformation::findShifts(std::vector<int64>& xShifts,
       xShifts[iter] = xShifts[iter - 1] + newXShift;
       yShifts[iter] = yShifts[iter - 1] + newYShift;
 
-      // Roll: current slice becomes reference for the next iteration
+      // Reuse the current feature IDs for the next reference slice.
       std::swap(refFeatureIds, curFeatureIds);
       refFeatureCount = curFeatureCount;
     }

@@ -9,11 +9,13 @@ namespace nx::core
 
 /**
  * @class TiffImageIO
- * @brief IImageIO backend using libtiff for TIFF format support.
+ * @brief Reads and writes TIFF images with libtiff.
  *
  * Supports uint8, uint16, and float32 pixel types.
- * Reads/writes scanline-by-scanline.
- * Captures libtiff error messages via a thread-local error handler.
+ * Reads scanlines or tiles and writes scanlines.
+ * Captures libtiff error messages with a per-handle error handler.
+ * The reader does not normalize the TIFF Orientation tag. Top-to-bottom output
+ * requires input whose stored row order is top-to-bottom.
  */
 class SIMPLNX_EXPORT TiffImageIO : public IImageIO
 {
@@ -25,8 +27,12 @@ public:
   Result<> readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const override;
 
   /**
-   * @brief Streams TIFF scanlines or tile-row segments into the callback so
-   * callers can crop/convert directly into bounded destination pages.
+   * @brief Supplies TIFF scanlines or tile-row segments to a callback.
+   * @param filePath Identifies the TIFF file.
+   * @param callback Receives bounded first-page row segments.
+   * @return Valid result on success, or a decoder or callback error.
+   *
+   * The bounded segments let callers crop or convert directly into destination pages.
    */
   Result<> readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const override;
   Result<> writePixelData(const std::filesystem::path& filePath, std::span<const uint8> buffer, const ImageMetadata& metadata) const override;

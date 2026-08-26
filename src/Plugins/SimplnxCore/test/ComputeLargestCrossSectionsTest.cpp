@@ -323,13 +323,9 @@ DataStructure CreateValidTestDataStructure()
 }
 
 /**
- * @brief
- *  Create a Cell and Cell Feature attribute Matrix. The Cell AttributeMatrix will have a
- *  featureIds DataArray that has values of 10. The Cell Feature AttributeMatrix will have
- *  only 6 tuples in it. This means that the maximum value of FeatureIds would be 5. By having
- *  values in the Feature Ids = 10, the preflight would pass but the execute would fail.
- * @param geomIs3d
- * @return
+ * @brief Creates invalid feature identifiers for an execution-error test.
+ * @param geomIs3d True to create a three-dimensional geometry.
+ * @return DataStructure whose FeatureIds exceed the feature-array tuple count.
  */
 DataStructure CreateInvalidTestDataStructure(bool geomIs3d)
 {
@@ -367,23 +363,20 @@ TEST_CASE("SimplnxCore::ComputeLargestCrossSectionsFilter: Valid Filter Executio
   const std::array<std::array<float32, 6>, 3> expectedCrossSections = {
       {{0.0f, 0.625f, 0.875f, 0.0625f, 0.1875f, 1.375f}, {0.0f, 0.4375f, 1.1875f, 0.1875f, 0.125f, 1.625f}, {0.0f, 0.75f, 1.4375f, 0.1875f, 0.125f, 2.1875f}}};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeLargestCrossSectionsFilter filter;
   DataStructure ds = CreateValidTestDataStructure();
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_Plane_Key, std::make_any<ChoicesParameter::ValueType>(plane));
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_ImageGeometryPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry})));
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellData, k_FeatureIds})));
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_CellFeatureAttributeMatrixPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellFeatureData})));
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_LargestCrossSectionsArrayName_Key, std::make_any<std::string>(k_LargestCrossSections));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -401,7 +394,7 @@ TEST_CASE("SimplnxCore::ComputeLargestCrossSectionsFilter: InValid Filter Execut
 {
   UnitTest::LoadPlugins();
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeLargestCrossSectionsFilter filter;
   Arguments args;
   args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_Plane_Key, std::make_any<ChoicesParameter::ValueType>(0));
@@ -413,10 +406,10 @@ TEST_CASE("SimplnxCore::ComputeLargestCrossSectionsFilter: InValid Filter Execut
   {
     DataStructure ds = CreateInvalidTestDataStructure(false);
     args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_CellFeatureAttributeMatrixPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellFeatureData})));
-    // Preflight the filter and check result
+
     auto preflightResult = filter.preflight(ds, args);
     SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions)
-    // Execute the filter and check the result
+
     auto executeResult = filter.execute(ds, args);
     SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
     UnitTest::CheckArraysInheritTupleDims(ds);
@@ -429,10 +422,10 @@ TEST_CASE("SimplnxCore::ComputeLargestCrossSectionsFilter: InValid Filter Execut
 
     DataStructure ds = CreateInvalidTestDataStructure(true);
     args.insertOrAssign(ComputeLargestCrossSectionsFilter::k_CellFeatureAttributeMatrixPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellEnsembleData})));
-    // Preflight the filter and check result
+
     auto preflightResult = filter.preflight(ds, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-    // Execute the filter and check the result
+
     auto executeResult = scope.executeFilter(filter, ds, args);
     SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
     UnitTest::CheckArraysInheritTupleDims(ds);

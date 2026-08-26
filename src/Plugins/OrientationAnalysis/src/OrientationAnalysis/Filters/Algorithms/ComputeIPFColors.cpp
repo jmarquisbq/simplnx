@@ -8,7 +8,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ComputeIPFColors::ComputeIPFColors(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeIPFColorsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_MessageHandler(mesgHandler)
@@ -17,24 +16,11 @@ ComputeIPFColors::ComputeIPFColors(DataStructure& dataStructure, const IFilter::
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeIPFColors::~ComputeIPFColors() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Dispatches IPF color computation to the appropriate algorithm based on
- *        storage type.
- *
- * The three arrays checked for OOC status are the Euler angles (input, 3-component
- * float32), the cell phases (input, 1-component int32), and the IPF colors (output,
- * 3-component uint8). If any of them are backed by chunked OOC storage, the Scanline
- * path is selected to avoid chunk thrashing; otherwise the parallel Direct path is used.
- */
 Result<> ComputeIPFColors::operator()()
 {
-  // Retrieve raw IDataArray pointers for storage-type inspection by DispatchAlgorithm.
-  // These are only used for the AnyOutOfCore() check -- the actual typed access
-  // happens inside ComputeIPFColorsDirect or ComputeIPFColorsScanline.
+  // Dispatch checks storage residency. The selected executor performs typed access.
   auto* eulersArray = m_DataStructure.getDataAs<IDataArray>(m_InputValues->cellEulerAnglesArrayPath);
   auto* phasesArray = m_DataStructure.getDataAs<IDataArray>(m_InputValues->cellPhasesArrayPath);
   auto* crystalStructuresArray = m_DataStructure.getDataAs<IDataArray>(m_InputValues->crystalStructuresArrayPath);

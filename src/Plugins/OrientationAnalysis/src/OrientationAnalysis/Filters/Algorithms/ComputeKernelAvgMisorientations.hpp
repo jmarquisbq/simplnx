@@ -13,37 +13,50 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeKernelAvgMisorientations algorithm.
+ * @struct ComputeKernelAvgMisorientationsInputValues
+ * @brief Identifies KAM inputs.
+ *
+ * KernelSize stores X, Y, Z radii. The output angle is in degrees.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeKernelAvgMisorientationsInputValues
 {
-  VectorInt32Parameter::ValueType KernelSize;     ///< Half-widths {kX, kY, kZ} of the kernel in each dimension
-  bool UseFeatureIds = true;                      ///< Use same-feature neighbors when true; valid same-phase neighbors when false
-  DataPath FeatureIdsArrayPath;                   ///< Cell-level Int32 feature ID per voxel
-  DataPath CellPhasesArrayPath;                   ///< Cell-level Int32 phase index per voxel
-  DataPath QuatsArrayPath;                        ///< Cell-level Float32 quaternions (4 components)
-  DataPath CrystalStructuresArrayPath;            ///< Ensemble-level UInt32 crystal structure Laue classes
-  DataPath KernelAverageMisorientationsArrayName; ///< Output: Cell-level Float32 KAM value (degrees)
-  DataPath InputImageGeometry;                    ///< ImageGeom providing voxel grid dimensions
+  VectorInt32Parameter::ValueType KernelSize;
+  bool UseFeatureIds = true;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath QuatsArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath KernelAverageMisorientationsArrayName;
+  DataPath InputImageGeometry;
 };
 
 /**
  * @class ComputeKernelAvgMisorientations
- * @brief Computes the Kernel Average Misorientation (KAM) for each cell of an Image Geometry.
+ * @brief Computes Kernel Average Misorientation for each Image Geometry cell.
  *
- * For each valid cell (featureId > 0 and phase > 0), the misorientation between the cell and
- * every admitted neighbor in a user-sized kernel is averaged and stored in degrees. Neighbors
- * are admitted per-grain (same feature id, the default) or per-voxel (featureId > 0 and same
- * phase) depending on the UseFeatureIds input.
+ * Valid cells average admitted neighbor angles in degrees. Same-feature mode
+ * uses the focal feature. Same-phase mode uses positive feature IDs in the
+ * focal phase.
  *
- * This facade dispatches to the parallel direct traversal for in-memory arrays and to a
- * cache-budgeted scanline implementation for out-of-core arrays.
+ * The facade dispatches to direct or cache-budgeted scanline traversal.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeKernelAvgMisorientations
 {
 public:
+  /**
+   * @brief Initializes KAM dispatch.
+   * @param dataStructure Provides selected arrays and the geometry.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and KAM settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeKernelAvgMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                   ComputeKernelAvgMisorientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the KAM dispatcher.
+   */
   ~ComputeKernelAvgMisorientations() noexcept;
 
   ComputeKernelAvgMisorientations(const ComputeKernelAvgMisorientations&) = delete;
@@ -52,8 +65,8 @@ public:
   ComputeKernelAvgMisorientations& operator=(ComputeKernelAvgMisorientations&&) noexcept = delete;
 
   /**
-   * @brief Dispatches and executes the KAM computation.
-   * @return Result<> with any errors encountered during execution.
+   * @brief Dispatches KAM computation.
+   * @return Result from the selected executor.
    */
   Result<> operator()();
 

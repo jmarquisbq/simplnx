@@ -16,6 +16,10 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @class DirectDispatchProbe
+ * @brief Records direct-probe selection.
+ */
 class DirectDispatchProbe
 {
 public:
@@ -34,6 +38,10 @@ private:
   bool& m_UsedDirect;
 };
 
+/**
+ * @class ScanlineDispatchProbe
+ * @brief Records scanline-probe selection.
+ */
 class ScanlineDispatchProbe
 {
 public:
@@ -52,6 +60,13 @@ private:
   bool& m_UsedDirect;
 };
 
+/**
+ * @class TestOutOfCoreListStore
+ * @brief Reports out-of-core residency for dispatch classification tests.
+ *
+ * The store retains ListStore storage. The override isolates mixed IArray
+ * residency classification without a disk-backed test store.
+ */
 class TestOutOfCoreListStore : public ListStore<int32>
 {
 public:
@@ -63,11 +78,24 @@ public:
   }
 };
 
+/**
+ * @brief Dispatches data-array targets to test probes.
+ * @param arrays Identifies targets for residency selection.
+ * @param usedDirect Receives true when the direct probe runs.
+ * @return Result from the selected probe.
+ */
 Result<> dispatchDataArraysForTest(std::initializer_list<const IDataArray*> arrays, bool& usedDirect)
 {
   return DispatchAlgorithm<DirectDispatchProbe, ScanlineDispatchProbe>(arrays, usedDirect);
 }
 
+/**
+ * @brief Dispatches an empty target list to test probes.
+ * @param usedDirect Receives true when the direct probe runs.
+ * @return Result from the selected probe.
+ *
+ * An empty list verifies the default direct path without a storage target.
+ */
 Result<> dispatchEmptyForTest(bool& usedDirect)
 {
   return DispatchAlgorithm<DirectDispatchProbe, ScanlineDispatchProbe>({}, usedDirect);

@@ -21,339 +21,356 @@ namespace nx::core
 class DataStructure;
 class IDataStoreFormatResolver;
 
+/**
+ * @namespace DREAM3D
+ * @brief Reads, writes, and incrementally materializes DREAM3D files.
+ */
 namespace DREAM3D
 {
+/**
+ * @typedef FileData
+ * @brief Defines a Pipeline and DataStructure pair.
+ */
 using FileData = std::pair<Pipeline, DataStructure>;
+/**
+ * @typedef FileVersionType
+ * @brief Defines the stored file-version text type.
+ */
 using FileVersionType = std::string;
+/**
+ * @typedef PipelineVersionType
+ * @brief Defines the stored pipeline-version integer type.
+ */
 using PipelineVersionType = int32;
 
+/**
+ * @brief Identifies an invalid pipeline version.
+ */
 inline constexpr int32 k_InvalidPipelineVersion = -404;
+/**
+ * @brief Identifies an invalid DataStructure version.
+ */
 inline constexpr int32 k_InvalidDataStructureVersion = -405;
+/**
+ * @brief Identifies a missing pipeline group.
+ */
 inline constexpr int32 k_PipelineGroupUnavailable = -406;
+/**
+ * @brief Specifies the current DREAM3D file version.
+ */
 inline constexpr StringLiteral k_CurrentFileVersion = "8.0";
+/**
+ * @brief Specifies the supported legacy DREAM3D file version.
+ */
 inline constexpr StringLiteral k_LegacyFileVersion = "7.0";
 
 /**
  * @brief Returns the DREAM3D file version.
- * @param path
- * @return FileVersionType
+ * @param path Identifies the file.
+ * @return Stored file version or first read-error message.
  */
 SIMPLNX_EXPORT FileVersionType GetFileVersion(const std::filesystem::path& path);
 
 /**
  * @brief Returns the DREAM3D file version.
- * @param fileReader
- * @return FileVersionType
+ * @param fileReader Provides an open file.
+ * @return Stored file version or first read-error message.
  */
 SIMPLNX_EXPORT FileVersionType GetFileVersion(const nx::core::HDF5::FileIO& fileReader);
 
 /**
  * @brief Returns the DREAM3D pipeline version.
- * @param fileReader
- * @return PipelineVersionType
+ * @param fileReader Provides an open file.
+ * @return Stored pipeline version, or k_InvalidPipelineVersion on failure.
  */
 SIMPLNX_EXPORT PipelineVersionType GetPipelineVersion(const nx::core::HDF5::FileIO& fileReader);
 
 /**
- * @brief Imports and returns the Pipeline / DataStructure pair from the target
- * .dream3d file.
+ * @brief Imports a Pipeline and DataStructure from an open DREAM3D file.
  *
- * This method imports both current and legacy DataStructures but will return
- * an empty Pipeline when given a legacy file.
- * @param fileReader
- * @param preflight = false
- * @return FileData
+ * Legacy files return an empty Pipeline.
+ * @param fileReader Provides an open file.
+ * @param preflight Creates placeholder array stores when true.
+ * @return Imported pair or read error.
  */
 SIMPLNX_EXPORT Result<FileData> ReadFile(const nx::core::HDF5::FileIO& fileReader, bool preflight = false);
 
 /**
- * @brief Imports and returns the Pipeline / DataStructure pair from the target
- * .dream3d file.
+ * @brief Imports a Pipeline and DataStructure from a DREAM3D path.
  *
- * This method imports both current and legacy DataStructures but will return
- * an empty Pipeline and warning when given a legacy file.
- * @param path
- * @return Result<FileData>
+ * Legacy files return an empty Pipeline and a warning.
+ * @param path Identifies the file.
+ * @return Imported pair or read error.
  */
 SIMPLNX_EXPORT Result<FileData> ReadFile(const std::filesystem::path& path);
 
 /**
- * @brief Loads a complete DataStructure from a .dream3d file with all arrays
- * receiving real data stores (in-core or OOC).
+ * @brief Loads a complete DataStructure with materialized array stores.
  *
- * Supports both v8.0 and legacy v7.0 file formats. When a registered IO manager
- * finalizes imports (the out-of-core manager) the import is deferred to that
- * manager, which decides whether each array becomes an in-core DataStore or a
- * lazy disk-backed store; otherwise every array is eager-loaded in-core.
+ * A registered import finalizer can attach disk-backed stores. Core then eagerly
+ * loads any Empty placeholders that remain. Without a finalizer, core loads all arrays.
  *
- * @param path Filesystem path to the .dream3d file
- * @return Result containing the fully loaded DataStructure, or errors on failure
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @return Materialized DataStructure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructure(const std::filesystem::path& path);
 
 /**
- * @brief Loads a complete DataStructure from a .dream3d file, stamping a per-DataStructure
- * store-format resolver before import finalization runs.
+ * @brief Loads a complete DataStructure with an optional format resolver.
  *
- * Identical to the no-resolver overload except that @p resolver is installed on the
- * DataStructure before the IO-manager finalize pass. This allows callers (e.g. read-only
- * visualization loads) to supply a resolver that directs each array to a disk-backed out-of-core
- * store rather than loading data into memory, enabling fast first-show without eager
- * in-core allocation. Passing nullptr uses the process-level default resolver, which
- * matches the behavior of the no-resolver overload.
+ * The resolver is installed before import finalization. A finalizer can therefore
+ * choose disk-backed stores per array. Null keeps the process-level default resolver.
  *
- * @param path     Filesystem path to the .dream3d file
- * @param resolver Per-DataStructure store-format policy; nullptr = process default
- * @return Result containing the fully loaded DataStructure, or errors on failure
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @param resolver Specifies per-DataStructure storage policy, or null for process default.
+ * @return Materialized DataStructure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructure(const std::filesystem::path& path, std::shared_ptr<const IDataStoreFormatResolver> resolver);
 
 /**
- * @brief Loads specific arrays from a .dream3d file with real data stores,
- * pruning all unrequested objects from the result.
+ * @brief Loads selected arrays and their ancestor objects.
  *
- * Only the requested arrays (and their ancestor containers) are present in
- * the returned DataStructure. No Empty placeholder stores remain — every
- * array in the result has been fully loaded or attached to an OOC store.
+ * The returned structure removes unrequested objects. Every retained array has
+ * an in-core or disk-backed store, not an Empty placeholder.
  *
- * @param path Filesystem path to the .dream3d file
- * @param dataPaths The specific DataPaths to load from the file
- * @return Result containing the pruned DataStructure with only requested arrays
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @param dataPaths Specifies arrays to retain.
+ * @return Pruned materialized DataStructure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureArrays(const std::filesystem::path& path, const std::vector<DataPath>& dataPaths);
 
 /**
- * @brief Loads specific arrays from a .dream3d file, stamping a per-DataStructure
- * store-format resolver before import finalization runs, then pruning unrequested objects.
+ * @brief Loads selected arrays with an optional format resolver.
  *
- * Identical to the no-resolver overload except that @p resolver is installed on the
- * DataStructure before the IO-manager finalize pass. This lets callers supply a resolver
- * that attaches disk-backed out-of-core stores for the requested arrays — useful when a read-only
- * visualization load wants to stream only certain arrays from disk without loading any
- * unneeded data in-core. Passing nullptr uses the process-level default resolver.
+ * The resolver is installed before import finalization. Unrequested objects are
+ * pruned after retained arrays receive materialized stores.
  *
- * @param path      Filesystem path to the .dream3d file
- * @param dataPaths The specific DataPaths to load from the file
- * @param resolver  Per-DataStructure store-format policy; nullptr = process default
- * @return Result containing the pruned DataStructure with only requested arrays
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @param dataPaths Specifies arrays to retain.
+ * @param resolver Specifies per-DataStructure storage policy, or null for process default.
+ * @return Pruned materialized DataStructure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureArrays(const std::filesystem::path& path, const std::vector<DataPath>& dataPaths, std::shared_ptr<const IDataStoreFormatResolver> resolver);
 
 /**
- * @brief Loads the topology (metadata skeleton) of a .dream3d file without
- * loading any array data. All DataArrays receive Empty placeholder stores.
+ * @brief Loads a metadata-only DataStructure.
  *
- * This is the preflight/metadata-only path: the returned DataStructure has
- * the complete hierarchy (geometries, attribute matrices, arrays) but none
- * of the arrays contain real data.
+ * The complete hierarchy is present. DataArrays receive Empty placeholder stores.
  *
- * @param path Filesystem path to the .dream3d file
- * @return Result containing the metadata-only DataStructure with Empty stores
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @return Metadata structure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureMetadata(const std::filesystem::path& path);
 
 /**
- * @brief Loads the topology (metadata skeleton) for specific arrays from a
- * .dream3d file. All arrays receive Empty placeholder stores, and unrequested
- * objects are pruned from the result.
+ * @brief Loads metadata for selected arrays and their ancestors.
  *
- * Combines the metadata-only behavior of LoadDataStructureMetadata with the
- * path-based pruning of LoadDataStructureArrays.
+ * Retained arrays use Empty placeholder stores. Unrequested objects are removed.
  *
- * @param path Filesystem path to the .dream3d file
- * @param dataPaths The specific DataPaths whose metadata to load
- * @return Result containing the pruned metadata-only DataStructure
+ * @param path Identifies a current or legacy DREAM3D file.
+ * @param dataPaths Specifies arrays to retain.
+ * @return Pruned metadata structure or import error.
  */
 SIMPLNX_EXPORT Result<DataStructure> LoadDataStructureArraysMetadata(const std::filesystem::path& path, const std::vector<DataPath>& dataPaths);
 
 /**
- * @brief Writes a .dream3d file with the specified data.
- * @param fileWriter
- * @param fileData
- * @return Result<>
+ * @brief Writes Pipeline and DataStructure data to an open DREAM3D file.
+ * @param fileWriter Receives serialized content.
+ * @param fileData Provides Pipeline and DataStructure data.
+ * @return First HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteFile(nx::core::HDF5::FileIO& fileWriter, const FileData& fileData);
 
 /**
- * @brief Writes a .dream3d file with the specified data.
- * @param fileWriter
- * @param fileData
- * @return Result<>
+ * @brief Writes a Pipeline and DataStructure to an open DREAM3D file.
+ * @param fileWriter Receives serialized content.
+ * @param pipeline Provides pipeline metadata.
+ * @param dataStructure Provides hierarchy and arrays.
+ * @return First HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteFile(nx::core::HDF5::FileIO& fileWriter, const Pipeline& pipeline, const DataStructure& dataStructure);
 
 /**
- * @brief Writes a .dream3d file with the specified data and explicit write options.
- *        Equivalent to the no-options overload when a default-constructed WriteOptions is provided.
- * @param fileWriter     An open HDF5 file writer to receive the serialized content.
- * @param pipeline       Pipeline metadata to embed alongside the DataStructure.
- * @param dataStructure  DataStructure to serialize.
- * @param options        Write-time options (e.g. gzip compression level for DataArray datasets).
- * @return Result<>      Success, or an error describing the first failing write step.
+ * @brief Writes a Pipeline and DataStructure with explicit options.
+ * @param fileWriter Receives serialized content.
+ * @param pipeline Provides pipeline metadata.
+ * @param dataStructure Provides hierarchy and arrays.
+ * @param options Specifies write-time compression and related policies.
+ * @return First HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteFile(nx::core::HDF5::FileIO& fileWriter, const Pipeline& pipeline, const DataStructure& dataStructure, const nx::core::HDF5::DataStructureWriter::WriteOptions& options);
 
 /**
- * @brief Writes a .dream3d file with the specified data.
- * @param path
- * @param dataStructure
- * @param writeXdmf
- * @return bool
+ * @brief Writes a DataStructure and optional Pipeline to a DREAM3D path.
+ * @param path Specifies the destination file.
+ * @param dataStructure Provides hierarchy and arrays.
+ * @param pipeline Provides optional pipeline metadata.
+ * @param writeXdmf Writes a sibling XDMF file when true.
+ * @return File or HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteFile(const std::filesystem::path& path, const DataStructure& dataStructure, const Pipeline& pipeline = {}, bool writeXdmf = false);
 
 /**
- * @brief Writes a .dream3d file with the specified data and explicit write options.
- *        Equivalent to the no-options overload when a default-constructed WriteOptions is provided.
- * @param path           Destination filesystem path for the .dream3d file.
- * @param dataStructure  DataStructure to serialize.
- * @param pipeline       Pipeline metadata to embed alongside the DataStructure.
- * @param writeXdmf      If true, also produces a sibling .xdmf file next to the .dream3d file.
- * @param options        Write-time options (e.g. gzip compression level for DataArray datasets).
- * @return Result<>      Success, or an error describing the first failing write step.
+ * @brief Writes a DataStructure and Pipeline with explicit options.
+ * @param path Specifies the destination file.
+ * @param dataStructure Provides hierarchy and arrays.
+ * @param pipeline Provides pipeline metadata.
+ * @param writeXdmf Writes a sibling XDMF file when true.
+ * @param options Specifies write-time compression and related policies.
+ * @return File or HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteFile(const std::filesystem::path& path, const DataStructure& dataStructure, const Pipeline& pipeline, bool writeXdmf,
                                   const nx::core::HDF5::DataStructureWriter::WriteOptions& options);
 
 /**
- * @brief Writes a recovery snapshot of @p dataStructure to @p path.
+ * @brief Writes a full recovery snapshot or a redirect file.
  *
- * When @p userDataFilePath is unset (default), the full recovery file is
- * written: in-core arrays get their data payload, OOC-backed arrays get a
- * placeholder plus their getRecoveryMetadata() key/value attributes so the
- * recovery loader can reconstruct the backing store on load.
+ * Without userDataFilePath, in-core arrays write payloads. OOC arrays write
+ * placeholders and recovery metadata for backing-store reconstruction.
  *
- * When @p userDataFilePath is set, @p dataStructure and @p pipeline are
- * ignored and a minimal HDF5 file is written containing only the file-
- * version attribute and a root-level string attribute named
- * "UserDataFilePath" whose value is the absolute path of the user's
- * authoritative `.dream3d` output. The recovery scanner uses that attribute
- * at relaunch time to redirect the load at the user's file.
+ * With userDataFilePath, the writer ignores dataStructure and pipeline. It writes
+ * only file version and an absolute UserDataFilePath attribute.
  *
- * @param path Target path of the recovery file ("{uuid}.dream3d").
- * @param dataStructure Pipeline's final DataStructure (ignored when
- *                      @p userDataFilePath is set).
- * @param pipeline      Pipeline JSON to embed (ignored when
- *                      @p userDataFilePath is set).
- * @param userDataFilePath Optional absolute path to the user's own
- *                         `.dream3d` file. When set, switches the writer
- *                         to minimal redirect mode.
- * @return Result<> ok on success; error payload on HDF5-level failure
- *         (file open or version-tag write).
+ * @param path Specifies the recovery destination.
+ * @param dataStructure Provides final pipeline data for a full snapshot.
+ * @param pipeline Provides embedded pipeline metadata for a full snapshot.
+ * @param userDataFilePath Selects redirect mode and its authoritative file.
+ * @return File or HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> WriteRecoveryFile(const std::filesystem::path& path, const DataStructure& dataStructure, const Pipeline& pipeline = {},
                                           std::optional<std::filesystem::path> userDataFilePath = std::nullopt);
 
 /**
- * @brief Reads the "UserDataFilePath" root-level HDF5 string attribute
- *        from a recovery file.
+ * @brief Reads an optional recovery UserDataFilePath attribute.
  *
- * The recovery scanner calls this on every `{uuid}.dream3d` it finds at
- * startup; when a value comes back it means the pipeline ended with a
- * WriteDREAM3DFilter and the returned path is the user's authoritative
- * output. Absent attribute is NOT an error — it just means this recovery
- * file carries its own data (the standard case).
+ * An absent attribute identifies a data-carrying recovery file and is not an error.
  *
- * @param recoveryFilePath Path to the `{uuid}.dream3d` to inspect.
- * @return Result<std::optional<std::filesystem::path>>
- *         - ok + nullopt: attribute absent, this is a standard recovery file
- *         - ok + path: attribute set, caller should redirect to that path
- *         - error: HDF5 open/read failure (corrupt file, missing, etc.)
+ * @param recoveryFilePath Identifies the recovery file.
+ * @return Null optional, redirect path, or HDF5 read error.
  */
 SIMPLNX_EXPORT Result<std::optional<std::filesystem::path>> ReadUserDataFilePathAttribute(const std::filesystem::path& recoveryFilePath);
 
 /**
- * @brief Appends the object at the path in the data structure to the dream3d file
- * @param path
- * @param dataStructure
- * @param dataPath
- * @return Result<>
+ * @brief Appends one DataObject to an existing DREAM3D file.
+ * @param path Identifies the destination file.
+ * @param dataStructure Provides the object and its dependencies.
+ * @param dataPath Identifies the object to append.
+ * @return File, lookup, or HDF5 write error, or success.
  */
 SIMPLNX_EXPORT Result<> AppendFile(const std::filesystem::path& path, const DataStructure& dataStructure, const DataPath& dataPath);
 
 /**
- * @brief Imports and returns the DataStructure from the target .dream3d file.
- *
- * This method imports both current and legacy DataStructures.
- * @param fileReader
- * @param preflight = false
- * @return DataStructure
+ * @brief Imports a current or legacy DataStructure from an open file.
+ * @param fileReader Provides an open file.
+ * @param preflight Creates placeholder stores when true.
+ * @return Imported DataStructure or read error.
  */
 SIMPLNX_EXPORT Result<DataStructure> ImportDataStructureFromFile(const nx::core::HDF5::FileIO& fileReader, bool preflight);
 
+/**
+ * @brief Imports one DataObject and its stored data from an open file.
+ * @param fileReader Provides an open file.
+ * @param dataPath Identifies the object.
+ * @return Imported object or read error.
+ */
 SIMPLNX_EXPORT Result<std::shared_ptr<DataObject>> ImportDataObjectFromFile(const nx::core::HDF5::FileIO& fileReader, const DataPath& dataPath);
 
+/**
+ * @brief Imports selected DataObjects from an open file.
+ * @param fileReader Provides an open file.
+ * @param dataPaths Identifies requested objects.
+ * @return Imported objects or first read error.
+ */
 SIMPLNX_EXPORT Result<std::vector<std::shared_ptr<DataObject>>> ImportSelectDataObjectsFromFile(const nx::core::HDF5::FileIO& fileReader, const std::vector<DataPath>& dataPaths);
 
 /**
- * @brief Inserts a shallow copy of the object at dataPath from importStructure
- * into dataStructure, without opening or reading the source file. Opening a
- * file is itself a round-trip on network storage, and preflight never reads
- * file contents, so this preflight-mode half of FinishImportingObject needs no
- * open file handle at all.
- * @param importStructure The (metadata-only) structure imported from the file.
- * @param dataStructure The pipeline structure receiving the object.
- * @param dataPath The object to transfer.
- * @return Result<> Errors if the path is missing or insertion fails.
+ * @brief Inserts one metadata-only object without reopening its source file.
+ *
+ * Preflight does not read array contents. Avoiding an open file removes one
+ * network-storage round trip.
+ * @param importStructure Provides the metadata object.
+ * @param dataStructure Receives a shallow copy.
+ * @param dataPath Identifies the object.
+ * @return Lookup or insertion error, or success.
  */
 SIMPLNX_EXPORT Result<> FinishImportingObjectPreflight(DataStructure& importStructure, DataStructure& dataStructure, const DataPath& dataPath);
 
+/**
+ * @brief Inserts and optionally materializes one imported object.
+ * @param importStructure Provides imported metadata.
+ * @param dataStructure Receives the object.
+ * @param dataPath Identifies the object.
+ * @param fileReader Provides stored data during execution.
+ * @param preflight Inserts only metadata when true.
+ * @return Lookup, insertion, or HDF5 read error, or success.
+ */
 SIMPLNX_EXPORT Result<> FinishImportingObject(DataStructure& importStructure, DataStructure& dataStructure, const DataPath& dataPath, const nx::core::HDF5::FileIO& fileReader, bool preflight);
 
 /**
- * @brief Imports and returns the DataStructure from the target .dream3d file.
- * This method imports both current and legacy DataStructures.
- * @param filePath
- * @return DataStructure
+ * @brief Imports a current or legacy DataStructure from a file path.
+ * @param filePath Identifies the file.
+ * @param preflight Creates placeholder stores when true.
+ * @return Imported DataStructure or read error.
  */
 SIMPLNX_EXPORT Result<DataStructure> ImportDataStructureFromFile(const std::filesystem::path& filePath, bool preflight);
 
 /**
- * @brief Imports and returns a Pipeline from the target .dream3d file.
+ * @brief Imports a Pipeline from an open DREAM3D file.
  *
- * This method does not import legacy Pipelines.
- * @param fileReader
- * @return Pipeline
+ * Legacy pipelines are not supported.
+ * @param fileReader Provides an open file.
+ * @return Imported Pipeline or read error.
  */
 SIMPLNX_EXPORT Result<Pipeline> ImportPipelineFromFile(const nx::core::HDF5::FileIO& fileReader);
 
 /**
- * @brief Imports and returns a Pipeline from the target .dream3d file.
+ * @brief Imports Pipeline JSON from an open DREAM3D file.
  *
- * This method does not import legacy Pipelines.
- * @param fileReader
- * @return Pipeline
+ * Legacy pipelines are not supported.
+ * @param fileReader Provides an open file.
+ * @return Imported JSON or read error.
  */
 SIMPLNX_EXPORT Result<nlohmann::json> ImportPipelineJsonFromFile(const nx::core::HDF5::FileIO& fileReader);
 
 /**
- * @brief Imports and returns a Pipeline from the target .dream3d file.
- * This method does not import legacy Pipelines.
- * @param fileReader
- * @return Pipeline
+ * @brief Imports Pipeline JSON from a DREAM3D path.
+ *
+ * Legacy pipelines are not supported.
+ * @param filePath Identifies the file.
+ * @return Imported JSON or read error.
  */
 SIMPLNX_EXPORT Result<nlohmann::json> ImportPipelineJsonFromFile(const std::filesystem::path& filePath);
 
 /**
- * @brief Imports and returns a Pipeline from the target .dream3d file.
- * This method does not import legacy Pipelines.
- * @param fileReader
- * @return Pipeline
+ * @brief Imports a Pipeline from a DREAM3D path.
+ *
+ * Legacy pipelines are not supported.
+ * @param filePath Identifies the file.
+ * @return Imported Pipeline or read error.
  */
 SIMPLNX_EXPORT Result<Pipeline> ImportPipelineFromFile(const std::filesystem::path& filePath);
 
 /**
- * @brief Writes an xdmf file for the given DataStructure.
- * The hdf5 file path corresponds to an already written hdf5 file for the given DataStructure.
- * @param filePath
- * @param dataStructure
- * @param hdf5FilePath
- * @return
+ * @brief Writes XDMF metadata for an existing DREAM3D HDF5 file.
+ * @param filePath Specifies the XDMF destination.
+ * @param dataStructure Provides geometry and array metadata.
+ * @param hdf5FilePath Specifies the referenced HDF5 path.
  */
 SIMPLNX_EXPORT void WriteXdmf(const std::filesystem::path& filePath, const DataStructure& dataStructure, std::string_view hdf5FilePath);
 
+/**
+ * @brief Adds every ancestor of selected paths.
+ * @param selectedPaths Specifies source paths.
+ * @return Unique selected paths and ancestors.
+ */
 SIMPLNX_EXPORT std::vector<nx::core::DataPath> ExpandSelectedPathsToAncestors(const std::vector<nx::core::DataPath>& selectedPaths);
 
+/**
+ * @brief Adds every descendant of selected paths.
+ * @param selectedPaths Specifies source paths.
+ * @param allPaths Provides candidates.
+ * @return Unique selected paths and descendants.
+ */
 SIMPLNX_EXPORT std::vector<nx::core::DataPath> ExpandSelectedPathsToDescendants(const std::vector<nx::core::DataPath>& selectedPaths, const std::vector<nx::core::DataPath>& allPaths);
 
 } // namespace DREAM3D

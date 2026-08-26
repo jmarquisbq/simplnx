@@ -22,14 +22,26 @@ namespace
 {
 using ull = unsigned long long int;
 
-/// Limits DataStore transfers and formatted text to a fixed-size working set.
+// Tuple chunks limit DataStore transfers and formatted text memory.
 constexpr usize k_ChunkTuples = 65536;
 constexpr usize k_EulerComponents = 3;
 constexpr usize k_MaxRecordCharacters = 256;
 
+/**
+ * @class ChunkedInput
+ * @brief Owns bounded input buffers for three source arrays.
+ *
+ * Source stores are borrowed for the object lifetime.
+ */
 class ChunkedInput
 {
 public:
+  /**
+   * @brief Creates bounded source buffers.
+   * @param eulerAngles Provides three values per cell.
+   * @param featureIds Provides one feature ID per cell.
+   * @param cellPhases Provides one phase ID per cell.
+   */
   ChunkedInput(const AbstractDataStore<float32>& eulerAngles, const AbstractDataStore<int32>& featureIds, const AbstractDataStore<int32>& cellPhases)
   : m_EulerAngles(eulerAngles)
   , m_FeatureIds(featureIds)
@@ -40,6 +52,12 @@ public:
   {
   }
 
+  /**
+   * @brief Loads one aligned tuple chunk from all source stores.
+   * @param tupleOffset Specifies the first tuple.
+   * @param tupleCount Specifies tuples to load.
+   * @return First source bulk-read error, or success.
+   */
   Result<> loadChunk(usize tupleOffset, usize tupleCount)
   {
     Result<> result = m_EulerAngles.copyIntoBuffer(tupleOffset * k_EulerComponents, nonstd::span<float32>(m_EulerAnglesBuffer.get(), tupleCount * k_EulerComponents));
@@ -81,6 +99,15 @@ private:
   std::unique_ptr<int32[]> m_CellPhasesBuffer;
 };
 
+/**
+ * @brief Writes bounded source chunks through one formatted text buffer.
+ * @param file Receives text records.
+ * @param outputPath Identifies the file for diagnostics.
+ * @param dims Specifies image dimensions.
+ * @param input Provides bounded source buffers.
+ * @param shouldCancel Stops before or after later chunks when true.
+ * @return Source, stream, or cancellation error, or success.
+ */
 Result<> WriteChunkedData(std::ofstream& file, const fs::path& outputPath, const SizeVec3& dims, ChunkedInput& input, const std::atomic_bool& shouldCancel)
 {
   const usize totalTuples = dims[0] * dims[1] * dims[2];
@@ -145,6 +172,17 @@ Result<> WriteChunkedData(std::ofstream& file, const fs::path& outputPath, const
   return {};
 }
 
+/**
+ * @brief Writes resident source arrays through direct pointers.
+ * @param file Receives text records.
+ * @param outputPath Identifies the file for diagnostics.
+ * @param dims Specifies image dimensions.
+ * @param eulerAnglesStore Provides three values per cell.
+ * @param featureIdsStore Provides one feature ID per cell.
+ * @param cellPhasesStore Provides one phase ID per cell.
+ * @param shouldCancel Stops before or after later chunks when true.
+ * @return Stream or cancellation error, or success.
+ */
 Result<> WriteDirectData(std::ofstream& file, const fs::path& outputPath, const SizeVec3& dims, const DataStore<float32>& eulerAnglesStore, const DataStore<int32>& featureIdsStore,
                          const DataStore<int32>& cellPhasesStore, const std::atomic_bool& shouldCancel)
 {
@@ -207,6 +245,10 @@ Result<> WriteDirectData(std::ofstream& file, const fs::path& outputPath, const 
   return {};
 }
 
+/**
+ * @struct WriterContext
+ * @brief Bundles borrowed output and source state for storage dispatch.
+ */
 struct WriterContext
 {
   std::ofstream& File;
@@ -218,14 +260,28 @@ struct WriterContext
   const std::atomic_bool& ShouldCancel;
 };
 
+/**
+ * @class WriteLosAlamosFFTDirect
+ * @brief Writes through resident pointers when all stores are concrete DataStores.
+ *
+ * A forced direct dispatch falls back to bounded reads when a concrete pointer is unavailable.
+ */
 class WriteLosAlamosFFTDirect
 {
 public:
+  /**
+   * @brief Creates a direct writer from borrowed context.
+   * @param context Provides output and source state.
+   */
   explicit WriteLosAlamosFFTDirect(WriterContext& context)
   : m_Context(context)
   {
   }
 
+  /**
+   * @brief Selects resident-pointer or bounded-buffer writing.
+   * @return Source, stream, or cancellation error, or success.
+   */
   Result<> operator()()
   {
     const auto* eulerAngles = dynamic_cast<const DataStore<float32>*>(&m_Context.EulerAngles.getDataStoreRef());
@@ -244,14 +300,26 @@ private:
   WriterContext& m_Context;
 };
 
+/**
+ * @class WriteLosAlamosFFTScanline
+ * @brief Writes all sources through bounded DataStore reads.
+ */
 class WriteLosAlamosFFTScanline
 {
 public:
+  /**
+   * @brief Creates a scanline writer from borrowed context.
+   * @param context Provides output and source state.
+   */
   explicit WriteLosAlamosFFTScanline(WriterContext& context)
   : m_Context(context)
   {
   }
 
+  /**
+   * @brief Writes all tuples through bounded source buffers.
+   * @return Source, stream, or cancellation error, or success.
+   */
   Result<> operator()()
   {
     ChunkedInput input(m_Context.EulerAngles.getDataStoreRef(), m_Context.FeatureIds.getDataStoreRef(), m_Context.CellPhases.getDataStoreRef());
@@ -263,7 +331,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteLosAlamosFFT::WriteLosAlamosFFT(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WriteLosAlamosFFTInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -272,20 +339,16 @@ WriteLosAlamosFFT::WriteLosAlamosFFT(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteLosAlamosFFT::~WriteLosAlamosFFT() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteLosAlamosFFT::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteLosAlamosFFT::operator()()
 {
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
+  // Create parent directories before opening the requested output path.
   Result<> createDirectoriesResult = nx::core::CreateOutputDirectories(m_InputValues->OutputFile.parent_path());
   if(createDirectoriesResult.invalid())
   {

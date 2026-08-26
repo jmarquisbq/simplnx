@@ -33,6 +33,7 @@ Result<> Silhouette::operator()()
   const auto& clusteringArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->ClusteringArrayPath);
   const auto& featureIdsArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->FeatureIdsArrayPath);
   const auto& outputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SilhouetteArrayPath);
+  // Every participating store drives dispatch because any one can require bulk I/O.
   if(m_InputValues->UseMask)
   {
     const auto& maskArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->MaskArrayPath);

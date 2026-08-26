@@ -21,10 +21,12 @@ using namespace nx::core;
 
 namespace
 {
-
-// At the current time this code could be simplified with a bool in the incremental template, HOWEVER,
-// it was done this way to allow for expansion of operations down the line multiplication, division, etc.
-/** @brief Compile-time selection of addition or subtraction for the incremental generator. */
+/**
+ * @struct IncrementalOptions
+ * @brief Selects compile-time incremental operations.
+ * @tparam UseAddition Enables addition after each generated tuple.
+ * @tparam UseSubtraction Enables subtraction after each generated tuple.
+ */
 template <bool UseAddition, bool UseSubtraction>
 struct IncrementalOptions
 {
@@ -35,13 +37,20 @@ struct IncrementalOptions
 using AdditionT = IncrementalOptions<true, false>;
 using SubtractionT = IncrementalOptions<false, true>;
 
+// Generated buffers target 65,536 values and retain at least one complete tuple.
 constexpr usize k_InitializationChunkValues = 65536;
 
 /**
- * @brief Generates typed values in tuple/component order and writes fixed chunks to a DataStore.
+ * @brief Generates typed values in tuple and component order through reusable chunks.
+ * @tparam T Specifies the output scalar type.
+ * @tparam ValueGenerator Generates one value from tuple and component indexes.
+ * @param dataStore Receives generated values.
+ * @param generateValue Generates one tuple component.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Error from bulk write, or success after cancellation.
  *
- * All initialization modes share this sink so none of them allocate or mutate
- * an array-sized resident buffer, including Bool stores.
+ * All modes share this sink and avoid array-sized resident buffers. A tuple
+ * wider than the target creates a larger one-tuple buffer. Bool uses a raw array.
  */
 template <typename T, typename ValueGenerator>
 Result<> WriteGeneratedValues(AbstractDataStore<T>& dataStore, ValueGenerator&& generateValue, const std::atomic_bool& shouldCancel)
@@ -79,7 +88,15 @@ Result<> WriteGeneratedValues(AbstractDataStore<T>& dataStore, ValueGenerator&& 
   return {};
 }
 
-/** @brief Parses one fill value per component and repeats it through the bounded generator sink. */
+/**
+ * @brief Repeats parsed component values through bounded writes.
+ * @tparam T Specifies the output scalar type.
+ * @param dataStore Receives fill values.
+ * @param stringValues Provides one value for each component.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Bulk-write result, or success after cancellation.
+ * @pre Every string converts to T and stringValues has one value per component.
+ */
 template <typename T>
 Result<> ValueFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& stringValues, const std::atomic_bool& shouldCancel)
 {
@@ -93,7 +110,18 @@ Result<> ValueFill(AbstractDataStore<T>& dataStore, const std::vector<std::strin
   return WriteGeneratedValues<T>(dataStore, [&values](usize, usize component) { return values[component]; }, shouldCancel);
 }
 
-/** @brief Produces the original component-wise incremental sequence without retaining generated tuples. */
+/**
+ * @brief Generates component-wise incremental values through bounded writes.
+ * @tparam T Specifies the output scalar type.
+ * @tparam IncrementalOptions Selects addition or subtraction.
+ * @param dataStore Receives generated values.
+ * @param startValues Provides initial component values.
+ * @param stepValues Provides per-component increments or decrements.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Bulk-write result, or success after cancellation.
+ * @pre Value lists have one convertible string per component.
+ * @pre Signed generated values remain representable in T.
+ */
 template <typename T, class IncrementalOptions = AdditionT>
 Result<> IncrementalFill(AbstractDataStore<T>& dataStore, const std::vector<std::string>& startValues, const std::vector<std::string>& stepValues, const std::atomic_bool& shouldCancel)
 {
@@ -142,7 +170,21 @@ Result<> IncrementalFill(AbstractDataStore<T>& dataStore, const std::vector<std:
   }
 }
 
-/** @brief Produces seeded random values from component-scale generators and bounded output chunks. */
+/**
+ * @brief Generates seeded random values through bounded writes.
+ * @tparam T Specifies the output scalar type.
+ * @tparam Ranged Selects configured or full-type distributions.
+ * @tparam DistributionT Specifies the component distribution type.
+ * @param distributions Provides one distribution per component.
+ * @param dataStore Receives generated values.
+ * @param seed Specifies the initial random seed.
+ * @param standardizeSeed Reuses one seed for every component when true.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Error from bulk write, or success after cancellation.
+ *
+ * Unranged floating output uses global rand() state to choose signs. The supplied
+ * seed controls magnitude engines but does not fully determine that output.
+ */
 template <typename T, bool Ranged, class DistributionT>
 Result<> RandomFill(std::vector<DistributionT>& distributions, AbstractDataStore<T>& dataStore, const uint64 seed, const bool standardizeSeed, const std::atomic_bool& shouldCancel)
 {
@@ -181,7 +223,14 @@ Result<> RandomFill(std::vector<DistributionT>& distributions, AbstractDataStore
       shouldCancel);
 }
 
-/** @brief Dispatches the requested incremental operation to its compile-time generator specialization. */
+/**
+ * @brief Selects an incremental generator specialization.
+ * @tparam T Specifies the output scalar type.
+ * @tparam ArgsT Specifies generator arguments.
+ * @param stepType Specifies addition or subtraction.
+ * @param args Forwards generator arguments.
+ * @return Generator result, or an invalid-operation error.
+ */
 template <typename T, class... ArgsT>
 Result<> FillIncForwarder(const StepType& stepType, ArgsT&&... args)
 {
@@ -197,7 +246,19 @@ Result<> FillIncForwarder(const StepType& stepType, ArgsT&&... args)
   return MakeErrorResult(-11620, "InitializeData received an invalid incremental operation.");
 }
 
-/** @brief Builds type-appropriate component distributions and forwards them to the bounded random generator. */
+/**
+ * @brief Builds component distributions for bounded random generation.
+ * @tparam T Specifies the output scalar type.
+ * @tparam Ranged Selects configured or full-type distributions.
+ * @tparam ArgsT Specifies random-generator arguments.
+ * @param range Provides lower and upper values for each component.
+ * @param numComponents Specifies the number of output components.
+ * @param args Forwards random-generator arguments.
+ * @return Random-generator result.
+ *
+ * All integral types use uniform_int_distribution<int64>. UInt64 bounds above
+ * INT64_MAX are not representable by that distribution.
+ */
 template <typename T, bool Ranged, class... ArgsT>
 Result<> FillRandomForwarder(const std::vector<T>& range, usize numComponents, ArgsT&&... args)
 {
@@ -230,7 +291,12 @@ Result<> FillRandomForwarder(const std::vector<T>& range, usize numComponents, A
   }
 }
 
-/** @brief Expands one user value to every component while preserving explicit per-component lists. */
+/**
+ * @brief Expands one component value to a full component list.
+ * @param numComps Specifies the number of output components.
+ * @param componentValues Provides one or all component values.
+ * @return Explicit component values.
+ */
 std::vector<std::string> standardizeMultiComponent(const usize numComps, const std::vector<std::string>& componentValues)
 {
   if(componentValues.size() == numComps)
@@ -248,10 +314,21 @@ std::vector<std::string> standardizeMultiComponent(const usize numComps, const s
   }
 }
 
-/** @brief Dispatches one runtime array type and initialization mode to the matching bounded generator. */
+/**
+ * @struct FillArrayFunctor
+ * @brief Dispatches a runtime array type to a bounded initializer.
+ */
 struct FillArrayFunctor
 {
-  /** @brief Parses mode-specific values and initializes the complete typed target array. */
+  /**
+   * @brief Initializes one typed target array.
+   * @tparam T Specifies the target scalar type.
+   * @param iDataArray Receives initialized values.
+   * @param inputValues Specifies initialization mode and values.
+   * @param shouldCancel Stops before later chunks when true.
+   * @return Bulk-write or invalid-mode result, or success after cancellation.
+   * @pre Mode-specific strings convert to T and match the component count.
+   */
   template <typename T>
   Result<> operator()(IDataArray& iDataArray, const InitializeDataInputValues& inputValues, const std::atomic_bool& shouldCancel)
   {
@@ -306,6 +383,11 @@ struct FillArrayFunctor
   }
 };
 
+/**
+ * @brief Converts Boolean text or integer text for a preflight preview.
+ * @param s Value text.
+ * @return One for true, zero for false, or the std::stoll result.
+ */
 int64 CreateCompValFromStr(const std::string& s)
 {
   return (StringUtilities::toLower(s) == "true") ? 1 : (StringUtilities::toLower(s) == "false") ? 0 : std::stoll(s);
@@ -508,7 +590,6 @@ void CreateRandomPreflightVals(bool standardizeSeed, InitializeType initType, co
 } // namespace core
 } // namespace nx
 
-// -----------------------------------------------------------------------------
 InitializeData::InitializeData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, InitializeDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -517,16 +598,13 @@ InitializeData::InitializeData(DataStructure& dataStructure, const IFilter::Mess
 {
 }
 
-// -----------------------------------------------------------------------------
 InitializeData::~InitializeData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& InitializeData::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> InitializeData::operator()()
 {
   auto& iDataArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->InputArrayPath);

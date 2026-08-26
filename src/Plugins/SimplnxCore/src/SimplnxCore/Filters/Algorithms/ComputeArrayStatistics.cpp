@@ -29,15 +29,14 @@ using namespace nx::core;
 
 namespace
 {
-// -----------------------------------------------------------------------------
 /**
- * @brief Checks whether all arrays in the set are backed by in-memory DataStores.
- * Used to decide if parallelization is safe: OOC stores are not thread-safe for
- * concurrent random access, so parallelization must be disabled when any array
- * resides out-of-core. Uses IDataStore::getStoreType() for an explicit check
- * rather than the legacy getDataFormat() string comparison.
+ * @brief Checks whether supplied arrays avoid out-of-core storage.
+ * @param arrays Arrays used by one parallel operation.
+ * @return True when no supplied array is out of core.
+ *
+ * Resident statistics use parallel random access. Out-of-core stores require
+ * bounded bulk I/O and must not enter that concurrent path.
  */
-// -----------------------------------------------------------------------------
 bool CheckArraysInMemory(const nx::core::IParallelAlgorithm::AlgorithmArrays& arrays)
 {
   if(arrays.empty())
@@ -61,10 +60,42 @@ bool CheckArraysInMemory(const nx::core::IParallelAlgorithm::AlgorithmArrays& ar
   return true;
 }
 
+/**
+ * @class StatisticsByFeatureImpl
+ * @brief Computes resident statistics for one parallel feature range.
+ * @tparam T Input and extrema value type.
+ *
+ * This implementation operates only on in-memory stores. Each worker owns a
+ * feature range and borrows all arrays for synchronous execution.
+ */
 template <typename T>
 class StatisticsByFeatureImpl
 {
 public:
+  /**
+   * @brief Creates a resident feature-statistics worker.
+   * @param length True to write sample counts.
+   * @param min True to write minima.
+   * @param max True to write maxima.
+   * @param mean True to write means.
+   * @param mode True to write modes.
+   * @param stdDeviation True to write standard deviations.
+   * @param summation True to write sums.
+   * @param mask Selects accepted tuples.
+   * @param featureIds Maps tuples to features.
+   * @param source Input values.
+   * @param featureHasDataArray Receives feature availability.
+   * @param lengthArray Receives sample counts.
+   * @param minArray Receives minima.
+   * @param maxArray Receives maxima.
+   * @param meanArray Receives means.
+   * @param modeArray Receives modes.
+   * @param stdDevArray Receives standard deviations.
+   * @param summationArray Receives sums.
+   * @param shouldCancel Cancellation flag.
+   * @param messageHelper Sends progress messages.
+   * @pre Referenced arrays, mask, and message helper outlive this worker.
+   */
   StatisticsByFeatureImpl(bool length, bool min, bool max, bool mean, bool mode, bool stdDeviation, bool summation, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask,
                           const Int32AbstractDataStore& featureIds, const AbstractDataStore<T>& source, BoolArray* featureHasDataArray, UInt64Array* lengthArray, DataArray<T>* minArray,
                           DataArray<T>* maxArray, Float32Array* meanArray, NeighborList<T>* modeArray, Float32Array* stdDevArray, Float32Array* summationArray, const std::atomic_bool& shouldCancel,
@@ -92,6 +123,13 @@ public:
   {
   }
 
+  /**
+   * @brief Computes statistics for an inclusive-exclusive feature range.
+   * @param start First feature identifier.
+   * @param end One past the last feature identifier.
+   *
+   * Standard deviation uses a second resident input pass after means exist.
+   */
   void compute(usize start, usize end) const
   {
     ThrottledMessenger throttledMessenger = m_MessageHelper.createThrottledMessenger();
@@ -168,11 +206,9 @@ public:
       {
         if(m_Mode && !modalMaps[localFeatureIndex].empty())
         {
-          // Find the maximum occurrence
           auto pr = std::max_element(modalMaps[localFeatureIndex].begin(), modalMaps[localFeatureIndex].end(), [](const auto& x, const auto& y) { return x.second < y.second; });
           int maxCount = pr->second;
 
-          // Store all values that have this maximum occurrence under the proper feature id
           for(const auto& modalPair : modalMaps[localFeatureIndex])
           {
             if(modalPair.second == maxCount)
@@ -195,9 +231,8 @@ public:
 
     if(m_StdDeviation)
     {
-      // https://www.khanacademy.org/math/statistics-probability/summarizing-quantitative-data/variance-standard-deviation-population/a/calculating-standard-deviation-step-by-step
       m_MessageHelper.sendMessage(fmt::format("Computing StdDev Feature/Ensemble [{}-{}]", start, end));
-      // This should probably be done with Kahan Summation instead
+      // Float64 accumulators reduce rounding loss before Float32 standard-deviation output.
       std::vector<float64> sumOfDiffs(numCurrentFeatures, 0.0f);
       progressCount = 0;
 
@@ -207,12 +242,10 @@ public:
         {
           return;
         }
-        // Is the value in a mask and if so, is that mask TRUE
         if(m_Mask != nullptr && !m_Mask->isTrue(tupleIndex))
         {
           continue;
         }
-        // Is the featureId within our range that we care about
         const int32 featureId = m_FeatureIds[tupleIndex];
         if(featureId < start || featureId >= end)
         {
@@ -234,7 +267,6 @@ public:
 
       for(usize j = 0; j < numCurrentFeatures; j++)
       {
-        // Set the value into the output array
         const uint64 lengthVal = m_Length ? m_LengthArray->operator[](j + start) : length[j];
         if(lengthVal > 0)
         {
@@ -242,9 +274,12 @@ public:
         }
       }
     }
+  }
 
-  } // end of compute
-
+  /**
+   * @brief Computes one parallel feature range.
+   * @param range Inclusive-exclusive feature range.
+   */
   void operator()(const Range& range) const
   {
     compute(range.min(), range.max());
@@ -273,38 +308,47 @@ private:
   MessageHelper& m_MessageHelper;
 };
 
-/// Number of cell/tuple elements read per bulk copyIntoBuffer() call when a range-based (non-"None")
-/// feature statistic implementation streams sequentially through a cell-level array. Bounds per-chunk
-/// memory to a small, fixed footprint regardless of total cell count -- required so memory use does
-/// not scale with the dataset size for out-of-core stores -- while still allowing the whole array to
-/// be visited in a single sequential pass. Matches the chunk size used elsewhere in this plugin (e.g.
-/// ComputeFeatureCentroids.cpp).
-constexpr usize k_ChunkTuples = 65536;
+constexpr usize k_ChunkTuples = 65536; // Bounds each cell-level bulk-I/O page.
 
-// -----------------------------------------------------------------------------
 /**
  * @class StatisticsByFeatureRangeImpl
- * @brief Computes length/min/max/mean/summation/mode/standard-deviation per feature for a contiguous
- * feature-id range [start, start+numFeatures) using a single sequential pass over the cell-level
- * source, feature-id, and (pre-combined mask+range) mask arrays.
+ * @brief Computes bounded statistics for a contiguous feature range.
+ * @tparam T Input and extrema value type.
  *
- * @section why Why single-pass bucketing replaces the per-feature rescan
- * The previous implementation looped over each FEATURE and, for every feature, rescanned every cell
- * in the array to find that feature's members -- O(numFeatures x numCells) cell-array traversal, plus
- * a second full rescan again for standard deviation. Since each cell's own feature id is available
- * directly from the feature-id array, every cell can instead be routed to its own feature's
- * accumulators in a single scan, reducing the cost to O(numCells) (or O(2 x numCells) when standard
- * deviation is requested, since the variance calculation needs each feature's mean computed first --
- * that mean cannot be known until the first pass completes, so it is inherently a second pass rather
- * than something foldable into the first). Cell-level arrays are read in bounded chunks via
- * copyIntoBuffer so per-chunk memory stays fixed rather than scaling with the total cell count, which
- * out-of-core arrays require. The per-feature accumulators themselves scale with numFeatures, which is
- * feature-scale (typically thousands) rather than cell-scale (millions to billions).
+ * One page scan routes each tuple to a feature accumulator. Standard deviation
+ * requires a second page scan after means are known. Cell buffers stay fixed;
+ * accumulators scale with feature count rather than cell count.
  */
 template <typename T>
 class StatisticsByFeatureRangeImpl
 {
 public:
+  /**
+   * @brief Creates a bounded feature-statistics operation.
+   * @param length True to write sample counts.
+   * @param min True to write minima.
+   * @param max True to write maxima.
+   * @param mean True to write means.
+   * @param mode True to write modes.
+   * @param stdDeviation True to write standard deviations.
+   * @param summation True to write sums.
+   * @param featureIdToCompactIndex Maps feature IDs to output indices.
+   * @param mask Selects accepted tuples.
+   * @param featureIds Maps tuples to features.
+   * @param source Input values.
+   * @param start First feature identifier.
+   * @param numFeatures Number of output features.
+   * @param featureHasDataArray Receives feature availability.
+   * @param lengthArray Receives sample counts.
+   * @param minArray Receives minima.
+   * @param maxArray Receives maxima.
+   * @param meanArray Receives means.
+   * @param modeArray Receives modes.
+   * @param stdDevArray Receives standard deviations.
+   * @param summationArray Receives sums.
+   * @param shouldCancel Cancellation flag.
+   * @pre Referenced arrays, map, mask, and outputs outlive this operation.
+   */
   StatisticsByFeatureRangeImpl(bool length, bool min, bool max, bool mean, bool mode, bool stdDeviation, bool summation, const std::vector<usize>& featureIdToCompactIndex,
                                const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, const Int32AbstractDataStore& featureIds, const AbstractDataStore<T>& source, int32 start,
                                usize numFeatures, BoolArray* featureHasDataArray, UInt64Array* lengthArray, DataArray<T>* minArray, DataArray<T>* maxArray, Float32Array* meanArray,
@@ -335,19 +379,17 @@ public:
   }
 
   /**
-   * @brief Runs the single-pass (two-pass when standard deviation is requested) per-feature statistics
-   * calculation for the whole [start, start+numFeatures) range and writes the results directly into
-   * the destination arrays.
-   * @return An invalid Result if a bulk read from a cell-level array fails.
+   * @brief Runs bounded statistics for the configured feature range.
+   * @return Bulk-I/O or cancellation result.
+   *
+   * Output writes follow successful page scans. Empty features keep initialized
+   * sentinel values for statistics that have no sample.
    */
   Result<> operator()() const
   {
     const usize numTuples = m_Source.getNumberOfTuples();
 
-    // Per-feature accumulators -- O(numFeatures) memory, feature-scale rather than cell-scale. T-typed
-    // accumulators use make_unique<T[]> rather than std::vector<T> because T may be `bool`, whose
-    // std::vector specialization bit-packs storage and does not support the compound assignment
-    // (operator+=) used below.
+    // Feature-scale accumulators stay resident. T arrays avoid vector<bool> proxy arithmetic.
     std::vector<usize> counts(m_NumFeatures, 0);
     auto minValues = std::make_unique<T[]>(m_NumFeatures);
     auto maxValues = std::make_unique<T[]>(m_NumFeatures);
@@ -370,7 +412,7 @@ public:
     auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
     auto sourceBuf = std::make_unique<T[]>(k_ChunkTuples);
 
-    // Pass 1: bucket length/min/max/summation/(mode) per feature in a single sweep of the cells.
+    // One page scan collects counts, extrema, sums, and optional mode frequencies.
     for(usize offset = 0; offset < numTuples; offset += k_ChunkTuples)
     {
       if(m_ShouldCancel)
@@ -417,8 +459,7 @@ public:
       }
     }
 
-    // Per-feature mean is always computed locally (standard deviation below needs it) but only
-    // written to the destination array when Mean was actually requested.
+    // Standard deviation needs means even when Mean output is disabled.
     std::vector<float32> meanValues(m_NumFeatures, 0.0f);
     for(usize k = 0; k < m_NumFeatures; k++)
     {
@@ -436,12 +477,10 @@ public:
       }
     }
 
-    // Pass 2: standard deviation needs each feature's mean already known, so it requires its own
-    // second sweep of the cells -- the variance calculation cannot be folded into pass 1.
+    // Variance requires completed means, so standard deviation uses a second page scan.
     std::vector<float64> sumOfDiffs(m_StdDeviation ? m_NumFeatures : 0, 0.0);
     if(m_StdDeviation)
     {
-      // https://www.khanacademy.org/math/statistics-probability/summarizing-quantitative-data/variance-standard-deviation-population/a/calculating-standard-deviation-step-by-step
       for(usize offset = 0; offset < numTuples; offset += k_ChunkTuples)
       {
         if(m_ShouldCancel)
@@ -475,9 +514,7 @@ public:
       }
     }
 
-    // Write results. Only features with count > 0 receive computed statistics; empty features keep
-    // the sentinel fill values InitializeArrays() applied before this class was invoked, matching the
-    // previous per-feature implementation, which likewise skipped writes for empty features.
+    // Empty features retain the sentinel values established during initialization.
     for(usize k = 0; k < m_NumFeatures; k++)
     {
       if(m_ShouldCancel)
@@ -515,11 +552,9 @@ public:
       {
         if(m_Mode && !modalMaps[k].empty())
         {
-          // Find the maximum occurrence
           auto pr = std::max_element(modalMaps[k].begin(), modalMaps[k].end(), [](const auto& x, const auto& y) { return x.second < y.second; });
           const uint64 maxCount = pr->second;
 
-          // Store all values that have this maximum occurrence under the proper feature id
           for(const auto& modalPair : modalMaps[k])
           {
             if(modalPair.second == maxCount)
@@ -563,10 +598,31 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class MedianByFeatureImpl
+ * @brief Computes resident exact medians and unique counts by feature.
+ * @tparam T Input value type.
+ *
+ * Exact median materializes selected values per feature. This resident-only
+ * implementation runs after the caller requires all participating arrays in memory.
+ */
 template <typename T>
 class MedianByFeatureImpl
 {
 public:
+  /**
+   * @brief Creates a resident median and unique-count worker.
+   * @param mask Selects accepted tuples.
+   * @param featureIds Maps tuples to features.
+   * @param source Input values.
+   * @param findMedian True to calculate medians.
+   * @param findNumUnique True to calculate unique counts.
+   * @param medianArray Receives medians.
+   * @param numUniqueValuesArray Receives unique counts.
+   * @param lengthArray Supplies feature capacities.
+   * @param messageHelper Sends progress messages.
+   * @pre Referenced arrays, mask, and message helper outlive this worker.
+   */
   MedianByFeatureImpl(const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, const Int32AbstractDataStore& featureIds, const AbstractDataStore<T>& source, bool findMedian, bool findNumUnique,
                       Float32Array* medianArray, Int32Array* numUniqueValuesArray, DataArray<uint64>* lengthArray, MessageHelper& messageHelper)
   : m_FindMedian(findMedian)
@@ -581,12 +637,17 @@ public:
   {
   }
 
+  /**
+   * @brief Computes resident medians and unique counts for a feature range.
+   * @param start First feature identifier.
+   * @param end One past the last feature identifier.
+   */
   void compute(usize start, usize end) const
   {
     m_MessageHelper.sendMessage(fmt::format("Starting Median Array Calculation: Feature/Ensemble [{}-{}]", start, end));
 
     const usize numFeatureSources = end - start;
-    // Create the arrays that will collect the values from the arrays. allocate them to the correct size based on the length array
+    // Reserve known feature capacities before collecting exact values.
     std::vector<std::vector<T>> featureSources(numFeatureSources);
     for(usize featureSourceIndex = 0; featureSourceIndex < numFeatureSources; featureSourceIndex++)
     {
@@ -599,12 +660,10 @@ public:
 
     for(usize tupleIndex = 0; tupleIndex < numTuples; tupleIndex++)
     {
-      // Is the value in a mask and if so, is that mask TRUE
       if(m_Mask != nullptr && !m_Mask->isTrue(tupleIndex))
       {
         continue;
       }
-      // Is the featureId within our range that we care about
       const int32 featureId = m_FeatureIds[tupleIndex];
       if(featureId < start || featureId >= end)
       {
@@ -628,6 +687,10 @@ public:
     }
   }
 
+  /**
+   * @brief Computes one parallel feature range.
+   * @param range Inclusive-exclusive feature range.
+   */
   void operator()(const Range& range) const
   {
     compute(range.min(), range.max());
@@ -645,25 +708,34 @@ private:
   MessageHelper& m_MessageHelper;
 };
 
-// -----------------------------------------------------------------------------
 /**
  * @class MedianByFeatureRangeImpl
- * @brief Computes median and/or number-of-unique-values per feature for a contiguous feature-id range
- * using a single sequential pass over the cell-level source, feature-id, and (pre-combined mask+range)
- * mask arrays that buckets each in-range cell's value into its own feature's value list, instead of
- * rescanning every cell once per feature (see StatisticsByFeatureRangeImpl for the general rationale).
+ * @brief Computes resident exact medians and unique counts for a feature range.
+ * @tparam T Input value type.
  *
- * @note Exact median requires the complete sorted set of values assigned to each feature, so this
- * class necessarily holds all in-range values in per-feature buffers whose combined size is
- * O(numCellsInRange) -- proportional to the number of in-range cells, not to numFeatures. This is
- * inherent to computing an exact (rather than approximate/binned) median and is not eliminated by the
- * single-pass bucketing change; bucketing only reduces the number of full cell-array traversals from
- * O(numFeatures) to O(1).
+ * One bulk page scan buckets each in-range value once. Exact median requires
+ * values retained per feature, so memory grows with selected cells. The bounded
+ * scanline implementation avoids this resident collection.
  */
 template <typename T>
 class MedianByFeatureRangeImpl
 {
 public:
+  /**
+   * @brief Creates a resident range median and unique-count operation.
+   * @param featureIdToCompactIndex Maps feature IDs to output indices.
+   * @param mask Selects accepted tuples.
+   * @param featureIds Maps tuples to features.
+   * @param source Input values.
+   * @param start First feature identifier.
+   * @param numFeatures Number of output features.
+   * @param findMedian True to calculate medians.
+   * @param findNumUnique True to calculate unique counts.
+   * @param medianArray Receives medians.
+   * @param numUniqueValuesArray Receives unique counts.
+   * @param shouldCancel Cancellation flag.
+   * @pre Referenced arrays, map, and mask outlive this operation.
+   */
   MedianByFeatureRangeImpl(const std::vector<usize>& featureIdToCompactIndex, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, const Int32AbstractDataStore& featureIds,
                            const AbstractDataStore<T>& source, int32 start, usize numFeatures, bool findMedian, bool findNumUnique, Float32Array* medianArray, Int32Array* numUniqueValuesArray,
                            const std::atomic_bool& shouldCancel)
@@ -682,16 +754,13 @@ public:
   }
 
   /**
-   * @brief Runs the single-pass median/unique-value bucketing for the whole [start, start+numFeatures)
-   * range and writes the results directly into the destination arrays.
-   * @return An invalid Result if a bulk read from a cell-level array fails.
+   * @brief Runs resident exact median and unique-value bucketing.
+   * @return Bulk-I/O or cancellation result.
    */
   Result<> operator()() const
   {
     const usize numTuples = m_Source.getNumberOfTuples();
-    // Per-feature value buffers. Their combined size scales with the number of in-range cells (see
-    // class doc comment) -- this is inherent to exact median/unique-value computation, not something
-    // this pass introduces.
+    // Exact median retains selected values in per-feature resident buffers.
     std::vector<std::vector<T>> perFeatureValues(m_FindMedian ? m_NumFeatures : 0);
     std::vector<std::set<T>> perFeatureUniqueValues(m_FindNumUniqueValues ? m_NumFeatures : 0);
 
@@ -788,7 +857,16 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Computes requested statistics for one resident ungrouped container.
+ * @tparam ContainerType Resident input container type.
+ * @tparam T Input value type.
+ * @param data Input values.
+ * @param arrays Created output arrays in filter-defined order.
+ * @param inputValues Selected statistics and output paths.
+ * @return Error for an incompatible checked output array.
+ * @throws std::invalid_argument If a median, mode, or unique-count output has an incompatible type.
+ */
 template <class ContainerType, typename T>
 Result<> FindStatisticsImpl(const ContainerType& data, std::vector<IArray*>& arrays, const ComputeArrayStatisticsInputValues* inputValues)
 {
@@ -803,7 +881,7 @@ Result<> FindStatisticsImpl(const ContainerType& data, std::vector<IArray*>& arr
     array0Ptr->initializeTuple(0, val);
   }
 
-  // If we are finding the min or the max (or both) just combine that into a single call
+  // One min/max reduction serves either requested extrema output.
   if(inputValues->FindMin || inputValues->FindMax)
   {
     const std::pair<T, T> minMaxValues = StatisticsCalculations::FindMinMax(data);
@@ -827,7 +905,7 @@ Result<> FindStatisticsImpl(const ContainerType& data, std::vector<IArray*>& arr
     }
   }
 
-  // Finding the mean depends on the summation.
+  // Mean and standard deviation both need the sum.
   if(inputValues->FindSummation || inputValues->FindMean || inputValues->FindStdDeviation)
   {
     const std::pair<float32, float32> sumMeanValues = StatisticsCalculations::FindSumMean(data);
@@ -903,12 +981,17 @@ Result<> FindStatisticsImpl(const ContainerType& data, std::vector<IArray*>& arr
   return {};
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Initializes enabled statistics outputs to their empty-group sentinels.
+ * @tparam T Input and extrema value type.
+ * @param dataStructure Owns the created output arrays.
+ * @param inputValues Selected statistics and output paths.
+ * @return Error for a missing or incompatible output array.
+ */
 template <typename T>
 Result<> InitializeArrays(DataStructure& dataStructure, const ComputeArrayStatisticsInputValues* inputValues)
 {
   using InputDataArrayType = DataArray<T>;
-  // Need to initialize the output data arrays
   if(inputValues->ComputeByIndex)
   {
     auto* arrayPtr = dataStructure.getDataAs<BoolArray>(inputValues->FeatureHasDataArrayName);
@@ -990,14 +1073,24 @@ Result<> InitializeArrays(DataStructure& dataStructure, const ComputeArrayStatis
     }
     arrayPtr->fill(-1);
   }
-  // End Initialization
-
   return {};
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @struct ComputeArrayStatisticsFunctor
+ * @brief Dispatches resident ungrouped statistics by input type.
+ */
 struct ComputeArrayStatisticsFunctor
 {
+  /**
+   * @brief Computes resident ungrouped statistics for one input type.
+   * @tparam T Input value type.
+   * @param dataStructure Owns inputs and outputs.
+   * @param inputIDataArray Input array.
+   * @param arrays Created output arrays in filter-defined order.
+   * @param inputValues Selected statistics and output paths.
+   * @return Initialization or statistics result.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray& inputIDataArray, std::vector<IArray*>& arrays, const ComputeArrayStatisticsInputValues* inputValues)
   {
@@ -1009,8 +1102,7 @@ struct ComputeArrayStatisticsFunctor
         maskCompare = MaskCompareUtilities::InstantiateMaskCompare(dataStructure, inputValues->MaskArrayPath);
       } catch(const std::out_of_range& exception)
       {
-        // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-        // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+        // Direct callers can bypass preflight, so the runtime check returns a usable error.
         const std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", inputValues->MaskArrayPath.toString());
         return MakeErrorResult(-563501, message);
       }
@@ -1023,11 +1115,9 @@ struct ComputeArrayStatisticsFunctor
     }
 
     const auto& inputArray = static_cast<const DataArray<T>&>(inputIDataArray);
-    // this level checks whether computing by index or not and preps the calculations accordingly
     if(inputValues->UseMask)
     {
-      // This section extracts out the data into a separate storage class. Note that
-      // this could get real ugly for an out-of-core DataArray
+      // The resident direct path materializes accepted values for ungrouped masked statistics.
       const usize numTuples = inputArray.getNumberOfTuples();
       std::vector<T> data;
       data.reserve(numTuples);
@@ -1039,7 +1129,6 @@ struct ComputeArrayStatisticsFunctor
         }
       }
       data.shrink_to_fit();
-      // compute the statistics for the entire array
       Result<> result = FindStatisticsImpl<std::vector<T>, T>(data, arrays, inputValues);
       if(result.invalid())
       {
@@ -1048,7 +1137,6 @@ struct ComputeArrayStatisticsFunctor
     }
     else
     {
-      // compute the statistics for the entire array
       Result<> result = FindStatisticsImpl<DataArray<T>, T>(inputArray, arrays, inputValues);
       if(result.invalid())
       {
@@ -1056,7 +1144,7 @@ struct ComputeArrayStatisticsFunctor
       }
     }
 
-    // compute the standardized data based on whether computing by index or not
+    // Resident standardization reads input values directly after mean and deviation exist.
     if(inputValues->StandardizeData)
     {
       const auto& mean = dataStructure.getDataRefAs<Float32Array>(inputValues->MeanArrayName).getDataStoreRef();
@@ -1078,9 +1166,27 @@ struct ComputeArrayStatisticsFunctor
   }
 };
 
-// -----------------------------------------------------------------------------
+/**
+ * @struct ComputeArrayStatisticsByFeatureFunctor
+ * @brief Dispatches resident grouped statistics by input type and range mode.
+ */
 struct ComputeArrayStatisticsByFeatureFunctor
 {
+  /**
+   * @brief Computes resident statistics for the legacy None feature range.
+   * @tparam T Input value type.
+   * @param dataStructure Owns inputs and outputs.
+   * @param inputIDataArray Input array.
+   * @param arrays Created output arrays in filter-defined order.
+   * @param numFeatures Number of output features.
+   * @param inputValues Selected statistics and output paths.
+   * @param shouldCancel Cancellation flag.
+   * @param messageHelper Sends progress messages.
+   * @return Initialization or resident statistics result.
+   *
+   * TBB runs only when every participating store is resident.
+   * Otherwise, the in-memory requirement gate runs this worker serially.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray* inputIDataArray, std::vector<IArray*>& arrays, usize numFeatures, const ComputeArrayStatisticsInputValues* inputValues,
                       const std::atomic_bool& shouldCancel, MessageHelper& messageHelper)
@@ -1093,8 +1199,7 @@ struct ComputeArrayStatisticsByFeatureFunctor
         maskCompare = MaskCompareUtilities::InstantiateMaskCompare(dataStructure, inputValues->MaskArrayPath);
       } catch(const std::out_of_range& exception)
       {
-        // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-        // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+        // Direct callers can bypass preflight, so the runtime check returns a usable error.
         const std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", inputValues->MaskArrayPath.toString());
         return MakeErrorResult(-563508, message);
       }
@@ -1106,7 +1211,6 @@ struct ComputeArrayStatisticsByFeatureFunctor
       return initializationResult;
     }
 
-    // this level preps and preforms the calculations accordingly
     const auto* inputArrayPtr = static_cast<const DataArray<T>*>(inputIDataArray);
     const auto* featureIdsPtr = dataStructure.getDataAs<Int32Array>(inputValues->FeatureIdsArrayPath);
     auto* lengthArrayPtr = dynamic_cast<DataArray<uint64>*>(arrays[0]);
@@ -1158,7 +1262,7 @@ struct ComputeArrayStatisticsByFeatureFunctor
 
       ParallelDataAlgorithm medianDataAlg;
       {
-        // Scoped to prevent alg use of ptr array
+        // This temporary list only determines whether median work can run in parallel.
         IParallelAlgorithm::AlgorithmArrays medianAlgArrays;
         medianAlgArrays.push_back(featureIdsPtr);
         medianAlgArrays.push_back(inputArrayPtr);
@@ -1173,7 +1277,7 @@ struct ComputeArrayStatisticsByFeatureFunctor
           MedianByFeatureImpl<T>(maskCompare, featureIds, data, inputValues->FindMedian, inputValues->FindNumUniqueValues, medianArrayPtr, numUniqueValuesArrayPtr, lengthArrayPtr, messageHelper));
     }
 
-    // compute the standardized data
+    // Resident standardization uses the per-feature mean and deviation arrays.
     if(inputValues->StandardizeData)
     {
       const auto& mean = dataStructure.getDataRefAs<Float32Array>(inputValues->MeanArrayName).getDataStoreRef();
@@ -1194,11 +1298,18 @@ struct ComputeArrayStatisticsByFeatureFunctor
   }
 
   /**
-   * @brief Range-based (IgnoreZero/ShrinkToFit/CustomRange/PaddedCustomRange) feature statistics
-   * entry point. Builds a single featureId -> compact-output-index lookup once (feature-scale) and
-   * shares it across the stats pass, the median/unique-value pass, and the standardization pass below
-   * -- each of which now streams the cell-level arrays in bounded chunks exactly once (twice for
-   * standard deviation, which needs the mean first) instead of rescanning all cells once per feature.
+   * @brief Computes resident statistics for a configured feature range.
+   * @tparam T Input value type.
+   * @param dataStructure Owns inputs and outputs.
+   * @param inputIDataArray Input array.
+   * @param arrays Created output arrays in filter-defined order.
+   * @param range Inclusive feature identifier range.
+   * @param inputValues Selected statistics and output paths.
+   * @param shouldCancel Cancellation flag.
+   * @return Initialization, bulk-I/O, or cancellation result.
+   *
+   * One feature-ID map creates compact output indices. Statistics, exact median,
+   * unique values, and standardization reuse this feature-scale lookup.
    */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray* inputIDataArray, std::vector<IArray*>& arrays, const std::pair<int32, int32>& range,
@@ -1222,7 +1333,6 @@ struct ComputeArrayStatisticsByFeatureFunctor
       return initializationResult;
     }
 
-    // this level preps and preforms the calculations accordingly
     const auto* featureIdsMapPtr = dataStructure.getDataAs<Int32Array>(inputValues->FeatureIdMapArrayPath);
     const auto* inputArrayPtr = static_cast<const DataArray<T>*>(inputIDataArray);
     const auto* featureIdsPtr = dataStructure.getDataAs<Int32Array>(inputValues->FeatureIdsArrayPath);
@@ -1243,10 +1353,7 @@ struct ComputeArrayStatisticsByFeatureFunctor
     const int32 start = range.first;
     const auto numFeatures = static_cast<usize>(static_cast<int64>(range.second) - static_cast<int64>(range.first) + 1);
 
-    // Cache the feature-id map (feature-scale, small) once and invert it into a dense featureId ->
-    // compact-output-index lookup. Replaces the O(numFeatures) std::find previously repeated once per
-    // feature inside the stats/median implementations, and once per CELL in the standardization loop
-    // below (an O(numCells x numFeatures) cost prior to this change).
+    // Cache the feature map once for all feature-scale and cell-level operations.
     std::vector<int32> featureIdMapCache(numFeatures);
     Result<> mapReadResult = featureIdsMapStore.copyIntoBuffer(0, nonstd::span<int32>(featureIdMapCache.data(), numFeatures));
     if(mapReadResult.invalid())
@@ -1282,17 +1389,15 @@ struct ComputeArrayStatisticsByFeatureFunctor
       }
     }
 
-    // compute the standardized data based on whether computing by index or not
+    // Standardization uses the compact feature layout.
     if(inputValues->StandardizeData)
     {
       const auto& mean = dataStructure.getDataRefAs<Float32Array>(inputValues->MeanArrayName).getDataStoreRef();
       const auto& stdDevStore = dataStructure.getDataRefAs<Float32Array>(inputValues->StdDeviationArrayName).getDataStoreRef();
       auto& standardized = dataStructure.getDataRefAs<Float32Array>(inputValues->StandardizedArrayName).getDataStoreRef();
 
-      // Cache mean/std (feature-scale) locally, then stream the cell-level arrays once in bounded
-      // chunks -- a read-modify-write per chunk so cells outside the feature-id range keep whatever
-      // value the standardized array already held (matches the previous per-cell setValue, which only
-      // ever touched in-range cells).
+      // Feature-scale means and deviations stay resident. Page read-modify-write
+      // preserves standardized values for tuples outside the selected range.
       std::vector<float32> meanCache(numFeatures);
       Result<> meanReadResult = mean.copyIntoBuffer(0, nonstd::span<float32>(meanCache.data(), numFeatures));
       if(meanReadResult.invalid())
@@ -1358,19 +1463,24 @@ struct ComputeArrayStatisticsByFeatureFunctor
 };
 
 /**
+ * @struct StatisticsGroupLayout
  * @brief Maps FeatureIds into the compact output tuple range chosen by the filter.
  * IDs outside a custom range return no group and are skipped without allocating
  * a sparse array up to the largest possible ID.
  */
 struct StatisticsGroupLayout
 {
-  bool ComputeByIndex = false;
-  bool CreateFeatureIdMap = false;
-  int32 FirstFeatureId = 0;
-  int32 LastFeatureId = 0;
-  usize GroupCount = 1;
+  bool ComputeByIndex = false;     // True when outputs group tuples by FeatureId.
+  bool CreateFeatureIdMap = false; // True when the filter creates compact-to-source mapping output.
+  int32 FirstFeatureId = 0;        // Inclusive source FeatureId lower bound.
+  int32 LastFeatureId = 0;         // Inclusive source FeatureId upper bound.
+  usize GroupCount = 1;            // Number of compact output tuples.
 
-  /** @brief Returns the compact output index for @p featureId, or no value when excluded. */
+  /**
+   * @brief Returns a compact output index for one FeatureId.
+   * @param featureId Source FeatureId.
+   * @return Compact output index, or no value when featureId is excluded.
+   */
   std::optional<usize> groupIndex(int32 featureId) const
   {
     if(!ComputeByIndex)
@@ -1385,18 +1495,24 @@ struct StatisticsGroupLayout
   }
 };
 
-/** @brief Minimum and maximum IDs discovered by the initial bounded FeatureIds scan. */
+/**
+ * @struct ObservedFeatureBounds
+ * @brief Stores FeatureId bounds from one bounded scan.
+ */
 struct ObservedFeatureBounds
 {
-  bool HasValues = false;
-  int32 Minimum = 0;
-  int32 Maximum = 0;
+  bool HasValues = false; // True after at least one FeatureId is observed.
+  int32 Minimum = 0;      // Lowest observed FeatureId.
+  int32 Maximum = 0;      // Highest observed FeatureId.
 };
 
 /**
  * @brief Finds the observed FeatureId interval with fixed-size bulk reads.
- * @return Partial/default bounds on cancellation, the first read failure, or
- * the complete bounds after one pass.
+ * @param featureIds Feature identifier store.
+ * @param shouldCancel Cancellation flag.
+ * @return Partial bounds on cancellation, a bulk-read error, or complete bounds.
+ *
+ * Fixed pages avoid a FeatureIds-sized resident buffer.
  */
 Result<ObservedFeatureBounds> discoverFeatureBounds(const Int32AbstractDataStore& featureIds, const std::atomic_bool& shouldCancel)
 {
@@ -1436,8 +1552,9 @@ Result<ObservedFeatureBounds> discoverFeatureBounds(const Int32AbstractDataStore
 
 /**
  * @brief Combines observed IDs and range controls into a dense output layout.
- * @return An error for an invalid or unrepresentable range; otherwise the exact
- * first ID, last ID, and output tuple count used by both implementations.
+ * @param inputValues Filter grouping options.
+ * @param observedBounds FeatureId bounds from the input.
+ * @return Error for an invalid or unrepresentable range, or the output layout.
  */
 Result<StatisticsGroupLayout> resolveGroupLayout(const ComputeArrayStatisticsInputValues& inputValues, const ObservedFeatureBounds& observedBounds)
 {
@@ -1524,9 +1641,16 @@ Result<StatisticsGroupLayout> resolveGroupLayout(const ComputeArrayStatisticsInp
 }
 
 template <typename T>
-constexpr uint64 k_StatisticsRecordSize = sizeof(int32) + sizeof(T) + sizeof(uint64);
+constexpr uint64 k_StatisticsRecordSize = sizeof(int32) + sizeof(T) + sizeof(uint64); // Group, value, and tuple identifier bytes.
 
-/** @brief Serializes (compact group, value, original tuple) for exact external sorting. */
+/**
+ * @brief Serializes one exact-order statistics record.
+ * @tparam T Input value type.
+ * @param bytes Destination record bytes.
+ * @param groupId Compact output group.
+ * @param value Input value.
+ * @param originalTupleIndex Source tuple identifier.
+ */
 template <typename T>
 void encodeStatisticsRecord(nonstd::span<std::byte> bytes, int32 groupId, T value, uint64 originalTupleIndex)
 {
@@ -1535,7 +1659,14 @@ void encodeStatisticsRecord(nonstd::span<std::byte> bytes, int32 groupId, T valu
   std::memcpy(bytes.data() + sizeof(groupId) + sizeof(value), &originalTupleIndex, sizeof(originalTupleIndex));
 }
 
-/** @brief Decodes a record created by encodeStatisticsRecord(). */
+/**
+ * @brief Deserializes one exact-order statistics record.
+ * @tparam T Input value type.
+ * @param bytes Source record bytes.
+ * @param groupId Receives the compact output group.
+ * @param value Receives the input value.
+ * @param originalTupleIndex Receives the source tuple identifier.
+ */
 template <typename T>
 void decodeStatisticsRecord(nonstd::span<const std::byte> bytes, int32& groupId, T& value, uint64& originalTupleIndex)
 {
@@ -1546,7 +1677,12 @@ void decodeStatisticsRecord(nonstd::span<const std::byte> bytes, int32& groupId,
 
 /**
  * @brief Orders scratch records by compact group, value, then input position.
- * The last key makes equal-value ordering deterministic without affecting run counts.
+ * @tparam T Input value type.
+ * @param left First serialized statistics record.
+ * @param right Second serialized statistics record.
+ * @return Negative, zero, or positive lexical comparison result.
+ *
+ * The tuple identifier makes equal-value ordering deterministic without changing run counts.
  */
 template <typename T>
 int32 compareStatisticsRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
@@ -1578,7 +1714,13 @@ int32 compareStatisticsRecords(nonstd::span<const std::byte> left, nonstd::span<
   return leftIndex < rightIndex ? -1 : 1;
 }
 
-/** @brief Tests generic numeric equality using the ordering required by the sorter. */
+/**
+ * @brief Tests numeric equality with only operator<.
+ * @tparam T Input value type.
+ * @param left First value.
+ * @param right Second value.
+ * @return True when neither value is less than the other.
+ */
 template <typename T>
 bool equivalentStatisticsValues(const T& left, const T& right)
 {
@@ -1587,8 +1729,13 @@ bool equivalentStatisticsValues(const T& left, const T& right)
 
 /**
  * @brief Streams sorted records in bounded pages and reports each equal-value run.
- * @p runFunction receives the compact group, value, occurrence count, and
- * zero-based position of the run within that group.
+ * @tparam T Input value type.
+ * @tparam RunFunction Callable that accepts group, value, count, and position.
+ * @param externalSort Finished statistics sorter.
+ * @param groupCount Number of compact output groups.
+ * @param shouldCancel Cancellation flag.
+ * @param runFunction Receives each equal-value run.
+ * @return Sort I/O, callback, or cancellation result.
  */
 template <typename T, typename RunFunction>
 Result<> scanSortedStatisticsRuns(const IExternalSort& externalSort, usize groupCount, const std::atomic_bool& shouldCancel, RunFunction&& runFunction)
@@ -1669,8 +1816,14 @@ Result<> scanSortedStatisticsRuns(const IExternalSort& externalSort, usize group
 
 /**
  * @brief Validates and bulk-writes one feature-scale scalar output.
- * Keeping this write centralized ensures all statistics use the store's
- * contiguous transfer API instead of per-element disk accesses.
+ * @tparam T Output value type.
+ * @param outputArray Destination scalar array.
+ * @param values Source values.
+ * @param count Number of values.
+ * @param path Output path for diagnostics.
+ * @return Validation or bulk-write result.
+ *
+ * The contiguous transfer avoids one disk access per output value.
  */
 template <typename T>
 Result<> writeStatisticsOutput(DataArray<T>* outputArray, const T* values, usize count, const DataPath& path)
@@ -1688,12 +1841,21 @@ Result<> writeStatisticsOutput(DataArray<T>* outputArray, const T* values, usize
 }
 
 /**
- * @brief Bounded implementation for one runtime-selected value and mask type.
+ * @brief Computes bounded statistics for one runtime-selected value and mask type.
+ * @tparam T Input and extrema value type.
+ * @tparam MaskT Mask value type.
+ * @param dataStructure Owns input and output arrays.
+ * @param inputDataArray Input values.
+ * @param featureIdsDataArray Optional FeatureIds array.
+ * @param maskDataArray Optional mask array.
+ * @param layout Resolved compact output layout.
+ * @param inputValues Selected statistics and output paths.
+ * @param shouldCancel Cancellation flag.
+ * @return Validation, bulk-I/O, sort, reduction, or cancellation result.
  *
- * Feature-scale accumulators remain resident while potentially large cell data
- * is read in fixed pages. Order statistics use a registered external sorter;
- * without one, exact repeated scans trade speed for bounded memory rather than
- * silently changing median, mode, or unique-count results.
+ * Feature-scale accumulators remain resident while large cell data uses fixed pages.
+ * Without an external sorter, repeated scans trade speed for bounded memory.
+ * The fallback keeps median, mode, and unique-count results exact.
  */
 template <typename T, typename MaskT>
 Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArray& inputDataArray, const IDataArray* featureIdsDataArray, const IDataArray* maskDataArray,
@@ -1814,8 +1976,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
     return result;
   };
 
-  // Pass 1 computes count, extrema, and sum while optionally producing compact
-  // external-sort records for statistics that depend on value order.
+  // One page scan collects count, extrema, sums, and optional exact-order records.
   for(usize offset = 0; offset < tupleCount; offset += k_ChunkTuples)
   {
     if(shouldCancel)
@@ -1932,10 +2093,10 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
     }
   }
 
-  // Variance requires the completed group means, so it is intentionally a
-  // second input pass instead of retaining every selected value in memory.
+  // Variance needs completed means, so it uses a second page scan.
   if(inputValues.FindStdDeviation)
   {
+    // Float64 squared-difference accumulation reduces rounding loss before Float32 output.
     std::vector<float64> sumOfDifferences(groupCount, 0.0);
     for(usize offset = 0; offset < tupleCount; offset += k_ChunkTuples)
     {
@@ -2018,8 +2179,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
     return {};
   };
 
-  // Consume equal-value runs to derive unique counts, mode frequencies, and
-  // the two exact median positions in one ordered traversal.
+  // Equal-value runs yield unique counts, mode frequencies, and exact median positions.
   if(needsSortedValues && externalSort != nullptr)
   {
     Result<> sortedResult = scanSortedStatisticsRuns<T>(*externalSort, groupCount, shouldCancel, consumeSortedRun);
@@ -2030,8 +2190,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
   }
   else if(needsSortedValues)
   {
-    // Provider-free fallback repeatedly selects and counts the next value for
-    // each group. It is deliberately slower but exact and bounded in memory.
+    // Provider-free scans are slower but keep exact order statistics bounded in memory.
     const auto scanGroup = [&](usize requestedGroup, auto&& valueFunction) -> Result<> {
       for(usize offset = 0; offset < tupleCount; offset += k_ChunkTuples)
       {
@@ -2147,8 +2306,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
     }
   }
 
-  // Mode values need a second ordered traversal after maximum run sizes are
-  // known because ties must all be emitted to the NeighborList.
+  // Mode ties require a second ordered traversal after maximum run sizes are known.
   if constexpr(!std::is_same_v<T, bool>)
   {
     if(inputValues.FindMode)
@@ -2291,8 +2449,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
   {
     return {};
   }
-  // Feature-scale outputs are committed in bulk only after every reduction has
-  // succeeded, minimizing disk transactions and avoiding partially interleaved writes.
+  // Feature-scale scalar outputs commit in bulk after the reductions succeed.
   if(inputValues.ComputeByIndex)
   {
     auto hasData = std::make_unique<bool[]>(groupCount);
@@ -2407,8 +2564,7 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
   {
     return {};
   }
-  // Standardization depends on final mean and deviation values. Stream the
-  // source once more and update fixed-size destination pages in place.
+  // Standardization uses final means and deviations in fixed read-modify-write pages.
   if(inputValues.StandardizeData)
   {
     auto standardizedBuffer = std::make_unique<float32[]>(k_ChunkTuples);
@@ -2457,10 +2613,24 @@ Result<> generateScanlineStatistics(DataStructure& dataStructure, const IDataArr
   return {};
 }
 
-/** @brief Runtime dispatch adapter for the bounded value and mask types. */
+/**
+ * @struct StatisticsScanlineFunctor
+ * @brief Dispatches bounded statistics by input and mask type.
+ */
 struct StatisticsScanlineFunctor
 {
-  /** @brief Selects an absent, Boolean, or UInt8 mask and invokes the typed scan. */
+  /**
+   * @brief Selects an absent, Boolean, or UInt8 mask for a bounded scan.
+   * @tparam T Input and extrema value type.
+   * @param dataStructure Owns input and output arrays.
+   * @param inputArray Input values.
+   * @param featureIdsArray Optional FeatureIds array.
+   * @param maskArray Optional mask array.
+   * @param layout Resolved compact output layout.
+   * @param inputValues Selected statistics and output paths.
+   * @param shouldCancel Cancellation flag.
+   * @return Result from the typed bounded scan.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray& inputArray, const IDataArray* featureIdsArray, const IDataArray* maskArray, const StatisticsGroupLayout& layout,
                       const ComputeArrayStatisticsInputValues& inputValues, const std::atomic_bool& shouldCancel) const
@@ -2481,18 +2651,30 @@ struct StatisticsScanlineFunctor
   }
 };
 
-/** @brief Dispatch wrapper around the original resident statistics callback. */
+/**
+ * @class ComputeArrayStatisticsDirect
+ * @brief Invokes the existing resident statistics implementation.
+ */
 class ComputeArrayStatisticsDirect
 {
 public:
-  /** @brief Retains a synchronous reference to the dispatcher-owned callback. */
+  /**
+   * @brief Stores a resident callback for synchronous dispatch.
+   * @tparam ArgsT Additional dispatch argument types.
+   * @param executeDirect Resident implementation callback.
+   * @param args Forwarded arguments ignored by this wrapper.
+   * @pre executeDirect outlives this wrapper.
+   */
   template <typename... ArgsT>
-  explicit ComputeArrayStatisticsDirect(const std::function<Result<>()>& executeDirect, ArgsT&&...)
+  explicit ComputeArrayStatisticsDirect(const std::function<Result<>()>& executeDirect, ArgsT&&... args)
   : m_ExecuteDirect(executeDirect)
   {
   }
 
-  /** @brief Runs the established in-memory implementation unchanged. */
+  /**
+   * @brief Executes the resident implementation callback.
+   * @return Callback result.
+   */
   Result<> operator()() const
   {
     return m_ExecuteDirect();
@@ -2503,15 +2685,28 @@ private:
 };
 
 /**
- * @brief Dispatch wrapper for bounded statistics over resident or disk-backed stores.
+ * @class ComputeArrayStatisticsScanline
+ * @brief Stores borrowed inputs for bounded statistics.
+ *
  * All captured references are non-owning and used synchronously by operator().
  */
 class ComputeArrayStatisticsScanline
 {
 public:
-  /** @brief Captures resolved layout, source arrays, outputs, and execution controls. */
-  ComputeArrayStatisticsScanline(const std::function<Result<>()>&, DataStructure& dataStructure, const IDataArray& inputArray, const IDataArray* featureIdsArray, const IDataArray* maskArray,
-                                 const StatisticsGroupLayout& layout, const ComputeArrayStatisticsInputValues& inputValues, const std::atomic_bool& shouldCancel)
+  /**
+   * @brief Stores resolved layout, source arrays, and execution controls.
+   * @param executeDirect Resident callback ignored by the scanline wrapper.
+   * @param dataStructure Owns input and output arrays.
+   * @param inputArray Input values.
+   * @param featureIdsArray Optional FeatureIds array.
+   * @param maskArray Optional mask array.
+   * @param layout Resolved compact output layout.
+   * @param inputValues Selected statistics and output paths.
+   * @param shouldCancel Cancellation flag.
+   * @pre Referenced arrays, layout, inputValues, and shouldCancel outlive this wrapper.
+   */
+  ComputeArrayStatisticsScanline(const std::function<Result<>()>& executeDirect, DataStructure& dataStructure, const IDataArray& inputArray, const IDataArray* featureIdsArray,
+                                 const IDataArray* maskArray, const StatisticsGroupLayout& layout, const ComputeArrayStatisticsInputValues& inputValues, const std::atomic_bool& shouldCancel)
   : m_DataStructure(dataStructure)
   , m_InputArray(inputArray)
   , m_FeatureIdsArray(featureIdsArray)
@@ -2522,7 +2717,10 @@ public:
   {
   }
 
-  /** @brief Dispatches the bounded algorithm on the input array's runtime type. */
+  /**
+   * @brief Dispatches bounded statistics by input value type.
+   * @return Result from the typed bounded scan.
+   */
   Result<> operator()() const
   {
     return ExecuteDataFunction(StatisticsScanlineFunctor{}, m_InputArray.getDataType(), m_DataStructure, m_InputArray, m_FeatureIdsArray, m_MaskArray, m_Layout, m_InputValues, m_ShouldCancel);
@@ -2539,7 +2737,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeArrayStatistics::ComputeArrayStatistics(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel,
                                                ComputeArrayStatisticsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -2549,10 +2746,8 @@ ComputeArrayStatistics::ComputeArrayStatistics(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeArrayStatistics::~ComputeArrayStatistics() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeArrayStatistics::operator()()
 {
   if(!m_InputValues->FindMin && !m_InputValues->FindMax && !m_InputValues->FindMean && !m_InputValues->FindMedian && !m_InputValues->FindMode && !m_InputValues->FindStdDeviation &&
@@ -2581,6 +2776,7 @@ Result<> ComputeArrayStatistics::operator()()
     return MakeErrorResult(-57315, fmt::format("ComputeArrayStatistics: mask '{}' does not exist or is not Boolean/UInt8.", m_InputValues->MaskArrayPath.toString()));
   }
 
+  // Discover FeatureId bounds before destination resizing so entry cancellation preserves outputs.
   ObservedFeatureBounds observedBounds;
   if(featureIdsArray != nullptr)
   {
@@ -2632,6 +2828,7 @@ Result<> ComputeArrayStatistics::operator()()
       {
         return MakeErrorResult(-57320, fmt::format("ComputeArrayStatistics: FeatureId mapping output '{}' does not exist or is not Int32.", m_InputValues->FeatureIdMapArrayPath.toString()));
       }
+      // The compact-to-source map scales with output groups, not cell tuples.
       std::vector<int32> mapping(layout.GroupCount);
       for(usize index = 0; index < layout.GroupCount; ++index)
       {
@@ -2706,6 +2903,7 @@ Result<> ComputeArrayStatistics::operator()()
                                    std::make_pair(layout.FirstFeatureId, layout.LastFeatureId), m_InputValues, m_ShouldCancel);
   };
 
+  // Every input and enabled output selects the safe storage implementation.
   std::vector<const IArray*> targets;
   targets.reserve(14);
   targets.push_back(inputArray);

@@ -20,7 +20,7 @@ using namespace nx::core;
 namespace
 {
 constexpr usize kBufferSize = 1024ULL;
-constexpr usize k_MaxChunkBytes = 1048576; // This is evenly divisible by 2, 4, and 8.
+constexpr usize k_MaxChunkBytes = 1048576;
 constexpr usize k_AsciiInputBufferSize = 16384;
 constexpr usize k_MaxAsciiTokenLength = 1024;
 
@@ -34,7 +34,19 @@ constexpr StringLiteral k_CellDataKeyword = "CELL_DATA";
 constexpr StringLiteral k_ScalarsKeyword = "SCALARS";
 constexpr StringLiteral k_VectorsKeyword = "VECTORS";
 
-// Preserve bytes beyond the declared value count so the section parser can read the next VTK header.
+/**
+ * @brief Parses a declared count of ASCII tokens through a fixed input buffer.
+ * @tparam TokenHandler Handles one token and its zero-based index.
+ * @param in Provides the VTK stream at the first value.
+ * @param totalTokens Specifies the declared value count.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later input buffers when true.
+ * @param tokenHandler Receives each complete token.
+ * @return Token, stream, conversion, or handler error, or success after cancellation.
+ *
+ * The parser seeks back unread bytes after the final value. This preserves the
+ * next VTK header in the shared stream.
+ */
 template <typename TokenHandler>
 Result<> ReadAsciiTokens(std::istream& in, usize totalTokens, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel, TokenHandler&& tokenHandler)
 {
@@ -133,6 +145,15 @@ Result<> ReadAsciiTokens(std::istream& in, usize totalTokens, const DataPath& da
   return {};
 }
 
+/**
+ * @brief Skips a declared binary value block through bounded reads.
+ * @tparam T Specifies the declared scalar type.
+ * @param in Provides the VTK stream at the first value.
+ * @param numElements Specifies values to skip.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later input buffers when true.
+ * @return Size or stream error, or success after completion or cancellation.
+ */
 template <typename T>
 Result<> SkipBinaryData(std::istream& in, usize numElements, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -165,6 +186,16 @@ Result<> SkipBinaryData(std::istream& in, usize numElements, const DataPath& dat
   return {};
 }
 
+/**
+ * @brief Skips one ASCII or binary array during preflight.
+ * @tparam T Specifies the declared scalar type.
+ * @param in Provides the VTK stream at the first value.
+ * @param binary Selects binary or ASCII parsing.
+ * @param numElements Specifies values to skip.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later input buffers when true.
+ * @return Parser or stream error, or success after completion or cancellation.
+ */
 template <typename T>
 Result<> SkipVolume(std::istream& in, bool binary, usize numElements, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -176,18 +207,41 @@ Result<> SkipVolume(std::istream& in, bool binary, usize numElements, const Data
   return ReadAsciiTokens(in, numElements, dataArrayPath, shouldCancel, [](const std::string&, usize) -> Result<> { return {}; });
 }
 
+/**
+ * @brief Calculates values in one typed transfer chunk.
+ * @tparam T Specifies the scalar type.
+ * @return At least one value and at most 1 MiB of values.
+ */
 template <typename T>
 constexpr usize ChunkValueCapacity()
 {
   return std::max<usize>(1, k_MaxChunkBytes / sizeof(T));
 }
 
+/**
+ * @brief Writes one typed value chunk.
+ * @tparam T Specifies the scalar type.
+ * @param dataStore Receives values.
+ * @param offset Specifies the first destination value.
+ * @param values Provides contiguous values.
+ * @return Destination bulk-write result.
+ */
 template <typename T>
 Result<> WriteChunk(AbstractDataStore<T>& dataStore, usize offset, nonstd::span<const T> values)
 {
   return dataStore.copyFromBuffer(offset, values);
 }
 
+/**
+ * @brief Reads and writes one big-endian binary array in bounded chunks.
+ * @tparam T Specifies the scalar type.
+ * @param in Provides the VTK stream at the first value.
+ * @param dataStore Receives converted native-endian values.
+ * @param totalValues Specifies the declared value count.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Stream or destination-write error, or success after cancellation.
+ */
 template <typename T>
 Result<> ReadBinaryData(std::istream& in, AbstractDataStore<T>& dataStore, usize totalValues, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -225,6 +279,16 @@ Result<> ReadBinaryData(std::istream& in, AbstractDataStore<T>& dataStore, usize
   return {};
 }
 
+/**
+ * @brief Parses and writes one ASCII array in bounded chunks.
+ * @tparam T Specifies the scalar type.
+ * @param in Provides the VTK stream at the first value.
+ * @param dataStore Receives converted values.
+ * @param totalValues Specifies the declared value count.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Stream, conversion, or destination-write error, or success after cancellation.
+ */
 template <typename T>
 Result<> ReadAsciiData(std::istream& in, AbstractDataStore<T>& dataStore, usize totalValues, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -255,7 +319,16 @@ Result<> ReadAsciiData(std::istream& in, AbstractDataStore<T>& dataStore, usize 
   });
 }
 
-// Reads both ASCII and binary values through the same fixed-capacity typed buffer.
+/**
+ * @brief Reads one typed ASCII or binary DataArray.
+ * @tparam T Specifies the scalar type.
+ * @param dataStructure Provides the destination array.
+ * @param in Provides the VTK stream at the first value.
+ * @param binary Selects binary or ASCII parsing.
+ * @param dataArrayPath Identifies the destination array.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Stream, conversion, or destination-write error, or success after cancellation.
+ */
 template <typename T>
 Result<> readDataChunk(DataStructure& dataStructure, std::istream& in, bool binary, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -274,7 +347,15 @@ Result<> readDataChunk(DataStructure& dataStructure, std::istream& in, bool bina
   return ReadAsciiData(in, dataStore, totalValues, dataArrayPath, shouldCancel);
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Reads one bounded header line.
+ * @param in Provides the VTK stream.
+ * @param result Receives a null-terminated line prefix.
+ * @param length Specifies result capacity.
+ * @return End-of-file error, or success.
+ *
+ * An overlong line is truncated and its remaining characters are discarded.
+ */
 Result<> ReadLine(std::istream& in, char* result, usize length)
 {
   in.getline(result, length);
@@ -286,7 +367,6 @@ Result<> ReadLine(std::istream& in, char* result, usize length)
     }
     if(in.gcount() == length)
     {
-      // Read kBufferSize chars; ignoring the rest of the line.
       in.clear();
       in.ignore(std::numeric_limits<int>::max(), '\n');
     }
@@ -294,7 +374,13 @@ Result<> ReadLine(std::istream& in, char* result, usize length)
   return {};
 }
 
-// --------------------------------------------------------------------------
+/**
+ * @brief Reads one bounded whitespace-delimited token.
+ * @param in Provides the VTK stream.
+ * @param result Receives token characters.
+ * @param length Specifies the stream width and result capacity.
+ * @return Token-stream error, or success.
+ */
 Result<> ReadString(std::istream& in, char* result, usize length)
 {
   in.width(length);
@@ -323,7 +409,12 @@ Result<> ReadString(std::istream& in, char* result, usize length)
   return {};
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Converts a mutable C string to lowercase.
+ * @param str Provides and receives characters.
+ * @param len Specifies maximum characters to inspect.
+ * @return str.
+ */
 char* LowerCase(char* str, const usize len)
 {
   usize i;
@@ -336,7 +427,16 @@ char* LowerCase(char* str, const usize len)
   return str;
 }
 
-// ------------------------------------------------------------------------
+/**
+ * @brief Dispatches a preflight data-block skip from an NX DataType.
+ * @param nxDType Specifies the converted VTK scalar type.
+ * @param in Provides the VTK stream at the first value.
+ * @param binary Selects binary or ASCII parsing.
+ * @param numElements Specifies values to skip.
+ * @param dataArrayPath Identifies the array for diagnostics.
+ * @param shouldCancel Stops before later input buffers when true.
+ * @return Parser or stream error, or success after cancellation.
+ */
 Result<> preflightSkipVolume(nx::core::DataType nxDType, std::istream& in, bool binary, usize numElements, const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel)
 {
   switch(nxDType)
@@ -380,6 +480,11 @@ Result<> preflightSkipVolume(nx::core::DataType nxDType, std::istream& in, bool 
   return {};
 }
 
+/**
+ * @brief Converts a legacy VTK scalar token to an NX DataType.
+ * @param text Specifies the VTK type token.
+ * @return Converted type or unsupported-token error.
+ */
 Result<nx::core::DataType> ConvertVtkDataType(const std::string& text)
 {
   if(text == "unsigned_char")
@@ -427,7 +532,6 @@ Result<nx::core::DataType> ConvertVtkDataType(const std::string& text)
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ReadVtkStructuredPoints::ReadVtkStructuredPoints(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                  ReadVtkStructuredPointsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -437,16 +541,13 @@ ReadVtkStructuredPoints::ReadVtkStructuredPoints(DataStructure& dataStructure, c
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadVtkStructuredPoints::~ReadVtkStructuredPoints() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ReadVtkStructuredPoints::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadVtkStructuredPoints::operator()()
 {
   return readFile();
@@ -518,7 +619,6 @@ void ReadVtkStructuredPoints::setDatasetType(const std::string& dataSetType)
   m_DatasetType = dataSetType;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadVtkStructuredPoints::readFile()
 {
   std::ifstream in(m_InputValues->InputFile, std::ios_base::in | std::ios_base::binary);
@@ -532,23 +632,22 @@ Result<> ReadVtkStructuredPoints::readFile()
   std::vector<char> buf(kBufferSize, '\0');
   std::string line;
   // char* buffer = buf.data();
-
-  auto result = ReadLine(in, buf.data(), kBufferSize); // Read Line 1 - VTK Version Info
+  auto result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
   }
-  std::fill(buf.begin(), buf.end(), '\0'); // Splat nulls across the vector
+  std::fill(buf.begin(), buf.end(), '\0');
 
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 2 - User Comment
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
   }
   setComment(std::string(buf.data()));
-  std::fill(buf.begin(), buf.end(), '\0'); // Splat nulls across the vector
+  std::fill(buf.begin(), buf.end(), '\0');
 
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 3 - BINARY or ASCII
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
@@ -568,8 +667,7 @@ Result<> ReadVtkStructuredPoints::readFile()
     return MakeErrorResult(to_underlying(ErrorCodes::FileTypeErr), ss);
   }
 
-  // Read Line 4 - Type of Dataset
-  std::fill(buf.begin(), buf.end(), '\0'); // Splat nulls across the vector
+  std::fill(buf.begin(), buf.end(), '\0');
   result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
@@ -598,13 +696,13 @@ Result<> ReadVtkStructuredPoints::readFile()
   }
   setDatasetType(dataset);
 
-  std::fill(buf.begin(), buf.end(), '\0');        // Splat nulls across the vector
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 5 which is the Dimension values
+  std::fill(buf.begin(), buf.end(), '\0');
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
   }
-  // But we need the 'extents' which is one less in all directions (unless dim=1)
+  // Cell dimensions subtract one from each point dimension.
   line = std::string(buf.data());
   auto tokens = StringUtilities::split(line, ' ');
   if(tokens.size() != 4)
@@ -643,8 +741,8 @@ Result<> ReadVtkStructuredPoints::readFile()
   cellDims[1] = pointDims[1] - 1;
   cellDims[2] = pointDims[2] - 1;
 
-  std::fill(buf.begin(), buf.end(), '\0');        // Splat nulls across the vector
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 6 which is the Scaling values
+  std::fill(buf.begin(), buf.end(), '\0');
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
@@ -683,8 +781,8 @@ Result<> ReadVtkStructuredPoints::readFile()
   }
   spacing[2] = convertResultF32.value();
 
-  std::fill(buf.begin(), buf.end(), '\0');        // Splat nulls across the vector
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 7 which is the Origin values
+  std::fill(buf.begin(), buf.end(), '\0');
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
@@ -722,8 +820,6 @@ Result<> ReadVtkStructuredPoints::readFile()
   }
   origin[2] = convertResultF32.value();
 
-  // Create the Image Geometry
-  // Define a custom class that generates the changes to the DataStructure.
   if(m_InputValues->ReadPointData && m_Preflight)
   {
     auto createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(m_InputValues->PointGeomPath, pointDims, origin, spacing, m_InputValues->PointAttributeMatrixName);
@@ -735,9 +831,8 @@ Result<> ReadVtkStructuredPoints::readFile()
     m_OutputActions.value().appendAction(std::move(createImageGeometryAction));
   }
 
-  // Read the first key word which should be POINT_DATA or CELL_DATA
-  std::fill(buf.begin(), buf.end(), '\0');        // Splat nulls across the vector
-  result = ReadLine(in, buf.data(), kBufferSize); // Read Line 8 which is the first type of data we are going to read
+  std::fill(buf.begin(), buf.end(), '\0');
+  result = ReadLine(in, buf.data(), kBufferSize);
   if(result.invalid())
   {
     return result;
@@ -806,23 +901,17 @@ Result<> ReadVtkStructuredPoints::readFile()
     }
   }
 
-  // Close the file since we are done with it.
   in.close();
 
   return {};
 }
 
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
 Result<int32> ReadVtkStructuredPoints::readDataTypeSection(std::istream& in, int32 numValues, const std::string& nextKeyWord)
 {
   std::vector<char> buf(kBufferSize, '\0');
 
-  // Read keywords until end-of-file
   while(!m_ShouldCancel && ReadString(in, buf.data(), kBufferSize).valid())
   {
-    // read scalar data
     if(strncmp(LowerCase(buf.data(), kBufferSize), "scalars", 7) == 0)
     {
       auto result = readScalarData(in, numValues);
@@ -831,7 +920,6 @@ Result<int32> ReadVtkStructuredPoints::readDataTypeSection(std::istream& in, int
         return ConvertResultTo<int32>(std::move(result), {});
       }
     }
-    // read vector data
     else if(strncmp(buf.data(), "vectors", 7) == 0)
     {
       auto result = readVectorData(in, numValues);
@@ -930,14 +1018,12 @@ Result<int32> ReadVtkStructuredPoints::readDataTypeSection(std::istream& in, int
     }
 #endif
 
-    // maybe bumped into cell data
     else if(strncmp(buf.data(), nextKeyWord.c_str(), 9) == 0)
     {
       std::string line(buf.data());
       std::vector<std::string> tokens = StringUtilities::split(line, ' ');
       std::string sectionType = std::string(tokens[0]);
-      // Read the number of values
-      std::fill(buf.begin(), buf.end(), '\0'); // Splat nulls across the vector
+      std::fill(buf.begin(), buf.end(), '\0');
       ReadString(in, buf.data(), kBufferSize);
       auto convertResultI32 = StringInterpretationUtilities::Convert<int32>({buf.data()});
       return {convertResultI32.value()};
@@ -949,7 +1035,7 @@ Result<int32> ReadVtkStructuredPoints::readDataTypeSection(std::istream& in, int
                                                 k_ScalarsKeyword, k_VectorsKeyword, k_PointDataKeyword, k_CellDataKeyword));
     }
 
-    std::fill(buf.begin(), buf.end(), '\0'); // Splat nulls across the vector
+    std::fill(buf.begin(), buf.end(), '\0');
   }
   return {0};
 }
@@ -998,7 +1084,6 @@ Result<int32> ReadVtkStructuredPoints::readDataTypeSection(std::istream& in, int
 //   return {static_cast<int32>(reslen)};
 // }
 
-// ------------------------------------------------------------------------
 Result<> ReadVtkStructuredPoints::readScalarData(std::istream& in, int32 numPts)
 {
   // char line[256], name[256], key[256], tableName[256];
@@ -1007,8 +1092,8 @@ Result<> ReadVtkStructuredPoints::readScalarData(std::istream& in, int32 numPts)
 
   //  char buffer[1024];
 
-  std::fill(line.begin(), line.end(), '\0');     // Splat nulls across the vector
-  if(::ReadLine(in, line.data(), 256).invalid()) // Read the rest of the line
+  std::fill(line.begin(), line.end(), '\0');
+  if(::ReadLine(in, line.data(), 256).invalid())
   {
     return MakeErrorResult(to_underlying(ErrorCodes::ReadScalarHeaderLineErr), fmt::format("Cannot read scalar header for file: {}", m_InputValues->InputFile.string()));
   }
@@ -1028,9 +1113,8 @@ Result<> ReadVtkStructuredPoints::readScalarData(std::istream& in, int32 numPts)
     numComp = static_cast<usize>(std::atoi(tokens[2].c_str()));
   }
 
-  // Done with that line in the file
-  std::fill(line.begin(), line.end(), '\0');     // Splat nulls across the vector
-  if(::ReadLine(in, line.data(), 256).invalid()) // Read the rest of the line
+  std::fill(line.begin(), line.end(), '\0');
+  if(::ReadLine(in, line.data(), 256).invalid())
   {
     return MakeErrorResult(to_underlying(ErrorCodes::ReadLookupTableLineErr), fmt::format("Cannot read LOOKUP_TABLE line for file: {}", m_InputValues->InputFile.string()));
   }
@@ -1050,7 +1134,6 @@ Result<> ReadVtkStructuredPoints::readScalarData(std::istream& in, int32 numPts)
   return readDataArray(in, numPts, name, scalarType, numComp);
 }
 
-// ------------------------------------------------------------------------
 Result<> ReadVtkStructuredPoints::readVectorData(std::istream& in, int32 numPts)
 {
   std::vector<char> line(256, '\0');
@@ -1068,7 +1151,6 @@ Result<> ReadVtkStructuredPoints::readVectorData(std::istream& in, int32 numPts)
   return readDataArray(in, numPts, tokens[0], tokens[1], 3);
 }
 
-// ------------------------------------------------------------------------
 Result<> ReadVtkStructuredPoints::readDataArray(std::istream& in, int32 numPts, const std::string& name, const std::string& scalarType, usize numComp)
 {
   DataPath arrayDataPath = m_InputValues->PointGeomPath.createChildPath(m_InputValues->PointAttributeMatrixName).createChildPath(name);
@@ -1152,7 +1234,6 @@ Result<> ReadVtkStructuredPoints::readDataArray(std::istream& in, int32 numPts, 
 //   return 0;
 // }
 
-// -----------------------------------------------------------------------------
 void ReadVtkStructuredPoints::readData(std::istream& instream)
 {
 #if 0

@@ -24,68 +24,110 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// DBSCANScanline — Out-of-Core (OOC) Algorithm
-//
-// This file implements the Scanline variant selected by DispatchAlgorithm.
-// Genuine OOC arrays use ExternalGDCF: fixed-window input/output transfers,
-// external sort streams, temporary fixed-width record stores, bounded page
-// caches, and fixed distance tiles. That path has neither per-cell DataStore
-// access nor resident point/grid-sized allocations. The older resident GDCF
-// below remains only as the forced-Scanline test fallback when every target
-// store is in memory.
-// =============================================================================
+/**
+ * @file DBSCANScanline.cpp
+ * @brief Implements the DBSCAN scanline path.
+ *
+ * Disk-backed execution uses ExternalGDCF. Fixed windows, external sorts,
+ * temporary fixed-width records, bounded page caches, and distance tiles avoid
+ * per-cell store access and point- or grid-sized resident allocations.
+ * The resident GDCF fallback handles direct Scanline calls with only in-memory stores.
+ * @see https://yliu.site/pub/GDCF_PR2019.pdf
+ */
 
 namespace
 {
 /**
- * @brief Constant mask used when masking is disabled without allocating one value per tuple.
+ * @class AllTrueMaskCompare
+ * @brief Supplies an accepted mask when masking is disabled.
+ *
+ * The adapter avoids allocating one mask value for each coordinate tuple.
  */
 class AllTrueMaskCompare final : public MaskCompareUtilities::MaskCompare
 {
 public:
-  /** @brief Reports both supplied tuples as accepted. */
-  bool bothTrue(usize, usize) const override
+  /**
+   * @brief Accepts both tuples.
+   * @param firstTuple Ignored first tuple index.
+   * @param secondTuple Ignored second tuple index.
+   * @return True.
+   */
+  bool bothTrue(usize firstTuple, usize secondTuple) const override
   {
     return true;
   }
-  /** @brief No tuple pair is rejected by the disabled mask. */
-  bool bothFalse(usize, usize) const override
+
+  /**
+   * @brief Rejects no tuple pair.
+   * @param firstTuple Ignored first tuple index.
+   * @param secondTuple Ignored second tuple index.
+   * @return False.
+   */
+  bool bothFalse(usize firstTuple, usize secondTuple) const override
   {
     return false;
   }
-  /** @brief Reports every tuple as accepted. */
-  bool isTrue(usize) const override
+
+  /**
+   * @brief Accepts a tuple.
+   * @param tupleIndex Ignored tuple index.
+   * @return True.
+   */
+  bool isTrue(usize tupleIndex) const override
   {
     return true;
   }
-  /** @brief No-op because this synthetic mask owns no writable storage. */
-  void setValue(usize, bool) override
+
+  /**
+   * @brief Ignores a mask update.
+   * @param tupleIndex Ignored tuple index.
+   * @param value Ignored mask value.
+   *
+   * The synthetic mask has no writable storage.
+   */
+  void setValue(usize tupleIndex, bool value) override
   {
   }
-  /** @brief Returns zero because tuple bounds come from the coordinate array. */
+
+  /**
+   * @brief Returns no stored tuples.
+   * @return Zero.
+   *
+   * DBSCAN gets tuple bounds from the coordinate array.
+   */
   usize getNumberOfTuples() const override
   {
     return 0;
   }
-  /** @brief A logical mask has one component. */
+
+  /**
+   * @brief Returns the logical mask component count.
+   * @return One.
+   */
   usize getNumberOfComponents() const override
   {
     return 1;
   }
-  /** @brief Returns zero because the algorithm does not query an unbounded all-true count. */
+
+  /**
+   * @brief Returns no stored true values.
+   * @return Zero.
+   *
+   * DBSCAN does not query a count for the synthetic unbounded mask.
+   */
   usize countTrueValues() const override
   {
     return 0;
   }
 };
 
-constexpr uint64 k_ExternalBatchRecords = 65536;
-constexpr uint64 k_ExternalRecordsPerPage = 4096;
-constexpr usize k_ExternalCachePages = 8;
-constexpr uint64 k_MergeTileRecords = 2048;
+constexpr uint64 k_ExternalBatchRecords = 65536;  // Bounds input, output, and external-sort transfer windows.
+constexpr uint64 k_ExternalRecordsPerPage = 4096; // Bounds records cached in one temporary-store page.
+constexpr usize k_ExternalCachePages = 8;         // Bounds cached pages for each temporary record type.
+constexpr uint64 k_MergeTileRecords = 2048;       // Bounds point records held for one pairwise distance tile.
 
 /**
+ * @struct DBSCANGridState
  * @brief Fixed-width externally stored state for one occupied spatial grid.
  *
  * Member ranges point into the sorted point stream; parent and cluster fields
@@ -93,40 +135,53 @@ constexpr uint64 k_MergeTileRecords = 2048;
  */
 struct DBSCANGridState
 {
-  uint64 Grid[3] = {0, 0, 0};
-  uint64 FirstMember = 0;
-  uint64 MemberCount = 0;
-  uint64 Parent = 0;
-  int32 ClusterId = 0;
-  uint8 IsCore = 0;
+  uint64 Grid[3] = {0, 0, 0}; // Grid coordinates in X/Y/Z order.
+  uint64 FirstMember = 0;     // First point-record index in sorted membership.
+  uint64 MemberCount = 0;     // Number of point records in the grid.
+  uint64 Parent = 0;          // Parent grid identifier in the external forest.
+  int32 ClusterId = 0;        // Feature identifier for a root grid.
+  uint8 IsCore = 0;           // Nonzero when MemberCount meets MinPoints.
 };
 
-/** @brief Fixed-width reference used to order core grids without retaining an in-memory index. */
+/**
+ * @struct DBSCANCoreOrder
+ * @brief Stores one externally ordered core-grid reference.
+ */
 struct DBSCANCoreOrder
 {
-  uint64 GridId = 0;
+  uint64 GridId = 0; // Grid-state record identifier.
 };
 
-/** @brief One grid coordinate in an externally stored per-axis lookup table. */
+/**
+ * @struct DBSCANAxisRecord
+ * @brief Stores one coordinate in an external axis index.
+ */
 struct DBSCANAxisRecord
 {
-  uint64 Coordinate = 0;
+  uint64 Coordinate = 0; // Grid coordinate on one axis.
 };
 
-/** @brief Deferred tuple label written externally and sorted back into original tuple order. */
+/**
+ * @struct DBSCANLabelRecord
+ * @brief Stores one deferred output label before tuple-order restoration.
+ */
 struct DBSCANLabelRecord
 {
-  uint64 TupleId = 0;
-  int32 FeatureId = 0;
+  uint64 TupleId = 0;  // Source tuple identifier.
+  int32 FeatureId = 0; // Final feature identifier.
 };
 
-/** @brief Fixed-width point record sorted by grid coordinates while preserving its original tuple ID. */
+/**
+ * @struct DBSCANPointRecord
+ * @brief Stores one point in externally sortable grid-membership form.
+ * @tparam T Coordinate value type.
+ */
 template <typename T>
 struct DBSCANPointRecord
 {
-  uint64 Grid[3] = {0, 0, 0};
-  uint64 TupleId = 0;
-  T Coordinates[3] = {};
+  uint64 Grid[3] = {0, 0, 0}; // Grid coordinates in X/Y/Z order.
+  uint64 TupleId = 0;         // Original tuple identifier.
+  T Coordinates[3] = {};      // Point coordinate values.
 };
 
 static_assert(std::is_trivially_copyable_v<DBSCANGridState>);
@@ -134,7 +189,15 @@ static_assert(std::is_trivially_copyable_v<DBSCANCoreOrder>);
 static_assert(std::is_trivially_copyable_v<DBSCANAxisRecord>);
 static_assert(std::is_trivially_copyable_v<DBSCANLabelRecord>);
 
-/** @brief Orders point records by grid Z/Y/X and then tuple ID for deterministic membership ranges. */
+/**
+ * @brief Orders point records by grid Z/Y/X and tuple identifier.
+ * @tparam T Coordinate value type.
+ * @param left First serialized point record.
+ * @param right Second serialized point record.
+ * @return Negative, zero, or positive lexical comparison result.
+ *
+ * Tuple identifiers make equal-grid membership ranges deterministic.
+ */
 template <typename T>
 int32 ComparePointRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
 {
@@ -156,14 +219,25 @@ int32 ComparePointRecords(nonstd::span<const std::byte> left, nonstd::span<const
   return lhs.TupleId < rhs.TupleId ? -1 : 1;
 }
 
-/** @brief Tests whether two sorted point records belong to the same spatial grid. */
+/**
+ * @brief Tests whether two point records use the same spatial grid.
+ * @tparam T Coordinate value type.
+ * @param left First point record.
+ * @param right Second point record.
+ * @return True when all grid coordinates match.
+ */
 template <typename T>
 bool SameGrid(const DBSCANPointRecord<T>& left, const DBSCANPointRecord<T>& right)
 {
   return left.Grid[0] == right.Grid[0] && left.Grid[1] == right.Grid[1] && left.Grid[2] == right.Grid[2];
 }
 
-/** @brief Orders external axis coordinates for bounded neighborhood-range queries. */
+/**
+ * @brief Orders external axis coordinates for bounded neighborhood queries.
+ * @param left First serialized axis record.
+ * @param right Second serialized axis record.
+ * @return Negative, zero, or positive coordinate comparison result.
+ */
 int32 CompareAxisRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
 {
   DBSCANAxisRecord lhs = {};
@@ -177,7 +251,12 @@ int32 CompareAxisRecords(nonstd::span<const std::byte> left, nonstd::span<const 
   return lhs.Coordinate < rhs.Coordinate ? -1 : 1;
 }
 
-/** @brief Restores deferred labels to original tuple order before the bulk output pass. */
+/**
+ * @brief Orders deferred labels by their original tuple identifiers.
+ * @param left First serialized label record.
+ * @param right Second serialized label record.
+ * @return Negative, zero, or positive tuple identifier comparison result.
+ */
 int32 CompareLabelRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
 {
   DBSCANLabelRecord lhs = {};
@@ -192,13 +271,19 @@ int32 CompareLabelRecords(nonstd::span<const std::byte> left, nonstd::span<const
 }
 
 /**
+ * @class ExternalGDCF
  * @brief Executes DBSCAN with externally sorted point membership and bounded record caches.
+ * @tparam T Coordinate value type.
+ * @tparam MaskT Mask value type.
  *
  * GDCF normally keeps point, grid, neighborhood, and cluster state resident.
- * This implementation instead streams points into a stable external sort,
- * materializes fixed grid/core/axis records through bounded caches, and performs
- * distance tests in fixed tiles. The resulting memory use is independent of the
- * number of input points and occupied grids, apart from configured cache bounds.
+ * This implementation streams points through a deterministic external sort. Bounded
+ * caches materialize fixed grid, core, and axis records. Fixed tiles perform
+ * distance tests. Memory use is independent of point and occupied-grid counts,
+ * apart from configured cache bounds.
+ *
+ * Cancellation checks occur between bounded I/O, cache, and merge operations.
+ * The caller interprets a set cancellation flag after a valid early return.
  */
 template <typename T, typename MaskT>
 class ExternalGDCF
@@ -206,7 +291,15 @@ class ExternalGDCF
 public:
   static_assert(std::is_trivially_copyable_v<DBSCANPointRecord<T>>);
 
-  /** @brief Borrows input stores and settings for one complete external GDCF execution. */
+  /**
+   * @brief Borrows stores and settings for one external GDCF execution.
+   * @param inputStore Coordinate store.
+   * @param maskStore Optional scalar mask store.
+   * @param inputValues DBSCAN parameters.
+   * @param dimensions Coordinate component count.
+   * @param shouldCancel Cancellation flag.
+   * @pre inputStore, maskStore, inputValues, and shouldCancel outlive this object.
+   */
   ExternalGDCF(const AbstractDataStore<T>& inputStore, const AbstractDataStore<MaskT>* maskStore, const DBSCANInputValues& inputValues, usize dimensions, const std::atomic_bool& shouldCancel)
   : m_InputStore(inputStore)
   , m_MaskStore(maskStore)
@@ -218,7 +311,8 @@ public:
 
   /**
    * @brief Validates inputs, discovers grid origin, externally sorts enabled points, and builds grid/core/axis records.
-   * @return A valid result, a no-cluster warning, or the first provider, validation, cancellation, or record-I/O failure.
+   * @pre Filter preflight has validated positive Epsilon and MinPoints values.
+   * @return Success, a no-cluster warning, or the first provider, validation, or record-I/O failure.
    */
   Result<> initialize()
   {
@@ -398,13 +492,11 @@ public:
     return {};
   }
 
-  /** @brief Returns the number of occupied spatial grids built during initialization. */
   uint64 activeGridCount() const
   {
     return m_ActiveGridCount;
   }
 
-  /** @brief Returns the number of occupied grids that meet the minimum-point core criterion. */
   uint64 coreGridCount() const
   {
     return m_CoreGridCount;
@@ -412,7 +504,10 @@ public:
 
   /**
    * @brief Creates the externally stored processing order for core grids.
-   * @return A valid result or the first temporary-record I/O or cancellation failure.
+   * @return Success, a no-cluster warning, or the first record-I/O failure.
+   *
+   * The external order avoids a core-grid-sized resident vector. LowDensityFirst
+   * sorts records in place. Random modes swap cached records with a fixed seed.
    */
   Result<> prepareCoreOrder()
   {
@@ -482,8 +577,11 @@ public:
   }
 
   /**
-   * @brief Merges neighboring core grids and assigns deterministic cluster roots.
-   * @return A valid result or the first neighborhood, distance-tile, cache, or cancellation failure.
+   * @brief Merges neighboring core grids and assigns stable roots to merged core grids.
+   * @return Success or the first neighborhood, tile, or cache failure.
+   *
+   * The method checks cancellation between bounded operations.
+   * Lowest-root union makes core-grid merges independent of merge order. Parse order can still control border-grid attachment.
    */
   Result<> cluster()
   {
@@ -753,16 +851,18 @@ public:
     return flushCaches();
   }
 
-  /** @brief Returns the final number of connected clusters after core-grid merging. */
   int32 finalClusterCount() const
   {
     return m_FinalClusterCount;
   }
 
   /**
-   * @brief Resolves point/grid membership into labels and bulk-writes them in original tuple order.
-   * @param featureIds Destination feature-ID store, which may be disk-backed.
-   * @return A valid result or the first external-sort, record-I/O, output-I/O, or cancellation failure.
+   * @brief Resolves membership into labels and bulk-writes tuple order.
+   * @param featureIds Destination feature-ID store.
+   * @return Success or the first sort, record-I/O, or output-I/O failure.
+   *
+   * Deferred labels sort back to tuple order. Fixed output windows prevent a
+   * label buffer that scales with the input tuple count.
    */
   Result<> label(AbstractDataStore<int32>& featureIds)
   {
@@ -949,7 +1049,12 @@ public:
   }
 
 private:
-  /** @brief Lexicographically compares two Z/Y/X grid coordinates for binary searches. */
+  /**
+   * @brief Compares two grid coordinates in Z/Y/X order.
+   * @param left First grid coordinate.
+   * @param right Second grid coordinate.
+   * @return Negative, zero, or positive lexical comparison result.
+   */
   static int32 compareGridCoordinates(const uint64* left, const uint64* right)
   {
     for(usize dimension = 3; dimension-- > 0;)
@@ -964,7 +1069,8 @@ private:
 
   /**
    * @brief Finds an occupied grid by coordinate through bounded record-cache lookups.
-   * @return Its record index, an empty optional when unoccupied, or an I/O failure.
+   * @param coordinates Grid coordinate to find.
+   * @return Record index, an empty optional when unoccupied, or an I/O failure.
    */
   Result<std::optional<uint64>> findGrid(const uint64* coordinates)
   {
@@ -1012,14 +1118,25 @@ private:
     return {compareGridCoordinates(stateResult.value().Grid, coordinates) == 0 ? std::optional<uint64>{begin} : std::nullopt};
   }
 
-  /** @brief Half-open range of axis-table records that can lie within epsilon of one coordinate. */
+  /**
+   * @struct AxisNeighborhood
+   * @brief Stores occupied coordinates near one axis position.
+   */
   struct AxisNeighborhood
   {
-    std::array<uint64, 5> Coordinates = {};
-    usize Count = 0;
+    std::array<uint64, 5> Coordinates = {}; // Candidate coordinates in the 5-position range.
+    usize Count = 0;                        // Number of candidate coordinates.
   };
 
-  /** @brief Locates the candidate coordinate range for one axis without loading the complete axis index. */
+  /**
+   * @brief Finds occupied axis coordinates near one grid coordinate.
+   * @param dimension Axis index.
+   * @param coordinate Center grid coordinate.
+   * @return Fixed-capacity neighborhood or an I/O, validation, or cancellation result.
+   *
+   * The method reads only the binary-search path and five candidates. It does
+   * not materialize the complete axis index.
+   */
   Result<AxisNeighborhood> axisNeighborhood(usize dimension, uint64 coordinate)
   {
     if(m_ShouldCancel)
@@ -1083,14 +1200,24 @@ private:
     return {neighborhood};
   }
 
-  /** @brief Fixed-capacity set of occupied neighboring grids relevant to one GDCF merge step. */
+  /**
+   * @struct GridNeighborhood
+   * @brief Stores occupied grids in one fixed DBSCAN neighborhood.
+   */
   struct GridNeighborhood
   {
-    std::array<uint64, 125> GridIds = {};
-    usize Count = 0;
+    std::array<uint64, 125> GridIds = {}; // Grid identifiers in the 5x5x5 search range.
+    usize Count = 0;                      // Number of occupied neighboring grids.
   };
 
-  /** @brief Combines the three axis ranges into the occupied neighboring-grid set. */
+  /**
+   * @brief Combines axis neighborhoods into occupied neighboring grids.
+   * @param gridId Center grid identifier.
+   * @return Fixed-capacity occupied-grid neighborhood or an I/O or cancellation result.
+   *
+   * The 5x5x5 limit follows the cell diagonal chosen from epsilon. The fixed
+   * array keeps each merge neighborhood bounded.
+   */
   Result<GridNeighborhood> gridNeighborhood(uint64 gridId)
   {
     Result<DBSCANGridState> targetResult = readGridState(gridId);
@@ -1155,7 +1282,11 @@ private:
 
   /**
    * @brief Tests point pairs from two grids in fixed tiles until an epsilon-connected pair is found.
-   * @return True when the grids connect, false otherwise, or a membership-record I/O failure.
+   * @param leftGridId First grid.
+   * @param rightGridId Second grid.
+   * @return True when the grids connect, false otherwise, or an I/O result.
+   *
+   * Fixed tiles bound memory even when one grid contains many points.
    */
   Result<bool> canMerge(uint64 leftGridId, uint64 rightGridId)
   {
@@ -1223,7 +1354,11 @@ private:
     return {false};
   }
 
-  /** @brief Reads one grid state through the bounded page cache. */
+  /**
+   * @brief Reads one grid state through the bounded page cache.
+   * @param gridId Grid-state record identifier.
+   * @return Grid state or a cache I/O error.
+   */
   Result<DBSCANGridState> readGridState(uint64 gridId)
   {
     if(m_GridStateCache == nullptr)
@@ -1233,7 +1368,12 @@ private:
     return m_GridStateCache->read(gridId, m_ShouldCancel);
   }
 
-  /** @brief Updates one grid state through the bounded write-back page cache. */
+  /**
+   * @brief Updates one grid state through the bounded write-back page cache.
+   * @param gridId Grid-state record identifier.
+   * @param state Replacement grid state.
+   * @return Cache write result.
+   */
   Result<> writeGridState(uint64 gridId, const DBSCANGridState& state)
   {
     if(m_GridStateCache == nullptr)
@@ -1243,7 +1383,13 @@ private:
     return m_GridStateCache->write(gridId, state, m_ShouldCancel);
   }
 
-  /** @brief Resolves a grid's disjoint-set root with bounded path compression. */
+  /**
+   * @brief Resolves a grid's disjoint-set root.
+   * @param gridId Grid to resolve.
+   * @return Root grid identifier or a cache, validation, or cancellation result.
+   *
+   * The depth bound detects corrupt parent cycles without retaining a path vector.
+   */
   Result<uint64> findRoot(uint64 gridId)
   {
     uint64 current = gridId;
@@ -1272,7 +1418,14 @@ private:
     return MakeErrorResult<uint64>(-54082, "DBSCAN external cluster forest contains a parent cycle.");
   }
 
-  /** @brief Uses existing root relationships to avoid an unnecessary point-distance comparison. */
+  /**
+   * @brief Tests whether two grids already share a root.
+   * @param leftGridId First grid.
+   * @param rightGridId Second grid.
+   * @return True when both grids share a root, or a root-resolution result.
+   *
+   * A shared root avoids an unnecessary point-distance tile comparison.
+   */
   Result<bool> infer(uint64 leftGridId, uint64 rightGridId)
   {
     Result<uint64> leftRootResult = findRoot(leftGridId);
@@ -1292,7 +1445,12 @@ private:
     return {leftRootResult.value() == rightRootResult.value()};
   }
 
-  /** @brief Assigns a grid parent while preserving the external disjoint-set invariants. */
+  /**
+   * @brief Assigns a grid parent in the external disjoint-set forest.
+   * @param gridId Child grid.
+   * @param parent Parent grid.
+   * @return Cache write or cancellation result.
+   */
   Result<> setParent(uint64 gridId, uint64 parent)
   {
     if(m_ShouldCancel)
@@ -1308,7 +1466,14 @@ private:
     return writeGridState(gridId, stateResult.value());
   }
 
-  /** @brief Merges a bounded neighbor set under its lowest root for deterministic feature numbering. */
+  /**
+   * @brief Merges a fixed neighbor set under its lowest feature root.
+   * @param gridIds Candidate grids.
+   * @param gridCount Number of valid gridIds entries.
+   * @return Cache, root-resolution, or cancellation result.
+   *
+   * The lowest root keeps feature identifiers deterministic across merge order.
+   */
   Result<> mergeLowestRootCluster(const std::array<uint64, 126>& gridIds, usize gridCount)
   {
     if(gridCount < 2)
@@ -1373,7 +1538,14 @@ private:
     return {};
   }
 
-  /** @brief Partitions and processes one core-order quick-sort section using record-cache swaps. */
+  /**
+   * @brief Partitions one external core-order sort section.
+   * @param begin First record index in the section.
+   * @param end Last record index in the section.
+   * @return Last index in the lower partition or an I/O or cancellation result.
+   *
+   * Cached swaps sort in place without a core-count resident vector.
+   */
   Result<uint64> processCoreOrderSection(uint64 begin, uint64 end)
   {
     if(m_ShouldCancel)
@@ -1473,7 +1645,14 @@ private:
     }
   }
 
-  /** @brief Sorts the external core-grid order in place without a core-count resident vector. */
+  /**
+   * @brief Sorts external core-grid records by population.
+   * @param begin First record index in the sort range.
+   * @param end Last record index in the sort range.
+   * @return Cache, partition, or cancellation result.
+   *
+   * Tail recursion processes the smaller partition first to bound call depth.
+   */
   Result<> quickSortCoreOrder(uint64 begin, uint64 end)
   {
     while(begin < end)
@@ -1520,7 +1699,12 @@ private:
     return {};
   }
 
-  /** @brief Flushes all dirty grid, core-order, and axis pages before another consumer reads them. */
+  /**
+   * @brief Flushes dirty grid, core-order, and axis pages.
+   * @return Cache flush or cancellation result.
+   *
+   * A following reader must observe writes before it consumes another record store.
+   */
   Result<> flushCaches()
   {
     if(m_GridStateCache != nullptr)
@@ -1553,7 +1737,13 @@ private:
     return {};
   }
 
-  /** @brief Reads a bounded run from the externally sorted point-membership stream. */
+  /**
+   * @brief Reads a bounded run from sorted point membership.
+   * @param offset First point-record index.
+   * @param count Number of records to read.
+   * @param records Receives count point records.
+   * @return Number of records read or an I/O result.
+   */
   Result<uint64> readMembership(uint64 offset, uint64 count, DBSCANPointRecord<T>* records) const
   {
     auto bytes = nonstd::span<std::byte>(reinterpret_cast<std::byte*>(records), static_cast<usize>(count) * sizeof(DBSCANPointRecord<T>));
@@ -1569,7 +1759,14 @@ private:
     return result;
   }
 
-  /** @brief Reduces the sorted membership stream into fixed occupied-grid records. */
+  /**
+   * @brief Reduces sorted membership into fixed occupied-grid records.
+   * @param records Reusable membership read buffer.
+   * @return Record-store, allocation, validation, or cancellation result.
+   *
+   * Two streaming passes count and write grids without keeping point membership
+   * or grid state in memory.
+   */
   Result<> buildGridStates(DBSCANPointRecord<T>* records)
   {
     const uint64 pointCount = m_Membership->recordCount();
@@ -1711,7 +1908,10 @@ private:
     return {};
   }
 
-  /** @brief Emits one external core-order record for every grid meeting the core criterion. */
+  /**
+   * @brief Emits one external order record for each core grid.
+   * @return Record-store, validation, or cancellation result.
+   */
   Result<> buildCoreOrder()
   {
     if(m_CoreGridCount == 0)
@@ -1797,7 +1997,13 @@ private:
     return {};
   }
 
-  /** @brief Builds compact per-axis coordinate indexes used by neighborhood searches. */
+  /**
+   * @brief Builds compact external coordinate indexes for neighborhood searches.
+   * @return Sort, record-store, validation, or cancellation result.
+   *
+   * Each axis keeps only unique occupied coordinates. This allows bounded binary
+   * searches instead of scanning all regular-grid positions.
+   */
   Result<> buildAxisIndexes()
   {
     std::array<std::unique_ptr<IExternalSort>, 3> axisSorts;
@@ -2009,6 +2215,9 @@ private:
 
 /**
  * @brief Initializes the potentially disk-backed label output with bounded zero-filled writes.
+ * @param featureIds Output feature-ID store.
+ * @param shouldCancel Cancellation flag.
+ * @return Output I/O or cancellation result.
  *
  * Masked and noise tuples must remain zero, so clearing first lets the later
  * labeling pass write only resolved point labels without a cell-count buffer.
@@ -2033,7 +2242,18 @@ Result<> ZeroFeatureIds(AbstractDataStore<int32>& featureIds, const std::atomic_
   return {};
 }
 
-/** @brief Runs all external GDCF phases for one input and optional-mask type combination. */
+/**
+ * @brief Runs all external GDCF phases for one input and mask type combination.
+ * @tparam T Coordinate value type.
+ * @tparam MaskT Mask value type.
+ * @param inputStore Coordinate store.
+ * @param maskStore Optional scalar mask store.
+ * @param featureIds Receives final feature identifiers.
+ * @param inputValues DBSCAN parameters.
+ * @param shouldCancel Cancellation flag.
+ * @param finalClusterCount Receives the final cluster count.
+ * @return Result from initialization, clustering, or labeling.
+ */
 template <typename T, typename MaskT>
 Result<> RunExternalTyped(const AbstractDataStore<T>& inputStore, const AbstractDataStore<MaskT>* maskStore, AbstractDataStore<int32>& featureIds, const DBSCANInputValues& inputValues,
                           const std::atomic_bool& shouldCancel, int32& finalClusterCount)
@@ -2058,10 +2278,23 @@ Result<> RunExternalTyped(const AbstractDataStore<T>& inputStore, const Abstract
   return result;
 }
 
-/** @brief Dispatches runtime input and mask types into the bounded external GDCF implementation. */
+/**
+ * @struct DBSCANExternalFunctor
+ * @brief Dispatches external DBSCAN by coordinate and mask type.
+ */
 struct DBSCANExternalFunctor
 {
-  /** @brief Clears output labels, selects the real mask type, and executes external clustering. */
+  /**
+   * @brief Clears labels, selects a mask type, and runs external clustering.
+   * @tparam T Coordinate value type.
+   * @param inputValues DBSCAN parameters.
+   * @param clusterArray Coordinate array.
+   * @param maskArray Optional mask array.
+   * @param featureIds Receives final feature identifiers.
+   * @param shouldCancel Cancellation flag.
+   * @param finalClusterCount Receives the final cluster count.
+   * @return Result from label clearing or external clustering.
+   */
   template <typename T>
   Result<> operator()(const DBSCANInputValues* inputValues, const IDataArray& clusterArray, const IDataArray* maskArray, Int32Array& featureIds, const std::atomic_bool& shouldCancel,
                       int32& finalClusterCount) const
@@ -2093,21 +2326,32 @@ struct DBSCANExternalFunctor
   }
 };
 
-// Implementation derived from https://yliu.site/pub/GDCF_PR2019.pdf. This
-// resident fallback is used only when Scanline is forced over in-memory stores.
+// Direct Scanline calls use resident GDCF only when all stores are in memory.
+// This path supports forced-Scanline tests. Genuine disk-backed execution uses ExternalGDCF.
 
-/** @brief Bit-packed incidence table mapping one coordinate position to active grid IDs. */
+/**
+ * @struct GridBitMap
+ * @brief Stores occupied-grid incidence for one coordinate axis.
+ */
 struct GridBitMap
 {
-  std::vector<uint8> gridTable = {};
-  usize numPositions = 0;
-  usize rowLength = 0;
+  std::vector<uint8> gridTable = {}; // Bit-packed grid incidence rows.
+  usize numPositions = 0;            // Number of positions on the indexed axis.
+  usize rowLength = 0;               // Bytes in one axis-position row.
 };
 
-/** @brief Allocates zeroed GridBitMap storage with one bit per grid/position pair. */
+/**
+ * @struct GridBitMapFactory
+ * @brief Creates zeroed axis-incidence tables.
+ */
 struct GridBitMapFactory
 {
-  /** @brief Creates the packed table and records its logical dimensions. */
+  /**
+   * @brief Creates one packed axis-incidence table.
+   * @param numGrids Number of occupied grids represented by table bits.
+   * @param numPositons Number of positions on the indexed axis.
+   * @return Zeroed table with one bit for each grid and position pair.
+   */
   static GridBitMap createGridBitMap(usize numGrids, usize numPositons)
   {
     GridBitMap gridBitMap = {};
@@ -2123,29 +2367,51 @@ struct GridBitMapFactory
   }
 };
 
-/** @brief Common resident grid-to-point membership state for the 2D/3D fallback indices. */
+/**
+ * @class HyperGridBitMap
+ * @brief Stores resident point membership for fallback grids.
+ */
 class HyperGridBitMap
 {
 public:
-  std::vector<std::vector<usize>> gridVoxels = {};
+  std::vector<std::vector<usize>> gridVoxels = {}; // Maps each occupied grid to its source tuple indices.
 
 protected:
+  /**
+   * @brief Creates empty resident fallback grid membership.
+   */
   HyperGridBitMap() = default;
 };
 
-/** @brief Three-dimensional resident spatial index used by forced Scanline verification. */
+/**
+ * @class HyperGridBitMap3D
+ * @brief Builds the resident three-dimensional Scanline fallback grid index.
+ *
+ * The fallback reads coordinate chunks through copyIntoBuffer(). Its resident
+ * grid membership is allowed because every target store is in memory.
+ */
 class HyperGridBitMap3D : public HyperGridBitMap
 {
 public:
-  static constexpr float32 Dimensions = 3;
+  static constexpr float32 Dimensions = 3; // Number of coordinate components.
 
-  GridBitMap xTable;
-  GridBitMap yTable;
-  GridBitMap zTable;
+  GridBitMap xTable; // Occupied-grid incidence by X position.
+  GridBitMap yTable; // Occupied-grid incidence by Y position.
+  GridBitMap zTable; // Occupied-grid incidence by Z position.
 
   HyperGridBitMap3D() = delete;
 
-  /** @brief Builds grid membership and X/Y/Z incidence tables with bounded coordinate reads. */
+  /**
+   * @brief Builds grid membership and axis incidence tables from accepted 3D points.
+   * @tparam T Coordinate value type.
+   * @param shouldCancel Cancellation flag.
+   * @param inputArray In-memory coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   *
+   * Fixed coordinate windows exercise bulk access without a full coordinate
+   * buffer. The fallback stops construction when shouldCancel is set.
+   */
   template <typename T>
   HyperGridBitMap3D(const std::atomic_bool& shouldCancel, const AbstractDataStore<T>& inputArray, float32 epsilon, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask)
   : HyperGridBitMap()
@@ -2155,7 +2421,7 @@ public:
     constexpr usize k_ChunkTuples = 65536;
     auto chunkBuf = std::make_unique<T[]>(k_ChunkTuples * numComps);
 
-    // Load array bounds using chunked bulk I/O
+    // Fixed coordinate windows avoid an input-sized coordinate buffer.
     std::array<float32, 6> bounds = {std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(),
                                      std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN()};
     for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
@@ -2189,7 +2455,7 @@ public:
       }
     }
 
-    // Grid Info - DO NOT MODIFY - basis for algorithm
+    // The cell diagonal equals epsilon, which bounds the required neighbor search.
     float32 sideLength = epsilon / std::sqrt(Dimensions);
     std::array<float32, 3> spacing = {sideLength, sideLength, sideLength};
 
@@ -2204,13 +2470,11 @@ public:
     dims[1] = static_cast<usize>(((bounds[4] + buffer) - origin[1]) / spacing[1]) + 2;
     dims[2] = static_cast<usize>(((bounds[5] + buffer) - origin[2]) / spacing[2]) + 2;
 
-    // Fill the BitMap
     {
       std::vector<std::array<usize, 3>> positions = {};
-      // Build a set of non-empty grids and temporarily store their positions
       {
         std::vector<bool> grids(std::accumulate(dims.cbegin(), dims.cend(), static_cast<usize>(1), std::multiplies<>()), false);
-        // Find num grid cells - chunked bulk I/O pass
+        // The temporary regular-grid map identifies occupied cells for compression.
         for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
         {
           if(shouldCancel)
@@ -2258,7 +2522,6 @@ public:
         }
 
         gridVoxels = std::vector<std::vector<usize>>(activeGridCount, std::vector<usize>(0));
-        // Fill grid cells - chunked bulk I/O pass
         for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
         {
           if(shouldCancel)
@@ -2284,9 +2547,9 @@ public:
             gridVoxels[gridMap[bin]].push_back(tup);
           }
         }
-      } // End of filling non-empty grids and positions vector
+      }
 
-      // Pack down memory further
+      // Release construction capacity before clustering retains this index.
       for(auto& grid : gridVoxels)
       {
         grid.shrink_to_fit();
@@ -2345,18 +2608,31 @@ public:
   }
 };
 
-/** @brief Two-dimensional resident counterpart of HyperGridBitMap3D. */
+/**
+ * @class HyperGridBitMap2D
+ * @brief Builds the resident two-dimensional Scanline fallback grid index.
+ */
 class HyperGridBitMap2D : public HyperGridBitMap
 {
 public:
-  static constexpr float32 Dimensions = 2;
+  static constexpr float32 Dimensions = 2; // Number of coordinate components.
 
-  GridBitMap xTable;
-  GridBitMap yTable;
+  GridBitMap xTable; // Occupied-grid incidence by X position.
+  GridBitMap yTable; // Occupied-grid incidence by Y position.
 
   HyperGridBitMap2D() = delete;
 
-  /** @brief Builds grid membership and X/Y incidence tables with bounded coordinate reads. */
+  /**
+   * @brief Builds grid membership and axis incidence tables from accepted 2D points.
+   * @tparam T Coordinate value type.
+   * @param shouldCancel Cancellation flag.
+   * @param inputArray In-memory coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   *
+   * Fixed coordinate windows exercise bulk access without a full coordinate
+   * buffer. The fallback stops construction when shouldCancel is set.
+   */
   template <typename T>
   HyperGridBitMap2D(const std::atomic_bool& shouldCancel, const AbstractDataStore<T>& inputArray, float32 epsilon, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask)
   : HyperGridBitMap()
@@ -2366,7 +2642,7 @@ public:
     constexpr usize k_ChunkTuples = 65536;
     auto chunkBuf = std::make_unique<T[]>(k_ChunkTuples * numComps);
 
-    // Load array bounds using chunked bulk I/O
+    // Fixed coordinate windows avoid an input-sized coordinate buffer.
     std::array<float32, 4> bounds = {std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(),
                                      std::numeric_limits<float32>::quiet_NaN()};
     for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
@@ -2397,7 +2673,7 @@ public:
       }
     }
 
-    // Grid Info - DO NOT MODIFY - basis for algorithm
+    // The cell diagonal equals epsilon, which bounds the required neighbor search.
     float32 sideLength = epsilon / std::sqrt(Dimensions);
     std::array<float32, 2> spacing = {sideLength, sideLength};
 
@@ -2410,13 +2686,11 @@ public:
     dims[0] = static_cast<usize>(((bounds[2] + buffer) - origin[0]) / spacing[0]) + 2;
     dims[1] = static_cast<usize>(((bounds[3] + buffer) - origin[1]) / spacing[1]) + 2;
 
-    // Fill the BitMap
     {
       std::vector<std::array<usize, 2>> positions = {};
-      // Build a set of non-empty grids and temporarily store their positions
       {
         std::vector<bool> grids(std::accumulate(dims.cbegin(), dims.cend(), static_cast<usize>(1), std::multiplies<>()), false);
-        // Find num grid cells - chunked bulk I/O pass
+        // The temporary regular-grid map identifies occupied cells for compression.
         for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
         {
           if(shouldCancel)
@@ -2461,7 +2735,6 @@ public:
         }
 
         gridVoxels = std::vector<std::vector<usize>>(activeGridCount, std::vector<usize>(0));
-        // Fill grid cells - chunked bulk I/O pass
         for(usize startTup = 0; startTup < numTuples; startTup += k_ChunkTuples)
         {
           if(shouldCancel)
@@ -2486,9 +2759,9 @@ public:
             gridVoxels[gridMap[bin]].push_back(tup);
           }
         }
-      } // End of filling non-empty grids and positions vector
+      }
 
-      // Pack down memory further
+      // Release construction capacity before clustering retains this index.
       for(auto& grid : gridVoxels)
       {
         grid.shrink_to_fit();
@@ -2538,7 +2811,13 @@ public:
   }
 };
 
-/** @brief Intersects @p outputGridMask with grids present near one axis position. */
+/**
+ * @brief Intersects a candidate mask with occupied grids near one axis position.
+ * @param outputGridMask Candidate grid bits updated in place.
+ * @param searchSpace Axis positions to inspect on each side.
+ * @param targetPosition Center axis position.
+ * @param selectedTable Axis-incidence table.
+ */
 void SearchTablePositions(std::vector<uint8>& outputGridMask, usize searchSpace, usize targetPosition, const GridBitMap& selectedTable)
 {
   std::vector<uint8> tempGridMask(selectedTable.rowLength, 0);
@@ -2560,10 +2839,24 @@ void SearchTablePositions(std::vector<uint8>& outputGridMask, usize searchSpace,
   }
 }
 
+/**
+ * @concept IsHGBP
+ * @brief Constrains a resident two- or three-dimensional grid index.
+ * @tparam HGBMT Candidate grid-index type.
+ */
 template <class HGBMT>
 concept IsHGBP = std::is_base_of_v<HyperGridBitMap, HGBMT>;
 
-/** @brief Returns occupied grids within the DBSCAN search neighborhood of one grid. */
+/**
+ * @brief Returns occupied grids within one DBSCAN search neighborhood.
+ * @tparam HGBPT Resident grid-index type.
+ * @param targetGridId Grid that defines the neighborhood.
+ * @param hyperGridBitMap Resident axis-incidence tables.
+ * @return Occupied neighboring grid identifiers.
+ *
+ * The bitwise intersection removes empty regular-grid positions before pairwise
+ * distance checks.
+ */
 template <IsHGBP HGBPT>
 std::vector<usize> NeighborGridQuery(usize targetGridId, const HGBPT& hyperGridBitMap)
 {
@@ -2641,19 +2934,28 @@ std::vector<usize> NeighborGridQuery(usize targetGridId, const HGBPT& hyperGridB
   return neighborGridIds;
 }
 
-/** @brief Union/forest node storing one resident grid's parent and assigned cluster. */
+/**
+ * @struct ClusterNode
+ * @brief Stores one grid's union parent and feature identifier.
+ */
 struct ClusterNode
 {
-  int32 clusterId = 0;
-  usize parent = 0;
+  int32 clusterId = 0; // Feature identifier for a root grid.
+  usize parent = 0;    // Parent grid identifier in the union forest.
 };
 
-/** @brief Resident union forest used to merge density-connected fallback grids. */
+/**
+ * @struct ClusterForest
+ * @brief Merges density-connected fallback grids.
+ */
 struct ClusterForest
 {
-  std::vector<ClusterNode> clusterForestNodes = {};
+  std::vector<ClusterNode> clusterForestNodes = {}; // State for every occupied grid.
 
-  /** @brief Creates one singleton cluster node per occupied grid. */
+  /**
+   * @brief Creates one singleton cluster node for each occupied grid.
+   * @param numGrids Number of occupied grids.
+   */
   void initialize(usize numGrids)
   {
     clusterForestNodes.resize(numGrids);
@@ -2665,7 +2967,11 @@ struct ClusterForest
     }
   }
 
-  /** @brief Finds the canonical cluster root. */
+  /**
+   * @brief Finds a grid's canonical cluster root.
+   * @param gridId Grid to resolve.
+   * @return Root grid identifier.
+   */
   usize findClusterRoot(usize gridId)
   {
     if(clusterForestNodes[gridId].parent == gridId)
@@ -2676,13 +2982,23 @@ struct ClusterForest
     return findClusterRoot(clusterForestNodes[gridId].parent);
   }
 
-  /** @brief Returns whether two grids already resolve to the same cluster. */
+  /**
+   * @brief Tests whether two grids resolve to the same cluster.
+   * @param pGridId First grid.
+   * @param qGridId Second grid.
+   * @return True when both grids have the same root.
+   */
   bool infer(usize pGridId, usize qGridId)
   {
     return findClusterRoot(pGridId) == findClusterRoot(qGridId);
   }
 
-  /** @brief Merges all supplied grids under the representative with the lowest cluster ID. */
+  /**
+   * @brief Merges grids under the root with the lowest feature identifier.
+   * @param gridIds Grids to merge.
+   *
+   * The selected root keeps feature numbering deterministic across merge order.
+   */
   void mergeLRC(const std::vector<usize>& gridIds)
   {
     if(gridIds.size() < 2)
@@ -2715,14 +3031,28 @@ struct ClusterForest
 };
 
 /**
- * @brief Resident fallback for forced Scanline execution on in-memory stores.
+ * @class GDCF
+ * @brief Provides resident fallback clustering for direct Scanline calls.
+ * @tparam HGBPT Resident grid-index type.
+ * @tparam T Coordinate value type.
+ *
+ * This fallback runs only when every routed store is in memory. ExternalGDCF
+ * handles disk-backed execution with bounded external records.
  */
 template <IsHGBP HGBPT, typename T>
 class GDCF
 {
 public:
   GDCF() = delete;
-  /** @brief Builds the selected resident spatial index and borrows clustering settings. */
+
+  /**
+   * @brief Creates a resident fallback clustering operation.
+   * @param shouldCancel Cancellation flag.
+   * @param inputArray In-memory coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   * @param distMetric Distance metric for pairwise tests.
+   */
   GDCF(const std::atomic_bool& shouldCancel, const AbstractDataStore<T>& inputArray, float32 epsilon, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask,
        ClusterUtilities::DistanceMetric distMetric)
   : hyperGridBitMap(HGBPT(shouldCancel, inputArray, epsilon, mask))
@@ -2733,7 +3063,16 @@ public:
   {
   }
 
-  /** @brief Forms core clusters, merges density-connected grids, and assigns border grids. */
+  /**
+   * @brief Forms core clusters and assigns connected border grids.
+   * @param minPoints Minimum points that make a grid core.
+   * @param parseOrder Order for core-grid processing.
+   * @param seed Random generator seed for random orders.
+   * @return Warning when no grid is core, or success otherwise.
+   *
+   * The method checks cancellation between grid passes.
+   * Lowest-root union makes core-grid merges independent of merge order. Parse order can still control border-grid attachment.
+   */
   Result<> cluster(usize minPoints, DBSCAN::ParseOrder parseOrder, std::mt19937_64::result_type seed = std::mt19937_64::default_seed)
   {
     std::vector<usize> coreGridIds = {};
@@ -2830,7 +3169,7 @@ public:
       clusterForest.mergeLRC(cluster);
     }
 
-    // Now determine if non-core grids are close enough to a cluster to be border else noise
+    // Non-core grids attach to connected clusters or remain labeled as noise.
     usize operations = 0;
     do
     {
@@ -2914,7 +3253,14 @@ public:
     return {};
   }
 
-  /** @brief Writes each point's resolved cluster ID, leaving unassigned points at zero. */
+  /**
+   * @brief Writes final cluster identifiers to the output store.
+   * @param fIdsDataStore Receives per-tuple feature identifiers.
+   * @return Warning when no cluster exists, or success otherwise.
+   *
+   * The method initializes output to zero so masked and unassigned tuples stay
+   * outliers. It checks cancellation between occupied grids.
+   */
   Result<> label(AbstractDataStore<int32>& fIdsDataStore)
   {
     if(clusterForest.clusterForestNodes.empty())
@@ -2951,18 +3297,12 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 
   /**
-   * @brief Reads coordinate data for all points in a resident-fallback grid cell.
+   * @brief Reads one resident fallback grid into a contiguous coordinate buffer.
+   * @param gridId Grid whose member coordinates are read.
+   * @return Float32 coordinates for all grid members.
    *
-   * This method gathers each member once through the storage-neutral bulk API
-   * and assembles a contiguous buffer that the pairwise loop can reuse.
-   *
-   * Memory cost is O(gridCellSize * dims) per call, which is typically very small
-   * (grid cells contain a handful of points in practice). The returned buffer is
-   * used for all pairwise distance computations in canMerge, so the data is read
-   * once and reused for every comparison.
-   *
-   * @param gridId Index of the grid cell whose member coordinates to read
-   * @return Contiguous float32 buffer with coordinates for all grid cell members
+   * The buffer lets canMerge reuse a grid's coordinates for every pairwise test.
+   * It scales with one grid and is used only for in-memory fallback execution.
    */
   std::vector<float32> readGridCellCoords(usize gridId) const
   {
@@ -2981,7 +3321,15 @@ private:
     return coords;
   }
 
-  /** @brief Partitions one density-sort range using Hoare's method. */
+  /**
+   * @brief Partitions one density-sort range with Hoare's method.
+   * @param sorted Grid identifiers ordered in place.
+   * @param begin First index in the partition.
+   * @param end Last index in the partition.
+   * @return Last index in the lower partition.
+   *
+   * Hoare partitioning sorts in place and avoids another core-grid buffer.
+   */
   usize ProcessSection(std::vector<usize>& sorted, usize begin, usize end) const
   {
     const usize threshold = hyperGridBitMap.gridVoxels[sorted[begin]].size();
@@ -3012,7 +3360,12 @@ private:
     }
   }
 
-  /** @brief Sorts core grid IDs by resident population for LowDensityFirst traversal. */
+  /**
+   * @brief Sorts grid identifiers by population for LowDensityFirst traversal.
+   * @param sorted Grid identifiers ordered in place.
+   * @param begin First index in the sort range.
+   * @param end Last index in the sort range.
+   */
   void QuickSortGrids(std::vector<usize>& sorted, usize begin, usize end) const
   {
     if(begin >= end)
@@ -3026,7 +3379,14 @@ private:
     QuickSortGrids(sorted, next + 1, end);
   }
 
-  /** @brief Tests all locally buffered point pairs until an epsilon-connected pair is found. */
+  /**
+   * @brief Tests two grids for an epsilon-connected point pair.
+   * @param pGridId First grid.
+   * @param qGridId Second grid.
+   * @return True when at least one point pair has distance less than epsilon.
+   *
+   * The fallback reads each grid once into a local buffer before pairwise tests.
+   */
   bool canMerge(usize pGridId, usize qGridId)
   {
     const usize dims = static_cast<usize>(HGBPT::Dimensions);
@@ -3048,7 +3408,17 @@ private:
   }
 };
 
-/** @brief Constructs one dimensional fallback specialization and runs clustering plus labeling. */
+/**
+ * @brief Runs one resident fallback specialization through clustering and labeling.
+ * @tparam AlgorithmT GDCF specialization type.
+ * @tparam T Coordinate value type.
+ * @param inputValues DBSCAN parameters.
+ * @param inputArray In-memory coordinate store.
+ * @param mask Selects coordinate tuples.
+ * @param featureIds Receives final feature identifiers.
+ * @param shouldCancel Cancellation flag.
+ * @return Warning, error, or success from clustering and labeling.
+ */
 template <class AlgorithmT, typename T>
 Result<> RunAlgorithm(const DBSCANInputValues* inputValues, const AbstractDataStore<T>& inputArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, Int32Array& featureIds,
                       const std::atomic_bool& shouldCancel)
@@ -3075,14 +3445,24 @@ Result<> RunAlgorithm(const DBSCANInputValues* inputValues, const AbstractDataSt
 }
 
 /**
- * @brief Dispatches the resident forced-Scanline fallback by input type and dimensionality.
+ * @struct DBSCANScanlineFunctor
+ * @brief Dispatches the resident Scanline fallback by type and dimension.
  *
- * This fallback is used only when tests force the Scanline class while all stores
- * are resident; genuine OOC execution always uses DBSCANExternalFunctor.
+ * This fallback applies when a direct Scanline call receives only resident stores.
+ * Forced-Scanline tests use this path. Genuine OOC execution uses DBSCANExternalFunctor.
  */
 struct DBSCANScanlineFunctor
 {
-  /** @brief Selects the two- or three-dimensional resident GDCF specialization. */
+  /**
+   * @brief Selects a two- or three-dimensional fallback specialization.
+   * @tparam T Coordinate value type.
+   * @param inputValues DBSCAN parameters.
+   * @param clusterArray Coordinate array.
+   * @param mask Selects coordinate tuples.
+   * @param featureIds Receives final feature identifiers.
+   * @param shouldCancel Cancellation flag.
+   * @return Result from the selected specialization, or an error for another component count.
+   */
   template <typename T>
   Result<> operator()(const DBSCANInputValues* inputValues, const IDataArray& clusterArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, Int32Array& featureIds,
                       const std::atomic_bool& shouldCancel)
@@ -3104,7 +3484,6 @@ struct DBSCANScanlineFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 DBSCANScanline::DBSCANScanline(DataStructure& dataStructure, const IFilter::MessageHandler&, const std::atomic_bool& shouldCancel, const DBSCANInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -3112,13 +3491,8 @@ DBSCANScanline::DBSCANScanline(DataStructure& dataStructure, const IFilter::Mess
 {
 }
 
-// -----------------------------------------------------------------------------
 DBSCANScanline::~DBSCANScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief OOC DBSCAN execution using bounded external records and bulk I/O.
- */
 Result<> DBSCANScanline::operator()()
 {
   auto& clusteringArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->ClusteringArrayPath);
@@ -3138,6 +3512,7 @@ Result<> DBSCANScanline::operator()()
   }
   else
   {
+    // All-resident inputs use the fallback. Forced Scanline tests exercise this path.
     std::unique_ptr<MaskCompareUtilities::MaskCompare> maskCompare;
     if(m_InputValues->UseMask)
     {
@@ -3166,6 +3541,7 @@ Result<> DBSCANScanline::operator()()
       return {};
     }
 
+    // Fixed windows find the largest label without a tuple-count resident buffer.
     auto& featureIdsDataStore = featureIds.getDataStoreRef();
     const usize totalSize = featureIdsDataStore.getSize();
     constexpr usize k_ChunkSize = 1000000;

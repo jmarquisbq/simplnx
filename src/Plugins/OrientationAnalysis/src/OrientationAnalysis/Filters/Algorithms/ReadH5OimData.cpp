@@ -7,22 +7,18 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ReadH5OimData::ReadH5OimData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ReadH5DataInputValues* inputValues)
 : IEbsdOemReader<ebsdlib::H5OIMReader>(dataStructure, mesgHandler, shouldCancel, inputValues)
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadH5OimData::~ReadH5OimData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ReadH5OimData::operator()()
 {
   return execute();
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadH5OimData::copyRawEbsdData(int sliceIndex)
 {
   if(m_ShouldCancel)
@@ -33,7 +29,7 @@ Result<> ReadH5OimData::copyRawEbsdData(int sliceIndex)
   const usize tuplesPerScan = imageGeom.getNumXCells() * imageGeom.getNumYCells();
   const usize sliceTupleStart = sliceIndex * tuplesPerScan;
 
-  // Adjust the values of the 'phase' data to correct for invalid values
+  // Map nonpositive phase IDs to phase one for downstream ensemble indexing.
   auto& phases = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::AngFile::Phases));
   auto* phasePtr = reinterpret_cast<int32*>(m_Reader->getPointerByName(ebsdlib::Ang::PhaseData));
 
@@ -54,9 +50,8 @@ Result<> ReadH5OimData::copyRawEbsdData(int sliceIndex)
   const auto* fitPtr = reinterpret_cast<float32*>(m_Reader->getPointerByName(ebsdlib::Ang::Fit));
   auto& fit = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->CellAttributeMatrixPath.createChildPath(ebsdlib::Ang::Fit));
 
-  // EbsdLib exposes one resident scan at a time. Convert/interleave that scan
-  // into bounded destination batches so disk-backed outputs never receive
-  // per-value writes or require a second scan-sized staging allocation.
+  // EbsdLib owns one resident scan. Use bounded destination pages to avoid
+  // per-value disk writes and a second scan-sized allocation.
   constexpr usize kTuplesPerBatch = 65536;
   // The two pages total one MiB, so keep them off Windows' default one-MiB thread stack.
   auto phaseBuffer = std::make_unique<int32[]>(kTuplesPerBatch);

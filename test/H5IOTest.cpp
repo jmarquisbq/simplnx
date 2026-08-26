@@ -281,14 +281,9 @@ TEST_CASE("HDF5 numeric attribute writers serialize complete HDF5 lifecycles", "
   }
 }
 
-// N threads each independently open the SAME file, open a group, open both datasets,
-// query their dimensions/chunk dimensions, and read each dataset back two ways: the
-// full-array readIntoSpan overload and the hyperslab readIntoSpan overload. Every read
-// is checked against the deterministic fixture values. All threads joining (no wall-clock
-// hang) proves the IO layer's leaf locking is deadlock-free, and the value checks prove
-// the concurrent open/query/read/close/destructor paths do not corrupt data. Without
-// leaf-locking inside the IO layer these concurrent bare HDF5 C calls would race the
-// non-thread-safe HDF5 library.
+// Eight threads open the same file, query both datasets, and use full-array and hyperslab reads.
+// Matching values and clean thread joins prove safe concurrent open, query, read, and close paths.
+// Leaf locking prevents races against the non-thread-safe HDF5 library.
 TEST_CASE("HDF5 IO layer self-locks: concurrent open+query+read does not race", "[simplnx][HDF5][concurrency]")
 {
   const std::filesystem::path tmp = std::filesystem::temp_directory_path() / "h5io_selflock.h5";
@@ -318,7 +313,7 @@ TEST_CASE("HDF5 IO layer self-locks: concurrent open+query+read does not race", 
         auto dsA = group.openDataset("a");
         auto dsB = group.openDataset("b");
 
-        // Exercise the (now self-locking) query methods on the read path.
+        // Query methods use their internal locking path on every read.
         const auto dimsA = dsA.getDimensions();
         if(dimsA.size() != 1 || dimsA[0] != k_Elems)
         {

@@ -16,10 +16,20 @@ using namespace nx::core;
 
 namespace
 {
+// Scalar and RGB buffers process 65,536 tuples per pass.
 constexpr usize k_ChunkTuples = 65536;
 constexpr usize k_ColorComponentCount = 3;
 constexpr usize k_ControlPointCompSize = 4;
 
+/**
+ * @brief Reads one typed mask chunk.
+ * @tparam MaskType Specifies the mask scalar type.
+ * @param maskArray Provides mask values.
+ * @param offset Specifies the first tuple index.
+ * @param count Specifies the number of tuple values.
+ * @param maskBuffer Receives the chunk values.
+ * @return Error from the mask store, or success.
+ */
 template <typename MaskType>
 Result<> readMaskChunk(const IDataArray& maskArray, usize offset, usize count, MaskType* maskBuffer)
 {
@@ -27,8 +37,21 @@ Result<> readMaskChunk(const IDataArray& maskArray, usize offset, usize count, M
   return maskStore.copyIntoBuffer(offset, nonstd::span<MaskType>(maskBuffer, count));
 }
 
+/**
+ * @struct GenerateColorArrayScanlineFunctor
+ * @brief Adapts runtime scalar types to bounded RGB generation.
+ */
 struct GenerateColorArrayScanlineFunctor
 {
+  /**
+   * @brief Generates RGB values for one scalar type.
+   * @tparam ScalarType Specifies the scalar input type.
+   * @param dataStructure Provides selected arrays.
+   * @param inputValues Specifies validated color-map settings.
+   * @param controlPoints Provides flattened scalar-RGB control points.
+   * @param shouldCancel Stops before later chunks when true.
+   * @return Error from bulk I/O, or success after cancellation.
+   */
   template <typename ScalarType>
   Result<> operator()(DataStructure& dataStructure, const CreateColorMapInputValues* inputValues, const std::vector<float32>& controlPoints, const std::atomic_bool& shouldCancel)
   {
@@ -41,7 +64,8 @@ struct GenerateColorArrayScanlineFunctor
     const usize numTuples = inputStore.getNumberOfTuples();
     if(numTuples == 0)
     {
-      // The Direct path historically discards its empty-array functor error.
+      // The Direct caller discards the empty-array result. Both paths return
+      // success without writing colors.
       return {};
     }
 
@@ -57,6 +81,7 @@ struct GenerateColorArrayScanlineFunctor
     ScalarType arrayMin{};
     ScalarType arrayMax{};
     bool initializedRange = false;
+    // The first pass fixes the typed range without materializing the source array.
     {
       for(usize offset = 0; offset < numTuples; offset += k_ChunkTuples)
       {
@@ -94,13 +119,13 @@ struct GenerateColorArrayScanlineFunctor
       }
     }
 
-    // Match the Direct path for an unsupported mask type: range discovery occurs,
-    // but no color conversion is dispatched. Parameter validation normally prevents this.
+    // Unsupported mask types leave RGB output unchanged in both paths.
     if(maskArray != nullptr && !hasBoolMask && !hasUInt8Mask)
     {
       return {};
     }
 
+    // The second pass maps values and writes complete RGB chunks.
     {
       for(usize offset = 0; offset < numTuples; offset += k_ChunkTuples)
       {
@@ -165,7 +190,6 @@ struct GenerateColorArrayScanlineFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 CreateColorMapScanline::CreateColorMapScanline(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel,
                                                const CreateColorMapInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -175,10 +199,8 @@ CreateColorMapScanline::CreateColorMapScanline(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 CreateColorMapScanline::~CreateColorMapScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> CreateColorMapScanline::operator()()
 {
   const IDataArray& selectedIDataArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedDataArrayPath);

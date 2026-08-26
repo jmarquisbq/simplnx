@@ -11,33 +11,21 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// MultiThresholdObjectsDirect — In-Core Algorithm
-//
-// This file implements the in-core (Direct) variant of MultiThresholdObjects.
-// It is selected by DispatchAlgorithm when all input arrays reside in memory.
-//
-// ALGORITHM OVERVIEW:
-//   For each threshold condition in the user-defined threshold tree:
-//   1. Allocate an O(n) temporary result vector initialized to FALSE
-//   2. Read each element of the input array via getComponentValue()
-//   3. Apply the comparison (< > == !=) to produce TRUE/FALSE per element
-//   4. Merge the temporary results into the output mask using AND/OR logic
-//
-//   Threshold conditions can be nested in ArrayThresholdSets (which recursively
-//   apply AND/OR between their children) or be individual ArrayThreshold comparisons.
-//
-// DATA ACCESS PATTERN:
-//   Uses getComponentValue() for per-element random access to input arrays, and
-//   operator[] for per-element writes to the output mask and temporary vectors.
-//   This is optimal for in-memory data. The O(n) temporary vector is acceptable
-//   when data is in memory but would be wasteful for OOC data — see the Scanline
-//   variant which uses O(chunkSize) temporaries instead.
-// =============================================================================
+// Direct evaluation holds one cell-count result vector for each active tree
+// level. Scanline replaces those vectors with bounded tuple chunks.
 
 namespace
 {
-/** @brief Combines one resident child-result vector into its parent's vector with the requested Boolean union. */
+/**
+ * @brief Merges one child result into its parent result.
+ * @tparam MaskT Specifies the mask scalar type.
+ * @param current Receives merged parent values.
+ * @param next Provides child values.
+ * @param unionOperator Selects logical OR or AND.
+ * @param trueValue Represents a matching tuple.
+ * @param falseValue Represents a nonmatching tuple.
+ * @param shouldCancel Stops later entries when true.
+ */
 template <typename MaskT>
 void MergeThresholdResults(std::vector<MaskT>& current, const std::vector<MaskT>& next, IArrayThreshold::UnionOperator unionOperator, MaskT trueValue, MaskT falseValue,
                            const std::atomic_bool& shouldCancel)
@@ -59,11 +47,24 @@ void MergeThresholdResults(std::vector<MaskT>& current, const std::vector<MaskT>
   }
 }
 
-/** @brief Dispatches a threshold input type and evaluates one comparison through direct component access. */
+/**
+ * @struct DirectComparisonEvaluator
+ * @brief Evaluates one leaf threshold through direct component access.
+ * @tparam MaskT Specifies the mask scalar type.
+ */
 template <typename MaskT>
 struct DirectComparisonEvaluator
 {
-  /** @brief Evaluates one leaf threshold for every resident tuple. */
+  /**
+   * @brief Evaluates one leaf threshold for all tuples.
+   * @tparam InputT Specifies the threshold input type.
+   * @param threshold Specifies comparison and component.
+   * @param inputArray Provides input tuples.
+   * @param output Receives mask values.
+   * @param trueValue Represents a match.
+   * @param falseValue Represents a nonmatch.
+   * @param shouldCancel Stops later tuples when true.
+   */
   template <typename InputT>
   void operator()(const ArrayThreshold& threshold, const IDataArray& inputArray, std::vector<MaskT>& output, MaskT trueValue, MaskT falseValue, const std::atomic_bool& shouldCancel)
   {
@@ -99,7 +100,17 @@ struct DirectComparisonEvaluator
   }
 };
 
-/** @brief Recursively evaluates a threshold tree into a cell-count resident mask vector. */
+/**
+ * @brief Recursively evaluates one threshold-tree node.
+ * @tparam MaskT Specifies the mask scalar type.
+ * @param node Specifies a threshold leaf or set.
+ * @param dataStructure Provides threshold input arrays.
+ * @param tupleCount Specifies output tuple count.
+ * @param output Receives cell-count mask values.
+ * @param trueValue Represents a match.
+ * @param falseValue Represents a nonmatch.
+ * @param shouldCancel Stops later tree work when true.
+ */
 template <typename MaskT>
 void EvaluateDirectNode(const IArrayThreshold& node, const DataStructure& dataStructure, usize tupleCount, std::vector<MaskT>& output, MaskT trueValue, MaskT falseValue,
                         const std::atomic_bool& shouldCancel)
@@ -157,10 +168,22 @@ void EvaluateDirectNode(const IArrayThreshold& node, const DataStructure& dataSt
   }
 }
 
-/** @brief Dispatches the output mask type, evaluates the complete tree, and writes resident values directly. */
+/**
+ * @struct DirectEvaluator
+ * @brief Evaluates a complete threshold tree into a resident output mask.
+ */
 struct DirectEvaluator
 {
-  /** @brief Executes the complete resident threshold evaluation. */
+  /**
+   * @brief Evaluates and writes one typed output mask.
+   * @tparam MaskT Specifies the output mask type.
+   * @param thresholdSet Specifies the root threshold set.
+   * @param dataStructure Provides threshold input arrays.
+   * @param outputArray Receives mask values.
+   * @param trueValue Represents a match.
+   * @param falseValue Represents a nonmatch.
+   * @param shouldCancel Stops later output tuples when true.
+   */
   template <typename MaskT>
   void operator()(const ArrayThresholdSet& thresholdSet, const DataStructure& dataStructure, IDataArray& outputArray, MaskT trueValue, MaskT falseValue, const std::atomic_bool& shouldCancel)
   {
@@ -183,7 +206,6 @@ struct DirectEvaluator
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjectsDirect::MultiThresholdObjectsDirect(DataStructure& dataStructure, const IFilter::MessageHandler&, const std::atomic_bool& shouldCancel,
                                                          const MultiThresholdObjectsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -192,10 +214,8 @@ MultiThresholdObjectsDirect::MultiThresholdObjectsDirect(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjectsDirect::~MultiThresholdObjectsDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> MultiThresholdObjectsDirect::operator()()
 {
   auto thresholdsObject = m_InputValues->ArrayThresholdsObject;

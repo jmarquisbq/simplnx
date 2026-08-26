@@ -14,97 +14,127 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// DBSCANDirect — In-Core Algorithm
-//
-// This file implements the in-core (Direct) variant of DBSCAN.
-// It is selected by DispatchAlgorithm when all input arrays reside in memory.
-//
-// ALGORITHM OVERVIEW (Grid-based DBSCAN / GDCF):
-//   Based on "Grid-based DBSCAN: Indexing and inference" by Boonchoo et al. 2019.
-//
-//   Phase 1 — Grid Construction:
-//     1. Scan the input array to find min/max bounds per dimension
-//     2. Create a regular grid with cell side length = epsilon / sqrt(dims)
-//     3. Bin each data point into a grid cell
-//     4. Build a compressed grid index (only non-empty cells)
-//     5. Create per-axis bitmap tables for fast neighbor grid queries
-//
-//   Phase 2 — Clustering:
-//     1. Identify "core" grid cells (those with >= minPoints data points)
-//     2. Sort core cells by parse order (low density first, random, etc.)
-//     3. For each core cell, query neighbor grids and merge if canMerge
-//        returns true (any pair of points has distance < epsilon)
-//     4. Expand clusters to border (non-core) grid cells
-//
-//   Phase 3 — Labeling:
-//     Write the final cluster ID for each data point based on its grid cell's
-//     cluster assignment. Points in unassigned cells become outliers (cluster 0).
-//
-// DATA ACCESS PATTERN:
-//   Uses direct operator[] for per-element random access. Grid construction
-//   requires 2-3 full passes over the input array. canMerge requires random
-//   access to arbitrary tuple indices within grid cells. Both patterns are
-//   optimal for in-memory data but would cause chunk thrashing for OOC data.
-// =============================================================================
+/**
+ * @file DBSCANDirect.cpp
+ * @brief Implements the resident GDCF DBSCAN path.
+ *
+ * The implementation follows the grid-based DBSCAN method from Boonchoo et al.
+ * (2019). Grid construction makes resident passes over coordinates. Cluster
+ * merging makes random tuple reads. These accesses are efficient in memory but
+ * can load and evict disk-backed chunks repeatedly. DBSCANScanline handles that
+ * storage pattern with bounded sequential I/O.
+ * @see https://yliu.site/pub/GDCF_PR2019.pdf
+ */
 
 namespace
 {
-/** @brief Mask adapter used when masking is disabled; every tuple is accepted. */
+/**
+ * @class AllTrueMaskCompare
+ * @brief Supplies an accepted mask when masking is disabled.
+ *
+ * The adapter avoids allocating one mask value for each coordinate tuple.
+ */
 class AllTrueMaskCompare final : public MaskCompareUtilities::MaskCompare
 {
 public:
-  /** @brief Reports both supplied tuples as accepted. */
-  bool bothTrue(usize, usize) const override
+  /**
+   * @brief Accepts both tuples.
+   * @param firstTuple Ignored first tuple index.
+   * @param secondTuple Ignored second tuple index.
+   * @return True.
+   */
+  bool bothTrue(usize firstTuple, usize secondTuple) const override
   {
     return true;
   }
-  /** @brief No pair is rejected by the disabled mask. */
-  bool bothFalse(usize, usize) const override
+
+  /**
+   * @brief Rejects no tuple pair.
+   * @param firstTuple Ignored first tuple index.
+   * @param secondTuple Ignored second tuple index.
+   * @return False.
+   */
+  bool bothFalse(usize firstTuple, usize secondTuple) const override
   {
     return false;
   }
-  /** @brief Every tuple is accepted. */
-  bool isTrue(usize) const override
+
+  /**
+   * @brief Accepts a tuple.
+   * @param tupleIndex Ignored tuple index.
+   * @return True.
+   */
+  bool isTrue(usize tupleIndex) const override
   {
     return true;
   }
-  /** @brief No-op because this synthetic mask has no writable storage. */
-  void setValue(usize, bool) override
+
+  /**
+   * @brief Ignores a mask update.
+   * @param tupleIndex Ignored tuple index.
+   * @param value Ignored mask value.
+   *
+   * The synthetic mask has no writable storage.
+   */
+  void setValue(usize tupleIndex, bool value) override
   {
   }
-  /** @brief Returns zero because tuple bounds are supplied by the coordinate array. */
+
+  /**
+   * @brief Returns no stored tuples.
+   * @return Zero.
+   *
+   * DBSCAN gets tuple bounds from the coordinate array.
+   */
   usize getNumberOfTuples() const override
   {
     return 0;
   }
-  /** @brief A logical mask has one component. */
+
+  /**
+   * @brief Returns the logical mask component count.
+   * @return One.
+   */
   usize getNumberOfComponents() const override
   {
     return 1;
   }
-  /** @brief Returns zero because an unbounded all-true count is not queried by DBSCAN. */
+
+  /**
+   * @brief Returns no stored true values.
+   * @return Zero.
+   *
+   * DBSCAN does not query a count for the synthetic unbounded mask.
+   */
   usize countTrueValues() const override
   {
     return 0;
   }
 };
 
-// Implementation derived from https://yliu.site/pub/GDCF_PR2019.pdf. This
-// in-core variant uses direct per-element getValue()/operator[] access.
-
-/** @brief Bit-packed incidence table mapping one coordinate position to active grid IDs. */
+/**
+ * @struct GridBitMap
+ * @brief Stores occupied-grid incidence for one coordinate axis.
+ */
 struct GridBitMap
 {
-  std::vector<uint8> gridTable = {};
-  usize numPositions = 0;
-  usize rowLength = 0;
+  std::vector<uint8> gridTable = {}; // Bit-packed grid incidence rows.
+  usize numPositions = 0;            // Number of positions on the indexed axis.
+  usize rowLength = 0;               // Bytes in one axis-position row.
 };
 
-/** @brief Allocates zeroed GridBitMap storage with one bit per grid/position pair. */
+/**
+ * @struct GridBitMapFactory
+ * @brief Creates zeroed axis-incidence tables.
+ */
 struct GridBitMapFactory
 {
-  /** @brief Creates the packed table and records its logical dimensions. */
+  /**
+   * @brief Creates one packed axis-incidence table.
+   * @param numGrids Number of occupied grids represented by table bits.
+   * @param numPositons Number of positions on the indexed axis.
+   * @return Zeroed table with one bit for each grid and position pair.
+   */
   static GridBitMap createGridBitMap(usize numGrids, usize numPositons)
   {
     GridBitMap gridBitMap = {};
@@ -120,33 +150,52 @@ struct GridBitMapFactory
   }
 };
 
-/** @brief Common resident grid-to-point membership state for the 2D/3D indices. */
+/**
+ * @class HyperGridBitMap
+ * @brief Stores resident point membership for occupied grids.
+ */
 class HyperGridBitMap
 {
 public:
-  std::vector<std::vector<usize>> gridVoxels = {};
+  std::vector<std::vector<usize>> gridVoxels = {}; // Maps each occupied grid to its source tuple indices.
 
 protected:
+  /**
+   * @brief Creates empty resident grid membership.
+   */
   HyperGridBitMap() = default;
 };
 
 /**
- * @brief Resident 3D spatial index used by Direct DBSCAN.
- * It bins points and builds X/Y/Z bitmaps so neighboring occupied grids can be
- * found without scanning the full regular-grid bounding box.
+ * @class HyperGridBitMap3D
+ * @brief Builds the resident three-dimensional DBSCAN grid index.
+ *
+ * Axis incidence tables find neighboring occupied grids without scanning the
+ * complete regular-grid bounding box.
  */
 class HyperGridBitMap3D : public HyperGridBitMap
 {
 public:
-  static constexpr float32 Dimensions = 3;
+  static constexpr float32 Dimensions = 3; // Number of coordinate components.
 
-  GridBitMap xTable;
-  GridBitMap yTable;
-  GridBitMap zTable;
+  GridBitMap xTable; // Occupied-grid incidence by X position.
+  GridBitMap yTable; // Occupied-grid incidence by Y position.
+  GridBitMap zTable; // Occupied-grid incidence by Z position.
 
   HyperGridBitMap3D() = delete;
 
-  /** @brief Builds grid membership and axis incidence tables from accepted 3D points. */
+  /**
+   * @brief Builds grid membership and axis incidence tables from accepted 3D points.
+   * @tparam T Coordinate value type.
+   * @param shouldCancel Cancellation flag.
+   * @param messageHelper Sends progress messages.
+   * @param inputArray Resident coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   *
+   * The direct path makes per-tuple reads because its caller selects resident
+   * storage. It stops construction when shouldCancel is set.
+   */
   template <typename T>
   HyperGridBitMap3D(const std::atomic_bool& shouldCancel, MessageHelper& messageHelper, const AbstractDataStore<T>& inputArray, float32 epsilon,
                     const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask)
@@ -156,7 +205,7 @@ public:
     const usize numComps = inputArray.getNumberOfComponents();
 
     messageHelper.sendMessage(" - Determining bounds...");
-    // Load array bounds using direct per-element access
+    // Resident tuple reads find the coordinate bounds without a bulk buffer.
     std::array<float32, 6> bounds = {std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(),
                                      std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN()};
     for(usize tup = 0; tup < numTuples; tup++)
@@ -184,7 +233,7 @@ public:
       bounds[5] = std::isnan(bounds[5]) ? zVal : std::max(bounds[5], zVal);
     }
 
-    // Grid Info - DO NOT MODIFY - basis for algorithm
+    // The cell diagonal equals epsilon, which bounds the required neighbor search.
     float32 sideLength = epsilon / std::sqrt(Dimensions);
     std::array<float32, 3> spacing = {sideLength, sideLength, sideLength};
 
@@ -200,13 +249,11 @@ public:
     dims[2] = static_cast<usize>(((bounds[5] + buffer) - origin[2]) / spacing[2]) + 2;
 
     messageHelper.sendMessage(" - Binning values into a regular grid...");
-    // Fill the BitMap
     {
       std::vector<std::array<usize, 3>> positions = {};
-      // Build a set of non-empty grids and temporarily store their positions
       {
         std::vector<bool> grids(std::accumulate(dims.cbegin(), dims.cend(), static_cast<usize>(1), std::multiplies<>()), false);
-        // Find num grid cells - direct access pass
+        // The temporary regular-grid map identifies occupied cells for compression.
         for(usize tup = 0; tup < numTuples; tup++)
         {
           if(shouldCancel)
@@ -249,7 +296,6 @@ public:
         }
 
         gridVoxels = std::vector<std::vector<usize>>(activeGridCount, std::vector<usize>(0));
-        // Fill grid cells - direct access pass
         for(usize tup = 0; tup < numTuples; tup++)
         {
           if(shouldCancel)
@@ -269,9 +315,9 @@ public:
           usize bin = (zPos * dims[1] * dims[0]) + (yPos * dims[0]) + xPos;
           gridVoxels[gridMap[bin]].push_back(tup);
         }
-      } // End of filling non-empty grids and positions vector
+      }
 
-      // Pack down memory further
+      // Release construction capacity before the clustering phase retains this index.
       for(auto& grid : gridVoxels)
       {
         grid.shrink_to_fit();
@@ -331,18 +377,32 @@ public:
   }
 };
 
-/** @brief Two-dimensional counterpart of HyperGridBitMap3D for XY coordinates. */
+/**
+ * @class HyperGridBitMap2D
+ * @brief Builds the resident two-dimensional DBSCAN grid index.
+ */
 class HyperGridBitMap2D : public HyperGridBitMap
 {
 public:
-  static constexpr float32 Dimensions = 2;
+  static constexpr float32 Dimensions = 2; // Number of coordinate components.
 
-  GridBitMap xTable;
-  GridBitMap yTable;
+  GridBitMap xTable; // Occupied-grid incidence by X position.
+  GridBitMap yTable; // Occupied-grid incidence by Y position.
 
   HyperGridBitMap2D() = delete;
 
-  /** @brief Builds grid membership and X/Y incidence tables from accepted 2D points. */
+  /**
+   * @brief Builds grid membership and axis incidence tables from accepted 2D points.
+   * @tparam T Coordinate value type.
+   * @param shouldCancel Cancellation flag.
+   * @param messageHelper Sends progress messages.
+   * @param inputArray Resident coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   *
+   * The direct path makes per-tuple reads because its caller selects resident
+   * storage. It stops construction when shouldCancel is set.
+   */
   template <typename T>
   HyperGridBitMap2D(const std::atomic_bool& shouldCancel, MessageHelper& messageHelper, const AbstractDataStore<T>& inputArray, float32 epsilon,
                     const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask)
@@ -351,7 +411,7 @@ public:
     const usize numTuples = inputArray.getNumberOfTuples();
     const usize numComps = inputArray.getNumberOfComponents();
 
-    // Load array bounds using direct per-element access
+    // Resident tuple reads find the coordinate bounds without a bulk buffer.
     std::array<float32, 4> bounds = {std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(), std::numeric_limits<float32>::quiet_NaN(),
                                      std::numeric_limits<float32>::quiet_NaN()};
     for(usize tup = 0; tup < numTuples; tup++)
@@ -376,7 +436,7 @@ public:
       bounds[3] = std::isnan(bounds[3]) ? yVal : std::max(bounds[3], yVal);
     }
 
-    // Grid Info - DO NOT MODIFY - basis for algorithm
+    // The cell diagonal equals epsilon, which bounds the required neighbor search.
     float32 sideLength = epsilon / std::sqrt(Dimensions);
     std::array<float32, 2> spacing = {sideLength, sideLength};
 
@@ -390,13 +450,11 @@ public:
     dims[1] = static_cast<usize>(((bounds[3] + buffer) - origin[1]) / spacing[1]) + 2;
 
     messageHelper.sendMessage(" - Binning values into a regular grid...");
-    // Fill the BitMap
     {
       std::vector<std::array<usize, 2>> positions = {};
-      // Build a set of non-empty grids and temporarily store their positions
       {
         std::vector<bool> grids(std::accumulate(dims.cbegin(), dims.cend(), static_cast<usize>(1), std::multiplies<>()), false);
-        // Find num grid cells - direct access pass
+        // The temporary regular-grid map identifies occupied cells for compression.
         for(usize tup = 0; tup < numTuples; tup++)
         {
           if(shouldCancel)
@@ -436,7 +494,6 @@ public:
         }
 
         gridVoxels = std::vector<std::vector<usize>>(activeGridCount, std::vector<usize>(0));
-        // Fill grid cells - direct access pass
         for(usize tup = 0; tup < numTuples; tup++)
         {
           if(shouldCancel)
@@ -455,9 +512,9 @@ public:
           usize bin = (yPos * dims[0]) + xPos;
           gridVoxels[gridMap[bin]].push_back(tup);
         }
-      } // End of filling non-empty grids and positions vector
+      }
 
-      // Pack down memory further
+      // Release construction capacity before the clustering phase retains this index.
       for(auto& grid : gridVoxels)
       {
         grid.shrink_to_fit();
@@ -508,7 +565,13 @@ public:
   }
 };
 
-/** @brief Intersects @p outputGridMask with grids present near one axis position. */
+/**
+ * @brief Intersects a candidate mask with occupied grids near one axis position.
+ * @param outputGridMask Candidate grid bits updated in place.
+ * @param searchSpace Axis positions to inspect on each side.
+ * @param targetPosition Center axis position.
+ * @param selectedTable Axis-incidence table.
+ */
 void SearchTablePositions(std::vector<uint8>& outputGridMask, usize searchSpace, usize targetPosition, const GridBitMap& selectedTable)
 {
   std::vector<uint8> tempGridMask(selectedTable.rowLength, 0);
@@ -530,10 +593,24 @@ void SearchTablePositions(std::vector<uint8>& outputGridMask, usize searchSpace,
   }
 }
 
+/**
+ * @concept IsHGBP
+ * @brief Constrains a resident two- or three-dimensional grid index.
+ * @tparam HGBMT Candidate grid-index type.
+ */
 template <class HGBMT>
 concept IsHGBP = std::is_base_of_v<HyperGridBitMap, HGBMT>;
 
-/** @brief Returns occupied grids within the DBSCAN search neighborhood of one grid. */
+/**
+ * @brief Returns occupied grids within one DBSCAN search neighborhood.
+ * @tparam HGBPT Resident grid-index type.
+ * @param targetGridId Grid that defines the neighborhood.
+ * @param hyperGridBitMap Resident axis-incidence tables.
+ * @return Occupied neighboring grid identifiers.
+ *
+ * The bitwise intersection removes empty regular-grid positions before pairwise
+ * distance checks.
+ */
 template <IsHGBP HGBPT>
 std::vector<usize> NeighborGridQuery(usize targetGridId, const HGBPT& hyperGridBitMap)
 {
@@ -611,19 +688,28 @@ std::vector<usize> NeighborGridQuery(usize targetGridId, const HGBPT& hyperGridB
   return neighborGridIds;
 }
 
-/** @brief Union/forest node storing a resident grid's parent and assigned cluster. */
+/**
+ * @struct ClusterNode
+ * @brief Stores one grid's union parent and feature identifier.
+ */
 struct ClusterNode
 {
-  int32 clusterId = 0;
-  usize parent = 0;
+  int32 clusterId = 0; // Feature identifier for a root grid.
+  usize parent = 0;    // Parent grid identifier in the union forest.
 };
 
-/** @brief Resident union forest used to merge density-connected core grids. */
+/**
+ * @struct ClusterForest
+ * @brief Merges density-connected resident grids.
+ */
 struct ClusterForest
 {
-  std::vector<ClusterNode> clusterForestNodes = {};
+  std::vector<ClusterNode> clusterForestNodes = {}; // State for every occupied grid.
 
-  /** @brief Creates one singleton cluster node per occupied grid. */
+  /**
+   * @brief Creates one singleton cluster node for each occupied grid.
+   * @param numGrids Number of occupied grids.
+   */
   void initialize(usize numGrids)
   {
     clusterForestNodes.resize(numGrids);
@@ -635,7 +721,11 @@ struct ClusterForest
     }
   }
 
-  /** @brief Finds and path-compresses the canonical cluster root. */
+  /**
+   * @brief Finds a grid's canonical cluster root.
+   * @param gridId Grid to resolve.
+   * @return Root grid identifier.
+   */
   usize findClusterRoot(usize gridId)
   {
     if(clusterForestNodes[gridId].parent == gridId)
@@ -646,13 +736,23 @@ struct ClusterForest
     return findClusterRoot(clusterForestNodes[gridId].parent);
   }
 
-  /** @brief Returns whether two grids already resolve to the same cluster. */
+  /**
+   * @brief Tests whether two grids resolve to the same cluster.
+   * @param pGridId First grid.
+   * @param qGridId Second grid.
+   * @return True when both grids have the same root.
+   */
   bool infer(usize pGridId, usize qGridId)
   {
     return findClusterRoot(pGridId) == findClusterRoot(qGridId);
   }
 
-  /** @brief Merges all supplied grids using the lowest root as the representative. */
+  /**
+   * @brief Merges grids under the root with the lowest feature identifier.
+   * @param gridIds Grids to merge.
+   *
+   * The selected root keeps feature numbering deterministic across merge order.
+   */
   void mergeLRC(const std::vector<usize>& gridIds)
   {
     if(gridIds.size() < 2)
@@ -685,15 +785,29 @@ struct ClusterForest
 };
 
 /**
- * @brief Direct Grid-based DBSCAN implementation over resident point and grid state.
- * Random tuple comparisons use direct operator[] access, which makes this path
- * fast in RAM but unsuitable for OOC stores.
+ * @class GDCF
+ * @brief Performs resident grid-based DBSCAN clustering.
+ * @tparam HGBPT Resident grid-index type.
+ * @tparam T Coordinate value type.
+ *
+ * Random tuple comparisons are efficient in resident storage. DBSCANScanline
+ * replaces these reads with bounded tiles for disk-backed stores.
  */
 template <IsHGBP HGBPT, typename T>
 class GDCF
 {
 public:
   GDCF() = delete;
+
+  /**
+   * @brief Creates a resident GDCF clustering operation.
+   * @param shouldCancel Cancellation flag.
+   * @param messageHelper Sends progress messages.
+   * @param inputArray Resident coordinate store.
+   * @param epsilon DBSCAN neighborhood radius.
+   * @param mask Selects coordinate tuples.
+   * @param distMetric Distance metric for pairwise tests.
+   */
   GDCF(const std::atomic_bool& shouldCancel, MessageHelper& messageHelper, const AbstractDataStore<T>& inputArray, float32 epsilon, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask,
        ClusterUtilities::DistanceMetric distMetric)
   : hyperGridBitMap(HGBPT(shouldCancel, messageHelper, inputArray, epsilon, mask))
@@ -705,7 +819,16 @@ public:
   {
   }
 
-  /** @brief Forms core clusters, merges density-connected grids, and assigns border grids. */
+  /**
+   * @brief Forms core clusters and assigns connected border grids.
+   * @param minPoints Minimum points that make a grid core.
+   * @param parseOrder Order for core-grid processing.
+   * @param seed Random generator seed for random orders.
+   * @return Warning when no grid is core, or success otherwise.
+   *
+   * The method checks cancellation between grid passes.
+   * Lowest-root union makes core-grid merges independent of merge order. Parse order can still control border-grid attachment.
+   */
   Result<> cluster(usize minPoints, DBSCAN::ParseOrder parseOrder, std::mt19937_64::result_type seed = std::mt19937_64::default_seed)
   {
     m_MessageHelper.sendMessage(" - Identifying core grids...");
@@ -805,7 +928,7 @@ public:
       clusterForest.mergeLRC(cluster);
     }
 
-    // Now determine if non-core grids are close enough to a cluster to be border else noise
+    // Non-core grids attach to connected clusters or remain labeled as noise.
     m_MessageHelper.sendMessage("Expanding and Merging Applicable Clusters:");
     usize loop = 1;
     usize operations = 0;
@@ -893,7 +1016,14 @@ public:
     return {};
   }
 
-  /** @brief Writes each point's final cluster ID, leaving masked/outlier points at zero. */
+  /**
+   * @brief Writes final cluster identifiers to the output store.
+   * @param fIdsDataStore Receives per-tuple feature identifiers.
+   * @return Warning when no cluster exists, or success otherwise.
+   *
+   * The method initializes output to zero so masked and unassigned tuples stay
+   * outliers. It checks cancellation between occupied grids.
+   */
   Result<> label(AbstractDataStore<int32>& fIdsDataStore)
   {
     if(clusterForest.clusterForestNodes.empty())
@@ -930,8 +1060,15 @@ private:
   const std::atomic_bool& m_ShouldCancel;
   MessageHelper& m_MessageHelper;
 
-  // Uses Hoare's method for speed
-  /** @brief Partitions one density-sort range and returns its pivot position. */
+  /**
+   * @brief Partitions one density-sort range with Hoare's method.
+   * @param sorted Grid identifiers ordered in place.
+   * @param begin First index in the partition.
+   * @param end Last index in the partition.
+   * @return Last index in the lower partition.
+   *
+   * Hoare partitioning sorts in place and avoids another core-grid buffer.
+   */
   usize ProcessSection(std::vector<usize>& sorted, usize begin, usize end) const
   {
     const usize threshold = hyperGridBitMap.gridVoxels[sorted[begin]].size();
@@ -962,7 +1099,12 @@ private:
     }
   }
 
-  /** @brief Sorts grid IDs by population for LowDensityFirst traversal. */
+  /**
+   * @brief Sorts grid identifiers by population for LowDensityFirst traversal.
+   * @param sorted Grid identifiers ordered in place.
+   * @param begin First index in the sort range.
+   * @param end Last index in the sort range.
+   */
   void QuickSortGrids(std::vector<usize>& sorted, usize begin, usize end) const
   {
     if(begin >= end)
@@ -976,12 +1118,15 @@ private:
     QuickSortGrids(sorted, next + 1, end);
   }
 
-  // In-core path: direct random access via operator[] is fast.
-  // For each pair of points (one from each grid cell), compute the distance
-  // and return true as soon as any pair is within epsilon. With in-memory data,
-  // operator[] is a pointer dereference, so random access to arbitrary tuple
-  // indices is efficient. For OOC data, see DBSCANScanline's readGridCellCoords().
-  /** @brief Tests whether any point pair across two candidate grids lies within epsilon. */
+  /**
+   * @brief Tests whether two candidate grids contain an epsilon-connected pair.
+   * @param pGridId First grid.
+   * @param qGridId Second grid.
+   * @return True when at least one point pair has distance less than epsilon.
+   *
+   * Direct random tuple reads are efficient in resident storage. Disk-backed
+   * reads can repeatedly load and evict chunks, so DBSCANScanline uses tiles.
+   */
   bool canMerge(usize pGridId, usize qGridId)
   {
     for(usize pPointId : hyperGridBitMap.gridVoxels[pGridId])
@@ -999,7 +1144,18 @@ private:
   }
 };
 
-/** @brief Constructs one dimensional GDCF specialization and runs clustering plus labeling. */
+/**
+ * @brief Runs one resident GDCF specialization through clustering and labeling.
+ * @tparam AlgorithmT GDCF specialization type.
+ * @tparam T Coordinate value type.
+ * @param inputValues DBSCAN parameters.
+ * @param inputArray Resident coordinate store.
+ * @param mask Selects coordinate tuples.
+ * @param featureIds Receives final feature identifiers.
+ * @param messageHelper Sends progress messages.
+ * @param shouldCancel Cancellation flag.
+ * @return Warning, error, or success from clustering and labeling.
+ */
 template <class AlgorithmT, typename T>
 Result<> RunAlgorithm(const DBSCANInputValues* inputValues, const AbstractDataStore<T>& inputArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, Int32Array& featureIds,
                       MessageHelper& messageHelper, const std::atomic_bool& shouldCancel)
@@ -1028,10 +1184,23 @@ Result<> RunAlgorithm(const DBSCANInputValues* inputValues, const AbstractDataSt
   return algorithm.label(featureIds.getDataStoreRef());
 }
 
-/** @brief Runtime type/dimension dispatch adapter for resident DBSCAN. */
+/**
+ * @struct DBSCANDirectFunctor
+ * @brief Dispatches resident DBSCAN by coordinate type and dimension.
+ */
 struct DBSCANDirectFunctor
 {
-  /** @brief Selects the 2D or 3D GDCF specialization for the coordinate array type. */
+  /**
+   * @brief Selects a two- or three-dimensional GDCF specialization.
+   * @tparam T Coordinate value type.
+   * @param inputValues DBSCAN parameters.
+   * @param clusterArray Coordinate array.
+   * @param mask Selects coordinate tuples.
+   * @param featureIds Receives final feature identifiers.
+   * @param messageHelper Sends progress messages.
+   * @param shouldCancel Cancellation flag.
+   * @return Result from the selected specialization, or an error for another component count.
+   */
   template <typename T>
   Result<> operator()(const DBSCANInputValues* inputValues, const IDataArray& clusterArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, Int32Array& featureIds,
                       MessageHelper& messageHelper, const std::atomic_bool& shouldCancel)
@@ -1053,7 +1222,6 @@ struct DBSCANDirectFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 DBSCANDirect::DBSCANDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const DBSCANInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -1062,13 +1230,8 @@ DBSCANDirect::DBSCANDirect(DataStructure& dataStructure, const IFilter::MessageH
 {
 }
 
-// -----------------------------------------------------------------------------
 DBSCANDirect::~DBSCANDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief In-core DBSCAN execution using direct per-element access.
- */
 Result<> DBSCANDirect::operator()()
 {
   MessageHelper messageHelper(m_MessageHandler);

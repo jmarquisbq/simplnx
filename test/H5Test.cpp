@@ -200,7 +200,7 @@ void CreateVertexGeometry(DataStructure& dataStructure)
   vertexGeometry->setVertices(*vertexArray);
   REQUIRE(vertexGeometry->getNumberOfVertices() == 144);
 
-  // Now create some "Cell" data for the Vertex Geometry
+  // Create cell-level arrays for the Vertex Geometry.
   ShapeType tupleShape = {vertexGeometry->getNumberOfVertices()};
   usize numComponents = 1;
   Int16Array* ci_data = CreateTestDataArray<int16_t>("Area", dataStructure, tupleShape, {numComponents}, geometryGroup->getId());
@@ -737,9 +737,8 @@ TEST_CASE("ImageGeometryIO")
   }
 }
 
-// Reading an attribute from an invalid HDF5 object must return a recoverable error rather
-// than throwing an uncaught exception. Previously the error-message formatting called
-// GetNameFromBuffer() on an empty name, which threw and aborted the process. See issue #1642.
+// Invalid HDF5 objects must return recoverable attribute errors instead of throwing.
+// This test exercises the empty-name formatting path.
 TEST_CASE("HDF5 ObjectIO: Invalid object reads recover gracefully")
 {
   auto app = Application::GetOrCreateInstance();
@@ -1204,11 +1203,8 @@ TEST_CASE("DatasetIO: writeSpan bypasses chunking for small arrays even with com
 TEST_CASE("HDF5 ApiLock serializes access via H5SUPPORT_MUTEX_LOCK", "[simplnx][HDF5]")
 {
 #ifdef H5Support_USE_MUTEX
-  // Regression guard for the original H5SUPPORT_MUTEX_LOCK() bug: the macro used to
-  // declare a fresh per-call local std::mutex (serializing nothing). Hammer a shared
-  // counter from many threads under the macro — a real lock on the one shared ApiLock
-  // yields exactly threads*iters with no lost updates; the old no-op macro would lose
-  // updates (and the unsynchronized increments would be a data race).
+  // Each thread increments one shared counter under H5SUPPORT_MUTEX_LOCK().
+  // The exact total proves that one shared ApiLock protects every update.
   constexpr int k_Threads = 8;
   constexpr int k_Iters = 20000;
   int counter = 0;

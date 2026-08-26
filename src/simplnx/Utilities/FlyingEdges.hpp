@@ -607,12 +607,13 @@ const nx::core::uint8 edgeVertices[12][2] = { {0,1}, {1,2}, {3,2},
 namespace nx::core
 {
 /**
+ * @class FlyingEdgesAlgorithm
  * @brief Four-pass Flying Edges isosurface extraction over an ImageGeom scalar field.
+ * @tparam T Specifies the input scalar type.
  *
  * Input values are supplied through a four-slice ring buffer. That window is
- * large enough for edge classification and gradient stencils, converting the
- * original per-voxel store accesses into sequential slice reads while bounding
- * resident input data independently of volume depth.
+ * large enough for classification and gradient stencils. Input memory is independent
+ * of volume depth. Output stores use per-value writes without Result reporting.
  */
 template <typename T>
 class FlyingEdgesAlgorithm
@@ -622,8 +623,14 @@ class FlyingEdgesAlgorithm
 
 public:
   /**
-   * @brief Binds input/output stores and allocates the fixed four-slice window.
-   * The ImageGeom, stores, and TriangleGeom remain caller-owned.
+   * @brief Creates a Flying Edges extraction algorithm.
+   * @param image Provides dimensions, origin, and spacing.
+   * @param dataStore Provides scalar values.
+   * @param isoVal Specifies the isosurface value.
+   * @param triangleGeom Receives vertices and triangles.
+   * @param normals Receives one normal per output vertex.
+   *
+   * All inputs and outputs remain caller-owned.
    */
   FlyingEdgesAlgorithm(const ImageGeom& image, const AbstractDataStore<T>& dataStore, const T isoVal, TriangleGeom& triangleGeom, Float32AbstractDataStore& normals)
   : m_Image(image)
@@ -639,9 +646,7 @@ public:
   , m_TrisStore(m_TriangleGeom.getFaces()->getDataStoreRef())
   , m_NormalsStore(normals)
   {
-    // Ring-buffer slots start empty; sliceData() lazily bulk-loads each Z-slice
-    // (see the member comment on m_SliceBuffers for why this is bounded to
-    // k_MaxResidentSlices * m_NX * m_NY elements rather than the full volume).
+    // Mark each ring slot empty before lazy slice loading starts.
     m_SliceBufferZ.fill(-1);
     for(auto& buffer : m_SliceBuffers)
     {
@@ -650,22 +655,15 @@ public:
   }
 
   /**
-   * @brief Pass 1 finds the trimmed X interval containing cut X/Y/Z edges for
-   * every grid row, reading each required Z-slice through the bounded window.
+   * @brief Finds the trimmed X interval with cut edges for each grid row.
+   * @return Input bulk-read error or success.
    */
   Result<> pass1()
   {
-    // For each (j, k), find the locations for computational trimming, xl and xr.
-    // Edge cases are derived directly from the resident input slices instead of
-    // retaining one byte for every X edge in the volume.
-    //  To properly find xl and xr, have to check along the x-axis,
-    //  the y-axis and the z-axis!
+    // Derive row trims from X, Y, and Z cuts without a volume-sized edge-case array.
     for(usize k = 0; k != m_NZ; ++k)
     {
-      // Bulk-load the whole (m_NX * m_NY) Z-slice once per k instead of issuing
-      // one OOC element read per voxel below; every (j, i) in this slice is
-      // scanned from the local buffer, which is byte-identical to the prior
-      // per-voxel m_DataStore[...] reads (see sliceData()).
+      // Load each required Z slice once for all rows at this k index.
       nonstd::span<const T> curKSlice = sliceData(k);
       nonstd::span<const T> nextKSlice;
       if(k + 1 < m_NZ)
@@ -702,17 +700,15 @@ public:
     }
     return {};
   }
-  ///////////////////////////////////////////////////////////////////////////////
-
   /**
    * @brief Pass 2 classifies cubes and counts their triangle and edge vertices.
+   * @return Input bulk-read error or success.
+   *
    * Counts are retained at row/grid-edge scale for the prefix pass.
    */
   Result<> pass2()
   {
-    // For each (j, k):
-    //  - for each cube (i, j, k) calculate caseId and number of GridEdge cuts
-    //    in the x, y and z direction.
+    // Classify each trimmed cube row and count its triangles and edge cuts.
     for(usize k = 0; k != m_NZ - 1; ++k)
     {
       const nonstd::span<const T> curKSlice = sliceData(k);
@@ -723,18 +719,15 @@ public:
       }
       for(usize j = 0; j != m_NY - 1; ++j)
       {
-        // find adjusted trim values
         usize xl, xr;
-        calcTrimValues(xl, xr, j, k); // xl, xr set in this function
+        calcTrimValues(xl, xr, j, k);
 
-        // ge0 is owned by this (i, j, k). ge1, ge2 and ge3 are only used for
-        // boundary cells.
+        // ge0 belongs to this cube row. Neighbor rows own ge1 through ge3.
         GridEdge& ge0 = m_GridEdges[k * m_NY + j];
         GridEdge& ge1 = m_GridEdges[k * m_NY + j + 1];
         GridEdge& ge2 = m_GridEdges[(k + 1) * m_NY + j];
         GridEdge& ge3 = m_GridEdges[(k + 1) * m_NY + j + 1];
 
-        // Count the number of triangles along this row of cubes.
         usize& curTriCounter = *(m_TriCounter.begin() + k * (m_NY - 1) + static_cast<int64>(j));
 
         bool isYEnd = (j == m_NY - 2);
@@ -746,7 +739,6 @@ public:
 
           const uint8 caseId = calcCubeCase(curKSlice, nextKSlice, i, j);
 
-          // If the cube has no triangles through it
           if(caseId == 0 || caseId == 255)
           {
             continue;
@@ -760,37 +752,8 @@ public:
           ge0.ystart += isCut[3];
           ge0.zstart += isCut[8];
 
-          // Note: Each 'gridCell' contains four m_GridEdges running along it,
-          //       ge0, ge1, ge2 and ge3. Each gridCell can access its own
-          //       ge0 but ge1, ge2 and ge3 are owned by other gridCells.
-          //       Accessing ge1, ge2 and ge3 leads to a race condition
-          //       unless gridCell is along the boundary of the image.
-          //
-          //       To really make sense of the indices, it helps to draw
-          //       out the following picture of a cube with the appropriate
-          //       labels:
-          //         v0 is at (i,   j,   k)
-          //         v1       (i+1, j,   k)
-          //         v2       (i+1, j+1, k)
-          //         v3       (i,   j+1, k)
-          //         v4       (i,   j,   k+1)
-          //         v5       (i+1, j,   k+1)
-          //         v6       (i+1, j+1, k+1)
-          //         v7       (i,   j+1, k+1)
-          //         e0  connects v0 to v1 and is parallel to the x-axis
-          //         e1           v1    v2                        y
-          //         e2           v2    v3                        x
-          //         e3           v0    v3                        y
-          //         e4           v4    v5                        x
-          //         e5           v5    v6                        y
-          //         e6           v6    v7                        x
-          //         e7           v4    v7                        y
-          //         e8           v0    v4                        z
-          //         e9           v1    v5                        z
-          //         e10          v3    v7                        z
-          //         e11          v2    v6                        z
-
-          // Handle cubes along the edge of the image
+          // Only boundary cubes update edges owned by adjacent rows. Other updates
+          // would race with the row that owns each GridEdge.
           if(isXEnd)
           {
             ge0.ystart += isCut[1];
@@ -824,12 +787,12 @@ public:
     }
     return {};
   }
-  ///////////////////////////////////////////////////////////////////////////////
-
-  /** @brief Pass 3 prefix-sums counts into deterministic output offsets and resizes outputs. */
+  /**
+   * @brief Prefix-sums counts into output offsets and resizes output arrays.
+   */
   void pass3()
   {
-    // Accumulate triangles into triCounter
+    // Convert row triangle counts to deterministic starting offsets.
     usize tmp;
     usize triAccum = 0;
     for(usize k = 0; k != m_NZ - 1; ++k)
@@ -844,8 +807,7 @@ public:
       }
     }
 
-    // accumulate points, filling out starting locations of each GridEdge
-    // in the process.
+    // Convert edge counts to deterministic vertex starting offsets.
     usize pointAccum = 0;
     for(usize k = 0; k != m_NZ; ++k)
     {
@@ -905,18 +867,14 @@ public:
     m_TriangleGeom.resizeVertexList(pointAccum);
     m_NormalsStore.resizeTuples({pointAccum});
   }
-  ///////////////////////////////////////////////////////////////////////////////
-
   /**
    * @brief Pass 4 revisits active cubes, interpolates vertices/normals, and
    * writes connectivity at the deterministic offsets established by pass 3.
+   * @return Input bulk-read error or success.
    */
   Result<> pass4()
   {
-    // For each (j, k):
-    //  - For each cube at i, fill out points, normals and triangles owned by
-    //    the cube. Each cube is in charge of filling out e0, e3 and e8. Only
-    //    in edge cases does it also fill out other edges.
+    // Each cube writes its owned edges. Boundary cubes also write exterior neighbor edges.
     for(usize k = 0; k != m_NZ - 1; ++k)
     {
       const nonstd::span<const T> curKSlice = sliceData(k);
@@ -927,9 +885,8 @@ public:
       }
       for(usize j = 0; j != m_NY - 1; ++j)
       {
-        // find adjusted trim values
         usize xl, xr;
-        calcTrimValues(xl, xr, j, k); // xl, xr set in this function
+        calcTrimValues(xl, xr, j, k);
 
         if(xl == xr)
           continue;
@@ -968,11 +925,6 @@ public:
 
           const uint8* isCut = util::isCut[caseId]; // has 12 elements
 
-          // Most of the information contained in pointCube, isoValCube
-          // and gradCube will be used--but not necessarily all. It has
-          // not been tested whether obtaining only the information
-          // needed will provide a significant speedup--but
-          // most likely not.
           cube pointCube = getPosCube(i, j, k);
           TCube isoValCube = getValCube(i, j, k);
           cube gradCube = getGradCube(i, j, k);
@@ -981,8 +933,7 @@ public:
             return std::move(m_ReadResult);
           }
 
-          // Add Points and normals.
-          // Calculate global indices for triangles
+          // Interpolate cut edges and record their global vertex indexes.
           std::array<usize, 12> globalIdxs = {};
 
           if(isCut[0])
@@ -1009,23 +960,15 @@ public:
             ++z0counter;
           }
 
-          // Note:
-          //   e1, e5, e9 and e11 will be visited in the next iteration
-          //   when they are e3, e7, e8 and 10 respectively. So don't
-          //   increment their counters. When the cube is an edge cube,
-          //   their counters don't need to be incremented because they
-          //   won't be used again.
-
-          // Manage boundary cases if needed, otherwise just update
-          // globalIdx.
+          // Edges 1, 5, 9, and 11 reuse counters under their owner-edge numbers.
+          // Boundary versions have no later owner and need no counter increment.
           if(isCut[1])
           {
             usize idx = ge0.ystart + y0counter;
             if(isXEnd)
             {
               InterpolateIntoArrays(pointCube, gradCube, isoValCube, 1, idx * 3);
-              // y0counter counter doesn't need to be incremented
-              // because it won't be used again.
+              // This boundary edge has no later owner.
             }
             globalIdxs[1] = idx;
           }
@@ -1036,7 +979,7 @@ public:
             if(isXEnd)
             {
               InterpolateIntoArrays(pointCube, gradCube, isoValCube, 9, idx * 3);
-              // z0counter doesn't need to in incremented.
+              // This boundary edge has no later owner.
             }
             globalIdxs[9] = idx;
           }
@@ -1091,7 +1034,7 @@ public:
             if(isXEnd and isYEnd)
             {
               InterpolateIntoArrays(pointCube, gradCube, isoValCube, 11, idx * 3);
-              // z1counter does not need to be incremented.
+              // This boundary edge has no later owner.
             }
             globalIdxs[11] = idx;
           }
@@ -1102,7 +1045,7 @@ public:
             if(isXEnd and isZEnd)
             {
               InterpolateIntoArrays(pointCube, gradCube, isoValCube, 5, idx * 3);
-              // y2 counter does not need to be incremented.
+              // This boundary edge has no later owner.
             }
             globalIdxs[5] = idx;
           }
@@ -1118,7 +1061,7 @@ public:
             ++x3counter;
           }
 
-          // Add triangles
+          // Write triangle connectivity from the case-table edge indexes.
           const char* caseTri = util::caseTriangles[caseId]; // size 16
           for(int idx = 0; caseTri[idx] != -1; idx += 3)
           {
@@ -1132,10 +1075,12 @@ public:
     }
     return {};
   }
-  ///////////////////////////////////////////////////////////////////////////////
 
 private:
-  ///////////////////// MEMBER VARIABLES /////////////////////
+  /**
+   * @struct GridEdge
+   * @brief Stores row trim bounds and prefix-summed vertex offsets.
+   */
   struct GridEdge
   {
     GridEdge()
@@ -1147,13 +1092,11 @@ private:
     {
     }
 
-    // trim values
-    // set on pass 1
+    // Pass 1 sets row trim bounds.
     usize xl;
     usize xr;
 
-    // modified on pass 2
-    // set on pass 3
+    // Pass 2 counts cuts. Pass 3 converts counts to offsets.
     usize xstart;
     usize ystart;
     usize zstart;
@@ -1164,42 +1107,33 @@ private:
   const T m_IsoVal;
   TriangleGeom& m_TriangleGeom;
 
-  usize const m_NX; //
-  usize const m_NY; // for indexing
-  usize const m_NZ; //
+  usize const m_NX;
+  usize const m_NY;
+  usize const m_NZ;
 
-  std::vector<GridEdge> m_GridEdges; // size of m_NY*m_NZ
-  std::vector<usize> m_TriCounter;   // size of (m_NY-1)*(m_NZ-1)
+  std::vector<GridEdge> m_GridEdges;
+  std::vector<usize> m_TriCounter;
 
-  AbstractDataStore<IGeometry::SharedVertexList::value_type>& m_PointsStore; //
-  AbstractDataStore<IGeometry::SharedTriList::value_type>& m_TrisStore;      //
-  Float32AbstractDataStore& m_NormalsStore;                                  // The output
+  AbstractDataStore<IGeometry::SharedVertexList::value_type>& m_PointsStore;
+  AbstractDataStore<IGeometry::SharedTriList::value_type>& m_TrisStore;
+  Float32AbstractDataStore& m_NormalsStore;
 
-  // Bounded-memory cache of Z-slices (each m_NX*m_NY elements of T) backing every
-  // m_DataStore read in passes 1, 2, and 4, including pass4()'s gradient stencil
-  // (getData()/computeGradient()). Passes 1 and 2 need the current and next slices.
-  // Pass 4 processes cube rows in increasing k order, and for the row at k,
-  // computeGradient() touches slices in {k-1, k, k+1, k+2} (fewer at the volume
-  // boundaries) — never more than k_MaxResidentSlices at once. Slots are addressed
-  // by `z % k_MaxResidentSlices`: any k_MaxResidentSlices consecutive integers map
-  // to k_MaxResidentSlices distinct slots, so every access after the first load in
-  // a given cube row is a hit, and advancing to the next row only reloads the one
-  // slice that has newly entered the window. This turns per-voxel m_DataStore[...]
-  // element reads (each paying OOC chunk-cache dispatch overhead) into at most one
-  // bulk copyIntoBuffer() call per newly needed slice, bounded to
-  // O(k_MaxResidentSlices * m_NX * m_NY) memory rather than the full volume.
+  // Passes 1 and 2 need current and next Z slices. Pass 4 gradients can need
+  // k-1 through k+2. Four modulo-addressed slots cover both access patterns.
+  // Advancing one cube row loads at most one new slice.
   static constexpr usize k_MaxResidentSlices = 4;
   mutable std::array<std::vector<T>, k_MaxResidentSlices> m_SliceBuffers;
-  mutable std::array<int64, k_MaxResidentSlices> m_SliceBufferZ; // Z index resident in each slot; -1 = not yet loaded
+  mutable std::array<int64, k_MaxResidentSlices> m_SliceBufferZ;
   mutable Result<> m_ReadResult;
 
-  /////////////////////////////////////////////////////////////
-
-  ///////////////////////////////////////////////////////////////////////////////
-  // Private helper functions
-  ///////////////////////////////////////////////////////////////////////////////
-
-  /** @brief Interpolates one cut edge into the vertex and normal output stores. */
+  /**
+   * @brief Interpolates one cut edge into vertex and normal stores.
+   * @param pointCube Provides cube vertex coordinates.
+   * @param gradCube Provides cube gradients.
+   * @param isoValCube Provides cube scalar values.
+   * @param edgeNum Specifies the marching-cubes edge.
+   * @param idx Specifies the flat output component offset.
+   */
   void InterpolateIntoArrays(cube& pointCube, cube& gradCube, TCube& isoValCube, uint8 edgeNum, usize idx)
   {
     auto pointsArray = interpolateOnCube(pointCube, isoValCube, edgeNum);
@@ -1215,7 +1149,14 @@ private:
     m_NormalsStore[idx + 2] = normalsArray[2];
   }
 
-  /** @brief Builds the marching-cubes case byte from two already resident slices. */
+  /**
+   * @brief Builds a marching-cubes case byte from two resident slices.
+   * @param lowerSlice Provides scalar values at k.
+   * @param upperSlice Provides scalar values at k plus one.
+   * @param i Specifies cube X index.
+   * @param j Specifies cube Y index.
+   * @return Eight-bit corner classification.
+   */
   [[nodiscard]] inline uint8 calcCubeCase(nonstd::span<const T> lowerSlice, nonstd::span<const T> upperSlice, usize i, usize j) const
   {
     const usize lowerRow = j * m_NX;
@@ -1240,6 +1181,13 @@ private:
     return caseId;
   }
 
+  /**
+   * @brief Combines four row trims for one cube row.
+   * @param xl Receives inclusive X start.
+   * @param xr Receives exclusive X end.
+   * @param j Specifies cube-row Y index.
+   * @param k Specifies cube-row Z index.
+   */
   inline void calcTrimValues(usize& xl, usize& xr, usize const& j, usize const& k) const
   {
     GridEdge const& ge0 = m_GridEdges[k * m_NY + j];
@@ -1254,6 +1202,13 @@ private:
       xl = xr;
   }
 
+  /**
+   * @brief Interpolates coordinates or gradients on one cube edge.
+   * @param pts Provides eight vector values.
+   * @param isoVals Provides eight scalar values.
+   * @param edge Specifies the marching-cubes edge.
+   * @return Interpolated vector at the isovalue crossing.
+   */
   inline std::array<float32, 3> interpolateOnCube(cube const& pts, TCube const& isoVals, uint8 const& edge) const
   {
     uint8 i0 = util::edgeVertices[edge][0];
@@ -1263,6 +1218,13 @@ private:
     return interpolate(pts[i0], pts[i1], weight);
   }
 
+  /**
+   * @brief Interpolates between two vectors.
+   * @param a Provides the first vector.
+   * @param b Provides the second vector.
+   * @param weight Specifies interpolation weight.
+   * @return Interpolated vector.
+   */
   inline std::array<float32, 3> interpolate(std::array<float32, 3> const& a, std::array<float32, 3> const& b, T const& weight) const
   {
     std::array<float32, 3> ret = {};
@@ -1272,6 +1234,13 @@ private:
     return ret;
   }
 
+  /**
+   * @brief Collects scalar values for one cube.
+   * @param i Specifies cube X index.
+   * @param j Specifies cube Y index.
+   * @param k Specifies cube Z index.
+   * @return Eight scalar corner values.
+   */
   TCube getValCube(usize i, usize j, usize k) const
   {
     TCube vals;
@@ -1288,6 +1257,13 @@ private:
     return vals;
   }
 
+  /**
+   * @brief Calculates coordinates for one cube.
+   * @param i Specifies cube X index.
+   * @param j Specifies cube Y index.
+   * @param k Specifies cube Z index.
+   * @return Eight corner coordinates.
+   */
   [[nodiscard]] cube getPosCube(usize i, usize j, usize k) const
   {
     cube pos;
@@ -1333,6 +1309,13 @@ private:
     return pos;
   }
 
+  /**
+   * @brief Calculates gradients for one cube.
+   * @param i Specifies cube X index.
+   * @param j Specifies cube Y index.
+   * @param k Specifies cube Z index.
+   * @return Eight corner gradients.
+   */
   [[nodiscard]] cube getGradCube(usize i, usize j, usize k) const
   {
     cube grad;
@@ -1350,14 +1333,12 @@ private:
   }
 
   /**
-   * @brief Returns the buffered contents of Z-slice `z` (m_NX*m_NY elements, X
-   * fastest-varying), bulk-loading it from the OOC-capable m_DataStore on first
-   * access. See the m_SliceBuffers member comment for the ring-buffer addressing
-   * scheme and why it never thrashes for the access patterns used by pass1() and
-   * computeGradient().
-   * @param z Z-slice index in [0, m_NZ)
-   * @return A read-only view of the cached slice, valid until its slot is reused
-   *         for a different z.
+   * @brief Returns one X-fastest Z slice from the four-slot cache.
+   * @param z Specifies a Z index in [0, m_NZ).
+   * @return Read-only view valid until another Z index reuses its modulo slot.
+   *
+   * A cache miss performs one checked bulk read. The method records an error
+   * in m_ReadResult and returns a zero-filled slice after failure.
    */
   nonstd::span<const T> sliceData(usize z) const
   {
@@ -1378,20 +1359,34 @@ private:
     return nonstd::span<const T>(m_SliceBuffers[slot].data(), m_SliceBuffers[slot].size());
   }
 
+  /**
+   * @brief Reads one cached scalar value.
+   * @param i Specifies X index.
+   * @param j Specifies Y index.
+   * @param k Specifies Z index.
+   * @return Scalar value.
+   */
   inline T getData(usize i, usize j, usize k) const
   {
     return sliceData(k)[j * m_NX + i];
   }
 
+  /**
+   * @brief Calculates one finite-difference gradient.
+   * @param i Specifies X index.
+   * @param j Specifies Y index.
+   * @param k Specifies Z index.
+   * @return Negative scalar gradient in physical units.
+   *
+   * Boundary axes use one-sided differences. Interior axes use centered differences.
+   */
   [[nodiscard]] std::array<float32, 3> computeGradient(usize i, usize j, usize k) const
   {
     std::array<std::array<float32, 2>, 3> x = {};
     std::array<float32, 3> run = {};
     FloatVec3 spacing = m_Image.getSpacing();
 
-    // planeIdx addresses (i, j) within whichever Z-slice is fetched below; this is
-    // the same offset the original flat `dataIdx` used modulo m_NX*m_NY*k, just
-    // resolved per-slice through sliceData() instead of directly against m_DataStore.
+    // planeIdx addresses the X-Y location in each fetched Z slice.
     const usize planeIdx = j * m_NX + i;
     nonstd::span<const T> curSlice = sliceData(k);
 
@@ -1460,7 +1455,5 @@ private:
 
     return ret;
   }
-
-  ///////////////////////////////////////////////////////////////////////////////
 };
 } // namespace nx::core

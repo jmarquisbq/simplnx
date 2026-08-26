@@ -1,29 +1,3 @@
-// -----------------------------------------------------------------------------
-// IdentifySampleCommon.hpp -- Shared utilities for IdentifySample algorithms
-// -----------------------------------------------------------------------------
-//
-// This header contains two components shared between the BFS and CCL variants
-// of the IdentifySample algorithm:
-//
-// 1. VectorUnionFind: A lightweight, vector-based union-find (disjoint set)
-//    data structure optimized for dense, sequentially-assigned label sets.
-//    Used by the CCL variant (IdentifySampleCCL) for tracking connected
-//    component equivalences during scanline labeling. Uses union-by-rank
-//    and path-halving for near-O(1) amortized operations.
-//
-// 2. IdentifySampleSliceBySliceFunctor: A type-dispatched functor that
-//    performs BFS-based sample identification on individual 2D slices of
-//    the volume. Used by BOTH algorithm classes when the user enables
-//    slice-by-slice mode. Since a single 2D slice always fits in memory,
-//    BFS is safe and efficient regardless of whether the underlying data
-//    store is in-core or out-of-core.
-//
-//    The functor supports three orthogonal slice planes (XY, XZ, YZ) and
-//    includes a batched YZ code path that amortizes HDF5 I/O by reading
-//    each Z-slice once per batch of X positions (instead of once per X
-//    position), providing approximately 10x speedup for OOC data.
-// -----------------------------------------------------------------------------
-
 #pragma once
 
 #include <array>
@@ -42,25 +16,12 @@ namespace nx::core
 
 /**
  * @class VectorUnionFind
- * @brief Vector-based union-find (disjoint set) for dense, sequentially-assigned
- * label sets (labels 1..N).
+ * @brief Stores dense label equivalences in resident vectors.
  *
- * Uses flat vectors instead of hash maps for O(1) indexed access with no hash
- * overhead. Suitable for connected component labeling where labels are assigned
- * sequentially starting from 1 and the maximum label count is not known in advance
- * (internal storage grows dynamically).
- *
- * Features:
- * - Union-by-rank for balanced merges (O(alpha(N)) amortized)
- * - Path halving in find() for near-O(1) amortized lookups
- * - Dynamic growth via makeSet() -- no need to pre-size
- * - No flatten() method -- the CCL code accumulates sizes externally and
- *   resolves roots via find() after the forward scan completes
- *
- * This class is used by IdentifySampleCCL (in IdentifySampleCCL.cpp) for the
- * 3D CCL algorithm. FillBadDataCCL uses the separate UnionFind class (in
- * simplnx/Utilities/UnionFind.hpp) which includes built-in size tracking and
- * a flatten() method.
+ * The helper uses union by rank and path halving for labels 1 through N. It is
+ * retained for resident algorithms that need dynamically growing label sets.
+ * The current IdentifySample CCL path uses ExternalEquivalence instead because
+ * its label records can reside on disk.
  */
 class VectorUnionFind
 {
@@ -68,8 +29,8 @@ public:
   VectorUnionFind() = default;
 
   /**
-   * @brief Pre-allocates internal storage for the expected number of labels.
-   * @param capacity Maximum expected label value.
+   * @brief Reserves storage through the largest expected label.
+   * @param capacity Largest expected label.
    */
   void reserve(usize capacity)
   {
@@ -78,8 +39,9 @@ public:
   }
 
   /**
-   * @brief Creates a new singleton set for label x if it does not already exist.
+   * @brief Creates a singleton set when the label is new.
    * @param x Label to initialize.
+   * @pre x is positive.
    */
   void makeSet(int64 x)
   {
@@ -95,9 +57,10 @@ public:
   }
 
   /**
-   * @brief Finds the root label with path-halving compression.
-   * @param x Label to find the root for.
-   * @return Root label of the equivalence class.
+   * @brief Finds a root and applies path halving.
+   * @param x Initialized label.
+   * @return Root label.
+   * @pre makeSet() initialized x.
    */
   int64 find(int64 x)
   {
@@ -110,9 +73,10 @@ public:
   }
 
   /**
-   * @brief Merges the equivalence classes of two labels using union-by-rank.
-   * @param a First label.
-   * @param b Second label.
+   * @brief Merges two sets by rank.
+   * @param a Initialized label.
+   * @param b Initialized label.
+   * @pre makeSet() initialized a and b.
    */
   void unite(int64 a, int64 b)
   {
@@ -140,16 +104,20 @@ private:
 
 /**
  * @struct IdentifySampleSliceBySliceFunctor
- * @brief BFS-based implementation for slice-by-slice mode.
+ * @brief Uses buffered BFS for resident slice-by-slice execution.
  *
- * Slices are 2D and small relative to the full volume, so OOC chunk
- * thrashing is not a concern. This functor is used by both the in-core
- * and OOC algorithm classes when slice-by-slice mode is enabled.
+ * This functor is the BFS path's slice implementation. The CCL path uses its own
+ * row-streaming slice implementation. XY and XZ use bulk transfers. Bool YZ uses
+ * individual values. Other YZ types batch as many as 64 plane buffers with one
+ * Z-slice buffer to reduce repeated disk reads.
+ *
+ * Bulk-I/O results are discarded. Cancellation can leave prior slices changed.
  */
 struct IdentifySampleSliceBySliceFunctor
 {
   /**
-   * @brief Enumerates the three orthogonal slice planes.
+   * @enum Plane
+   * @brief Selects the orthogonal plane to process independently.
    */
   enum class Plane
   {
@@ -162,16 +130,26 @@ struct IdentifySampleSliceBySliceFunctor
   static constexpr std::array<int64, 4> k_Dp2 = {-1, 1, 0, 0};
 
   /**
-   * @brief BFS sample identification + optional hole filling on a single 2D slice buffer.
+   * @brief Retains the largest true plane component and optionally fills holes.
+   * @tparam T Mask value type.
+   * @param sliceBuffer Plane values modified in place.
+   * @param sliceSize Number of plane values.
+   * @param planeDim1 Fast plane dimension.
+   * @param planeDim2 Slow plane dimension.
+   * @param fillHoles True to fill false components that do not touch an edge.
+   * @param shouldCancel Signals cancellation after component discovery or removal.
+   * @pre sliceBuffer contains at least sliceSize values.
+   * @pre sliceSize equals planeDim1 times planeDim2.
    *
-   * Operates entirely on in-memory data. The sliceBuffer is modified in-place:
-   * non-sample voxels are set to false, and if fillHoles is true, interior
-   * holes (false regions not touching the boundary) are filled back to true.
+   * Two N-bit vectors and a component queue retain plane state. The initial seed
+   * is not marked when it enters the queue, so a back edge can enqueue it twice.
+   * Equal-sized components favor the component that the scan finds last.
+   * Cancellation is not checked within a component search.
    */
   template <typename T>
   static void processSlice(T* sliceBuffer, usize sliceSize, int64 planeDim1, int64 planeDim2, bool fillHoles, const std::atomic_bool& shouldCancel)
   {
-    // BFS for sample identification
+    // Find the largest true plane component.
     std::vector<bool> checked(sliceSize, false);
     std::vector<bool> sample(sliceSize, false);
     std::vector<int64> currentVList;
@@ -231,7 +209,7 @@ struct IdentifySampleSliceBySliceFunctor
       return;
     }
 
-    // Mark non-sample voxels as false
+    // Remove true values outside the selected component.
     for(usize i = 0; i < sliceSize; ++i)
     {
       if(!sample[i])
@@ -245,7 +223,7 @@ struct IdentifySampleSliceBySliceFunctor
       return;
     }
 
-    // BFS for hole filling
+    // Fill false components that do not touch a plane edge.
     checked.assign(sliceSize, false);
     if(fillHoles)
     {
@@ -306,13 +284,19 @@ struct IdentifySampleSliceBySliceFunctor
   }
 
   /**
-   * @brief Performs BFS-based sample identification on each 2D slice of the given plane.
-   * @param imageGeom The image geometry providing dimensions.
-   * @param goodVoxelsPtr The mask array marking sample vs. non-sample voxels.
-   * @param fillHoles Whether to fill interior holes in each slice.
-   * @param plane Which orthogonal plane to slice along.
-   * @param messageHandler Handler for progress messages.
-   * @param shouldCancel Cancellation flag checked between slices.
+   * @brief Processes each selected plane through a buffered BFS.
+   * @tparam T Mask value type.
+   * @param imageGeom Supplies dimensions.
+   * @param goodVoxelsPtr Mask modified in place.
+   * @param fillHoles True to fill false components that do not touch a plane edge.
+   * @param plane Selected plane orientation.
+   * @param messageHandler Receives slice messages.
+   * @param shouldCancel Signals cancellation between planes and BFS phases.
+   * @pre imageGeom and goodVoxelsPtr are not null.
+   *
+   * The non-Bool YZ path can retain 64 YZ planes and one XY Z-slice at the same
+   * time. Other paths retain one selected plane. The function ignores all
+   * copyIntoBuffer() and copyFromBuffer() results.
    */
   template <typename T>
   void operator()(const ImageGeom* imageGeom, IDataArray* goodVoxelsPtr, bool fillHoles, Plane plane, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
@@ -359,9 +343,7 @@ struct IdentifySampleSliceBySliceFunctor
 
     const usize sliceSize = static_cast<usize>(planeDim1 * planeDim2);
 
-    // YZ batched path: read each Z-slice once per batch instead of once per X
-    // position. This reduces HDF5 ops from fixedDim × dimZ to
-    // ceil(fixedDim/batch) × dimZ × 3, giving ~10x speedup for OOC.
+    // Batch YZ columns so that one Z-slice read supplies as many as 64 planes.
     if constexpr(!std::is_same_v<T, bool>)
     {
       if(plane == Plane::YZ)
@@ -380,14 +362,14 @@ struct IdentifySampleSliceBySliceFunctor
           const int64 batchEnd = std::min(batchStart + k_BatchSize, fixedDim);
           const int64 batchCount = batchEnd - batchStart;
 
-          // Allocate column buffers for this batch
+          // Retain one plane buffer for each X position in this batch.
           std::vector<std::unique_ptr<T[]>> columnBuffers(static_cast<usize>(batchCount));
           for(int64 b = 0; b < batchCount; b++)
           {
             columnBuffers[static_cast<usize>(b)] = std::make_unique<T[]>(sliceSize);
           }
 
-          // Phase A: Read each Z-slice once, extract columns for all batch members
+          // Read each Z-slice once and extract all batch columns.
           for(int64 z = 0; z < dimZ; z++)
           {
             goodVoxels.copyIntoBuffer(static_cast<usize>(z) * zSliceElements, nonstd::span<T>(zSliceBuf.data(), zSliceElements));
@@ -401,7 +383,7 @@ struct IdentifySampleSliceBySliceFunctor
             }
           }
 
-          // Phase B: BFS each column buffer independently
+          // Process each column plane independently.
           for(int64 b = 0; b < batchCount; b++)
           {
             if(shouldCancel)
@@ -411,7 +393,7 @@ struct IdentifySampleSliceBySliceFunctor
             processSlice(columnBuffers[static_cast<usize>(b)].get(), sliceSize, planeDim1, planeDim2, fillHoles, shouldCancel);
           }
 
-          // Phase C: Write back — read each Z-slice, insert columns, write
+          // Read each Z-slice, insert all batch columns, and write it back.
           for(int64 z = 0; z < dimZ; z++)
           {
             goodVoxels.copyIntoBuffer(static_cast<usize>(z) * zSliceElements, nonstd::span<T>(zSliceBuf.data(), zSliceElements));
@@ -426,11 +408,11 @@ struct IdentifySampleSliceBySliceFunctor
             goodVoxels.copyFromBuffer(static_cast<usize>(z) * zSliceElements, nonstd::span<const T>(zSliceBuf.data(), zSliceElements));
           }
         }
-        return; // YZ batched processing complete
+        return;
       }
     }
 
-    // XY / XZ / YZ-bool path: process one plane at a time
+    // Process one XY, XZ, or Bool YZ plane at a time.
     auto sliceBuffer = std::make_unique<T[]>(sliceSize);
 
     for(int64 fixedIdx = 0; fixedIdx < fixedDim; ++fixedIdx)
@@ -441,16 +423,15 @@ struct IdentifySampleSliceBySliceFunctor
       }
       messageHandler(IFilter::Message::Type::Info, fmt::format("Slice {}", fixedIdx));
 
-      // Read the 2D slice into a local buffer using bulk reads where possible.
+      // Read the plane with bulk transfers where its layout permits them.
       if(stride1 == 1 && stride2 == planeDim1)
       {
-        // XY plane: entire slice is contiguous in memory. Single bulk read.
+        // An XY plane is contiguous.
         goodVoxels.copyIntoBuffer(static_cast<usize>(fixedIdx * fixedStride), nonstd::span<T>(sliceBuffer.get(), sliceSize));
       }
       else if(stride1 == 1)
       {
-        // XZ plane: each row of planeDim1 elements is contiguous, but rows
-        // are separated by stride2 (dimX*dimY). Read row-by-row.
+        // Each XZ row is contiguous.
         for(int64 p2 = 0; p2 < planeDim2; ++p2)
         {
           usize rowStart = static_cast<usize>(fixedIdx * fixedStride + p2 * stride2);
@@ -459,7 +440,7 @@ struct IdentifySampleSliceBySliceFunctor
       }
       else
       {
-        // YZ plane (bool type fallback): per-element access.
+        // AbstractDataStore<bool> requires individual YZ values here.
         for(int64 p2 = 0; p2 < planeDim2; ++p2)
         {
           for(int64 p1 = 0; p1 < planeDim1; ++p1)
@@ -471,15 +452,15 @@ struct IdentifySampleSliceBySliceFunctor
 
       processSlice(sliceBuffer.get(), sliceSize, planeDim1, planeDim2, fillHoles, shouldCancel);
 
-      // Write the modified slice back to the DataStore using bulk writes where possible.
+      // Write the plane with bulk transfers where its layout permits them.
       if(stride1 == 1 && stride2 == planeDim1)
       {
-        // XY plane: entire slice is contiguous in memory. Single bulk write.
+        // An XY plane is contiguous.
         goodVoxels.copyFromBuffer(static_cast<usize>(fixedIdx * fixedStride), nonstd::span<const T>(sliceBuffer.get(), sliceSize));
       }
       else if(stride1 == 1)
       {
-        // XZ plane: each row of planeDim1 elements is contiguous. Write row-by-row.
+        // Each XZ row is contiguous.
         for(int64 p2 = 0; p2 < planeDim2; ++p2)
         {
           usize rowStart = static_cast<usize>(fixedIdx * fixedStride + p2 * stride2);
@@ -488,7 +469,7 @@ struct IdentifySampleSliceBySliceFunctor
       }
       else
       {
-        // YZ plane (bool type fallback): per-element write-back.
+        // AbstractDataStore<bool> requires individual YZ values here.
         for(int64 p2 = 0; p2 < planeDim2; ++p2)
         {
           for(int64 p1 = 0; p1 < planeDim1; ++p1)

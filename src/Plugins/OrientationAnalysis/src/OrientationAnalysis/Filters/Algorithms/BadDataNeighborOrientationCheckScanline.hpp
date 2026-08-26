@@ -13,37 +13,17 @@ struct BadDataNeighborOrientationCheckInputValues;
 
 /**
  * @class BadDataNeighborOrientationCheckScanline
- * @brief Out-of-core (Scanline) algorithm for the bad-data neighbor orientation check.
+ * @brief Rehabilitates bad voxels with scanline OOC I/O.
  *
- * This algorithm is selected by the dispatcher when any of the quaternion, mask, or
- * phase arrays are backed by chunked (OOC) storage. It avoids random-access patterns
- * that would cause chunk thrashing by using a 3-slice rolling window over the Z axis.
+ * The dispatcher selects this class when a required per-voxel array is OOC. Three Z-slice
+ * buffers provide face-neighbor data through bulk reads. The algorithm recomputes neighbor counts
+ * instead of maintaining a global count array that would require random OOC writes. Levels descend
+ * from six to the requested count. Each level scans until no mask value changes. Cancellation is
+ * checked before each Z slice and returns success with already applied mask changes.
  *
- * **Strategy -- rolling window with on-the-fly neighbor counting**:
- *
- * For each "level" (starting at 6, decrementing to NumberOfNeighbors), the algorithm
- * repeatedly scans the entire volume until no more voxels are flipped:
- *
- *   1. Load Z-slices 0 (current) and 1 (next) via bulk copyIntoBuffer() for
- *      quaternions, phases, and the mask.
- *   2. For each Z-slice, iterate over every (x, y) in the slice:
- *      - If the voxel is already good, skip it.
- *      - Otherwise, check its 6 face-neighbors (4 in-plane from curSlice, 1 from
- *        prevSlice, 1 from nextSlice) for good voxels with matching orientation.
- *      - If the count of matching neighbors >= currentLevel, flip the mask to true
- *        in the local buffer.
- *   3. If any voxels were flipped in the current Z-slice, write the updated mask
- *      back to the OOC store via copyFromBuffer().
- *   4. Shift the rolling window: prev <- cur, cur <- next, and load the next
- *      Z-slice into the "next" buffer.
- *
- * **Key difference from the Worklist variant**: Neighbor counts are recomputed from
- * scratch for every bad voxel on every pass, because maintaining a persistent global
- * neighborCount array would require random-access OOC writes whenever a voxel flips.
- * The rolling-window scan approach trades more computation for strictly sequential I/O.
- *
- * **Memory footprint**: O(3 * sliceSize) for the rolling window buffers -- three
- * Z-slices of quaternions, phases, and mask data. No global per-voxel arrays.
+ * The rolling window bounds memory to three quaternion, phase, and mask slices. The bool-mask path
+ * also needs one raw bool scratch slice. The algorithm runs sequentially and gives no concurrent
+ * DataArray or DataStore access guarantee. Current slice bulk-I/O Result values are not inspected.
  *
  * @see BadDataNeighborOrientationCheckWorklist for the in-core worklist variant.
  */
@@ -51,14 +31,20 @@ class ORIENTATIONANALYSIS_EXPORT BadDataNeighborOrientationCheckScanline
 {
 public:
   /**
-   * @brief Constructs the OOC scanline neighbor orientation check algorithm.
-   * @param dataStructure The DataStructure containing all input/output arrays.
-   * @param mesgHandler Message handler for progress/info messages.
-   * @param shouldCancel Atomic cancellation flag checked once per Z-slice.
-   * @param inputValues Pointer to the shared parameter struct; must outlive this object.
+   * @brief Initializes the scanline bad-data executor.
+   * @param dataStructure Provides the selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies the selected arrays and settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   BadDataNeighborOrientationCheckScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                           const BadDataNeighborOrientationCheckInputValues* inputValues);
+
+  /**
+   * @brief Destroys the scanline bad-data executor.
+   */
   ~BadDataNeighborOrientationCheckScanline() noexcept;
 
   BadDataNeighborOrientationCheckScanline(const BadDataNeighborOrientationCheckScanline&) = delete;
@@ -67,17 +53,21 @@ public:
   BadDataNeighborOrientationCheckScanline& operator=(BadDataNeighborOrientationCheckScanline&&) noexcept = delete;
 
   /**
-   * @brief Flips bad voxels to good using Z-slice rolling window bulk I/O with
-   *        on-the-fly neighbor count recomputation.
-   * @return Result<> with any errors (e.g., invalid mask path).
+   * @brief Rehabilitates eligible bad voxels.
+   * @pre Cell phase IDs are nonnegative and within the crystal-structure array.
+   * @return An error if the mask type is unsupported or crystal structures are
+   *         invalid.
+   *
+   * Cancellation returns success with already applied mask changes. Slice
+   * bulk-I/O Result values are not inspected.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                            ///< Reference to the live DataStructure.
-  const BadDataNeighborOrientationCheckInputValues* m_InputValues = nullptr; ///< Borrowed pointer to input parameters.
-  const std::atomic_bool& m_ShouldCancel;                                    ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                           ///< Message handler for user-facing messages.
+  DataStructure& m_DataStructure;
+  const BadDataNeighborOrientationCheckInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

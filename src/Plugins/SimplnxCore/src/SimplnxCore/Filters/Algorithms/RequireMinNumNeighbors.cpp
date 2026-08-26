@@ -15,10 +15,10 @@ using namespace nx::core;
 
 namespace
 {
+// One marking and renumbering transfer contains at most 65,536 Feature IDs.
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 RequireMinNumNeighbors::RequireMinNumNeighbors(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                RequireMinNumNeighborsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -28,10 +28,8 @@ RequireMinNumNeighbors::RequireMinNumNeighbors(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 RequireMinNumNeighbors::~RequireMinNumNeighbors() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> RequireMinNumNeighbors::operator()()
 {
   auto& featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsPath)->getDataStoreRef();
@@ -41,10 +39,8 @@ Result<> RequireMinNumNeighbors::operator()()
   usize totalPoints = imageGeom.getNumberOfCells();
   usize totalFeatures = numNeighbors.getNumberOfTuples();
 
-  // If running on a single phase, validate that the user has not entered a phase number that is not
-  // in the system; the filter would not crash otherwise, but the user should be notified of
-  // unanticipated behavior. This cannot be done in the dataCheck since we don't have access to the
-  // data yet.
+  // Fail early when the selected phase has no feature. The feature scan uses
+  // direct feature-level access and occurs before cell data changes.
   if(m_InputValues->ApplyToSinglePhase)
   {
     auto& featurePhases = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeaturePhasesPath)->getDataStoreRef();
@@ -68,8 +64,7 @@ Result<> RequireMinNumNeighbors::operator()()
     }
   }
 
-  // Phase 1: mark removed features' voxels as -1 and renumber survivors to their compacted id in a
-  // single chunked bulk-I/O pass.
+  // Mark removed cells and compact surviving IDs in one cell pass.
   Error errorReturn = {0, ""};
   std::vector<bool> activeObjects = removeFeaturesUnderNeighborThreshold(featureIds, numNeighbors, totalPoints, errorReturn);
   if(errorReturn.code < 0)
@@ -84,9 +79,7 @@ Result<> RequireMinNumNeighbors::operator()()
   auto numInactiveObjects = std::count(activeObjects.begin(), activeObjects.end(), false);
   m_MessageHandler({nx::core::IFilter::Message::Type::Info, fmt::format("Removing {} features", numInactiveObjects)});
 
-  // Phase 2: fill the -1 voxels by majority-voting among face-neighbors and transferring the chosen
-  // neighbor's tuples. Because Phase 1 already compacted the surviving ids, the filled voxels inherit
-  // compacted ids for free.
+  // Fill negative cells after compaction so filled cells inherit compact IDs.
   Result<> assignResult = assignBadVoxels(imageGeom.getDimensions(), totalFeatures);
   if(assignResult.invalid())
   {
@@ -108,9 +101,8 @@ Result<> RequireMinNumNeighbors::operator()()
   m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Feature Count Changed: Previous: {} New: {}", totalFeatures, count));
 
   DataPath cellFeatureGroupPath = m_InputValues->NumNeighborsPath.getParent();
-  // Phase 1 already renumbered the surviving FeatureIds to their compacted ids (and Phase 2 propagated
-  // those compacted ids into the filled voxels), so tell RemoveInactiveObjects to skip its full-volume
-  // FeatureIds renumber pass and only compact/resize the feature-level arrays.
+  // Cell IDs already use the shared compaction map. Skip another cell pass and
+  // compact only the feature-level arrays.
   if(!nx::core::RemoveInactiveObjects(m_DataStructure, cellFeatureGroupPath, activeObjects, featureIds, totalFeatures, m_MessageHandler, m_ShouldCancel,
                                       /*cellFeatureIdsRenumbered=*/true))
   {
@@ -121,15 +113,13 @@ Result<> RequireMinNumNeighbors::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
 std::vector<bool> RequireMinNumNeighbors::removeFeaturesUnderNeighborThreshold(Int32AbstractDataStore& featureIds, const Int32AbstractDataStore& numNeighbors, usize totalPoints, Error& errorReturn)
 {
   usize totalFeatures = numNeighbors.getNumberOfTuples();
   std::vector<bool> activeObjects(totalFeatures, true);
 
-  // A feature stays active if it meets the neighbor threshold (or, in single-phase mode, if it is not
-  // in the target phase). `valid` becomes true as soon as any feature survives; if none do, all
-  // features would be removed and the run is an error.
+  // A feature survives when it meets the threshold or is outside the selected
+  // phase. At least one nonbackground feature must survive.
   bool valid = false;
   if(m_InputValues->ApplyToSinglePhase)
   {
@@ -174,17 +164,12 @@ std::vector<bool> RequireMinNumNeighbors::removeFeaturesUnderNeighborThreshold(I
     return activeObjects;
   }
 
-  // Compaction mapping for the surviving features. Computed with the shared helper so it matches
-  // exactly what RemoveInactiveObjects uses to compact the feature arrays.
+  // Use the same stable mapping that later compacts feature arrays.
   const FeatureRenumbering renumbering = ComputeFeatureRenumbering(activeObjects);
   const std::vector<size_t>& newNames = renumbering.newNames;
 
-  // Single chunked bulk-I/O pass over FeatureIds that BOTH marks removed features' voxels as -1 AND
-  // renumbers surviving voxels to their compacted id. Folding the renumber in here (this pass already
-  // reads and writes FeatureIds) lets operator() pass cellFeatureIdsRenumbered=true to
-  // RemoveInactiveObjects, eliminating its separate full-volume renumber read+write pass. The bad (-1)
-  // voxels are filled by assignBadVoxels using neighbor values that are now already compacted, so the
-  // final FeatureIds are identical to marking-then-renumbering. Only modified chunks are written back.
+  // Fuse marking and renumbering because both operations require the same cell
+  // read. Write only chunks that change. Current bulk-I/O results are discarded.
   auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
   for(usize offset = 0; offset < totalPoints; offset += k_ChunkTuples)
   {
@@ -222,7 +207,6 @@ std::vector<bool> RequireMinNumNeighbors::removeFeaturesUnderNeighborThreshold(I
   return activeObjects;
 }
 
-// -----------------------------------------------------------------------------
 Result<> RequireMinNumNeighbors::assignBadVoxels(SizeVec3 dimensions, usize totalFeatures)
 {
   return FillBadVoxels(m_DataStructure, m_InputValues->FeatureIdsPath, dimensions, m_InputValues->IgnoredVoxelArrayPaths, totalFeatures, m_MessageHandler, m_ShouldCancel);

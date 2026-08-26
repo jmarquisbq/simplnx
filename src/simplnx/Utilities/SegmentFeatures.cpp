@@ -25,9 +25,14 @@ constexpr uint64 k_RecordsPerPage = 4096;
 constexpr usize k_MaxCachedPages = 16;
 
 /**
- * @brief Creates fixed-record CCL scratch with a deliberately explicit fallback policy.
- * Genuine OOC input passes false so equivalence tables cannot silently become
- * volume-scale RAM allocations; forced OOC tests may permit the resident provider.
+ * @brief Creates fixed-record connected-component scratch.
+ * @param recordSize Specifies bytes per record.
+ * @param recordCount Specifies initial records.
+ * @param allowInMemoryFallback Permits a resident provider when true.
+ * @return Temporary store or provider error.
+ *
+ * Genuine OOC input disables resident fallback. This prevents equivalence tables
+ * from silently becoming volume-scale RAM allocations.
  */
 Result<std::unique_ptr<ITemporaryRecordStore>> CreateTemporaryRecordStore(uint64 recordSize, uint64 recordCount, bool allowInMemoryFallback)
 {
@@ -54,6 +59,7 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateTemporaryRecordStore(uint64
 }
 
 /**
+ * @class LabelEquivalence
  * @brief Storage-neutral union/find and final-label table for scanline CCL.
  *
  * Resident execution delegates to UnionFind and a vector. OOC execution stores
@@ -63,7 +69,13 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateTemporaryRecordStore(uint64
 class LabelEquivalence
 {
 public:
-  /** @brief Constructs the resident or external backend for labels [0, maximumLabel]. */
+  /**
+   * @brief Creates resident or external state for a maximum provisional label.
+   * @param useExternalStorage Selects temporary record stores when true.
+   * @param maximumLabel Specifies the largest possible provisional label.
+   * @param allowInMemoryFallback Permits resident temporary stores when true.
+   * @return Initialized equivalence state or allocation/provider error.
+   */
   static Result<std::unique_ptr<LabelEquivalence>> Create(bool useExternalStorage, uint64 maximumLabel, bool allowInMemoryFallback)
   {
     try
@@ -105,7 +117,12 @@ public:
     }
   }
 
-  /** @brief Returns the canonical root of a provisional label. */
+  /**
+   * @brief Finds the canonical root of one provisional label.
+   * @param label Specifies the provisional label.
+   * @param shouldCancel Stops external cache work when true.
+   * @return Canonical root or external-store error.
+   */
   Result<uint64> find(uint64 label, const std::atomic_bool& shouldCancel)
   {
     if(m_UseExternalStorage)
@@ -115,7 +132,12 @@ public:
     return {static_cast<uint64>(m_DirectEquivalence.find(static_cast<int64>(label)))};
   }
 
-  /** @brief Lazily materializes a label in the selected union/find backend. */
+  /**
+   * @brief Materializes one provisional label in the selected backend.
+   * @param label Specifies the provisional label.
+   * @param shouldCancel Stops external cache work when true.
+   * @return External-store error or success.
+   */
   Result<> initialize(uint64 label, const std::atomic_bool& shouldCancel)
   {
     auto result = find(label, shouldCancel);
@@ -126,7 +148,13 @@ public:
     return {};
   }
 
-  /** @brief Records that two provisional scanline labels represent one feature. */
+  /**
+   * @brief Unites two provisional labels.
+   * @param left Specifies the first label.
+   * @param right Specifies the second label.
+   * @param shouldCancel Stops external cache work when true.
+   * @return External-store error or success.
+   */
   Result<> unite(uint64 left, uint64 right, const std::atomic_bool& shouldCancel)
   {
     if(m_UseExternalStorage)
@@ -137,7 +165,11 @@ public:
     return {};
   }
 
-  /** @brief Allocates/normalizes state needed for the final dense relabeling pass. */
+  /**
+   * @brief Prepares state for dense final relabeling.
+   * @param nextLabel Specifies one past the largest provisional label.
+   * @return Allocation error or success.
+   */
   Result<> prepareFinalLabels(uint64 nextLabel)
   {
     if(!m_UseExternalStorage)
@@ -156,6 +188,11 @@ public:
 
   /**
    * @brief Maps one provisional label's root to a stable dense Int32 feature ID.
+   * @param label Specifies the provisional label.
+   * @param finalFeatureCount Provides and receives the largest dense ID.
+   * @param shouldCancel Stops external cache work when true.
+   * @return Dense Feature ID or external-store error.
+   *
    * The mapping is cached so later voxels in the same component avoid another root walk.
    */
   Result<int32> resolveFinalLabel(uint64 label, int32& finalFeatureCount, const std::atomic_bool& shouldCancel)
@@ -206,7 +243,11 @@ public:
     return {rootFinal};
   }
 
-  /** @brief Commits external equivalence and final-label pages between CCL phases. */
+  /**
+   * @brief Flushes external equivalence and final-label pages.
+   * @param shouldCancel Stops before later cache flushes when true.
+   * @return First external-store error, or success.
+   */
   Result<> flush(const std::atomic_bool& shouldCancel)
   {
     if(!m_UseExternalStorage)
@@ -222,7 +263,12 @@ public:
   }
 
 private:
-  /** @brief Reads a previously assigned dense label, or zero when unresolved. */
+  /**
+   * @brief Reads a cached dense label.
+   * @param label Specifies a provisional label or root.
+   * @param shouldCancel Stops external cache work when true.
+   * @return Dense label, zero when unresolved, or external-store error.
+   */
   Result<int32> finalLabel(uint64 label, const std::atomic_bool& shouldCancel)
   {
     if(m_UseExternalStorage)
@@ -232,7 +278,13 @@ private:
     return {m_DirectFinalLabels[static_cast<usize>(label)]};
   }
 
-  /** @brief Caches the dense label for a provisional label or root. */
+  /**
+   * @brief Caches one dense label.
+   * @param label Specifies a provisional label or root.
+   * @param finalLabel Specifies its dense Feature ID.
+   * @param shouldCancel Stops external cache work when true.
+   * @return External-store error or success.
+   */
   Result<> setFinalLabel(uint64 label, int32 finalLabel, const std::atomic_bool& shouldCancel)
   {
     if(m_UseExternalStorage)
@@ -254,7 +306,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 SegmentFeatures::SegmentFeatures(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler)
 : m_DataStructure(dataStructure)
 , m_ShouldCancel(shouldCancel)
@@ -262,47 +313,13 @@ SegmentFeatures::SegmentFeatures(DataStructure& dataStructure, const std::atomic
 {
 }
 
-// -----------------------------------------------------------------------------
 SegmentFeatures::~SegmentFeatures() = default;
 
-// =============================================================================
-// Connected Component Labeling (CCL) Segmentation
-// =============================================================================
-//
-// This method segments voxels into features using a scanline-based
-// connected-component labeling algorithm. It processes voxels in strict Z-Y-X
-// scanline order, which yields sequential data-store access patterns and keeps
-// the working set bounded to a rolling two-slice window regardless of volume
-// size.
-//
-// The algorithm has three phases:
-//
-// Phase 1 (Forward CCL):
-//   Scan voxels in Z-Y-X order. For each valid voxel, examine only its
-//   "backward" neighbors — those already visited earlier in scanline order.
-//   If a backward neighbor has a label and is similar (per areNeighborsSimilar),
-//   adopt that label. If multiple distinct labels are found among backward
-//   neighbors, unite them in a Union-Find structure. If no backward neighbor
-//   matches, assign a fresh provisional label. Labels are written to both an
-//   rolling two-slice buffer (for fast neighbor lookups) and to the featureIds
-//   store (for persistence).
-//
-// Phase 1b (Periodic boundary merge):
-//   If periodic boundaries are enabled, Phase 1 cannot detect connections
-//   that wrap around the volume (the wrapped neighbor has a higher linear
-//   index and hasn't been visited yet). This phase reads back provisional
-//   labels and unites similar voxels on opposite boundary faces.
-//
-// Phase 2 (Resolution + Relabeling):
-//   Resolve each provisional label through either the in-core Union-Find table
-//   or the bounded external equivalence store, then map roots to contiguous
-//   final feature IDs. The final-label map is likewise resident for Direct and
-//   disk-backed/page-cached for OOC. Write final IDs back one slice at a time.
-// =============================================================================
+// CCL uses three stages. The forward scan creates provisional labels and
+// equivalences. Periodic merging joins wrapped boundaries. Final resolution writes dense IDs.
 Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<int32>& featureIdsStore, bool usesOutOfCoreInput)
 {
   const SizeVec3 udims = gridGeom->getDimensions();
-  // getDimensions() returns [X, Y, Z]
   const int64 dimX = static_cast<int64>(udims[0]);
   const int64 dimY = static_cast<int64>(udims[1]);
   const int64 dimZ = static_cast<int64>(udims[2]);
@@ -323,33 +340,14 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
     return ConvertResult(std::move(equivalenceResult));
   }
   auto equivalences = std::move(equivalenceResult.value());
-  int32 nextLabel = 1; // Provisional labels start at 1
+  int32 nextLabel = 1;
 
-  // Rolling 2-slice buffer for backward neighbor label lookups.
-  //
-  // Why 2 slices is sufficient:
-  //   In Z-Y-X scanline order, a voxel at (ix, iy, iz) has backward neighbors
-  //   only in the current Z-slice (iz) or the immediately previous Z-slice
-  //   (iz-1). No backward neighbor can ever be in Z-slice (iz-2) or earlier,
-  //   because all 13 backward neighbor offsets have dz in {-1, 0}. Therefore,
-  //   keeping just 2 slices in memory — the current and the previous — is
-  //   enough for all backward neighbor label reads.
-  //
-  // This design uses O(dimX * dimY) memory instead of O(dimX * dimY * dimZ),
-  // enabling processing of datasets much larger than available RAM.
-  //
-  // Buffer layout: Z-slice (iz % 2) occupies indices
-  //   [sliceOffset .. sliceOffset + sliceStride), where
-  //   sliceOffset = (iz % 2) * sliceSize.
+  // Backward neighbors use only the current and previous Z slices. A two-slice
+  // rolling buffer therefore keeps label memory proportional to slice area.
   const usize sliceSize = static_cast<usize>(sliceStride);
   std::vector<int32> labelBuffer(2 * sliceSize, 0);
 
-  // =========================================================================
-  // Phase 1: Forward CCL - assign provisional labels using backward neighbors
-  // =========================================================================
-  // Slice buffer for batch-writing featureIds to the data store.
-  // Phase 1 only writes to featureIdsStore (never reads), so we accumulate
-  // writes per Z-slice and flush once via copyFromBuffer at slice end.
+  // The forward pass writes one complete Feature-ID slice at a time.
   std::vector<int32> featureIdsSlice(sliceSize, 0);
 
   for(int64 iz = 0; iz < dimZ; iz++)
@@ -365,11 +363,10 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
       return prepareResult;
     }
 
-    // Zero the featureIds slice buffer for this Z-slice (prevents stale
-    // labels from the previous slice being written back for invalid voxels)
+    // Clear invalid-voxel positions before the slice write.
     std::fill(featureIdsSlice.begin(), featureIdsSlice.end(), 0);
 
-    // Clear the current slice's portion of the rolling buffer
+    // Reuse the current rolling-buffer slot for this slice.
     const usize currentSliceOffset = static_cast<usize>(iz % 2) * sliceSize;
     std::fill(labelBuffer.begin() + currentSliceOffset, labelBuffer.begin() + currentSliceOffset + sliceSize, 0);
 
@@ -380,35 +377,20 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
         const int64 index = iz * sliceStride + iy * dimX + ix;
         const usize bufIdx = currentSliceOffset + static_cast<usize>(iy * dimX + ix);
 
-        // Skip voxels that are not valid
         if(!isValidVoxel(index))
         {
           continue;
         }
 
-        // Check backward neighbors for existing labels.
-        // "Backward" neighbors are those with a smaller linear index — i.e.,
-        // already processed earlier in Z-Y-X scanline order. In 3D, these are
-        // neighbors with dz < 0, or dz == 0 && dy < 0, or dz == 0 && dy == 0
-        // && dx < 0. Forward neighbors (higher linear index) are not yet
-        // labeled and cannot be consulted.
-        //
-        // Neighbor labels are read from the rolling buffer (direct memory
-        // access, O(1)) rather than from the OOC featureIds store, avoiding
-        // chunk loads for every neighbor lookup.
+        // A backward neighbor has a smaller Z-Y-X linear index and already has
+        // a provisional label. Read these labels from the rolling buffer.
         int32 assignedLabel = 0;
         const usize prevSliceOffset = static_cast<usize>((iz + 1) % 2) * sliceSize;
 
         if(useFaceOnly)
         {
-          // Face connectivity: exactly 3 backward neighbors exist:
-          //   -X (dx=-1): one column to the left in the same row/slice
-          //   -Y (dy=-1): one row earlier in the same slice
-          //   -Z (dz=-1): same (x,y) position in the previous slice
-          // The 3 forward neighbors (+X, +Y, +Z) have not been labeled yet
-          // and are skipped.
+          // Face connectivity checks the three labeled directions: -X, -Y, and -Z.
 
-          // Check -X neighbor (same Z-slice, same buffer region)
           if(ix > 0)
           {
             const int64 neighIdx = index - 1;
@@ -429,7 +411,6 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
               }
             }
           }
-          // Check -Y neighbor (same Z-slice, same buffer region)
           if(iy > 0)
           {
             const int64 neighIdx = index - dimX;
@@ -450,7 +431,6 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
               }
             }
           }
-          // Check -Z neighbor (previous Z-slice, other buffer region)
           if(iz > 0)
           {
             const int64 neighIdx = index - sliceStride;
@@ -474,21 +454,8 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
         }
         else
         {
-          // FaceEdgeVertex connectivity: 13 backward neighbors out of 26 total.
-          //
-          // A 3x3x3 neighborhood has 26 neighbors (excluding self). Exactly
-          // half (13) have a smaller linear index in Z-Y-X order and are thus
-          // "backward." These are enumerated by iterating:
-          //   dz in {-1, 0}:
-          //     dz=-1: all 9 neighbors in the previous Z-slice (any dx, dy)
-          //     dz= 0: only neighbors with dy < 0 (3 neighbors), or
-          //            dy == 0 && dx == -1 (1 neighbor) => 4 total
-          //   Total: 9 + 4 = 13 backward neighbors
-          //
-          // The loop bounds below encode this enumeration efficiently:
-          //   - dz ranges [-1, 0]
-          //   - dy ranges [-1, +1] when dz<0, or [-1, 0] when dz==0
-          //   - dx ranges [-1, +1] when dz<0 or dy<0, or [-1, -1] when dz==0 && dy==0
+          // Complete connectivity has 13 backward neighbors. The previous slice
+          // supplies nine. The current slice supplies three from -Y and one from -X.
           for(int64 dz = -1; dz <= 0; ++dz)
           {
             const int64 nz = iz + dz;
@@ -562,7 +529,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
           }
         }
 
-        // If no matching backward neighbor, assign new provisional label
+        // Create a provisional label when no backward neighbor matches.
         if(assignedLabel == 0)
         {
           if(nextLabel == std::numeric_limits<int32>::max())
@@ -577,14 +544,14 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
           }
         }
 
-        // Write label to rolling buffer (for neighbor reads) and slice buffer (for batch write)
+        // Keep the label for neighbor lookup and the final slice write.
         labelBuffer[bufIdx] = assignedLabel;
         const usize inSlice = static_cast<usize>(iy * dimX + ix);
         featureIdsSlice[inSlice] = assignedLabel;
       }
     }
 
-    // Batch-write this Z-slice's featureIds to the data store
+    // Write the completed provisional-label slice.
     auto writeResult = featureIdsStore.copyFromBuffer(static_cast<usize>(iz) * sliceSize, nonstd::span<const int32>(featureIdsSlice.data(), sliceSize));
     if(writeResult.invalid())
     {
@@ -597,35 +564,17 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
     return {};
   }
 
-  // =========================================================================
-  // Phase 1b: Periodic boundary merge (O(slice) memory)
-  // =========================================================================
-  // The forward CCL pass cannot detect connections that wrap around periodic
-  // boundaries because the wrapped neighbor has a higher linear index and
-  // has not been processed yet when the boundary voxel is visited. This
-  // phase reads back provisional labels from featureIdsStore slice by slice
-  // and unites labels of similar voxels on opposite boundary faces.
-  //
-  // Memory strategy: instead of reading the entire volume into memory, we
-  // read featureIds one or two Z-slices at a time and call prepareForSlice()
-  // so areNeighborsSimilar() reads from the subclass's fast slice buffers.
-  // This keeps memory at O(dimX * dimY) rather than O(dimX * dimY * dimZ).
+  // The forward scan cannot see wrapped neighbors with higher linear indexes.
+  // Periodic merging reads one or two label slices and joins opposite boundaries.
   if(m_IsPeriodic)
   {
-    // Reusable slice-sized buffers for reading featureIds from the store
     std::vector<int32> featureIdsSliceCur(sliceSize, 0);
 
     if(useFaceOnly)
     {
-      // Face connectivity: each axis is handled independently because face
-      // neighbors only connect along a single axis. For each axis, we
-      // iterate over the 2D face and compare each voxel at the low boundary
-      // (e.g. ix=0) with its counterpart at the high boundary (e.g.
-      // ix=dimX-1). These are the wrapped neighbor pairs that Phase 1 could
-      // not process because the wrapped neighbor had not yet been labeled.
+      // Face connectivity compares low and high boundary faces independently.
 
-      // X-axis: unite voxels at ix=0 with ix=dimX-1
-      // Both voxels are in the same Z-slice, so one slice suffices.
+      // X boundaries share one Z slice.
       if(dimX > 1)
       {
         for(int64 iz = 0; iz < dimZ; iz++)
@@ -660,8 +609,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
         }
       }
 
-      // Y-axis: unite voxels at iy=0 with iy=dimY-1
-      // Both voxels are in the same Z-slice, so one slice suffices.
+      // Y boundaries share one Z slice.
       if(dimY > 1)
       {
         for(int64 iz = 0; iz < dimZ; iz++)
@@ -696,10 +644,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
         }
       }
 
-      // Z-axis: unite voxels at iz=0 with iz=dimZ-1
-      // These are in different Z-slices, so we read both into separate
-      // buffers. We call prepareForSlice for both so the 2-slot rolling
-      // buffer holds both slices for areNeighborsSimilar().
+      // Z boundaries use separate first-slice and last-slice buffers.
       if(dimZ > 1)
       {
         std::vector<int32> featureIdsSliceOther(sliceSize, 0);
@@ -714,8 +659,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
           return lastReadResult;
         }
 
-        // Load both slices into the subclass's 2-slot rolling buffer so
-        // areNeighborsSimilar() can compare voxels across these two slices.
+        // Prepare both boundary slices for subclass comparisons.
         auto firstPrepareResult = prepareForSlice(0, dimX, dimY, dimZ);
         if(firstPrepareResult.invalid())
         {
@@ -751,24 +695,9 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
     }
     else
     {
-      // FaceEdgeVertex connectivity: check all 26-neighbor pairs that wrap
-      // across periodic boundaries. Unlike face-only mode, edge and vertex
-      // neighbors can wrap across two or even three axes simultaneously
-      // (e.g. a corner voxel's diagonal neighbor wraps in X, Y, and Z).
-      //
-      // Memory strategy: iterate Z-slices one at a time. For each slice,
-      // read its featureIds into featureIdsSliceCur. Only Z-boundary slices
-      // (iz=0 and iz=dimZ-1) can have neighbors that wrap in Z; all other
-      // slices only have X/Y wrapping where both voxels are in the same
-      // Z-slice. For Z-boundary slices, we also read the wrapped partner
-      // slice (dimZ-1 or 0) into featureIdsSliceWrapped.
-      //
-      // The subclass's prepareForSlice 2-slot rolling buffer naturally
-      // holds both the current slice and the wrapped partner, so
-      // areNeighborsSimilar() works correctly.
-      //
-      // Pre-read featureIds for slices 0 and dimZ-1 into persistent buffers
-      // so they are available when either Z-boundary slice is processed.
+      // Complete connectivity can wrap across one, two, or three axes. Process
+      // one current Z slice and one optional wrapped partner slice.
+      // Keep first and last labels available for both Z-boundary passes.
       std::vector<int32> featureIdsSlice0(sliceSize, 0);
       std::vector<int32> featureIdsSliceLast(sliceSize, 0);
       auto firstReadResult = featureIdsStore.copyIntoBuffer(0, nonstd::span<int32>(featureIdsSlice0.data(), sliceSize));
@@ -792,7 +721,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
           return {};
         }
 
-        // Use the pre-read buffer for slices 0 and dimZ-1; read fresh for others
+        // Reuse boundary buffers and read each interior slice when needed.
         if(iz == 0)
         {
           std::copy(featureIdsSlice0.begin(), featureIdsSlice0.end(), featureIdsSliceCur.begin());
@@ -810,24 +739,20 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
           }
         }
 
-        // Load input data for the current slice
         auto prepareResult = prepareForSlice(iz, dimX, dimY, dimZ);
         if(prepareResult.invalid())
         {
           return prepareResult;
         }
 
-        // Determine if this is a Z-boundary slice and identify the wrapped
-        // partner. Only iz=0 can wrap to dimZ-1, and only iz=dimZ-1 can
-        // wrap to 0. Interior slices have no Z-wrapped neighbors.
+        // Only first and last Z slices need a wrapped partner.
         int64 wrappedPartnerZ = -1; // sentinel: no Z-wrapped partner
         const int32* wrappedSlicePtr = nullptr;
         if(iz == 0 && dimZ > 1)
         {
           wrappedPartnerZ = dimZ - 1;
           wrappedSlicePtr = featureIdsSliceLast.data();
-          // Load the wrapped partner into the 2-slot buffer so
-          // areNeighborsSimilar() can access both slices
+          // Prepare the wrapped partner for cross-slice comparisons.
           auto wrappedPrepareResult = prepareForSlice(wrappedPartnerZ, dimX, dimY, dimZ);
           if(wrappedPrepareResult.invalid())
           {
@@ -849,7 +774,7 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
         {
           for(int64 ix = 0; ix < dimX; ix++)
           {
-            // Only boundary voxels can have neighbors that wrap around
+            // Only boundary voxels can have wrapped neighbors.
             const bool onBoundary = (ix == 0 || ix == dimX - 1 || iy == 0 || iy == dimY - 1 || iz == 0 || iz == dimZ - 1);
             if(!onBoundary)
             {
@@ -914,25 +839,20 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
                     wrappedX = true;
                   }
 
-                  // Only process pairs that actually wrap around at least one
-                  // axis. Non-wrapped pairs were already handled in Phase 1.
+                  // The forward scan already processed every nonwrapped pair.
                   if(!wrappedX && !wrappedY && !wrappedZ)
                   {
                     continue;
                   }
 
                   const int64 neighIdx = nz * sliceStride + ny * dimX + nx;
-                  // Deduplication: only process the pair where neighIdx > index.
-                  // This ensures each (voxelA, voxelB) pair is united exactly
-                  // once, since unite() is symmetric.
+                  // Process each symmetric pair only from its smaller flat index.
                   if(neighIdx <= index)
                   {
                     continue;
                   }
 
-                  // Look up the neighbor's label from the appropriate slice buffer.
-                  // If the neighbor is in the same Z-slice, use featureIdsSliceCur.
-                  // If the neighbor is in the wrapped partner Z-slice, use wrappedSlicePtr.
+                  // Select the current or wrapped label slice from the neighbor Z index.
                   int32 labelNeigh = 0;
                   if(nz == iz)
                   {
@@ -971,24 +891,8 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
     return {};
   }
 
-  // =========================================================================
-  // Phase 2: Resolution + Relabeling (combined single pass)
-  // =========================================================================
-  //
-  // After Phase 1/1b, every valid voxel has a provisional label and the
-  // equivalence state knows which provisional labels belong to the same
-  // connected component. This phase scans voxels slice-by-slice, resolves the
-  // root and final ID through LabelEquivalence, and writes each completed slice
-  // back through copyFromBuffer. Direct keeps these tables resident; OOC keeps
-  // them in bounded page caches over temporary-record storage.
-  //
-  // Combining discovery and relabeling into a single pass halves the number
-  // of OOC accesses compared to doing them separately. The slice-sequential
-  // iteration order ensures optimal I/O patterns.
-  //
-  // Because the scan is in linear (Z-Y-X) order, final feature IDs are
-  // assigned in the order their first voxel appears in the volume.
-  // =========================================================================
+  // Resolve roots and write dense final IDs in one slice-sequential pass.
+  // First voxel appearance determines final Feature-ID order.
   auto prepareFinalLabelsResult = equivalences->prepareFinalLabels(static_cast<uint64>(nextLabel));
   if(prepareFinalLabelsResult.invalid())
   {
@@ -1048,25 +952,21 @@ Result<> SegmentFeatures::executeCCL(IGridGeometry* gridGeom, AbstractDataStore<
   return {};
 }
 
-// -----------------------------------------------------------------------------
 Result<> SegmentFeatures::prepareForSlice(int64 /*iz*/, int64 /*dimX*/, int64 /*dimY*/, int64 /*dimZ*/)
 {
   return {};
 }
 
-// -----------------------------------------------------------------------------
 bool SegmentFeatures::isValidVoxel(int64 point) const
 {
   return true;
 }
 
-// -----------------------------------------------------------------------------
 bool SegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
 {
   return false;
 }
 
-// -----------------------------------------------------------------------------
 void SegmentFeatures::randomizeFeatureIds(nx::core::Int32Array* featureIds, uint64 totalFeatures)
 {
   m_MessageHelper.sendMessage("Randomizing Feature Ids");

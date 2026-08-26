@@ -33,14 +33,14 @@ TEST_CASE("OrientationAnalysis::ComputeQuaternionConjugateFilter", "[Orientation
 {
   UnitTest::LoadPlugins();
 
+  // AlgorithmTestScope forces the selected path and records its target-call
+  // witness.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   DataStructure dataStructure;
 
-  // Build up a simple Float32Array and place default data into the array
   Float32Array* quats = UnitTest::CreateTestDataArray<float32>(dataStructure, k_QuatName, {4ULL}, {4ULL}, {});
 
   for(size_t i = 0; i < 16; i++)
@@ -69,21 +69,17 @@ TEST_CASE("OrientationAnalysis::ComputeQuaternionConjugateFilter", "[Orientation
   (*exemplarData)[14] = -14.0F;
   (*exemplarData)[15] = 15.0F;
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
     const ComputeQuaternionConjugateFilter filter;
 
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(ComputeQuaternionConjugateFilter::k_CellQuatsArrayPath_Key, std::make_any<DataPath>(DataPath({k_QuatName})));
     args.insertOrAssign(ComputeQuaternionConjugateFilter::k_OutputDataArrayName_Key, std::make_any<std::string>(k_ConvertedName));
     args.insertOrAssign(ComputeQuaternionConjugateFilter::k_DeleteOriginalData_Key, std::make_any<bool>(false));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 

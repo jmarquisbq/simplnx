@@ -108,7 +108,7 @@ TEST_CASE("SimplnxCore::CreateColorMapFilter: Valid filter execution")
 
   std::map<std::string, nlohmann::json> presetsMap = ReadPresets();
 
-  // Read Image File
+  // Load the image input.
   {
     const ReadTextDataArrayFilter filter;
     Arguments args;
@@ -123,7 +123,7 @@ TEST_CASE("SimplnxCore::CreateColorMapFilter: Valid filter execution")
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Apply Preset
+  // Apply the selected color preset.
   const CreateColorMapFilter filter;
   Arguments args;
   fs::path presetFilePath;
@@ -226,7 +226,7 @@ TEST_CASE("SimplnxCore::CreateColorMapFilter: Valid filter execution")
     IFilter::ExecuteResult executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-    // Validate Results
+    // Validate the generated colors.
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<UInt8Array>(DataPath{{"CI_RGB"}}));
     const UInt8Array& resultArray = dataStructure.getDataRefAs<UInt8Array>(DataPath{{"CI_RGB"}});
     const AbstractDataStore<uint8>& resultStore = resultArray.getDataStoreRef();

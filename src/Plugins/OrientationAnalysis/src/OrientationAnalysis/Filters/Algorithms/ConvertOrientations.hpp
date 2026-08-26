@@ -29,39 +29,40 @@ constexpr int32 k_MatchingTypesError = -67005;
 } // namespace convert_orientations_constants
 
 /**
- * @brief Input values for the ConvertOrientations algorithm.
+ * @struct ConvertOrientationsInputValues
+ * @brief Identifies orientation-conversion inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ConvertOrientationsInputValues
 {
-  ArraySelectionParameter::ValueType InputOrientationArrayPath;  ///< Cell-level Float32 input orientation array
-  ebsdlib::orientations::Type InputType;                         ///< Enumerated input representation type
-  DataObjectNameParameter::ValueType OutputOrientationArrayName; ///< Name for the output orientation array
-  ebsdlib::orientations::Type OutputType;                        ///< Enumerated output representation type
+  ArraySelectionParameter::ValueType InputOrientationArrayPath;
+  ebsdlib::orientations::Type InputType;
+  DataObjectNameParameter::ValueType OutputOrientationArrayName;
+  ebsdlib::orientations::Type OutputType;
 };
 
 /**
  * @class ConvertOrientations
- * @brief Converts between orientation representations (Euler angles, quaternions,
- *        orientation matrices, axis-angle, Rodrigues, homochoric, cubochoric,
- *        and stereographic projection).
+ * @brief Converts between EbsdLib orientation representations.
  *
- * A macro-generated parallel worker class is instantiated for each valid
- * input/output combination. The worker reads input tuples, converts each
- * orientation, and writes the result to the output array.
- *
- * ## OOC Optimization
- *
- * The macro-generated parallel worker classes now use chunked bulk I/O
- * internally (chunk size of 4096 tuples). Within each `operator()(Range)`
- * call, input data is read via `copyIntoBuffer()` and output data is written
- * via `copyFromBuffer()` in chunks, with the conversion loop operating on
- * contiguous local buffers. This replaces per-element `operator[]` access
- * that would trigger chunk load/evict cycles with OOC storage.
+ * Macro-generated workers convert 4,096-tuple local buffers. Bulk I/O avoids
+ * per-element OOC access.
  */
 class ORIENTATIONANALYSIS_EXPORT ConvertOrientations
 {
 public:
+  /**
+   * @brief Initializes orientation conversion.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies input and output representations.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ConvertOrientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ConvertOrientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the orientation-conversion executor.
+   */
   ~ConvertOrientations() noexcept;
 
   ConvertOrientations(const ConvertOrientations&) = delete;
@@ -70,24 +71,30 @@ public:
   ConvertOrientations& operator=(ConvertOrientations&&) noexcept = delete;
 
   /**
-   * @brief Executes the orientation conversion using parallel chunked bulk I/O.
-   * @return Result<> with any errors encountered during execution.
+   * @brief Converts orientations.
+   * @return Success.
+   *
+   * Cancellation returns success with completed chunks preserved.
    */
   Result<> operator()();
 
   /**
-   * @brief Returns true if the user has requested cancellation.
+   * @brief Returns the current cancellation state.
+   * @return True if cancellation has been requested.
    */
   bool shouldCancel() const;
 
   /**
-   * @brief Emits mutex-protected, time-throttled progress updates from parallel workers.
-   * @param counter Number of tuples completed by the caller.
+   * @brief Sends a throttled progress message.
+   * @param counter Specifies completed tuples.
+   *
+   * The mutex serializes progress state updates from workers.
    */
   void sendThreadSafeProgressMessage(usize counter);
 
   /**
-   * @brief Exposes the cancellation flag so streaming workers can poll it.
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
    */
   const std::atomic_bool& getCancel() const
   {

@@ -7,8 +7,24 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @struct CreateArrayFunctor
+ * @brief Dispatches array creation to a selected value type.
+ */
 struct CreateArrayFunctor
 {
+  /**
+   * @brief Creates one dispatched numeric array.
+   * @tparam T Dispatched array value type.
+   * @param dataStructure Destination data structure.
+   * @param tDims Row-major tuple dimensions.
+   * @param cDims Component dimensions.
+   * @param path Created array path.
+   * @param mode Preflight or execute action mode.
+   * @param dataFormat Requested storage format.
+   * @param fillValue Serialized initial value.
+   * @return Creation warnings or errors.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const std::vector<usize>& tDims, const std::vector<usize>& cDims, const DataPath& path, IDataAction::Mode mode, const std::string& dataFormat,
                       std::string fillValue)

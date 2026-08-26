@@ -300,18 +300,16 @@ void RunTest(const uint8& algoMapIndex, const ConvertColorToGrayScale::Conversio
 
   std::vector<DataPath> daps = {DataPath({m_GeomName, m_DataArrayName})};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ConvertColorToGrayScaleFilter filter;
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ConvertColorToGrayScaleFilter::k_ConversionAlgorithm_Key, std::make_any<ChoicesParameter::ValueType>(static_cast<uint64>(algorithm)));
   args.insertOrAssign(ConvertColorToGrayScaleFilter::k_ColorWeights_Key, std::make_any<VectorFloat32Parameter::ValueType>(colorWeights));
   args.insertOrAssign(ConvertColorToGrayScaleFilter::k_ColorChannel_Key, std::make_any<int32>(colorChannel));
   args.insertOrAssign(ConvertColorToGrayScaleFilter::k_InputDataArrayPath_Key, std::make_any<MultiArraySelectionParameter::ValueType>(daps));
   args.insertOrAssign(ConvertColorToGrayScaleFilter::k_OutputArrayPrefix_Key, std::make_any<StringParameter::ValueType>(m_outputArrayPrefix));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStruct, args);
   if(shouldFail)
   {
@@ -322,7 +320,6 @@ void RunTest(const uint8& algoMapIndex, const ConvertColorToGrayScale::Conversio
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
   }
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStruct, args);
   if(shouldFail)
   {
@@ -431,9 +428,9 @@ TEST_CASE("SimplnxCore::ConvertColorToGrayScaleFilter: SIMPL Backwards Compatibi
 
       const Arguments args = pipelineFilter->getArguments();
       CHECK(args.value<ChoicesParameter::ValueType>(ConvertColorToGrayScaleFilter::k_ConversionAlgorithm_Key) == 0);
-      // Complex type (FloatVec3FilterParameterConverter) - verified by successful pipeline loading
+      // Successful pipeline loading verifies the FloatVec3FilterParameterConverter value.
       CHECK(args.value<int32>(ConvertColorToGrayScaleFilter::k_ColorChannel_Key) == 5);
-      // Complex type (MultiDataArraySelectionFilterParameterConverter) - verified by successful pipeline loading
+      // Successful pipeline loading verifies the MultiDataArraySelectionFilterParameterConverter value.
       CHECK(args.value<std::string>(ConvertColorToGrayScaleFilter::k_OutputArrayPrefix_Key) == "TestName");
     }
   }

@@ -15,21 +15,13 @@ namespace nx::core
 {
 DataIOCollection::DataIOCollection()
 {
-  // Register the built-in CoreDataIOManager directly into the map. The core
-  // manager's formatName() is k_InMemoryFormat, which is a reserved name that
-  // addIOManager() rejects for plugin registrations — so we bypass that
-  // validation here by writing to m_ManagerMap directly. This is the only
-  // place in the codebase permitted to register a manager under the reserved
-  // in-memory format name.
+  // Only the built-in CoreDataIOManager can use the reserved in-memory format name.
   auto coreManager = std::make_shared<nx::core::Generic::CoreDataIOManager>();
   m_ManagerMap[coreManager->formatName()] = coreManager;
 
-  // HDF5 format name is not reserved, so this cannot fail.
   (void)addIOManager(std::make_shared<nx::core::HDF5::DataIOManager>());
 
-  // The out-of-core IO manager (format "HDF5-OOC") is NOT registered here. Core does not know
-  // about out-of-core storage; when the out-of-core plugin is present it registers its manager
-  // via addIOManager() at application startup.
+  // Optional managers register through plugins so core remains storage-format neutral.
 }
 DataIOCollection::~DataIOCollection() noexcept = default;
 
@@ -41,9 +33,7 @@ Result<> DataIOCollection::addIOManager(std::shared_ptr<IDataIOManager> manager)
   }
 
   const std::string& name = manager->formatName();
-  // k_InMemoryFormat is reserved for the built-in CoreDataIOManager, which is
-  // registered directly by the constructor. Any other attempt to register
-  // under this name (e.g., from a plugin) is rejected.
+  // Plugins cannot replace the built-in manager for the reserved in-memory name.
   if(name == Preferences::k_InMemoryFormat)
   {
     return MakeErrorResult(-6011, fmt::format("Cannot register an I/O manager with the reserved format name '{}'", std::string(Preferences::k_InMemoryFormat)));
@@ -51,8 +41,7 @@ Result<> DataIOCollection::addIOManager(std::shared_ptr<IDataIOManager> manager)
 
   m_ManagerMap[name] = manager;
 
-  // Invariant: at most one registered manager finalizes .dream3d imports (the OOC manager). The
-  // onImportFinalize fan-out dispatches to the first such manager, so a second would be silently ignored.
+  // Import finalization chooses one manager, so registration permits at most one finalizer.
 #ifndef NDEBUG
   {
     int finalizerCount = 0;
@@ -135,9 +124,8 @@ std::unique_ptr<IDataStore> DataIOCollection::createDataStore(const std::string&
     }
   }
 
-  // Fallback: no registered manager claimed @p type, so default to in-memory
-  // storage. The built-in CoreDataIOManager is always registered under
-  // k_InMemoryFormat by our constructor, so .at() is guaranteed to succeed.
+  // Unknown formats use the built-in in-memory store. The constructor always
+  // registers its reserved manager before callers can create stores.
   const auto& coreManager = m_ManagerMap.at(std::string(Preferences::k_InMemoryFormat));
   return coreManager->dataStoreCreationFnc(coreManager->formatName())(dataType, tupleShape, componentShape, {});
 }
@@ -152,19 +140,13 @@ std::unique_ptr<IListStore> DataIOCollection::createListStore(const std::string&
     }
   }
 
-  // Fallback: see createDataStore for rationale. Core manager is always present.
+  // Unknown formats use the built-in in-memory list store.
   const auto& coreManager = m_ManagerMap.at(std::string(Preferences::k_InMemoryFormat));
   return coreManager->listStoreCreationFnc(coreManager->formatName())(dataType, tupleShape);
 }
 
-// ---------------------------------------------------------------------------
-// StringStore creation
-// ---------------------------------------------------------------------------
-
 bool DataIOCollection::hasStringStoreCreationFnc(const std::string& type) const
 {
-  // Search all registered IO managers for one that provides a StringStore
-  // factory for the requested format name.
   for(const auto& [ioType, ioManager] : m_ManagerMap)
   {
     if(ioManager->hasStringStoreCreationFnc(type))
@@ -177,8 +159,6 @@ bool DataIOCollection::hasStringStoreCreationFnc(const std::string& type) const
 
 std::unique_ptr<AbstractStringStore> DataIOCollection::createStringStore(const std::string& type, const ShapeType& tupleShape)
 {
-  // Find the first IO manager that has a StringStore factory for the requested
-  // format and delegate construction.
   for(const auto& [ioType, ioManager] : m_ManagerMap)
   {
     if(ioManager->hasStringStoreCreationFnc(type))
@@ -187,28 +167,17 @@ std::unique_ptr<AbstractStringStore> DataIOCollection::createStringStore(const s
       return fnc(tupleShape);
     }
   }
-  // No IO manager supports this format for string stores.
   return nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Post-pipeline store finalization
-// ---------------------------------------------------------------------------
-
 void DataIOCollection::finalizeStores(DataStructure& dataStructure)
 {
-  // Fan out to every registered manager's lifecycle hook. The out-of-core manager uses this to
-  // transition its stores from write mode to read-only (close write handles, reopen as read
-  // handles); the in-memory core manager's hook is a no-op.
+  // Each manager finalizes only the stores it owns after pipeline execution.
   for(const auto& [ioType, manager] : m_ManagerMap)
   {
     manager->onFinalizeStores(dataStructure);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Aggregate lifecycle fan-out methods
-// ---------------------------------------------------------------------------
 
 bool DataIOCollection::anyManagerFinalizesImport() const
 {
@@ -285,10 +254,9 @@ void DataIOCollection::registerFormatDisplayName(const std::string& formatName, 
 std::vector<std::pair<std::string, std::string>> DataIOCollection::getFormatDisplayNames() const
 {
   std::vector<std::pair<std::string, std::string>> result;
-  // Always include the two built-in entries first
+  // Automatic and explicit in-memory labels remain first for stable UI selection.
   result.emplace_back("", k_AutomaticDisplayName);
   result.emplace_back(std::string(Preferences::k_InMemoryFormat), k_InMemoryDisplayName);
-  // Append any additionally registered display names
   for(const auto& [formatName, displayName] : m_FormatDisplayNames)
   {
     result.emplace_back(formatName, displayName);
@@ -298,9 +266,7 @@ std::vector<std::pair<std::string, std::string>> DataIOCollection::getFormatDisp
 
 std::string DataIOCollection::generateManagerListString() const
 {
-  // Build one row per registered manager. Each row pairs the display name
-  // with a comma-separated list of store-type capabilities. We collect first,
-  // then format the output as a padded table so columns align.
+  // Collect rows before formatting so labels align in the error-message table.
   struct Row
   {
     std::string displayName;
@@ -312,14 +278,10 @@ std::string DataIOCollection::generateManagerListString() const
   usize maxNameWidth = 0;
   for(const auto& [managerKey, manager] : m_ManagerMap)
   {
-    // The manager's own formatName() is the key under which it registers its
-    // factories (convention enforced across all known managers). Query with
-    // that key to determine what this manager can create.
+    // A manager registers its own factories under its format name.
     const std::string fn = manager->formatName();
 
-    // Resolve a friendly display name. The core in-memory manager has a fixed
-    // label; other managers may have a registered display name;
-    // otherwise fall back to the raw format identifier.
+    // Prefer a registered label and fall back to the format identifier.
     std::string displayName;
     if(fn == Preferences::k_InMemoryFormat)
     {
@@ -331,7 +293,7 @@ std::string DataIOCollection::generateManagerListString() const
       displayName = (it != m_FormatDisplayNames.end()) ? it->second : fn;
     }
 
-    // Collect the capability labels in a stable order so rows read consistently.
+    // Keep capability labels in a stable order for readable errors.
     std::vector<std::string> capabilities;
     if(manager->hasDataStoreCreationFnc(fn))
     {
@@ -367,8 +329,7 @@ std::string DataIOCollection::generateManagerListString() const
     rows.push_back({std::move(displayName), std::move(capList)});
   }
 
-  // Assemble the padded output. The leading newline keeps the table from
-  // butting up against the caller's error-message prefix.
+  // A leading newline separates the table from its caller's error prefix.
   std::string result = "Registered IO managers and their capabilities:";
   for(const auto& row : rows)
   {

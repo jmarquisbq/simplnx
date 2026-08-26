@@ -8,18 +8,9 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// MultiThresholdObjects — Dispatcher
-//
-// This file contains only the dispatch logic. The actual algorithm implementations
-// live in MultiThresholdObjectsDirect.cpp (in-core) and
-// MultiThresholdObjectsScanline.cpp (out-of-core).
-//
 // The dispatch checks every threshold input and the output mask. Valid adaptive
 // storage combinations may put any one of these arrays on disk.
-// =============================================================================
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjects::MultiThresholdObjects(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                              MultiThresholdObjectsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -29,18 +20,8 @@ MultiThresholdObjects::MultiThresholdObjects(DataStructure& dataStructure, const
 {
 }
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjects::~MultiThresholdObjects() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Dispatches to the appropriate algorithm variant based on storage type.
- *
- * Checks every input array referenced by the threshold configuration and the created
- * output mask to determine if OOC storage is in use.
- *
- * Both variants receive identical constructor arguments and produce identical output.
- */
 Result<> MultiThresholdObjects::operator()()
 {
   auto thresholdsObject = m_InputValues->ArrayThresholdsObject;

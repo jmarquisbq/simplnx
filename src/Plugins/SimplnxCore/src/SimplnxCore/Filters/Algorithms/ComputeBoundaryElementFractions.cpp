@@ -16,7 +16,6 @@ namespace
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeBoundaryElementFractions::ComputeBoundaryElementFractions(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                  ComputeBoundaryElementFractionsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -26,10 +25,8 @@ ComputeBoundaryElementFractions::ComputeBoundaryElementFractions(DataStructure& 
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeBoundaryElementFractions::~ComputeBoundaryElementFractions() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeBoundaryElementFractions::operator()()
 {
   auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
@@ -86,6 +83,7 @@ Result<> ComputeBoundaryElementFractions::operator()()
   }
   for(usize i = 1; i < numFeatures; i++)
   {
+    // An unused positive feature produces NaN. Feature zero remains unchanged.
     boundaryFractions[i] = surfVoxCounts[i] / voxCounts[i];
   }
   return boundaryCellFractionsStore.copyFromBuffer(0, nonstd::span<const float32>(boundaryFractions.data(), numFeatures));

@@ -11,25 +11,36 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ReadHDF5Dataset algorithm.
+ * @struct ReadHDF5DatasetInputValues
+ * @brief Stores the HDF5 file, parent path, and selected datasets.
  */
 struct SIMPLNXCORE_EXPORT ReadHDF5DatasetInputValues
 {
-  ReadHDF5DatasetParameter::ValueType ImportHdf5Object; ///< HDF5 import configuration (file path, parent, dataset list).
+  ReadHDF5DatasetParameter::ValueType ImportHdf5Object;
 };
 
 /**
  * @class ReadHDF5Dataset
  * @brief Reads one or more datasets from an HDF5 file into the DataStructure.
  *
- * Iterates over the user-selected datasets, reads each via the HDF5 support library,
- * and populates the corresponding DataArray. Progress messages report the current
- * dataset being imported.
+ * FillDataArray performs each dataset transfer through the HDF5 support layer.
+ * The algorithm checks cancellation only between selected datasets.
  */
 class SIMPLNXCORE_EXPORT ReadHDF5Dataset
 {
 public:
+  /**
+   * @brief Creates an HDF5 dataset reader.
+   * @param dataStructure Receives imported DataArrays.
+   * @param mesgHandler Is retained but not used.
+   * @param shouldCancel Stops before later datasets when true.
+   * @param inputValues Specifies the file and datasets. The caller must keep
+   * this object alive for the reader lifetime.
+   */
   ReadHDF5Dataset(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ReadHDF5DatasetInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning reader.
+   */
   ~ReadHDF5Dataset() noexcept;
 
   ReadHDF5Dataset(const ReadHDF5Dataset&) = delete;
@@ -37,6 +48,12 @@ public:
   ReadHDF5Dataset& operator=(const ReadHDF5Dataset&) = delete;
   ReadHDF5Dataset& operator=(ReadHDF5Dataset&&) noexcept = delete;
 
+  /**
+   * @brief Imports selected numeric datasets in selection order.
+   * @return File, type, or dataset-transfer error, or success after cancellation.
+   *
+   * Cancellation or an error can retain datasets imported before the current dataset.
+   */
   Result<> operator()();
 
 private:

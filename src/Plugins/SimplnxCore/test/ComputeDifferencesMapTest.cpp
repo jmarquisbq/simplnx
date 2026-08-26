@@ -37,11 +37,9 @@ TEST_CASE("SimplnxCore::ComputeDifferencesMapFilter: Instantiate Filter", "[Comp
   args.insertOrAssign(ComputeDifferencesMapFilter::k_SecondInputArrayPath_Key, std::make_any<DataPath>(secondInputPath));
   args.insertOrAssign(ComputeDifferencesMapFilter::k_DifferenceMapArrayPath_Key, std::make_any<DataPath>(createdArrayPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   REQUIRE(!preflightResult.outputActions.valid());
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   REQUIRE(!executeResult.result.valid());
 
@@ -64,13 +62,13 @@ TEST_CASE("SimplnxCore::ComputeDifferencesMapFilter: Test Algorithm", "[ComputeD
 
   args.insertOrAssign(ComputeDifferencesMapFilter::k_FirstInputArrayPath_Key, std::make_any<DataPath>(firstInputPath));
   {
-    // Preflight the filter and check result
+
     auto preflightResult = filter.preflight(dataStructure, args);
     REQUIRE(!preflightResult.outputActions.valid());
   }
 
   args.insertOrAssign(ComputeDifferencesMapFilter::k_SecondInputArrayPath_Key, std::make_any<DataPath>(secondInputPath));
-  // Preflight the filter and check result
+
   {
     auto preflightResult = filter.preflight(dataStructure, args);
     REQUIRE(!preflightResult.outputActions.valid());
@@ -78,7 +76,7 @@ TEST_CASE("SimplnxCore::ComputeDifferencesMapFilter: Test Algorithm", "[ComputeD
 
   args.insertOrAssign(ComputeDifferencesMapFilter::k_DifferenceMapArrayPath_Key, std::make_any<DataPath>(createdArrayPath));
   {
-    // Preflight the filter and check result
+
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
   }

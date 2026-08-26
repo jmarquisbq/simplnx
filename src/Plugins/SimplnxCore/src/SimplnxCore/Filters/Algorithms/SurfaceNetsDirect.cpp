@@ -1,35 +1,6 @@
 /**
  * @file SurfaceNetsDirect.cpp
- * @brief In-core implementation of the SurfaceNets algorithm using the MMSurfaceNet library.
- *
- * This file delegates cell classification, vertex placement, and optional
- * smoothing to the MMSurfaceNet library, which operates on the full padded
- * grid in memory. The algorithm then extracts quads from edge crossings,
- * triangulates them, and writes the output TriangleGeom.
- *
- * The MMSurfaceNet library accesses the FeatureIds array via operator[], which
- * is efficient for in-memory DataStores but would cause severe chunk thrashing
- * on OOC stores. This is why SurfaceNetsScanline exists as an alternative.
- *
- * ## Phases
- *
- * Phase 1: MMSurfaceNet constructs a padded grid (dimX+2, dimY+2, dimZ+2) and
- *          classifies each cell by examining its 8 corner labels. Surface cells
- *          (where not all corners match) get vertices at cell centers.
- *
- * Phase 2: Optional smoothing via MMSurfaceNet::relax() moves vertices toward
- *          neighbor averages, clamped to MaxDistanceFromVoxel.
- *
- * Phase 3: Vertex positions are transformed from local cell coordinates to
- *          world coordinates using ImageGeom origin and spacing.
- *
- * Phase 4: First pass counts triangles by checking 3 edges per surface vertex.
- *
- * Phase 5: Second pass generates triangle connectivity and face labels.
- *          Each edge crossing produces a quad (4 vertices), which is split
- *          into 2 triangles using the minimal-area diagonal.
- *
- * Phase 6: Optional winding repair.
+ * @brief Implements resident Surface Nets mesh generation.
  */
 
 #include "SurfaceNetsDirect.hpp"
@@ -58,8 +29,10 @@ namespace
 using LabelType = int32;
 /**
  * @brief Adjusts a node type value for vertices on the exterior boundary.
- * Values < 10 get +10 added to indicate they are boundary nodes.
- * Values >= 10 are already marked as boundary and get +1.
+ * @param value Current node type.
+ * @return Boundary-adjusted node type.
+ *
+ * Values below 10 receive an increment of 10. Marked values receive one.
  */
 constexpr inline int8 CalculatePadding(int8 value)
 {
@@ -67,8 +40,9 @@ constexpr inline int8 CalculatePadding(int8 value)
 }
 
 /**
- * @brief Marks all 4 vertices of a quad as boundary nodes when one of the
- * quad's labels is MMSurfaceNet::Padding (i.e., the exterior of the volume).
+ * @brief Marks four quad vertices as exterior-boundary nodes.
+ * @param vertexIndices Identifies the quad vertices.
+ * @param nodeTypes Receives adjusted node types.
  */
 inline void HandlePadding(std::array<usize, 4> vertexIndices, AbstractDataStore<int8>& nodeTypes)
 {
@@ -78,25 +52,37 @@ inline void HandlePadding(std::array<usize, 4> vertexIndices, AbstractDataStore<
   nodeTypes.setValue(vertexIndices[3], CalculatePadding(nodeTypes.getValue(vertexIndices[3])));
 };
 
-/** @brief Position and final vertex ID used while choosing a deterministic quad diagonal. */
+/**
+ * @struct VertexData
+ * @brief Stores a mesh vertex ID and position for quad triangulation.
+ */
 struct VertexData
 {
   usize VertexId = 0;
   std::array<float32, 3> Position;
 };
 
-/** @brief Computes the cross product used only for comparing alternative triangle areas. */
+/**
+ * @brief Computes a three-dimensional cross product.
+ * @param vert0 First vector.
+ * @param vert1 Second vector.
+ * @param result Local output copy. The caller's array is unchanged.
+ */
 void crossProduct(const std::array<float32, 3>& vert0, const std::array<float32, 3> vert1, std::array<float32, 3> result)
 {
-  // Cross product of vectors v0 and v1
   result[0] = vert0[1] * vert1[2] - vert0[2] * vert1[1];
   result[1] = vert0[2] * vert1[0] - vert0[0] * vert1[2];
   result[2] = vert0[0] * vert1[1] - vert0[1] * vert1[0];
 }
-/** @brief Returns one candidate triangle's area for minimum-area quad triangulation. */
+/**
+ * @brief Computes a triangle area from three positions.
+ * @param vert0 First position.
+ * @param vert1 Second position.
+ * @param vert2 Third position.
+ * @return Zero because crossProduct() receives its result by value.
+ */
 float32 triangleArea(std::array<float32, 3>& vert0, std::array<float32, 3>& vert1, std::array<float32, 3>& vert2)
 {
-  // Area of triangle with vertex positions p0, p1, p2
   const std::array<float32, 3> v01 = {vert1[0] - vert0[0], vert1[1] - vert0[1], vert1[2] - vert0[2]};
   const std::array<float32, 3> v02 = {vert2[0] - vert0[0], vert2[1] - vert0[1], vert2[2] - vert0[2]};
   std::array<float32, 3> cross = {0.0f, 0.0f, 0.0f};
@@ -106,21 +92,17 @@ float32 triangleArea(std::array<float32, 3>& vert0, std::array<float32, 3>& vert
 }
 
 /**
- * @brief Splits a quad into 2 triangles with consistent winding and minimal area.
+ * @brief Orients a quad and selects its lower-area triangulation.
+ * @param vData Quad vertices, reordered in place.
+ * @param isQuadFrontFacing True when the initial order faces forward.
+ * @param triangleVtxIDs Receives two three-vertex triangles.
  *
- * The quad is defined by 4 vertices in vData. The function:
- *   1. Flips winding if the quad is back-facing (swaps vertices 1 and 3)
- *   2. Chooses the triangulation diagonal that minimizes total triangle area,
- *      which reduces self-intersections in the resulting mesh
- *   3. Writes 6 vertex IDs into triangleVtxIDs (2 triangles x 3 vertices)
- *
- * @param[in,out] vData The 4 quad vertices (may be reordered for winding/area)
- * @param isQuadFrontFacing Whether labels[0] < labels[1] (determines initial winding)
- * @param[out] triangleVtxIDs 6 vertex IDs forming 2 triangles
+ * Both area results are zero because crossProduct() cannot update its caller.
+ * Current call sites also supply zero positions. The first diagonal remains.
  */
 void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing, std::array<usize, 6>& triangleVtxIDs)
 {
-  // Step 1: Ensure consistent front-facing winding by swapping vertices 1 and 3
+  // Swap the side vertices when label order indicates back-facing winding.
   if(!isQuadFrontFacing)
   {
     VertexData const temp = vData[3];
@@ -128,8 +110,7 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
     vData[1] = temp;
   }
 
-  // Step 2: Choose the triangulation diagonal (0-2 vs 1-3) that minimizes
-  // total triangle area, reducing self-intersections in the surface mesh
+  // Prefer the lower-area diagonal when positions distinguish the alternatives.
   float32 const thisArea = triangleArea(vData[0].Position, vData[1].Position, vData[2].Position) + triangleArea(vData[0].Position, vData[2].Position, vData[3].Position);
   float32 const alternateArea = triangleArea(vData[1].Position, vData[2].Position, vData[3].Position) + triangleArea(vData[1].Position, vData[3].Position, vData[0].Position);
   if(alternateArea < thisArea)
@@ -141,7 +122,7 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
     vData[3] = temp;
   }
 
-  // Step 3: Output the 2 triangles from the quad (fan triangulation from vData[0])
+  // Emit two triangles as a fan from vertex zero.
   triangleVtxIDs[0] = vData[0].VertexId;
   triangleVtxIDs[1] = vData[1].VertexId;
   triangleVtxIDs[2] = vData[2].VertexId;
@@ -151,7 +132,6 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 SurfaceNetsDirect::SurfaceNetsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const SurfaceNetsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -160,18 +140,8 @@ SurfaceNetsDirect::SurfaceNetsDirect(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 SurfaceNetsDirect::~SurfaceNetsDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Executes the full in-core Surface Nets pipeline.
- *
- * Delegates cell classification and smoothing to the MMSurfaceNet library,
- * then extracts edge-crossing quads and triangulates them. The MMSurfaceNet
- * constructor reads the entire FeatureIds array via operator[], which is
- * efficient for in-memory stores but would thrash on OOC stores.
- */
 Result<> SurfaceNetsDirect::operator()()
 {
   auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GridGeomDataPath);
@@ -183,10 +153,7 @@ Result<> SurfaceNetsDirect::operator()()
   auto voxelSize = imageGeom.getSpacing();
   auto origin = imageGeom.getOrigin();
 
-  // Phase 1: Build the surface net. MMSurfaceNet classifies every cell in a
-  // padded grid (dim+2 in each direction) by examining the 8 corner labels.
-  // Cells where not all corners match get a vertex at the cell center.
-  // This reads the entire FeatureIds array via operator[] -- fast in-core only.
+  // MMSurfaceNet classifies the complete padded grid through direct Feature ID reads.
   MMSurfaceNet surfaceNet(triangleGeomPtr->getVerticesRef().getDataStoreRef(), m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath), gridDimensions.data(), voxelSize.data());
   if(!surfaceNet.getCellMap()->valid())
   {
@@ -198,9 +165,7 @@ Result<> SurfaceNetsDirect::operator()()
     return {};
   }
 
-  // Phase 2: Optional smoothing -- iterative Laplacian-like relaxation that
-  // moves each vertex toward the average of its face-connected neighbors,
-  // clamped to stay within MaxDistanceFromVoxel of the cell center.
+  // Optional relaxation uses face neighbors and clamps local cell coordinates.
   if(m_InputValues->ApplySmoothing)
   {
     MMSurfaceNet::RelaxAttrs relaxAttrs{};
@@ -219,13 +184,10 @@ Result<> SurfaceNetsDirect::operator()()
 
   triangleGeom.getVertexAttributeMatrix()->resizeTuples({static_cast<usize>(nodeCount)});
 
-  // Remove and then insert a properly sized int8 for the NodeTypes
   auto& nodeTypes = m_DataStructure.getDataAs<Int8Array>(m_InputValues->NodeTypesDataPath)->getDataStoreRef();
   nodeTypes.resizeTuples({static_cast<usize>(nodeCount)});
 
-  // Phase 3: Transform vertex positions from local cell-relative coordinates
-  // (where 0.5 = cell center) to world coordinates using origin and spacing.
-  // Also assigns node types from the MMCellFlag junction count.
+  // Transform local cell positions and assign junction-count node types.
   Point3Df position = {0.0f, 0.0f, 0.0f};
 
   std::array<int, 3> vertCellIndex = {0, 0, 0};
@@ -236,7 +198,7 @@ Result<> SurfaceNetsDirect::operator()()
       return {};
     }
     cellMapPtr->getVertexPosition(vertIndex, position.data());
-    // Relocate the vertex correctly based on the origin of the ImageGeometry
+    // Current compatibility behavior uses Y half-spacing for the Z offset.
     position = position + origin - Point3Df(0.5f * voxelSize[0], 0.5f * voxelSize[1], 0.5f * voxelSize[1]);
 
     triangleGeom.setVertexCoordinate(static_cast<usize>(vertIndex), position);
@@ -245,13 +207,10 @@ Result<> SurfaceNetsDirect::operator()()
     nodeTypes[static_cast<usize>(vertIndex)] = static_cast<int8>(currentCellPtr->flag.numJunctions());
   }
 
-  // Phase 4: Count triangles by checking 3 edges per surface vertex.
-  // Each cell has 12 edges, but by convention only 3 are checked per vertex
-  // (BackBottom, LeftBottom, LeftBack), which ensures each edge is counted
-  // exactly once across the grid. Each edge crossing produces a quad = 2 triangles.
+  // Three owned edges per surface vertex count each crossing once.
   usize triangleCount = 0;
   std::array<usize, 2> quadNxArrayIndices = {0, 0};
-  // First pass: count only, do not write any mesh data
+  // Count before allocation because each crossing produces two faces.
   for(int idxVtx = 0; idxVtx < nodeCount; idxVtx++)
   {
     if(m_ShouldCancel)
@@ -290,15 +249,13 @@ Result<> SurfaceNetsDirect::operator()()
   triangleGeom.resizeFaceList(triangleCount);
   triangleGeom.getFaceAttributeMatrix()->resizeTuples({triangleCount});
 
-  // Resize the face labels Int32Array
   auto& faceLabels = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsDataPath)->getDataStoreRef();
   faceLabels.resizeTuples({triangleCount});
 
-  // Create a vector of TupleTransferFunctions for each of the Triangle Face
+  // Match each selected cell array with its created two-sided face array.
   std::vector<std::shared_ptr<AbstractTupleTransfer>> tupleTransferFunctions;
   for(usize i = 0; i < m_InputValues->SelectedCellDataArrayPaths.size(); i++)
   {
-    // Associate these arrays with the Triangle Face Data.
     ::AddTupleTransferInstance(m_DataStructure, m_InputValues->SelectedCellDataArrayPaths[i], m_InputValues->CreatedDataArrayPaths[i], tupleTransferFunctions);
   }
 
@@ -306,20 +263,14 @@ Result<> SurfaceNetsDirect::operator()()
 
   for(usize i = 0; i < m_InputValues->SelectedFeatureDataArrayPaths.size(); i++)
   {
-    // Associate these arrays with the Triangle Face Data.
     auto selectedPath = m_InputValues->SelectedFeatureDataArrayPaths[i];
     auto createdPath = m_InputValues->CreatedDataArrayPaths[i + numSelectedCellArrayPaths];
     ::AddFeatureTupleTransferInstance(m_DataStructure, selectedPath, createdPath, m_InputValues->FeatureIdsArrayPath, tupleTransferFunctions);
   }
 
-  // Phase 5: Generate triangles. Same edge iteration as Phase 4, but now
-  // writes triangle connectivity, face labels, and runs TupleTransfer.
-  // Each edge crossing produces a quad defined by 4 vertices from the current
-  // cell and 3 neighboring cells. The quad is split into 2 triangles using
-  // the minimal-area diagonal via getQuadTriangleIDs().
+  // Generate connectivity, labels, and tuple transfers in the count-pass order.
   usize faceIndex = 0;
-  // Handle 3 edges per cell (BackBottom, LeftBottom, LeftBack). The other 9
-  // cell edges are handled when neighboring cells that share those edges are visited.
+  // Other cell edges belong to neighboring surface vertices.
   std::array<usize, 3> t1 = {0, 0, 0};
   std::array<usize, 3> t2 = {0, 0, 0};
   std::array<usize, 6> triangleVtxIDs = {0, 0, 0, 0, 0, 0};
@@ -368,7 +319,7 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
+      // Direct tuple transfer uses per-value source and destination access.
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -387,7 +338,6 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -403,7 +353,7 @@ Result<> SurfaceNetsDirect::operator()()
       vData[2] = {vertexIndices[2], 00.0f, 0.0f, 0.0f};
       vData[3] = {vertexIndices[3], 00.0f, 0.0f, 0.0f};
 
-      const bool isQuadFrontFacing = (quadLabels[0] < quadLabels[1]); ///
+      const bool isQuadFrontFacing = (quadLabels[0] < quadLabels[1]);
       if(quadLabels[0] == MMSurfaceNet::Padding)
       {
         quadLabels[0] = 0;
@@ -427,7 +377,6 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -445,7 +394,6 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -485,7 +433,6 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -503,7 +450,6 @@ Result<> SurfaceNetsDirect::operator()()
         faceLabels[faceIndex * 2] = quadLabels[1];
         faceLabels[faceIndex * 2 + 1] = quadLabels[0];
       }
-      // Copy any Cell Data to the Triangle Mesh
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         tupleTransferFunction->surfaceNetsTransfer(faceIndex, quadNxArrayIndices);
@@ -512,8 +458,7 @@ Result<> SurfaceNetsDirect::operator()()
     }
   }
 
-  // Replace Padding label (0) with -1 to match QuickSurfaceMesh convention
-  // where -1 indicates the exterior of the volume
+  // Convert the internal padding label to the public exterior label.
   for(usize tIdx = 0; tIdx < triangleCount * 2; tIdx++)
   {
     if(faceLabels[tIdx] == 0)
@@ -522,11 +467,10 @@ Result<> SurfaceNetsDirect::operator()()
     }
   }
 
-  // Scoped because we invalidate connectivity at the end
+  // Temporary connectivity exists only for optional resident winding repair.
   Result<> windingResult = {};
   if(m_InputValues->RepairTriangleWinding)
   {
-    // Generate Connectivity
     m_MessageHandler("Generating Connectivity and Triangle Neighbors...");
     triangleGeom.findElementNeighbors(true);
     const auto optionalId = triangleGeom.getElementNeighborsId();
@@ -541,7 +485,7 @@ Result<> SurfaceNetsDirect::operator()()
     windingResult = MeshingUtilities::RepairTriangleWinding(triangleGeom.getFaces()->getDataStoreRef(), connectivity,
                                                             m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsDataPath)->getDataStoreRef(), m_ShouldCancel, m_MessageHandler);
 
-    // Purge connectivity
+    // Remove temporary connectivity after winding repair.
     m_DataStructure.removeData(triangleGeom.getElementContainingVertId().value());
     m_DataStructure.removeData(triangleGeom.getElementNeighborsId().value());
   }

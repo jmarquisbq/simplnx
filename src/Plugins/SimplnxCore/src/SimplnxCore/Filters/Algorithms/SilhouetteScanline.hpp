@@ -13,30 +13,34 @@ struct SilhouetteInputValues;
  * @class SilhouetteScanline
  * @brief Computes exact silhouette scores with bounded tiles and checked bulk I/O.
  *
- * The implementation retains the all-pairs mathematics and deterministic tuple
- * order of SilhouetteDirect while replacing per-element DataStore access and
- * cell-count workspaces with fixed tuple tiles. It discovers sparse feature IDs,
- * accumulates one outer tile's distances by feature, and writes each completed
- * output tile before advancing. The memory footprint is therefore bounded by
- * the tile size, component count, and number of features rather than all cells.
+ * Three passes discover sparse positive Feature IDs, count enabled tuples, and
+ * perform the all-pairs calculation. Pairwise input tiles are reread for each
+ * outer tile. Memory is O(128 times (component count plus feature count)), not
+ * tuple count. The repeated reads preserve deterministic tuple order and exact
+ * Direct-path mathematics with sequential disk access.
  *
- * Silhouette dispatches here when any participating array is out-of-core, or
- * when the OOC route is explicitly forced for verification. The object borrows
- * all constructor arguments and does not own their storage.
+ * Feature zero is a valid own cluster but is not an alternate cluster for b.
+ * Negative Feature IDs return an error before output begins. Cancellation in
+ * discovery or counting leaves output unchanged. Cancellation during pairwise
+ * work preserves completed output tiles.
  *
- * @see SilhouetteDirect for the resident-array implementation.
+ * @see SilhouetteDirect for the resident distance-table implementation.
  */
 class SIMPLNXCORE_EXPORT SilhouetteScanline
 {
 public:
   /**
-   * @brief Creates the bounded, bulk-I/O silhouette implementation.
-   * @param dataStructure Data structure containing the clustering input, feature IDs, optional mask, and output.
-   * @param messageHandler Accepted for dispatch compatibility; this implementation does not emit progress messages.
-   * @param shouldCancel Cancellation flag checked between discovery, counting, and pairwise tiles.
-   * @param inputValues Non-owning pointer to the filter arguments. It must remain valid through operator()().
+   * @brief Initializes the bulk-I/O silhouette implementation.
+   * @param dataStructure Contains input, Feature ID, mask, and output arrays.
+   * @param messageHandler Preserves the common interface but receives no messages.
+   * @param shouldCancel Signals cancellation between passes and tiles.
+   * @param inputValues Selects metric and array paths.
+   * @pre All arguments outlive this executor.
    */
   SilhouetteScanline(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, const SilhouetteInputValues* inputValues);
+  /**
+   * @brief Destroys the bulk-I/O silhouette implementation.
+   */
   ~SilhouetteScanline() noexcept;
 
   SilhouetteScanline(const SilhouetteScanline&) = delete;
@@ -45,8 +49,11 @@ public:
   SilhouetteScanline& operator=(SilhouetteScanline&&) noexcept = delete;
 
   /**
-   * @brief Runs feature discovery, feature counting, tiled distance accumulation, and bulk output writes.
-   * @return A valid result on success or cancellation; otherwise an I/O, mask-type, feature-ID, or size-overflow error.
+   * @brief Discovers clusters and writes tiled silhouette scores.
+   * @return Bulk-I/O, mask-type, Feature ID, or size-overflow result.
+   * @pre Participating arrays have equal tuple counts.
+   *
+   * Cancellation returns success. Scores from completed outer tiles remain.
    */
   Result<> operator()();
 

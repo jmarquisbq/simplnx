@@ -12,6 +12,10 @@
 
 namespace nx::core
 {
+/**
+ * @struct RegularGridSampleSurfaceMeshInputValues
+ * @brief Stores output-grid settings and source/output paths.
+ */
 struct SIMPLNXCORE_EXPORT RegularGridSampleSurfaceMeshInputValues
 {
   VectorUInt64Parameter::ValueType Dimensions;
@@ -25,25 +29,30 @@ struct SIMPLNXCORE_EXPORT RegularGridSampleSurfaceMeshInputValues
 
 /**
  * @class RegularGridSampleSurfaceMesh
- * @brief Samples a TriangleGeometry onto a regular grid (ImageGeom) using
- * scanline rasterization. For each Z-slice of the grid, triangles are
- * intersected with the Z-plane to produce 2D edges. Each Y-scanline then
- * finds X-intersections with those edges, sorts them, and fills voxels
- * between crossings using face label toggling to assign feature IDs.
+ * @brief Rasterizes a labeled TriangleGeom into an ImageGeom.
  *
- * Z-slices are processed in parallel. Each worker thread rasterizes into
- * a thread-local buffer and then copies results back to the output DataArray
- * under a mutex via copyFromBuffer, ensuring thread safety and efficient
- * bulk I/O with out-of-core DataStore implementations.
+ * Each Z worker intersects triangles with the slice plane. Sorted X crossings
+ * toggle face labels to assign output cells along each Y row.
  *
- * All input geometry data (faces, vertices, face labels) is pre-loaded into
- * contiguous memory buffers via copyIntoBuffer at algorithm start, so worker
- * threads operate on plain memory arrays with no virtual dispatch per element.
+ * The algorithm materializes all faces, vertices, and face labels before parallel
+ * work. Each active worker also owns one slice buffer and triangle-edge lists.
+ * A mutex serializes output-slice writes because generic DataStore writes are not concurrent.
  */
 class SIMPLNXCORE_EXPORT RegularGridSampleSurfaceMesh
 {
 public:
+  /**
+   * @brief Creates a regular-grid surface sampler.
+   * @param dataStructure Provides source mesh and output ImageGeom arrays.
+   * @param mesgHandler Receives phase messages.
+   * @param shouldCancel Stops later preprocessing or worker scheduling when true.
+   * @param inputValues Specifies validated settings and paths. The caller must keep
+   * this object alive for the sampler lifetime.
+   */
   RegularGridSampleSurfaceMesh(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, RegularGridSampleSurfaceMeshInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning sampler.
+   */
   ~RegularGridSampleSurfaceMesh() noexcept;
 
   RegularGridSampleSurfaceMesh(const RegularGridSampleSurfaceMesh&) = delete;
@@ -51,16 +60,24 @@ public:
   RegularGridSampleSurfaceMesh& operator=(const RegularGridSampleSurfaceMesh&) = delete;
   RegularGridSampleSurfaceMesh& operator=(RegularGridSampleSurfaceMesh&&) noexcept = delete;
 
+  /**
+   * @brief Rasterizes all scheduled Z slices.
+   * @return Success after scheduled workers finish.
+   *
+   * Input and output bulk-I/O errors are not inspected. Cancellation stops new
+   * worker scheduling, but scheduled workers finish and can write output slices.
+   */
   Result<> operator()();
 
   /**
-   * @brief Thread-safe method to copy a completed Z-slice buffer into the
-   * output DataArray using bulk copyFromBuffer. Called by worker threads
-   * after rasterizing a slice.
-   * @tparam T The element type of the feature IDs array
-   * @param zSlice The Z-slice index
-   * @param sliceData Raw pointer to the thread-local buffer containing rasterized feature IDs
-   * @param count Number of elements in the slice buffer
+   * @brief Writes one completed Z-slice while holding the output mutex.
+   * @tparam T Specifies the Feature-ID scalar type.
+   * @param zSlice Specifies the destination Z index.
+   * @param sliceData Provides rasterized Feature IDs.
+   * @param count Specifies values in the slice buffer.
+   * @pre operator() initialized the slice size and output path.
+   *
+   * The method does not inspect the copyFromBuffer() result.
    */
   template <typename T>
   void sendThreadSafeSliceUpdate(usize zSlice, const T* sliceData, usize count)

@@ -57,7 +57,7 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogram: Counts & Bins Only", "[SimplnxCor
 {
   UnitTest::LoadPlugins();
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeArrayHistogramFilter filter;
   DataStructure dataStruct;
   Arguments args;
@@ -72,7 +72,6 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogram: Counts & Bins Only", "[SimplnxCor
   auto parentPath = dataPaths[0].getParent();
   auto dataGPath = parentPath.createChildPath("HistogramDataGroup");
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ComputeArrayHistogramFilter::k_NumberOfBins_Key, std::make_any<int32>(4));
   args.insertOrAssign(ComputeArrayHistogramFilter::k_UserDefinedRange_Key, std::make_any<bool>(false));
   args.insertOrAssign(ComputeArrayHistogramFilter::k_CreateNewDataGroup_Key, std::make_any<bool>(true));
@@ -81,11 +80,9 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogram: Counts & Bins Only", "[SimplnxCor
   args.insertOrAssign(ComputeArrayHistogramFilter::k_HistoBinRangeName_Key, std::make_any<std::string>(std::string{::k_BinRangesName}));
   args.insertOrAssign(ComputeArrayHistogramFilter::k_HistoBinCountName_Key, std::make_any<std::string>(std::string{::k_BinCountsName}));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStruct, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStruct, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
@@ -161,7 +158,7 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogram: All Histogram Calculations", "[Si
   const std::string mostPopulatedBin = "Most Populated Bin";
   const std::string modalBinRanges = "Modal Bin Ranges";
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayHistogramFilter filter;
     Arguments args;
@@ -181,16 +178,13 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogram: All Histogram Calculations", "[Si
     args.insertOrAssign(ComputeArrayHistogramFilter::k_HistoMostPopulatedBinName_Key, std::make_any<std::string>(mostPopulatedBin));
     args.insertOrAssign(ComputeArrayHistogramFilter::k_HistoModalBinRangesName_Key, std::make_any<std::string>(modalBinRanges));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     DataPath histogramPath = histogramsDataPath.createChildPath(fmt::format("\"{}\" Histogram", inputArrayName));
     auto* dataGroup = dataStructure.getDataAs<DataGroup>(histogramPath);

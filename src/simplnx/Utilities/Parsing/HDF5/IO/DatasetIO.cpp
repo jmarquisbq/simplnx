@@ -53,31 +53,17 @@ std::string GetNameFromFilterType(H5Z_filter_t id)
 }
 
 /**
- * @brief Builds an HDF5 Dataset Creation Property List configured for chunked storage
- *        with the gzip/deflate filter applied at the requested level.
+ * @brief Builds chunked deflate dataset-creation properties.
+ * @param dims Specifies full dataset dimensions.
+ * @param elementByteSize Specifies bytes per value.
+ * @param compressionLevel Specifies gzip level from 0 through 9.
+ * @return H5P_DEFAULT, an owned property-list ID, or an HDF5/configuration error.
  *
- * Two valid success outcomes:
- *   - The returned hid_t equals H5P_DEFAULT when the helper intentionally falls through
- *     to the HDF5 default (contiguous, no filter). Caller must NOT close H5P_DEFAULT.
- *   - Otherwise the returned hid_t is a freshly-created DCPL the caller now owns and
- *     MUST release with H5Pclose.
+ * Level 0 and small arrays use H5P_DEFAULT, which the caller must not close.
+ * Other successful results are caller-owned and require H5Pclose().
  *
- * Intentional fall-through (Result is valid, value == H5P_DEFAULT):
- *   - compressionLevel == 0 (compression disabled)
- *   - totalBytes < k_SmallArrayThresholdBytes (bypass — chunk-index overhead would dominate)
- *
- * Failure outcomes (Result is invalid):
- *   - compressionLevel outside [0, 9]
- *   - empty dims or zero elementByteSize (caller bug — writeSpan must pass the dataspace rank)
- *   - elementByteSize * product(dims) overflows usize
- *   - H5Pcreate / H5Pset_chunk / H5Pset_deflate fails — the HDF5 error code is propagated
- *
- * Chunk shape comes from the shared core policy nx::core::HDF5::computeChunkShape with the
- * BundleOuterSlabs regime: it targets ~1 MiB per chunk via a greedy outermost-first walk
- * over the full dataspace dims. HDF5 stores arrays in C-order, so each chunk covers
- * contiguous bytes and the target is honored at every dataset scale — large slices get
- * row-band chunks instead of one oversized slab, and because output files are write-once
- * the policy bundles multiple whole outer slabs into one chunk when they fit the target.
+ * BundleOuterSlabs targets approximately 1 MiB C-order chunks. Large slices use
+ * row bands. Small outer slabs can share one chunk.
  */
 nx::core::Result<hid_t> BuildChunkedDeflateDcpl(const std::vector<usize>& dims, usize elementByteSize, int32 compressionLevel)
 {
@@ -527,9 +513,8 @@ std::string DatasetIO::readAsString() const
     return "";
   }
 
-  // Determine variable-length-ness under a leaf lock. The variable-length branch
-  // delegates to readAsVectorOfStrings(), which self-locks, so it MUST run after
-  // this lock is released — re-taking the non-recursive ApiLock would deadlock.
+  // Inspect string type under one leaf lock. Call the self-locking vector reader
+  // only after releasing this nonrecursive lock.
   bool isVariableString = false;
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -730,8 +715,7 @@ nx::core::Result<> DatasetIO::readIntoSpan(nonstd::span<T> data) const
     return MakeErrorResult(-1001, fmt::format("DatasetReader error: Unsupported span data type for dataset '{}' in file '{}'", getNamePath(), getFilePath().string()));
   }
 
-  // Full dataspace dimensions, queried lock-free (getDimensions self-manages the HDF5 lock).
-  // These drive both the span-size validation and the parallel codec's modeling below.
+  // getDimensions() manages its own HDF5 lock.
   const std::vector<usize> usizeDims = getDimensions();
   const hsize_t totalElements = std::accumulate(usizeDims.begin(), usizeDims.end(), static_cast<hsize_t>(1), std::multiplies<hsize_t>());
 
@@ -740,35 +724,19 @@ nx::core::Result<> DatasetIO::readIntoSpan(nonstd::span<T> data) const
     return MakeErrorResult(-1006, "DatasetReader error: Span size does not match the number of elements to read.");
   }
 
-  // Parallel-inflate fast path for compressed chunked datasets.
-  //
-  // Why this branch exists: HDF5's deflate decompression runs inside H5Dread under a
-  // process-wide, non-reentrant lock, so a serial whole-dataset read of a large compressed
-  // chunked dataset serializes entirely on inflation. Routing such reads through
-  // ParallelChunkCodec inflates the chunks on worker threads off that lock, which is the
-  // payoff for the whole in-core read path (every reader that reaches this method inherits it
-  // automatically). When the codec produces output, it is byte-identical to a serial H5Dread
-  // of the whole dataset (verified by the codec's own tests).
-  //
-  // The eligibility decision is made WITHOUT holding ApiLock(): getChunkDimensions() and the
-  // ParallelChunkCodec constructor's eligibility probe each self-acquire the (non-recursive)
-  // HDF5 lock internally, so holding it here would self-deadlock.
+  // H5Dread inflates under the process-wide HDF5 lock. Eligible chunked datasets
+  // instead inflate on worker threads outside that lock.
+  // Eligibility calls manage their own nonrecursive HDF5 lock.
   const std::vector<usize> usizeChunkDims = getChunkDimensions(); // empty when the dataset is not chunked
   if(!usizeChunkDims.empty())
   {
-    // Model the in-core read as a single tuple-space transfer of the WHOLE flat array:
-    // tupleShape = the full dataspace dims and componentShape = {} (so numComponents = 1).
-    // The codec then scatters row-major over the full dims, byte-identically to a serial
-    // H5Dread of the whole dataset. The tuple-vs-component split is irrelevant here and is
-    // intentionally not modeled (this method does not know it and does not need it).
+    // Model the complete flat array as one-component tuple space. Component shape
+    // is not available or necessary for row-major scattering.
     std::vector<uint64> tupleShape(usizeDims.begin(), usizeDims.end());
     std::vector<uint64> chunkShape(usizeChunkDims.begin(), usizeChunkDims.end());
 
-    // A DatasetIO descended via GroupIO::openDataset carries no m_FilePath (only the root file
-    // object holds it), so getFilePath() is empty here on the in-core read path. The codec needs
-    // the real on-disk path for its lock-free positional reads; resolve it from the open dataset's
-    // HDF5 file handle when getFilePath() is empty. This works regardless of how the DatasetIO was
-    // constructed; if it cannot be resolved the codec stays ineligible and the serial read runs.
+    // A GroupIO child can lack m_FilePath. Resolve the physical path from its
+    // dataset handle for positional chunk reads. Failure keeps the codec ineligible.
     std::filesystem::path codecFilePath = getFilePath();
     if(codecFilePath.empty())
     {
@@ -787,10 +755,8 @@ nx::core::Result<> DatasetIO::readIntoSpan(nonstd::span<T> data) const
     HDF5::ParallelChunkCodec codec(codecFilePath, getNamePath(), tupleShape, chunkShape, /*componentShape=*/{}, sizeof(T), datasetId);
     if(codec.isEligible())
     {
-      // Defensive backstop: if the parallel path throws for any reason, fall through to the
-      // proven serial H5Dread below so this fast path can never make a previously-working read
-      // fail. A successful codec read is byte-identical to the serial read, so this is purely a
-      // safety net, not a behavior difference.
+      // An exception falls back to serial H5Dread. Successful codec output matches
+      // the serial row-major result.
       try
       {
         const uint64 numChunks = HDF5::getNumberOfChunks(tupleShape, chunkShape);
@@ -798,22 +764,18 @@ nx::core::Result<> DatasetIO::readIntoSpan(nonstd::span<T> data) const
         std::iota(allChunkIndices.begin(), allChunkIndices.end(), uint64{0});
 
         nonstd::span<std::byte> out(reinterpret_cast<std::byte*>(data.data()), data.size_bytes());
-        // The codec self-locks its leaf HDF5 metadata peeks and inflates off the lock, so this
-        // call must NOT be wrapped in ApiLock() (doing so would serialize the very work the codec
-        // parallelizes, and would self-deadlock against the codec's own internal locking).
+        // The codec locks metadata internally and inflates outside the lock.
         codec.inflateChunksIntoSpan(out, allChunkIndices);
         return {};
       } catch(const std::exception&)
       {
-        // Fall through to the serial read below.
+        // Use the serial fallback.
       }
     }
   }
 
-  // Serial fallback: ineligible dataset, not chunked, or the codec threw. This is the proven
-  // serial transfer. Per the ApiLock contract, the lock guards ONLY the bare leaf HDF5 C-API
-  // calls; error-message strings (which call getNamePath / getFilePath, themselves lock-taking)
-  // are constructed OUTSIDE the lock to avoid self-deadlocking the non-recursive lock.
+  // The serial fallback locks only bare HDF5 calls. Error formatting stays outside
+  // because path accessors can acquire the same nonrecursive lock.
   std::vector<hsize_t> memDims(usizeDims.begin(), usizeDims.end());
 
   hid_t fileSpaceId = H5I_INVALID_HID;
@@ -879,12 +841,8 @@ Result<> DatasetIO::readIntoSpan(nonstd::span<T> data, const std::optional<std::
     return MakeErrorResult(-1001, "DatasetReader error: Unsupported span data type.");
   }
 
-  // open() self-locks, so it is resolved BEFORE this method's leaf lock (holding the
-  // non-recursive ApiLock across it would self-deadlock). The hyperslab read then runs as
-  // one leaf critical section. Each bare HDF5 step records an error code into errorCode
-  // and the dataspaces are always closed inside the lock; the code is translated to a
-  // Result AFTER the lock so error-string construction (getNamePath/getFilePath) stays off
-  // the lock.
+  // open() manages its own lock and must run before the leaf critical section.
+  // Dataspaces close inside the lock. Error formatting stays outside it.
   const hid_t datasetId = open();
 
   int errorCode = 0;
@@ -903,7 +861,7 @@ Result<> DatasetIO::readIntoSpan(nonstd::span<T> data, const std::optional<std::
       H5Sget_simple_extent_dims(fileSpaceId, dims.data(), maxDims.data());
       if(start.has_value() && count.has_value())
       {
-        // Both start and count are provided
+        // Select the explicit start and count.
 #if defined(__APPLE__)
         std::vector<unsigned long long> startData(start->begin(), start->end());
         std::vector<unsigned long long> countVec(count->begin(), count->end());
@@ -918,7 +876,7 @@ Result<> DatasetIO::readIntoSpan(nonstd::span<T> data, const std::optional<std::
       }
       else if(start.has_value())
       {
-        // Only start is provided
+        // Extend an explicit start through the remaining dataset.
         std::vector<hsize_t> countRemaining(rank);
         for(int i = 0; i < rank; ++i)
         {
@@ -937,7 +895,7 @@ Result<> DatasetIO::readIntoSpan(nonstd::span<T> data, const std::optional<std::
       }
       else if(count.has_value())
       {
-        // Only count is provided
+        // Select the requested count from the dataset origin.
         std::vector<hsize_t> startZeros(rank, 0);
 #if defined(__APPLE__)
         std::vector<unsigned long long> countVec(count->begin(), count->end());
@@ -952,7 +910,7 @@ Result<> DatasetIO::readIntoSpan(nonstd::span<T> data, const std::optional<std::
       }
       else
       {
-        // Neither start nor count is provided
+        // Select the complete dataset.
         memDims = dims;
       }
 
@@ -1135,9 +1093,7 @@ Result<> DatasetIO::readChunkIntoSpan(nonstd::span<T> data, nonstd::span<const u
 
 std::vector<nx::core::usize> DatasetIO::getChunkDimensions() const
 {
-  // open() and getDimensions() each self-lock, so they are resolved BEFORE this method's
-  // leaf lock. The dataset-creation-property-list queries are then one leaf critical
-  // section (and the DCPL is closed inside it to avoid leaking the handle).
+  // Resolve self-locking accessors before one property-list leaf critical section.
   const hid_t selfId = open();
   const usize numDims = getDimensions().size();
 
@@ -1160,10 +1116,7 @@ std::vector<nx::core::usize> DatasetIO::getChunkDimensions() const
 
 std::vector<nx::core::usize> DatasetIO::getDimensions() const
 {
-  // getId() and getClassType() each self-lock, so they are resolved BEFORE this method's
-  // leaf lock (holding the non-recursive ApiLock across them would self-deadlock). The
-  // dataspace open, the optional string-type query, the extent queries, and the dataspace
-  // close are then one leaf critical section.
+  // Resolve self-locking accessors before one dataspace leaf critical section.
   const hid_t selfId = getId();
   const hid_t classType = getClassType();
 
@@ -1217,11 +1170,8 @@ Result<> DatasetIO::writeSpan(const DimsType& dims, nonstd::span<const T> values
   std::vector<hsize_t> hDims(dims.size());
   std::transform(dims.begin(), dims.end(), hDims.begin(), [](DimsType::value_type x) { return static_cast<hsize_t>(x); });
 
-  // Each leaf HDF5 step self-locks its own bare C call(s) and runs OUTSIDE any held lock:
-  // H5Screate_simple here, then BuildChunkedDeflateDcpl (self-locks its DCPL build),
-  // createOrOpenDataset (self-locks its open/create), and finally the bare H5Dwrite/H5Pclose
-  // below. Per the public-locks/private-unlocked discipline this method never holds the
-  // ApiLock across another lock-taking call.
+  // Each wrapper call manages its own nonrecursive HDF5 lock. No lock spans
+  // another public wrapper call.
   hid_t dataspaceId = H5I_INVALID_HID;
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -1243,35 +1193,14 @@ Result<> DatasetIO::writeSpan(const DimsType& dims, nonstd::span<const T> values
       ErrorType error = 0;
       if(datasetId >= 0)
       {
-        // Parallel-deflate fast path for compressed chunked datasets — the write mirror of the
-        // read branch in readIntoSpan<T>.
-        //
-        // Why this branch exists: HDF5's deflate compression runs inside H5Dwrite under a
-        // process-wide, non-reentrant lock, so a serial whole-dataset write of a large
-        // compressed chunked dataset serializes entirely on compression (the dominant cost).
-        // Routing such writes through ParallelChunkCodec compresses the chunks on worker
-        // threads OFF that lock and stores the pre-compressed bytes via H5Dwrite_chunk, which
-        // is the payoff for the whole in-core write path (every saver that reaches this method
-        // inherits it). The written chunks read back byte-identically through a serial H5Dread
-        // (verified by the codec's own tests), so this is a performance branch, not a behavior
-        // difference.
-        //
-        // The eligibility decision is made WITHOUT holding ApiLock(): getChunkDimensions() and
-        // the ParallelChunkCodec constructor's eligibility probe each self-acquire the
-        // (non-recursive) HDF5 lock internally, so holding it here would self-deadlock. The
-        // dataset was just created with the chunked + deflate DCPL above, so a non-empty
-        // getChunkDimensions() AND an eligible codec together mean a single-filter deflate
-        // pipeline this path can write directly.
+        // H5Dwrite compresses under the process-wide HDF5 lock. Eligible datasets
+        // instead compress on workers and commit precompressed chunks serially.
+        // Eligibility calls manage their own nonrecursive HDF5 lock.
         bool wroteViaCodec = false;
         const std::vector<usize> usizeChunkDims = getChunkDimensions(); // empty when contiguous (level 0 / small array)
         if(!usizeChunkDims.empty())
         {
-          // Model the in-core write as a single tuple-space transfer of the WHOLE flat array:
-          // tupleShape = the full dataspace dims and componentShape = {} (so numComponents = 1),
-          // exactly as readIntoSpan<T> models the matching read. The codec then gathers
-          // row-major over the full dims, byte-identically to a serial H5Dwrite of the whole
-          // dataset. The tuple-vs-component split is irrelevant here and is intentionally not
-          // modeled (this method does not know it and does not need it).
+          // Model the complete flat array as one-component tuple space.
           std::vector<uint64> tupleShape(dims.begin(), dims.end());
           std::vector<uint64> chunkShape(usizeChunkDims.begin(), usizeChunkDims.end());
           HDF5::ParallelChunkCodec codec(getFilePath(), getNamePath(), tupleShape, chunkShape, /*componentShape=*/{}, sizeof(T), datasetId);
@@ -1282,11 +1211,8 @@ Result<> DatasetIO::writeSpan(const DimsType& dims, nonstd::span<const T> values
             std::iota(allChunkIndices.begin(), allChunkIndices.end(), uint64{0});
 
             const nonstd::span<const std::byte> source(reinterpret_cast<const std::byte*>(values.data()), values.size_bytes());
-            // The codec compresses bounded batches off the lock, then self-locks its serial leaf
-            // H5Dwrite_chunk commits, so this call must NOT be wrapped in ApiLock() (doing so would
-            // serialize the very work the codec parallelizes and would self-deadlock against the
-            // codec's own internal locking). A false return leaves the serial H5Dwrite below as the
-            // proven backstop, so a codec failure can never make a previously-working write fail.
+            // The codec manages metadata and chunk-commit locks internally. A false
+            // result selects the serial H5Dwrite fallback.
             std::string codecError;
             if(codec.deflateSpanIntoChunks(source, allChunkIndices, /*sourceStartTuple=*/0, &codecError))
             {
@@ -1297,10 +1223,7 @@ Result<> DatasetIO::writeSpan(const DimsType& dims, nonstd::span<const T> values
 
         if(!wroteViaCodec)
         {
-          // Serial backstop: uncompressed (contiguous) dataset, an ineligible deflate pipeline,
-          // or a codec failure. Per the ApiLock contract the lock guards ONLY the bare H5Dwrite
-          // leaf call; error-message strings (which reach lock-taking accessors) are built
-          // outside the lock so the non-recursive lock never self-deadlocks.
+          // The serial fallback locks only H5Dwrite. Error formatting stays outside.
           const void* data = static_cast<const void*>(values.data());
           {
             std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -1347,34 +1270,16 @@ Result<> DatasetIO::writeSpan<bool>(const DimsType& dims, nonstd::span<const boo
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// createEmptyDataset
-// -----------------------------------------------------------------------------
-// Creates an HDF5 dataset with the correct type and N-D dimensions but writes
-// no data. This is the first step of the two-step OOC write pattern:
-//
-//   1. createEmptyDataset() -- allocate the dataset on disk
-//   2. writeSpanHyperslab() -- fill it region-by-region as chunks are read
-//      from the OOC backing file
-//
-// In-core stores do not use this; they call writeSpan() which creates the
-// dataset and writes all data in a single HDF5 call.
-// -----------------------------------------------------------------------------
 template <typename T>
 Result<> DatasetIO::createEmptyDataset(const DimsType& dims)
 {
-  // Resolve the HDF5 native type ID for the template parameter.
   hid_t dataType = HdfTypeForPrimitive<T>();
   if(dataType == -1)
   {
     return MakeErrorResult(-1020, "createEmptyDataset error: Unsupported data type.");
   }
 
-  // Convert the DimsType vector to HDF5's hsize_t vector and create a
-  // simple N-D dataspace matching the full array dimensions. The bare H5Screate_simple
-  // self-locks; BuildChunkedDeflateDcpl and createOrOpenDataset below self-lock their own
-  // leaf calls, and the final bare H5Sclose/H5Pclose each take their own short lock — this
-  // method never holds the ApiLock across another lock-taking call.
+  // Each dataset-creation wrapper manages its own nonrecursive HDF5 lock.
   std::vector<hsize_t> hDims(dims.size());
   std::transform(dims.begin(), dims.end(), hDims.begin(), [](DimsType::value_type x) { return static_cast<hsize_t>(x); });
   hid_t dataspaceId = H5I_INVALID_HID;
@@ -1387,14 +1292,7 @@ Result<> DatasetIO::createEmptyDataset(const DimsType& dims)
     return MakeErrorResult(-1021, "createEmptyDataset error: Unable to create dataspace.");
   }
 
-  // Build the dataset creation property list so that a compression-requesting
-  // write (m_CompressionLevel > 0) produces a chunked + deflated dataset, matching
-  // the single-shot writeSpan() path. BuildChunkedDeflateDcpl falls through to
-  // H5P_DEFAULT (contiguous) for compression level 0 and for arrays below the
-  // small-array threshold. This is what lets the two-step OOC streaming write
-  // honor compression: without it the dataset was always created contiguous, so
-  // large OOC arrays were written uncompressed even when WriteOptions requested
-  // compression.
+  // Use the full-span compression policy before later OOC hyperslab transfers.
   auto dcplResult = BuildChunkedDeflateDcpl(dims, sizeof(T), m_CompressionLevel);
   if(dcplResult.invalid())
   {
@@ -1407,9 +1305,7 @@ Result<> DatasetIO::createEmptyDataset(const DimsType& dims)
   }
   const hid_t dcpl = dcplResult.value();
 
-  // Create (or reopen) the dataset. The dataset is left empty; data will
-  // be written later via writeSpanHyperslab(). createOrOpenDataset self-locks, so it runs
-  // before the bare H5Sclose/H5Pclose cleanup leaf scope.
+  // createOrOpenDataset() locks itself. Close local properties in a later leaf scope.
   auto datasetId = createOrOpenDataset<T>(dataspaceId, dcpl);
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -1427,25 +1323,6 @@ Result<> DatasetIO::createEmptyDataset(const DimsType& dims)
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// writeSpanHyperslab
-// -----------------------------------------------------------------------------
-// Writes a contiguous buffer of values into a rectangular sub-region (hyperslab)
-// of an existing HDF5 dataset. The dataset must already exist on disk, created
-// either by createEmptyDataset() or writeSpan().
-//
-// This is the second step of the two-step OOC write pattern. An OOC store
-// iterates over its backing file chunk-by-chunk, reads each chunk into a
-// temporary buffer, and calls this method to write that buffer into the
-// corresponding region of the output dataset. The pattern avoids ever
-// materializing the entire array in memory.
-//
-// The method works by:
-//   1. Opening the dataset's file dataspace
-//   2. Selecting a hyperslab defined by start[] and count[]
-//   3. Creating a compact memory dataspace matching count[]
-//   4. Writing from the caller's span into the selected hyperslab
-// -----------------------------------------------------------------------------
 template <typename T>
 Result<> DatasetIO::writeSpanHyperslab(nonstd::span<const T> values, const std::vector<uint64>& start, const std::vector<uint64>& count)
 {
@@ -1454,17 +1331,13 @@ Result<> DatasetIO::writeSpanHyperslab(nonstd::span<const T> values, const std::
     return MakeErrorResult(-506, fmt::format("Cannot open HDF5 data at {} / {}", getFilePath().string(), getNamePath()));
   }
 
-  // Resolve the HDF5 native type for T.
   hid_t dataType = HdfTypeForPrimitive<T>();
   if(dataType == -1)
   {
     return MakeErrorResult(-1010, "writeSpanHyperslab error: Unsupported data type.");
   }
 
-  // open() self-locks, so it is resolved BEFORE this method's leaf lock. The hyperslab
-  // write then runs as one leaf critical section: each bare HDF5 step records an error
-  // code and the dataspaces are always closed inside the lock; the code is translated to a
-  // Result after the lock so error-string construction stays off the lock.
+  // open() locks itself before the leaf hyperslab critical section.
   const hid_t datasetId = open();
 
   int errorCode = 0;
@@ -1478,10 +1351,7 @@ Result<> DatasetIO::writeSpanHyperslab(nonstd::span<const T> values, const std::
     }
     else
     {
-      // Select the hyperslab region [start, start+count) in the file dataspace.
-      // On macOS, hsize_t (unsigned long long) differs from uint64 (unsigned long),
-      // so we must copy into vectors of the correct type to avoid mismatched
-      // pointer casts.
+      // macOS uses a different hsize_t underlying type. Copy offsets to avoid pointer casts.
 #if defined(__APPLE__)
       std::vector<unsigned long long> startVec(start.begin(), start.end());
       std::vector<unsigned long long> countVec(count.begin(), count.end());
@@ -1494,8 +1364,7 @@ Result<> DatasetIO::writeSpanHyperslab(nonstd::span<const T> values, const std::
       }
       else
       {
-        // Create a memory-side dataspace that matches the hyperslab extent. The
-        // caller's span must contain exactly product(count) elements.
+        // Match the memory dataspace to the selected extent.
         std::vector<hsize_t> memDims(count.begin(), count.end());
         hid_t memSpaceId = H5Screate_simple(static_cast<int>(memDims.size()), memDims.data(), nullptr);
         if(memSpaceId < 0)
@@ -1504,7 +1373,6 @@ Result<> DatasetIO::writeSpanHyperslab(nonstd::span<const T> values, const std::
         }
         else
         {
-          // Write from the in-memory buffer into the selected hyperslab on disk.
           writeError = H5Dwrite(datasetId, dataType, memSpaceId, fileSpaceId, H5P_DEFAULT, values.data());
           if(writeError < 0)
           {
@@ -1538,9 +1406,7 @@ nx::core::Result<ChunkedDataInfo> DatasetIO::initChunkedDataset(const DimsType& 
   ChunkedDataInfo dataInfo;
   std::vector<hsize_t> h5DimsVec(h5Dims.begin(), h5Dims.end());
 
-  // The bare H5Screate_simple self-locks here. createOrOpenDataset below self-locks its own
-  // open/create leaf calls, so it runs AFTER this leaf scope releases — holding the
-  // non-recursive lock across it would self-deadlock (public-locks / private-unlocked).
+  // Create the dataspace before the separately locked dataset open or create call.
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
     dataInfo.dataspaceId = H5Screate_simple(h5Dims.size(), h5DimsVec.data(), nullptr);
@@ -1753,10 +1619,7 @@ Result<> DatasetIO::writeChunk(const ChunkedDataInfo& chunkInfo, const DimsType&
       std::vector<hsize_t> chunkShapeVec(chunkShape.begin(), chunkShape.end());
       std::vector<hsize_t> trueChunkShapeVec(trueChunkDims.begin(), trueChunkDims.end());
 
-      // chunkInfo's dataset/dataspace ids are already open (from initChunkedDataset), and
-      // HdfTypeForPrimitive is a pure compile-time type map, so the hyperslab selection,
-      // memory-dataspace create, write, and close are one leaf critical section with no
-      // self-locking IO call inside it (public-locks / private-unlocked).
+      // Open chunk handles permit one leaf lock around selection, write, and cleanup.
       {
         std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
         error = H5Sselect_hyperslab(dataspaceId, H5S_SELECT_SET, offsetVec.data(), NULL, trueChunkShapeVec.data(), NULL);
@@ -1815,10 +1678,7 @@ nx::core::Result<> DatasetIO::writeString(const std::string& text)
   herr_t error = 0;
   Result<> returnError = {};
 
-  // The whole body is bare HDF5 C calls plus pure accessors (getParentId/getNamePath only
-  // read members and take no lock), so it self-locks as one leaf critical section. No
-  // self-locking IO method (open/getId/createOrOpenDataset/etc.) is called here, so there
-  // is no public-to-public nesting.
+  // Pure member access occurs before one leaf lock around all HDF5 string calls.
   const hid_t parentId = getParentId();
   const std::string namePath = getNamePath();
   {
@@ -1878,10 +1738,7 @@ nx::core::Result<> DatasetIO::writeVectorOfStrings(const std::vector<std::string
   //   return MakeErrorResult(-100, "Cannot Write to Invalid DatasetIO");
   // }
 
-  // The whole body is bare HDF5 C calls plus pure accessors/setters (getParentId/
-  // getNamePath read members; setId only writes m_Id — none take a lock), so it self-locks
-  // as one leaf critical section. No self-locking IO method is called here, so there is no
-  // public-to-public nesting.
+  // Pure member access occurs before one leaf lock around all HDF5 string calls.
   const hid_t parentId = getParentId();
   const std::string namePath = getNamePath();
   hid_t dataspaceID = -1;
@@ -2005,9 +1862,7 @@ bool DatasetIO::exists() const
 
 std::string DatasetIO::getFilterName() const
 {
-  // getId() self-locks; resolve it before the leaf lock. GetNameFromFilterType is a pure
-  // mapping switch (no HDF5), so the whole DCPL/filter query loop is one leaf critical
-  // section (the DCPL is closed inside it to avoid leaking the handle).
+  // Resolve getId() before one leaf lock around property-list inspection and cleanup.
   const hid_t selfId = getId();
   std::string filterNames;
   {

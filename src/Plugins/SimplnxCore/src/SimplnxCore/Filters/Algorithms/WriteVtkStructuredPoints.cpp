@@ -31,12 +31,24 @@ constexpr usize k_AsciiChunkValues = 65536;
 constexpr int32 k_ReadChunkError = -2090;
 constexpr int32 k_WriteError = -2091;
 
+/**
+ * @brief Calculates values in one binary transfer chunk.
+ * @tparam T Specifies the scalar type.
+ * @return At least one value and at most 16 MiB of values.
+ */
 template <typename T>
 constexpr usize BinaryChunkValueCapacity()
 {
   return std::max<usize>(1, k_MaxChunkBytes / sizeof(T));
 }
 
+/**
+ * @brief Converts output-stream state to a diagnostic Result.
+ * @param outputStream Provides current stream state.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the current source array.
+ * @return Success for a good stream, or a write error.
+ */
 Result<> CheckOutputStream(const std::ofstream& outputStream, const fs::path& outputPath, const DataPath& arrayPath)
 {
   if(outputStream.good())
@@ -48,6 +60,15 @@ Result<> CheckOutputStream(const std::ofstream& outputStream, const fs::path& ou
       k_WriteError, fmt::format("Failed to write data array '{}' to VTK file '{}'. Check that the destination has sufficient free space and is writable.", arrayPath.toString(), outputPath.string()));
 }
 
+/**
+ * @brief Writes a legacy VTK SCALARS preamble.
+ * @tparam T Specifies the array scalar type.
+ * @param outputStream Receives the preamble.
+ * @param dataArray Provides name and component count.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @return Stream write result.
+ */
 template <typename T>
 Result<> WriteArrayPreamble(std::ofstream& outputStream, const DataArray<T>& dataArray, const fs::path& outputPath, const DataPath& arrayPath)
 {
@@ -57,6 +78,18 @@ Result<> WriteArrayPreamble(std::ofstream& outputStream, const DataArray<T>& dat
   return CheckOutputStream(outputStream, outputPath, arrayPath);
 }
 
+/**
+ * @brief Writes resident binary values through a direct pointer.
+ * @tparam T Specifies the scalar type.
+ * @param outputStream Receives binary values.
+ * @param dataStore Provides resident values.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Stream error, or success after completion or cancellation.
+ *
+ * Little-endian values use a bounded byte-swap buffer. Source values remain unchanged.
+ */
 template <typename T>
 Result<> WriteBinaryDirect(std::ofstream& outputStream, const DataStore<T>& dataStore, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -96,6 +129,15 @@ Result<> WriteBinaryDirect(std::ofstream& outputStream, const DataStore<T>& data
   return CheckOutputStream(outputStream, outputPath, arrayPath);
 }
 
+/**
+ * @brief Reads one source chunk and adds array context to read errors.
+ * @tparam T Specifies the scalar type.
+ * @param dataStore Provides source values.
+ * @param offset Specifies the first source value.
+ * @param chunk Receives contiguous values.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @return Source bulk-read result with array context.
+ */
 template <typename T>
 Result<> ReadChunk(const AbstractDataStore<T>& dataStore, usize offset, nonstd::span<T> chunk, const DataPath& arrayPath)
 {
@@ -110,6 +152,16 @@ Result<> ReadChunk(const AbstractDataStore<T>& dataStore, usize offset, nonstd::
                          fmt::format("Failed to read values [{}, {}) from data array '{}' while writing the VTK file: {}", offset, offset + chunk.size(), arrayPath.toString(), reason));
 }
 
+/**
+ * @brief Writes binary values through bounded source reads.
+ * @tparam T Specifies the scalar type.
+ * @param outputStream Receives binary values.
+ * @param dataStore Provides source values.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Source-read or stream-write error, or success after cancellation.
+ */
 template <typename T>
 Result<> WriteBinaryBulk(std::ofstream& outputStream, const AbstractDataStore<T>& dataStore, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -148,6 +200,14 @@ Result<> WriteBinaryBulk(std::ofstream& outputStream, const AbstractDataStore<T>
   return CheckOutputStream(outputStream, outputPath, arrayPath);
 }
 
+/**
+ * @brief Formats one ASCII value range with ten values per line.
+ * @tparam T Specifies the scalar type.
+ * @param outputStream Receives formatted values.
+ * @param values Provides contiguous values.
+ * @param count Specifies values to format.
+ * @param currentItemCount Preserves line position across chunks.
+ */
 template <typename T>
 void WriteAsciiValues(std::ofstream& outputStream, const T* values, usize count, usize& currentItemCount)
 {
@@ -180,6 +240,16 @@ void WriteAsciiValues(std::ofstream& outputStream, const T* values, usize count,
   }
 }
 
+/**
+ * @brief Writes resident ASCII values through a direct pointer.
+ * @tparam T Specifies the scalar type.
+ * @param outputStream Receives formatted values.
+ * @param dataStore Provides resident values.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Stream error, or success after completion or cancellation.
+ */
 template <typename T>
 Result<> WriteAsciiDirect(std::ofstream& outputStream, const DataStore<T>& dataStore, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -208,6 +278,16 @@ Result<> WriteAsciiDirect(std::ofstream& outputStream, const DataStore<T>& dataS
   return CheckOutputStream(outputStream, outputPath, arrayPath);
 }
 
+/**
+ * @brief Writes ASCII values through bounded source reads.
+ * @tparam T Specifies the scalar type.
+ * @param outputStream Receives formatted values.
+ * @param dataStore Provides source values.
+ * @param outputPath Identifies the destination file.
+ * @param arrayPath Identifies the source array for diagnostics.
+ * @param shouldCancel Stops before later chunks when true.
+ * @return Source-read or stream-write error, or success after cancellation.
+ */
 template <typename T>
 Result<> WriteAsciiBulk(std::ofstream& outputStream, const AbstractDataStore<T>& dataStore, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
 {
@@ -242,8 +322,23 @@ Result<> WriteAsciiBulk(std::ofstream& outputStream, const AbstractDataStore<T>&
   return CheckOutputStream(outputStream, outputPath, arrayPath);
 }
 
+/**
+ * @struct WriteVtkDataDirectFunctor
+ * @brief Selects direct or bounded writing for one runtime array type.
+ */
 struct WriteVtkDataDirectFunctor
 {
+  /**
+   * @brief Writes one typed array after its VTK preamble.
+   * @tparam T Specifies the array scalar type.
+   * @param outputStream Receives the array.
+   * @param iDataArray Provides source values.
+   * @param binary Selects binary or ASCII output.
+   * @param outputPath Identifies the destination file.
+   * @param arrayPath Identifies the source array.
+   * @param shouldCancel Stops before later chunks when true.
+   * @return Source-read or stream-write error, or success after cancellation.
+   */
   template <typename T>
   Result<> operator()(std::ofstream& outputStream, IDataArray& iDataArray, bool binary, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel) const
   {
@@ -265,8 +360,23 @@ struct WriteVtkDataDirectFunctor
   }
 };
 
+/**
+ * @struct WriteVtkDataScanlineFunctor
+ * @brief Writes one runtime array type through bounded source reads.
+ */
 struct WriteVtkDataScanlineFunctor
 {
+  /**
+   * @brief Writes one typed array after its VTK preamble.
+   * @tparam T Specifies the array scalar type.
+   * @param outputStream Receives the array.
+   * @param iDataArray Provides source values.
+   * @param binary Selects binary or ASCII output.
+   * @param outputPath Identifies the destination file.
+   * @param arrayPath Identifies the source array.
+   * @param shouldCancel Stops before later chunks when true.
+   * @return Source-read or stream-write error, or success after cancellation.
+   */
   template <typename T>
   Result<> operator()(std::ofstream& outputStream, IDataArray& iDataArray, bool binary, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel) const
   {
@@ -282,9 +392,22 @@ struct WriteVtkDataScanlineFunctor
   }
 };
 
+/**
+ * @class WriteVtkDataDirect
+ * @brief Adapts one array to direct storage dispatch.
+ */
 class WriteVtkDataDirect
 {
 public:
+  /**
+   * @brief Creates one borrowed array writer.
+   * @param outputStream Receives the array.
+   * @param dataArray Provides source values.
+   * @param binary Selects binary or ASCII output.
+   * @param outputPath Identifies the destination file.
+   * @param arrayPath Identifies the source array.
+   * @param shouldCancel Stops before later chunks when true.
+   */
   WriteVtkDataDirect(std::ofstream& outputStream, IDataArray& dataArray, bool binary, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
   : m_OutputStream(outputStream)
   , m_DataArray(dataArray)
@@ -295,6 +418,10 @@ public:
   {
   }
 
+  /**
+   * @brief Dispatches the source scalar type.
+   * @return Source-read or stream-write error, or success after cancellation.
+   */
   Result<> operator()()
   {
     return ExecuteDataFunctionNoBool(WriteVtkDataDirectFunctor{}, m_DataArray.getDataType(), m_OutputStream, m_DataArray, m_Binary, m_OutputPath, m_ArrayPath, m_ShouldCancel);
@@ -309,11 +436,22 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
-// Dispatch keeps in-memory writes on raw contiguous storage while forced and real
-// OOC execution uses sequential bulk reads with the same formatting logic.
+/**
+ * @class WriteVtkDataScanline
+ * @brief Adapts one array to bounded storage dispatch.
+ */
 class WriteVtkDataScanline
 {
 public:
+  /**
+   * @brief Creates one borrowed array writer.
+   * @param outputStream Receives the array.
+   * @param dataArray Provides source values.
+   * @param binary Selects binary or ASCII output.
+   * @param outputPath Identifies the destination file.
+   * @param arrayPath Identifies the source array.
+   * @param shouldCancel Stops before later chunks when true.
+   */
   WriteVtkDataScanline(std::ofstream& outputStream, IDataArray& dataArray, bool binary, const fs::path& outputPath, const DataPath& arrayPath, const std::atomic_bool& shouldCancel)
   : m_OutputStream(outputStream)
   , m_DataArray(dataArray)
@@ -324,6 +462,10 @@ public:
   {
   }
 
+  /**
+   * @brief Dispatches the source scalar type.
+   * @return Source-read or stream-write error, or success after cancellation.
+   */
   Result<> operator()()
   {
     return ExecuteDataFunctionNoBool(WriteVtkDataScanlineFunctor{}, m_DataArray.getDataType(), m_OutputStream, m_DataArray, m_Binary, m_OutputPath, m_ArrayPath, m_ShouldCancel);
@@ -339,7 +481,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteVtkStructuredPoints::WriteVtkStructuredPoints(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                    WriteVtkStructuredPointsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -349,16 +490,13 @@ WriteVtkStructuredPoints::WriteVtkStructuredPoints(DataStructure& dataStructure,
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteVtkStructuredPoints::~WriteVtkStructuredPoints() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteVtkStructuredPoints::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteVtkStructuredPoints::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);

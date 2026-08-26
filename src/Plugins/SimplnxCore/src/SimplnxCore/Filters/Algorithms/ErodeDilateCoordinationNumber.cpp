@@ -1,31 +1,6 @@
 /**
  * @file ErodeDilateCoordinationNumber.cpp
- * @brief Coordination-number-based boundary smoothing of good/bad voxels,
- *        optimized for out-of-core (OOC) data stores via Z-slice buffered I/O.
- *
- * ## High-Level Flow (per pass)
- *
- * 1. **Initialize rolling window** -- Load FeatureId Z-slices 0 and 1 into
- *    the three-element window (slots 1 and 2).
- *
- * 2. **Scan every voxel** (Z-major, then Y, then X):
- *    - For each voxel on a good/bad boundary, count face neighbors of the
- *      opposite type (the "coordination number") and record the most common
- *      neighbor FeatureId.
- *    - Store the coordination number and best-neighbor index in per-slice
- *      arrays rather than full-volume arrays.
- *
- * 3. **Deferred transfer** -- After processing Z-slice z, commit the marks
- *    for z-1 (which are now complete). Only voxels whose coordination number
- *    meets or exceeds the user's threshold are actually transferred.
- *
- * 4. **Rotate windows** -- Shift rolling-window buffers and per-slice arrays
- *    forward by one Z-layer.
- *
- * 5. **Flush final slice** -- Commit the last slice's marks after the Z-loop.
- *
- * 6. **Repeat** until no voxels were modified (if Loop is true) or after
- *    one pass (if Loop is false).
+ * @brief Smooths good/bad boundaries with slice-bounded coordination state.
  */
 
 #include "ErodeDilateCoordinationNumber.hpp"

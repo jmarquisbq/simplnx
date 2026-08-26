@@ -25,15 +25,15 @@ constexpr usize k_ChunkValues = 65536;
 constexpr usize k_MaskChunkTuples = 65536;
 
 /**
+ * @class ChunkMaskReader
  * @brief Presents an optional Bool/UInt8 mask through one reusable bounded tuple page.
  *
- * This removes the former synthetic all-true cell array and avoids single-value
- * OOC reads during seeded centroid selection.
+ * A null mask reports every tuple as selected. Page reads avoid single-value
+ * out-of-core access during centroid selection.
  */
 class ChunkMaskReader
 {
 public:
-  /** @brief Borrows the optional mask and allocates typed page buffers only when needed. */
   explicit ChunkMaskReader(const IDataArray* mask)
   : m_Mask(mask)
   {
@@ -44,7 +44,12 @@ public:
     }
   }
 
-  /** @brief Bulk-loads one mask page beginning at offset. */
+  /**
+   * @brief Loads one mask page.
+   * @param offset First tuple in the page.
+   * @param count Number of tuples to load.
+   * @return Success, or a bulk-read error.
+   */
   Result<> load(usize offset, usize count)
   {
     m_Offset = offset;
@@ -60,7 +65,6 @@ public:
     return m_Mask->getIDataStoreRefAs<AbstractDataStore<uint8>>().copyIntoBuffer(offset, nonstd::span<uint8>(m_UInt8Buffer.get(), count));
   }
 
-  /** @brief Returns one value known to lie in the currently loaded page, or true when masking is disabled. */
   bool value(usize index) const
   {
     if(m_Mask == nullptr)
@@ -71,7 +75,12 @@ public:
     return m_Mask->getDataType() == DataType::boolean ? m_BoolBuffer[localIndex] : m_UInt8Buffer[localIndex] != 0;
   }
 
-  /** @brief Returns one mask value, loading its containing page when necessary. */
+  /**
+   * @brief Reads one mask value and loads its page when necessary.
+   * @param index Tuple index to read.
+   * @param tupleCount Total mask tuple count.
+   * @return The mask value, or a bulk-read error.
+   */
   Result<bool> valueAt(usize index, usize tupleCount)
   {
     if(m_Mask == nullptr)
@@ -90,7 +99,12 @@ public:
     return {value(index)};
   }
 
-  /** @brief Scans bounded pages until an eligible tuple is found, preventing an endless seeded-selection loop. */
+  /**
+   * @brief Tests whether the mask selects at least one tuple.
+   * @param tupleCount Total input tuple count.
+   * @return True when one selected tuple exists, or a bulk-read error.
+   * @note This validation scan does not inspect the cancellation flag.
+   */
   Result<bool> hasTrueValue(usize tupleCount)
   {
     if(m_Mask == nullptr)
@@ -125,17 +139,18 @@ private:
 };
 
 /**
+ * @class ComputeKMeansTemplate
  * @brief Typed Lloyd iteration using chunked assignments and cluster-scale centroid state.
+ * @tparam T Input and centroid value type.
  *
  * Centroids remain resident because they scale with K and component count. Cell
- * inputs, masks, and feature IDs are read/written in fixed pages, and all centroid
- * sums are accumulated in one pass per iteration.
+ * inputs, masks, and feature IDs use fixed pages. One pass accumulates all
+ * centroid components.
  */
 template <typename T>
 class ComputeKMeansTemplate
 {
 public:
-  /** @brief Borrows all typed stores and immutable K-Means settings. */
   ComputeKMeansTemplate(ComputeKMeansScanline& filter, const IDataArray& inputArray, IDataArray& meansArray, const IDataArray* maskArray, Int32AbstractDataStore& featureIds,
                         const ComputeKMeansInputValues& inputValues)
   : m_Filter(filter)
@@ -147,7 +162,16 @@ public:
   {
   }
 
-  /** @brief Selects initial centroids and repeats assignment/mean phases until exact centroid convergence. */
+  /**
+   * @brief Selects initial centroids and repeats assignment and mean phases.
+   * @return Success, or a shape, overflow, cluster-ID, or bulk-transfer error.
+   *
+   * Sampling permits duplicate centroids. For multi-tuple input, the legacy
+   * index formula excludes the final tuple. The convergence test reads flat
+   * means indices 1 through K and does not inspect all components.
+   *
+   * Cancellation returns success. Output pages from earlier phases remain.
+   */
   Result<> operator()()
   {
     const usize tupleCount = m_Input.getNumberOfTuples();
@@ -270,7 +294,16 @@ public:
   }
 
 private:
-  /** @brief Assigns each enabled tuple to its nearest cached centroid and bulk-writes Feature IDs. */
+  /**
+   * @brief Assigns selected tuples to their nearest cached centroids.
+   * @param tupleCount Number of input tuples.
+   * @param components Number of components in each tuple.
+   * @param maskReader Supplies aligned mask pages.
+   * @return Success, or a bulk-transfer error.
+   *
+   * Existing assignment pages are read first so masked tuples keep their prior
+   * IDs. Cancellation leaves completed pages in the output store.
+   */
   Result<> findClusters(usize tupleCount, usize components, ChunkMaskReader& maskReader)
   {
     const usize meansSize = (m_InputValues.InitClusters + 1) * components;
@@ -322,7 +355,15 @@ private:
     return {};
   }
 
-  /** @brief Recomputes every centroid with one chunked pass over input values and assignments. */
+  /**
+   * @brief Recomputes all arithmetic means with one chunked input pass.
+   * @param tupleCount Number of input tuples.
+   * @param components Number of components in each tuple.
+   * @return Success, or a cluster-ID or bulk-transfer error.
+   *
+   * All tuples contribute to their current assignment. Masked tuples normally
+   * remain in reserved bucket zero. Cancellation does not publish partial sums.
+   */
   Result<> findMeans(usize tupleCount, usize components)
   {
     const usize meansSize = (m_InputValues.InitClusters + 1) * components;
@@ -373,10 +414,23 @@ private:
   const ComputeKMeansInputValues& m_InputValues;
 };
 
-/** @brief Dispatches the clustering array's runtime numeric type to ComputeKMeansTemplate. */
+/**
+ * @struct ExecuteKMeansFunctor
+ * @brief Dispatches the runtime numeric type to the scanline implementation.
+ */
 struct ExecuteKMeansFunctor
 {
-  /** @brief Constructs and executes the selected typed K-Means implementation. */
+  /**
+   * @brief Constructs and executes one typed K-Means implementation.
+   * @tparam T Input and centroid value type.
+   * @param filter Supplies messaging and cancellation.
+   * @param input Supplies input tuples.
+   * @param means Receives cluster centroids.
+   * @param mask Supplies an optional Bool or UInt8 mask.
+   * @param featureIds Receives cluster assignments.
+   * @param inputValues Supplies immutable settings.
+   * @return Result from the typed implementation.
+   */
   template <typename T>
   Result<> operator()(ComputeKMeansScanline& filter, const IDataArray& input, IDataArray& means, const IDataArray* mask, Int32AbstractDataStore& featureIds,
                       const ComputeKMeansInputValues& inputValues) const

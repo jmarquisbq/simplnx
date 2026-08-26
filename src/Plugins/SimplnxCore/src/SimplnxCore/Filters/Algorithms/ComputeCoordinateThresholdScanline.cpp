@@ -13,8 +13,21 @@ using namespace nx::core;
 
 namespace
 {
+// The fixed staging buffer bounds scratch memory for ImageGeom mask creation.
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Writes an ImageGeom mask in bounded batches.
+ * @param imageGeom Supplies dimensions, origin, and spacing.
+ * @param mask Receives one value per cell.
+ * @param shouldInvert True to reverse mask values.
+ * @param isInBounds Tests each cell corner.
+ * @param shouldCancel Signals cancellation between batches.
+ * @return Success, or an output bulk-I/O error.
+ *
+ * A cell passes only when all eight corners pass. Cancellation returns success
+ * after completed batches. Later cells are not written.
+ */
 Result<> ComputeImageMask(const ImageGeom& imageGeom, UInt8AbstractDataStore& mask, bool shouldInvert, const std::function<uint8(float32, float32, float32)>& isInBounds,
                           const std::atomic_bool& shouldCancel)
 {
@@ -43,7 +56,7 @@ Result<> ComputeImageMask(const ImageGeom& imageGeom, UInt8AbstractDataStore& ma
       const usize yIndex = xyIndex / xCells;
       const usize xIndex = xyIndex % xCells;
 
-      // Keep the primitive arithmetic and corner order identical to the original nested ImageGeom loop.
+      // The arithmetic and corner order match the direct ImageGeom implementation.
       const float32 minXValue = xIndex * spacing[0] + origin[0];
       const float32 minYValue = yIndex * spacing[1] + origin[1];
       const float32 minZValue = zIndex * spacing[2] + origin[2];
@@ -74,7 +87,6 @@ Result<> ComputeImageMask(const ImageGeom& imageGeom, UInt8AbstractDataStore& ma
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThresholdScanline::ComputeCoordinateThresholdScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                        const ComputeCoordinateThresholdInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -84,10 +96,8 @@ ComputeCoordinateThresholdScanline::ComputeCoordinateThresholdScanline(DataStruc
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThresholdScanline::~ComputeCoordinateThresholdScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeCoordinateThresholdScanline::operator()()
 {
   std::function<uint8(float32, float32, float32)> isInBounds;

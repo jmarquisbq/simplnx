@@ -10,7 +10,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 PartitionGeometry::PartitionGeometry(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, PartitionGeometryInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -19,10 +18,8 @@ PartitionGeometry::PartitionGeometry(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 PartitionGeometry::~PartitionGeometry() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometry::operator()()
 {
   const DataPath partitionIdsPath = m_InputValues->InputGeomCellAMPath.createChildPath(m_InputValues->PartitionIdsArrayName);

@@ -15,11 +15,12 @@ using namespace nx::core;
 namespace
 {
 /**
- * @brief Parallel resident worker that broadcasts one feature tuple to every cell carrying that Feature ID.
+ * @class CopyFeatureArrayToElementArrayImpl
+ * @brief Broadcasts one typed feature tuple to matching cells.
+ * @tparam T Specifies the feature and output scalar type.
  *
- * When all stores are concrete DataStore instances it captures raw pointers to
- * remove virtual access from the hot loop; the generic direct-index fallback
- * preserves behavior for other resident store implementations.
+ * Concrete stores use raw pointers. The generic fallback has no general
+ * DataStore thread-safety guarantee during parallel access.
  */
 template <typename T>
 class CopyFeatureArrayToElementArrayImpl
@@ -27,7 +28,13 @@ class CopyFeatureArrayToElementArrayImpl
 public:
   using StoreType = AbstractDataStore<T>;
 
-  /** @brief Borrows the typed source, Feature IDs, destination, and cancellation state for one parallel run. */
+  /**
+   * @brief Creates a typed feature broadcast worker.
+   * @param selectedFeatureArray Provides feature tuples.
+   * @param featureIdsStore Provides one Feature Id per cell.
+   * @param createdArray Receives cell tuples.
+   * @param shouldCancel Stops later cells when true.
+   */
   CopyFeatureArrayToElementArrayImpl(const IDataArray& selectedFeatureArray, const Int32AbstractDataStore& featureIdsStore, IDataArray& createdArray, const std::atomic_bool& shouldCancel)
   : m_SelectedFeatureStore(selectedFeatureArray.getIDataStoreRefAs<StoreType>())
   , m_FeatureIdsStore(featureIdsStore)
@@ -45,7 +52,10 @@ public:
     }
   }
 
-  /** @brief Broadcasts feature values for the worker's half-open cell range. */
+  /**
+   * @brief Broadcasts feature values for one cell range.
+   * @param range Specifies the half-open cell-index range.
+   */
   void operator()(const Range& range) const
   {
     const usize numComps = m_SelectedFeatureStore.getNumberOfComponents();
@@ -89,7 +99,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 CopyFeatureArrayToElementArrayDirect::CopyFeatureArrayToElementArrayDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                            const CopyFeatureArrayToElementArrayInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -99,10 +108,8 @@ CopyFeatureArrayToElementArrayDirect::CopyFeatureArrayToElementArrayDirect(DataS
 {
 }
 
-// -----------------------------------------------------------------------------
 CopyFeatureArrayToElementArrayDirect::~CopyFeatureArrayToElementArrayDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> CopyFeatureArrayToElementArrayDirect::operator()()
 {
   if(m_InputValues->SelectedFeatureArrayPaths.empty())

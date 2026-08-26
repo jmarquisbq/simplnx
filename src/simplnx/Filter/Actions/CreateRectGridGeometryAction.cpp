@@ -41,12 +41,10 @@ CreateRectGridGeometryAction::~CreateRectGridGeometryAction() noexcept = default
 Result<> CreateRectGridGeometryAction::apply(DataStructure& dataStructure, Mode mode) const
 {
   static constexpr StringLiteral prefix = "CreateRectGridGeometryAction: ";
-  // Check for empty Geometry DataPath
   if(getCreatedPath().empty())
   {
     return MakeErrorResult(-5901, fmt::format("{}CreateRectGridGeometryAction: Geometry Path cannot be empty", prefix));
   }
-  // Check if the Geometry Path already exists
   if(auto* parentObject = dataStructure.getDataAs<BaseGroup>(getCreatedPath()); parentObject != nullptr)
   {
     return MakeErrorResult(-5902, fmt::format("{}CreateRectGridGeometryAction: DataObject already exists at path '{}'", prefix, getCreatedPath().toString()));
@@ -59,7 +57,6 @@ Result<> CreateRectGridGeometryAction::apply(DataStructure& dataStructure, Mode 
       return MakeErrorResult(-5903, fmt::format("{}CreateRectGridGeometryAction: Geometry could not be created at path:'{}'", prefix, getCreatedPath().toString()));
     }
   }
-  // Get the Parent ID
   if(!dataStructure.getId(parentPath).has_value())
   {
     return MakeErrorResult(-5904, fmt::format("{}CreateRectGridGeometryAction: Parent Id was not available for path:'{}'", prefix, parentPath.toString()));
@@ -81,7 +78,6 @@ Result<> CreateRectGridGeometryAction::apply(DataStructure& dataStructure, Mode 
     return MakeErrorResult(-5907, fmt::format("{}CreateRectGridGeometryAction: Could not find z bounds array at path '{}'", prefix, m_InputZBounds.toString()));
   }
 
-  // Create the RectGridGeometry
   RectGridGeom* rectGridGeom = RectGridGeom::Create(dataStructure, getCreatedPath().getTargetName(), dataStructure.getId(parentPath).value());
   if(rectGridGeom == nullptr)
   {
@@ -102,7 +98,6 @@ Result<> CreateRectGridGeometryAction::apply(DataStructure& dataStructure, Mode 
 
   rectGridGeom->setCellData(*attributeMatrix);
 
-  // create the bounds arrays
   Result<> results;
   if(m_ArrayHandlingType == ArrayHandlingType::Copy)
   {

@@ -21,7 +21,6 @@ namespace
 constexpr usize k_ChunkSize = 4096;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeAvgCAxes::ComputeAvgCAxes(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeAvgCAxesInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -30,33 +29,16 @@ ComputeAvgCAxes::ComputeAvgCAxes(DataStructure& dataStructure, const IFilter::Me
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeAvgCAxes::~ComputeAvgCAxes() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes the average crystallographic c-axis direction per feature for
- * hexagonal phases. Each cell's quaternion is converted to a passive rotation
- * matrix, transposed to an active rotation, and multiplied by <0,0,1> to get
- * the c-axis in the sample reference frame. A running average c-axis is
- * accumulated per feature, then normalized.
- *
- * OOC strategy: Cell-level arrays (featureIds, phases, quats) are read in
- * fixed-size chunks (k_ChunkSize tuples) via copyIntoBuffer. Feature-level
- * avgCAxes is cached entirely in a local buffer (random access by featureId
- * would cause severe OOC chunk thrashing). The final result is bulk-written
- * back to the DataStore via copyFromBuffer.
- */
 Result<> ComputeAvgCAxes::operator()()
 {
-  // Bulk-read ensemble-level crystal structures into local memory to avoid
-  // per-element OOC virtual dispatch during the cell loop
+  // The local ensemble cache avoids cell-loop store access.
   const auto& crystalStructuresStoreRef = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath)->getDataStoreRef();
   const usize numCrystalStructures = crystalStructuresStoreRef.getSize();
   auto crystalStructuresCache = std::make_unique<uint32[]>(numCrystalStructures);
   crystalStructuresStoreRef.copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresCache.get(), numCrystalStructures));
 
-  // Figure out if all phases are either Hexagonal-Low 6/m or Hexagonal-High 6/mmm Laue Phases
   bool allPhasesHexagonal = true;
   bool noPhasesHexagonal = true;
   for(usize i = 1; i < numCrystalStructures; ++i)
@@ -67,7 +49,6 @@ Result<> ComputeAvgCAxes::operator()()
     noPhasesHexagonal = noPhasesHexagonal && !isHex;
   }
 
-  // If NONE of the phases are hexagonal then bail out now with an error
   if(noPhasesHexagonal)
   {
     return MakeErrorResult(-76402, "No phases that have a crystal symmetry of Hexagonal (6/mmm or 6/m) were found.");
@@ -75,14 +56,12 @@ Result<> ComputeAvgCAxes::operator()()
 
   Result<> result;
 
-  // Throw a warning for any NON-Hex Laue Phases
   if(!allPhasesHexagonal)
   {
     result.warnings().push_back({-76403, "Non Hexagonal phases were found. All calculations for non Hexagonal phases will be skipped and a NaN value inserted."});
   }
 
-  // DataStore references for cell-level arrays — all access goes through
-  // copyIntoBuffer/copyFromBuffer to avoid per-element OOC overhead.
+  // Cell data uses chunked bulk I/O to avoid per-element OOC access.
   const auto& featureIdsStoreRef = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
   const auto& quatsStoreRef = m_DataStructure.getDataAs<Float32Array>(m_InputValues->QuatsArrayPath)->getDataStoreRef();
   const auto& cellPhasesStoreRef = m_DataStructure.getDataAs<Int32Array>(m_InputValues->CellPhasesArrayPath)->getDataStoreRef();
@@ -91,11 +70,8 @@ Result<> ComputeAvgCAxes::operator()()
   const usize totalPoints = featureIdsStoreRef.getNumberOfTuples();
   const usize totalFeatures = avgCAxesStoreRef.getNumberOfTuples();
 
-  // Cache feature-level avgCAxes entirely in a local buffer. The cell loop
-  // accesses this by featureId (random order), which would cause severe OOC
-  // chunk thrashing if left in the DataStore. Zero-initialized: the accumulation
-  // must start from zero regardless of whatever the output store holds, and the
-  // cache is written back wholesale at the end.
+  // Feature IDs select output tuples in random order, so accumulation stays
+  // local until the final write.
   const usize avgCAxesElements = totalFeatures * 3;
   auto avgCAxesCache = std::make_unique<float32[]>(avgCAxesElements);
   std::fill_n(avgCAxesCache.get(), avgCAxesElements, 0.0f);
@@ -105,16 +81,12 @@ Result<> ComputeAvgCAxes::operator()()
 
   auto counter = std::make_unique<int32[]>(totalFeatures);
 
-  // Pre-allocate chunk buffers for sequential cell-level reads. These are
-  // reused every iteration to avoid repeated heap allocations.
   auto featureIdsChunk = std::make_unique<int32[]>(k_ChunkSize);
   auto cellPhasesChunk = std::make_unique<int32[]>(k_ChunkSize);
   auto quatsChunk = std::make_unique<float32[]>(k_ChunkSize * 4);
 
   m_MessageHandler({IFilter::Message::Type::Info, "Computing cell contributions"});
 
-  // Process cells in fixed-size chunks. Each chunk triggers one bulk read per
-  // array, amortizing OOC overhead over k_ChunkSize tuples.
   usize tupleIdx = 0;
   while(tupleIdx < totalPoints)
   {
@@ -125,7 +97,6 @@ Result<> ComputeAvgCAxes::operator()()
 
     const usize chunkTuples = std::min(k_ChunkSize, totalPoints - tupleIdx);
 
-    // Bulk-read this chunk of cell data (sequential access pattern, OOC-friendly)
     featureIdsStoreRef.copyIntoBuffer(tupleIdx, nonstd::span<int32>(featureIdsChunk.get(), chunkTuples));
     cellPhasesStoreRef.copyIntoBuffer(tupleIdx, nonstd::span<int32>(cellPhasesChunk.get(), chunkTuples));
     quatsStoreRef.copyIntoBuffer(tupleIdx * 4, nonstd::span<float32>(quatsChunk.get(), chunkTuples * 4));
@@ -133,53 +104,42 @@ Result<> ComputeAvgCAxes::operator()()
     for(usize t = 0; t < chunkTuples; t++)
     {
       const int32 currentFeatureId = featureIdsChunk[t];
-      // If the featureId for a given cell is valid ( > 0) then analyze that value
       if(currentFeatureId > 0)
       {
         const int32 currentCellPhase = cellPhasesChunk[t];                          // Get the current cell phase
         const auto crystalStructureType = crystalStructuresCache[currentCellPhase]; // Get the CrystalStructure, i.e., Laue class of the cell
         const usize cAxesIndex = 3 * static_cast<usize>(currentFeatureId);
 
-        // If the Laue class is not Hexagonal, then continue to the next cell. Writing NaN here
-        // would poison the running average for features that also contain hexagonal cells;
-        // features with no hexagonal contributions are marked NaN in the finalize loop instead.
+        // Skip non-hexagonal cells so mixed features retain valid contributions.
         if(crystalStructureType != ebsdlib::CrystalStructure::Hexagonal_High && crystalStructureType != ebsdlib::CrystalStructure::Hexagonal_Low)
         {
           continue;
         }
 
-        counter[currentFeatureId]++; // Increment the count
+        counter[currentFeatureId]++;
         const usize quatOffset = t * 4;
 
-        // Create the 3x3 Orientation Matrix from the Quaternion. This represents a passive rotation matrix
         ebsdlib::OrientationMatrixDType oMatrix =
             ebsdlib::QuaternionDType(quatsChunk[quatOffset], quatsChunk[quatOffset + 1], quatsChunk[quatOffset + 2], quatsChunk[quatOffset + 3]).toOrientationMatrix();
 
-        // Convert the passive rotation matrix to an active rotation matrix by taking the transpose
-        // Multiply the active transformation matrix by the C-Axis (as Miller Index). This actively rotates
-        // the crystallographic C-Axis (which is along the <0,0,1> direction) into the physical sample
-        // reference frame
+        // The transposed matrix maps crystal [001] into the sample frame.
         c1 = oMatrix.transpose() * cAxis;
 
-        // normalize so that the magnitude is 1
         c1.normalize();
 
-        // Compute the running average c-axis and normalize the result
         Eigen::Vector3d curCAxis{0.0f, 0.0f, 0.0f};
         curCAxis[0] = avgCAxesCache[cAxesIndex] / static_cast<float32>(counter[currentFeatureId]);
         curCAxis[1] = avgCAxesCache[cAxesIndex + 1] / static_cast<float32>(counter[currentFeatureId]);
         curCAxis[2] = avgCAxesCache[cAxesIndex + 2] / static_cast<float32>(counter[currentFeatureId]);
         curCAxis.normalize();
 
-        // Ensure that angle between the current point's sample reference frame C-Axis
-        // and the running average sample C-Axis is positive
+        // Antiparallel c axes represent the same hexagonal direction.
         float64 w = ImageRotationUtilities::CosBetweenVectors(c1, curCAxis);
         if(w < 0.0)
         {
           c1 *= -1.0f;
         }
 
-        // Continue summing up the rotations
         avgCAxesCache[cAxesIndex] += static_cast<float32>(c1[0]);
         avgCAxesCache[cAxesIndex + 1] += static_cast<float32>(c1[1]);
         avgCAxesCache[cAxesIndex + 2] += static_cast<float32>(c1[2]);
@@ -189,7 +149,6 @@ Result<> ComputeAvgCAxes::operator()()
     tupleIdx += chunkTuples;
   }
 
-  // Now that each feature's Axis is summed up, compute the final average C-Axis
   m_MessageHandler({IFilter::Message::Type::Info, "Computing final feature average C-Axis values"});
 
   for(usize i = 0; i < totalFeatures; i++)
@@ -202,17 +161,14 @@ Result<> ComputeAvgCAxes::operator()()
     const usize tupleIndex = i * 3;
     if(counter[i] == 0)
     {
-      // Feature is either non-hexagonal or has no assigned voxels; either way, no meaningful average exists.
+      // Features without a hexagonal contribution have no c-axis average.
       avgCAxesCache[tupleIndex] = NAN;
       avgCAxesCache[tupleIndex + 1] = NAN;
       avgCAxesCache[tupleIndex + 2] = NAN;
     }
     else
     {
-      // Divide the accumulated sum by the cell count, then normalize so the
-      // output is a unit-magnitude C-axis direction. The antipodal-flip rule
-      // guarantees |sum| >= sqrt(cellCount), so the divided vector's magnitude
-      // is >= 1/sqrt(cellCount) > 0 -- no near-zero guard needed.
+      // Antipodal flips keep the accumulated direction away from zero.
       Eigen::Vector3d finalAvg{avgCAxesCache[tupleIndex] / static_cast<float64>(counter[i]), avgCAxesCache[tupleIndex + 1] / static_cast<float64>(counter[i]),
                                avgCAxesCache[tupleIndex + 2] / static_cast<float64>(counter[i])};
       finalAvg.normalize();
@@ -222,8 +178,6 @@ Result<> ComputeAvgCAxes::operator()()
     }
   }
 
-  // Single bulk-write of the completed feature-level avgCAxes back to the DataStore.
-  // All accumulation and normalization was done in the local buffer.
   avgCAxesStoreRef.copyFromBuffer(0, nonstd::span<const float32>(avgCAxesCache.get(), avgCAxesElements));
 
   return result;

@@ -10,56 +10,60 @@ namespace nx::core
 {
 
 /**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
+/**
  * @struct ComputeEuclideanDistMapInputValues
- * @brief Holds all user-configured parameters for the ComputeEuclideanDistMap algorithm.
+ * @brief Stores filter values for a distance-map execution.
  */
 struct SIMPLNXCORE_EXPORT ComputeEuclideanDistMapInputValues
 {
-  bool CalcManhattanDist;        ///< If true, output Manhattan (city-block) distances as int32; otherwise Euclidean as float32.
-  bool DoBoundaries;             ///< Compute distance to nearest grain boundary (2+ unique neighbors).
-  bool DoTripleLines;            ///< Compute distance to nearest triple line (3+ unique neighbors).
-  bool DoQuadPoints;             ///< Compute distance to nearest quadruple point (4+ unique neighbors).
-  DataPath FeatureIdsArrayPath;  ///< Per-cell Feature ID array (int32).
-  DataPath GBDistancesArrayPath; ///< Output: grain boundary distance map.
-  DataPath TJDistancesArrayPath; ///< Output: triple junction distance map.
-  DataPath QPDistancesArrayPath; ///< Output: quadruple point distance map.
-  DataPath InputImageGeometry;   ///< Path to the ImageGeom.
+  bool CalcManhattanDist; ///< True to create int32 city-block maps. False creates float32 Euclidean maps.
+  // These flags select seeds with one, two, or three distinct neighboring Feature IDs.
+  bool DoBoundaries;
+  bool DoTripleLines;
+  bool DoQuadPoints;
+  DataPath FeatureIdsArrayPath;
+  DataPath GBDistancesArrayPath;
+  DataPath TJDistancesArrayPath;
+  DataPath QPDistancesArrayPath;
+  DataPath InputImageGeometry;
 };
 
 /**
  * @class ComputeEuclideanDistMap
- * @brief Computes distance maps from each voxel to the nearest grain boundary,
- * triple junction, and/or quadruple point using iterative neighbor propagation
- * followed by optional Euclidean distance correction.
+ * @brief Computes requested boundary, triple-line, and quad-point distance maps.
  *
- * The algorithm first identifies boundary voxels by checking each voxel's 6 face
- * neighbors for different Feature IDs. Voxels with 2+ distinct neighbors are grain
- * boundaries, 3+ are triple lines, 4+ are quadruple points. It then propagates
- * distances outward using iterative "city-block" expansion and optionally converts
- * to true Euclidean distances.
+ * A seed pass examines six face neighbors. One, two, and three distinct neighbor Feature IDs
+ * create the requested seed types. Manhattan propagation supplies optional Euclidean correction.
  *
- * @section ooc_optimization Out-of-Core Optimization
- * The original implementation accessed FeatureIds and distance DataStores through
- * per-element virtual dispatch in multiple passes (boundary identification, iterative
- * propagation, final distance write-back). For OOC data, this caused severe chunk
- * thrashing across all passes.
+ * The normal dispatcher selects scanline execution when any required input or output uses
+ * out-of-core storage. Resident stores also use scanline execution except when all maps and blocked
+ * cells select the measured direct-path exception. Direct execution allocates full-volume buffers.
+ * It is not an out-of-core memory bound.
  *
- * OOC stores and most in-memory workloads use a bounded-memory scanline implementation
- * that identifies seeds through rolling three-slice FeatureIds buffers and transforms
- * each output with bulk Z-slice I/O. Obstacle-free volumes use exact forward/backward
- * city-block sweeps. Volumes with non-positive FeatureIds use exact layer-synchronous
- * propagation so blocked cells remain non-traversable. Resident scratch is O(X*Y);
- * Euclidean mode stores its cell-level nearest-seed scratch in a DataStore selected by
- * the active storage policy.
- *
- * A measured in-memory exception uses the direct parallel implementation when all
- * three maps are requested and non-positive FeatureIds are present. OOC stores never
- * use that full-volume temporary-buffer path.
+ * Scanline execution uses rolling Z-slice buffers. Euclidean mode stores nearest-seed state in a
+ * temporary DataStore that follows the active storage policy. Direct workers calculate from local
+ * buffers. This specialization does not establish generic DataArray or DataStore thread safety.
  */
 class SIMPLNXCORE_EXPORT ComputeEuclideanDistMap
 {
 public:
+  /**
+   * @brief Initializes the distance-map algorithm.
+   * @param dataStructure Contains the ImageGeom, Feature IDs, and output maps.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects map types and identifies required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeEuclideanDistMap(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeEuclideanDistMapInputValues* inputValues);
+  /**
+   * @brief Destroys the distance-map algorithm.
+   */
   ~ComputeEuclideanDistMap() noexcept;
 
   ComputeEuclideanDistMap(const ComputeEuclideanDistMap&) = delete;
@@ -67,36 +71,41 @@ public:
   ComputeEuclideanDistMap& operator=(const ComputeEuclideanDistMap&) = delete;
   ComputeEuclideanDistMap& operator=(ComputeEuclideanDistMap&&) noexcept = delete;
 
+  /**
+   * @brief Defines the numeric type for map selectors.
+   */
   using EnumType = uint32_t;
 
   /**
    * @enum MapType
-   * @brief Identifies which type of distance map a ComputeDistanceMapImpl instance computes.
+   * @brief Identifies the seed type for one distance map.
    */
   enum class MapType : EnumType
   {
-    FeatureBoundary = 0, ///< Distance to nearest grain boundary (2+ unique neighbors).
-    TripleJunction = 1,  ///< Distance to nearest triple junction (3+ unique neighbors).
-    QuadPoint = 2,       ///< Distance to nearest quadruple point (4+ unique neighbors).
+    FeatureBoundary = 0, ///< Uses seeds with one distinct neighboring Feature ID.
+    TripleJunction = 1,  ///< Uses seeds with two distinct neighboring Feature IDs.
+    QuadPoint = 2,       ///< Uses seeds with three distinct neighboring Feature IDs.
   };
 
   /**
-   * @brief Executes the distance map computation, dispatching int32 (Manhattan) or float32 (Euclidean).
-   * @return Result<> indicating success or error.
+   * @brief Computes requested distance maps.
+   * @return Success.
+   *
+   * Both implementations return success when a cancellation checkpoint observes the signal. Direct
+   * tasks run to completion after they start. Scanline execution preserves completed map ranges.
+   *
+   * Current bulk-I/O Result values are not inspected. A storage failure can leave partial maps and
+   * still return success.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the cancellation flag reference.
-   * @return const reference to the atomic cancellation boolean.
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                                    ///< Reference to the DataStructure.
-  const ComputeEuclideanDistMapInputValues* m_InputValues = nullptr; ///< User-configured parameters.
-  const std::atomic_bool& m_ShouldCancel;                            ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                   ///< Message handler for progress.
+  DataStructure& m_DataStructure;
+  const ComputeEuclideanDistMapInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

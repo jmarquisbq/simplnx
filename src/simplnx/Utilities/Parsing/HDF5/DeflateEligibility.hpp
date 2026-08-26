@@ -9,39 +9,30 @@ namespace nx::core::HDF5
 {
 
 /**
- * @brief Runtime host-endianness probe (portable across MSVC/GCC/Clang; folds to a constant).
- * @return true when the host stores multi-byte integers little-endian first.
+ * @brief Tests the host byte order at runtime.
+ * @return True when the host stores the least-significant byte first.
  */
 SIMPLNX_EXPORT bool hostIsLittleEndian();
 
 /**
- * @brief Probes whether a dataset qualifies for the HDF5-bypassing deflate fast paths —
- * reading raw compressed chunks via a parallel pread + inflate, or writing them via a
- * parallel compress + H5Dwrite_chunk — instead of the serial HDF5 filter pipeline.
+ * @brief Tests whether raw deflate chunk I/O can bypass the HDF5 filter pipeline.
+ * @param datasetId Identifies an open HDF5 dataset.
+ * @param elementSize Specifies bytes in one dataset element.
+ * @param deflateLevelOut Receives the dataset deflate level when available, or is null.
+ * @return True when the raw parallel deflate paths are eligible.
+ * @pre datasetId is valid and elementSize is nonzero.
+ * @pre The caller does not hold Support::ApiLock().
  *
- * A dataset is eligible when BOTH hold:
- * - its filter pipeline is exactly one filter and that filter is deflate — any other
- *   pipeline (shuffle/szip/fletcher32/multi-filter/unknown) must go through HDF5's own
- *   serial filter pipeline for correctness; and
- * - the file element byte order matches the host order, or the element is single-byte
- *   (order-irrelevant) — both fast paths bypass the byte swap H5Dread/H5Dwrite would
- *   perform.
+ * Eligibility requires exactly one deflate filter. It also requires matching file
+ * and host byte order unless elements have one byte. Other filter pipelines use
+ * HDF5 so it can apply filters and byte conversion correctly. This includes
+ * shuffle, SZIP, Fletcher32, multiple-filter, and unknown pipelines.
  *
- * The loader and writer share this single probe so their read and write gates cannot
- * diverge: a chunk written by the writer's fast path is always readable by the loader's,
- * and vice versa.
- *
- * Acquires @c nx::core::HDF5::Support::ApiLock() internally for the DCPL/datatype
- * queries; the caller must NOT already hold it. That lock is a non-recursive
- * std::mutex, so re-entering it on the same thread would self-deadlock.
- *
- * @param datasetId Open HDF5 dataset id.
- * @param elementSize sizeof(T) for the dataset element type (gates the byte-order check).
- * @param deflateLevelOut Optional out-parameter; when non-null and the dataset is a
- *        single-filter deflate pipeline, receives the DCPL deflate level (cd_values[0])
- *        so a writer compresses exactly as the dataset's creation property list
- *        specifies. Untouched when the pipeline is not single-filter deflate.
- * @return true when the parallel deflate fast paths apply.
+ * The loader and writer share this probe, so their eligibility rules stay equal.
+ * The function gets Support::ApiLock() for all HDF5 calls. The lock is not recursive.
+ * If the pipeline is not single-filter deflate, deflateLevelOut stays unchanged.
+ * Eligible reads use positional raw I/O and inflate. Eligible writes use compression
+ * followed by H5Dwrite_chunk.
  */
 SIMPLNX_EXPORT bool probeSingleDeflateEligibility(hid_t datasetId, usize elementSize, int32* deflateLevelOut);
 

@@ -32,8 +32,12 @@ namespace
 {
 /**
  * @brief Discovers the output feature count with a single bounded scan of FeatureIds.
- * @return One greater than the largest nonnegative ID, zero on cancellation or
- * when no nonnegative IDs exist, or an error when a page read or size conversion fails.
+ * @param featureIdsStore Feature identifier store.
+ * @param shouldCancel Cancellation flag.
+ * @return One greater than the largest nonnegative identifier, zero for cancellation
+ * or no nonnegative identifiers, or a bulk-read or conversion error.
+ *
+ * Fixed pages avoid a FeatureIds-sized resident buffer.
  */
 Result<usize> findFeatureCount(const AbstractDataStore<int32>& featureIdsStore, const std::atomic_bool& shouldCancel)
 {
@@ -71,25 +75,36 @@ Result<usize> findFeatureCount(const AbstractDataStore<int32>& featureIdsStore, 
 } // namespace
 
 /**
- * @class GenerateHistogramImpl
- * @brief This class is a pseudo-wrapper for the serial::GenerateHistogram, the reason for this class' existence is to hold/define ownership of objects in each thread
- * @tparam Type this the end type of the function in that the container and data values are of this type
- * @tparam SizeType this is the scalar type of the bin counts container
+ * @class GenerateFeatureHistogramImpl
+ * @brief Computes resident histograms for one parallel feature range.
+ * @tparam Type Input and bin-range value type.
+ * @tparam SizeType Histogram count value type.
+ *
+ * Each worker borrows the resident stores and owns only its feature-scale
+ * buffers. Precomputed bin geometry lets one bounded cell scan update all
+ * features in the worker range.
  */
 template <typename Type, std::integral SizeType>
 class GenerateFeatureHistogramImpl
 {
 public:
   /**
-   * @function constructor
-   * @brief This constructor requires a defined range and creates the object
-   * @param inputStore this is the AbstractDataStore holding the data that will be binned
-   * @param binRangesStore this is the AbstractDataStore that the ranges will be loaded into.
-   * @param rangeMinMax this is assumed to be the inclusive minimum value and exclusive maximum value for the overall histogram bins. FORMAT: [minimum, maximum)
-   * @param shouldCancel this is an atomic value that will determine whether execution ends early
-   * @param numBins this is the total number of bin ranges being calculated and by extension the indexing value for the ranges
-   * @param histogramStore this is the AbstractDataStore that will hold the counts for each bin (variable type sizing)
-   * @param overflow this is an atomic counter for the number of values that fall outside the bin range
+   * @brief Creates a resident worker with modal-range output.
+   * @param inputStore Input values.
+   * @param binRangesStore Receives bin ranges.
+   * @param modalBinRangesList Receives modal bin ranges.
+   * @param featureIdsStore Maps tuples to features.
+   * @param histMin User-defined histogram minimum.
+   * @param histMax User-defined histogram maximum.
+   * @param histFullRange True to derive each feature range from its values.
+   * @param shouldCancel Cancellation flag.
+   * @param numBins Number of histogram bins.
+   * @param histogramStore Receives bin counts.
+   * @param mostPopulatedStore Receives most-populated bin data.
+   * @param mask Selects accepted tuples.
+   * @param overflow Counts values outside configured ranges.
+   * @param progressMessageHelper Reports progress.
+   * @pre Referenced stores, mask, and progress helper outlive this worker.
    */
   GenerateFeatureHistogramImpl(const AbstractDataStore<Type>& inputStore, AbstractDataStore<Type>& binRangesStore, NeighborList<Type>* modalBinRangesList,
                                const AbstractDataStore<int32>& featureIdsStore, float64 histMin, float64 histMax, bool histFullRange, const std::atomic_bool& shouldCancel, const int32 numBins,
@@ -112,6 +127,23 @@ public:
   {
   }
 
+  /**
+   * @brief Creates a resident worker without modal-range output.
+   * @param inputStore Input values.
+   * @param binRangesStore Receives bin ranges.
+   * @param featureIdsStore Maps tuples to features.
+   * @param histMin User-defined histogram minimum.
+   * @param histMax User-defined histogram maximum.
+   * @param histFullRange True to derive each feature range from its values.
+   * @param shouldCancel Cancellation flag.
+   * @param numBins Number of histogram bins.
+   * @param histogramStore Receives bin counts.
+   * @param mostPopulatedStore Receives most-populated bin data.
+   * @param mask Selects accepted tuples.
+   * @param overflow Counts values outside configured ranges.
+   * @param progressMessageHelper Reports progress.
+   * @pre Referenced stores, mask, and progress helper outlive this worker.
+   */
   GenerateFeatureHistogramImpl(const AbstractDataStore<Type>& inputStore, AbstractDataStore<Type>& binRangesStore, const AbstractDataStore<int32>& featureIdsStore, float64 histMin, float64 histMax,
                                bool histFullRange, const std::atomic_bool& shouldCancel, const int32 numBins, AbstractDataStore<SizeType>& histogramStore,
                                AbstractDataStore<SizeType>& mostPopulatedStore, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, std::atomic<usize>& overflow,
@@ -133,11 +165,14 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the resident histogram worker.
+   */
   ~GenerateFeatureHistogramImpl() = default;
 
   /**
-   * @function operator()
-   * @brief This function serves as the execute method
+   * @brief Computes one parallel feature range.
+   * @param range Inclusive-exclusive feature range.
    */
   void operator()(const Range& range) const
   {
@@ -145,18 +180,13 @@ public:
   }
 
   /**
-   * @function compute
-   * @brief Computes the histogram, bin ranges, most-populated bin, and (optionally) modal bin ranges for every
-   * feature in [start, end). This is done in three bounded passes over the feature range rather than one full
-   * rescan of the cell arrays per feature: (1) derive each feature's bin edges/increment from the length/min/max
-   * stats already gathered by CalculateFeatureHasDataStats, (2) a single chunked pass over every cell that bins
-   * it directly into its owning feature's histogram, and (3) a per-feature finalization pass that writes the
-   * outputs and computes modal bin ranges. Because every feature's bin edges are known before any cell is read,
-   * one pass over the cells suffices to bin all of them - there is no need to revisit the cell arrays once per
-   * feature, which is what made this scale as O(features * cells) previously.
-   * @param start the inclusive first feature id handled by this call (parallel dispatches split the full
-   * feature range across calls)
-   * @param end the exclusive last feature id handled by this call
+   * @brief Computes histograms for an inclusive-exclusive feature range.
+   * @param start First feature identifier.
+   * @param end One past the last feature identifier.
+   *
+   * The method first builds feature-scale bin geometry. One fixed-page cell scan
+   * then routes every accepted tuple to its feature. Finalization writes counts,
+   * ranges, most-populated bins, and optional modal ranges.
    */
   void compute(usize start, usize end) const
   {
@@ -171,11 +201,7 @@ public:
       return;
     }
 
-    // ---- Pass 1: per-feature bin-edge precompute (feature-level; O(numCurrentFeatures)) ----
-    // Bin range, increment, and the "degenerate range" short-circuit only depend on this feature's
-    // own [min, max] (or the user-supplied range) and numBins - none of that requires visiting a
-    // single cell. Computing it up front for every feature in this chunk lets the cell scan below
-    // become a single pass instead of a per-feature rescan.
+    // Precompute feature-scale bin data so one cell scan updates every histogram.
     std::vector<Type> histMinPerFeature(numCurrentFeatures, static_cast<Type>(0));
     std::vector<float32> incrementPerFeature(numCurrentFeatures, 0.0F);
     std::vector<std::vector<Type>> rangesPerFeature(numCurrentFeatures);
@@ -193,7 +219,7 @@ public:
 
       if(length[localFeatureIndex] == 0)
       {
-        continue; // no data for this feature: ranges/histogram stay zeroed, matching legacy behavior
+        continue; // Empty features retain zeroed output values.
       }
 
       auto histMin = static_cast<Type>(m_HistMin);
@@ -210,22 +236,14 @@ public:
       histMinPerFeature[localFeatureIndex] = histMin;
       incrementPerFeature[localFeatureIndex] = increment;
 
-      // A degenerate (near-zero width) range means every value for this feature falls in bin 0.
-      // There is nothing a cell scan could add, so this feature is fully resolved without ever
-      // reading a cell - the single-pass scan below skips it entirely (see the increment check).
+      // A near-zero increment places all accepted values in bin zero.
       if(std::fabs(increment) < 1E-10)
       {
         histogramPerFeature[localFeatureIndex][0] = length[localFeatureIndex];
       }
     }
 
-    // ---- Pass 2: single sequential scan over cells, bounded chunks via copyIntoBuffer ----
-    // The previous design rescanned the *entire* cell array once per feature (O(features * cells)),
-    // which dominates runtime once there are more than a handful of features and drives millions of
-    // redundant per-element reads against potentially disk-backed FeatureIds/input arrays. Since
-    // every feature's bin edges are already known (Pass 1), each cell can be routed straight to its
-    // owning feature's histogram bin in a single O(cells) pass, reading in bounded chunks instead of
-    // one element at a time.
+    // Fixed pages route each accepted tuple without a per-feature cell rescan.
     constexpr usize k_ChunkTuples = 65536;
     auto featureIdsBuffer = std::make_unique<int32[]>(k_ChunkTuples);
     auto valueBuffer = std::make_unique<Type[]>(k_ChunkTuples);
@@ -252,31 +270,28 @@ public:
         const int32 featureId = featureIdsBuffer[cellIdx];
         if(featureId < static_cast<int32>(start) || featureId >= static_cast<int32>(end))
         {
-          continue; // this cell's feature is owned by a different feature-range chunk of this parallel dispatch
+          continue; // Another worker owns this feature.
         }
 
         const usize localFeatureIndex = static_cast<usize>(featureId) - start;
         if(length[localFeatureIndex] == 0)
         {
-          continue; // defensive: cannot happen given the mask/feature match above already implies length > 0
+          continue;
         }
 
         const float32 increment = incrementPerFeature[localFeatureIndex];
         if(std::fabs(increment) < 1E-10)
         {
-          continue; // degenerate range already fully resolved by the direct-count short-circuit in Pass 1
+          continue; // The first pass already counted this degenerate feature in bin zero.
         }
 
-        // Materialize a concrete Type before calling CalculateBin: when Type == bool, indexing
-        // std::vector<bool> yields a proxy reference rather than a plain bool, and CalculateBin's
-        // single template parameter requires both the value and the min arguments to deduce to the
-        // exact same concrete type.
+        // vector<bool> yields a proxy, so CalculateBin needs a concrete Type value.
         const Type histMin = histMinPerFeature[localFeatureIndex];
         const Type value = valueBuffer[cellIdx];
-        const auto bin = static_cast<int32>(HistogramUtilities::serial::CalculateBin(value, histMin, increment)); // find bin for this input array value
-        if((bin >= 0) && (bin < m_NumBins))                                                                       // make certain bin is in range
+        const auto bin = static_cast<int32>(HistogramUtilities::serial::CalculateBin(value, histMin, increment));
+        if((bin >= 0) && (bin < m_NumBins))
         {
-          histogramPerFeature[localFeatureIndex][bin]++; // increment histogram element corresponding to this input array value
+          histogramPerFeature[localFeatureIndex][bin]++;
         }
         else
         {
@@ -285,7 +300,7 @@ public:
       }
     }
 
-    // ---- Pass 3: per-feature finalization - modal bin ranges, output writes, progress ----
+    // Finalize feature-scale outputs after the cell scan completes.
     usize progressIncrement = numCurrentFeatures / 100;
     usize progressCount = 0;
     for(usize j = start; j < end; j++)
@@ -303,32 +318,29 @@ public:
         const Type histMin = histMinPerFeature[localFeatureIndex];
         const float32 increment = incrementPerFeature[localFeatureIndex];
 
-        // Bool breaks neighbor lists; if we have made it here we know m_ModalBinRangesList is a nullptr
+        // Boolean input cannot produce modal NeighborList output.
         if constexpr(!std::is_same_v<Type, bool>)
         {
           if(m_ModalBinRangesList != nullptr)
           {
             if(std::fabs(increment) < 1E-10)
             {
-              // The historical serial oracle is the full feature range. Using this worker's
-              // TBB [start, end) block made the emitted value partition-dependent.
+              // The modal contract uses [0, featureCount), independent of worker range.
               m_ModalBinRangesList->addEntry(j, static_cast<Type>(0));
               m_ModalBinRangesList->addEntry(j, static_cast<Type>(m_HistogramStore.getNumberOfTuples()));
             }
             else if(!modalMaps[localFeatureIndex].empty())
             {
-              // Find the maximum occurrence
               auto pr = std::max_element(modalMaps[localFeatureIndex].begin(), modalMaps[localFeatureIndex].end(), [](const auto& x, const auto& y) { return x.second < y.second; });
               int maxCount = pr->second;
 
-              // Store all values that have this maximum occurrence under the proper feature id
               for(const auto& modalPair : modalMaps[localFeatureIndex])
               {
                 if(modalPair.second == maxCount)
                 {
                   const Type mode = modalPair.first;
                   const auto modalBin = HistogramUtilities::serial::CalculateBin(mode, histMin, increment);
-                  if((modalBin >= 0) && (modalBin < m_NumBins)) // make certain bin is in range
+                  if((modalBin >= 0) && (modalBin < m_NumBins))
                   {
                     m_ModalBinRangesList->addEntry(j, ranges[modalBin]);
                     m_ModalBinRangesList->addEntry(j, ranges[modalBin + 1]);
@@ -338,7 +350,7 @@ public:
             }
           }
         }
-      } // end of length if
+      }
 
       for(usize k = 0; k < histogram.size(); k++)
       {
@@ -363,7 +375,6 @@ public:
       }
     }
 
-    // Send one at the end so that the progress is communicated properly
     progressMessenger.sendProgressMessage(progressCount);
   }
 
@@ -385,18 +396,37 @@ private:
 };
 
 /**
- * @class InstantiateHistogramImplFunctor
- * @brief This is a compatibility functor that leverages existing typecasting functions to create the appropriately typed GenerateHistogramImpl() cleanly.
- * Designed for compatibility with the existing parallel execution classes.
+ * @struct InstantiateHistogramByFeatureImplFunctor
+ * @brief Creates a typed resident histogram worker for parallel execution.
  */
 struct InstantiateHistogramByFeatureImplFunctor
 {
+  /**
+   * @brief Creates a worker with modal-range output.
+   * @tparam T Input and bin-range value type.
+   * @tparam ArgsT Forwarded worker argument types.
+   * @param modalBinRangesNL Untyped modal-range list.
+   * @param inputArray Input array.
+   * @param binRangesArray Bin-range output array.
+   * @param args Forwarded worker arguments.
+   * @return Typed resident histogram worker.
+   */
   template <typename T, class... ArgsT>
   auto operator()(INeighborList* modalBinRangesNL, const IDataArray* inputArray, IDataArray* binRangesArray, ArgsT&&... args)
   {
     return GenerateFeatureHistogramImpl(inputArray->template getIDataStoreRefAs<AbstractDataStore<T>>(), binRangesArray->template getIDataStoreRefAs<AbstractDataStore<T>>(),
                                         dynamic_cast<NeighborList<T>*>(modalBinRangesNL), std::forward<ArgsT>(args)...);
   }
+
+  /**
+   * @brief Creates a worker without modal-range output.
+   * @tparam T Input and bin-range value type.
+   * @tparam ArgsT Forwarded worker argument types.
+   * @param inputArray Input array.
+   * @param binRangesArray Bin-range output array.
+   * @param args Forwarded worker arguments.
+   * @return Typed resident histogram worker.
+   */
   template <typename T, class... ArgsT>
   auto operator()(const IDataArray* inputArray, IDataArray* binRangesArray, ArgsT&&... args)
   {
@@ -407,9 +437,15 @@ struct InstantiateHistogramByFeatureImplFunctor
 
 namespace
 {
-constexpr usize k_HistogramChunkTuples = 65536;
+constexpr usize k_HistogramChunkTuples = 65536; // Bounds each scanline input page.
 
-/** @brief Multiplies two allocation dimensions without wrapping usize. */
+/**
+ * @brief Multiplies two allocation dimensions without usize overflow.
+ * @param lhs First dimension.
+ * @param rhs Second dimension.
+ * @param product Receives the product when representable.
+ * @return True when the product fits usize.
+ */
 bool checkedMultiply(usize lhs, usize rhs, usize& product)
 {
   if(lhs != 0 && rhs > std::numeric_limits<usize>::max() / lhs)
@@ -421,11 +457,17 @@ bool checkedMultiply(usize lhs, usize rhs, usize& product)
 }
 
 template <typename T>
-constexpr uint64 k_ModalRecordSize = sizeof(int32) + sizeof(T) + sizeof(uint64);
+constexpr uint64 k_ModalRecordSize = sizeof(int32) + sizeof(T) + sizeof(uint64); // Feature, value, and tuple identifier bytes.
 
 /**
  * @brief Serializes a modal candidate as (feature ID, value, original tuple).
- * The tuple index supplies a deterministic final ordering for equal values.
+ * @tparam T Modal value type.
+ * @param bytes Destination record bytes.
+ * @param featureId Feature identifier.
+ * @param value Modal candidate value.
+ * @param originalTupleIndex Source tuple identifier.
+ *
+ * The tuple identifier provides deterministic ordering for equal values.
  */
 template <typename T>
 void encodeModalRecord(nonstd::span<std::byte> bytes, int32 featureId, T value, uint64 originalTupleIndex)
@@ -435,7 +477,14 @@ void encodeModalRecord(nonstd::span<std::byte> bytes, int32 featureId, T value, 
   std::memcpy(bytes.data() + sizeof(featureId) + sizeof(value), &originalTupleIndex, sizeof(originalTupleIndex));
 }
 
-/** @brief Reconstructs a modal candidate written by encodeModalRecord(). */
+/**
+ * @brief Deserializes one modal candidate record.
+ * @tparam T Modal value type.
+ * @param bytes Source record bytes.
+ * @param featureId Receives the feature identifier.
+ * @param value Receives the modal candidate value.
+ * @param originalTupleIndex Receives the source tuple identifier.
+ */
 template <typename T>
 void decodeModalRecord(nonstd::span<const std::byte> bytes, int32& featureId, T& value, uint64& originalTupleIndex)
 {
@@ -445,8 +494,13 @@ void decodeModalRecord(nonstd::span<const std::byte> bytes, int32& featureId, T&
 }
 
 /**
- * @brief Orders modal records by feature, value, then original tuple index so
- * equal values become contiguous while sorting remains deterministic.
+ * @brief Orders modal records by feature, value, and tuple identifier.
+ * @tparam T Modal value type.
+ * @param left First serialized modal record.
+ * @param right Second serialized modal record.
+ * @return Negative, zero, or positive lexical comparison result.
+ *
+ * Equal values become contiguous while the tuple identifier keeps the order deterministic.
  */
 template <typename T>
 int32 compareModalRecords(nonstd::span<const std::byte> left, nonstd::span<const std::byte> right)
@@ -478,14 +532,27 @@ int32 compareModalRecords(nonstd::span<const std::byte> left, nonstd::span<const
   return leftIndex < rightIndex ? -1 : 1;
 }
 
-/** @brief Tests value equality using only operator<, including for generic numeric types. */
+/**
+ * @brief Tests value equality with only operator<.
+ * @tparam T Numeric value type.
+ * @param left First value.
+ * @param right Second value.
+ * @return True when neither value is less than the other.
+ */
 template <typename T>
 bool equivalentModalValues(const T& left, const T& right)
 {
   return !(left < right) && !(right < left);
 }
 
-/** @brief Applies the histogram's half-open [minimum, maximum) range rule. */
+/**
+ * @brief Tests the histogram half-open range.
+ * @tparam T Numeric value type.
+ * @param value Value to test.
+ * @param minimum Inclusive lower bound.
+ * @param maximum Exclusive upper bound.
+ * @return True when value is in [minimum, maximum).
+ */
 template <typename T>
 bool isInHistogramRange(const T& value, const T& minimum, const T& maximum)
 {
@@ -494,7 +561,13 @@ bool isInHistogramRange(const T& value, const T& minimum, const T& maximum)
 
 /**
  * @brief Calculates a bin index without overflowing signed integral subtraction.
- * The floating-point path is used only when value - minimum is not representable in T.
+ * @tparam T Numeric value type.
+ * @param value Value to bin.
+ * @param minimum Histogram minimum.
+ * @param increment Bin width.
+ * @return Calculated bin index.
+ *
+ * The floating-point path handles signed differences that T cannot represent.
  */
 template <typename T>
 int32 calculateSafeBin(const T& value, const T& minimum, float32 increment)
@@ -511,8 +584,18 @@ int32 calculateSafeBin(const T& value, const T& minimum, float32 increment)
 
 /**
  * @brief Appends the bin-range pair associated with one modal value.
- * Values outside the configured histogram range are deliberately omitted to
- * preserve the direct algorithm's modal NeighborList behavior.
+ * @tparam T Modal value type.
+ * @param modalBinRanges Receives modal bin-range pairs.
+ * @param feature Feature identifier.
+ * @param value Modal value.
+ * @param ranges Flat bin-range values.
+ * @param bins Number of bins per feature.
+ * @param minimum Inclusive histogram lower bound.
+ * @param maximum Exclusive histogram upper bound.
+ * @param increment Bin width.
+ *
+ * Values outside the histogram range are omitted. The Direct-compatible layout
+ * indexes the feature's flat range buffer by bin.
  */
 template <typename T>
 void appendModalRange(NeighborList<T>& modalBinRanges, usize feature, const T& value, const T* ranges, usize bins, const T& minimum, const T& maximum, float32 increment)
@@ -524,8 +607,6 @@ void appendModalRange(NeighborList<T>& modalBinRanges, usize feature, const T& v
   const int32 bin = calculateSafeBin(value, minimum, increment);
   if(bin >= 0 && static_cast<usize>(bin) < bins)
   {
-    // Preserve the historical Direct-path modal oracle, which indexes the feature's flat pair
-    // buffer by bin rather than by the pair's first component.
     const usize rangeOffset = feature * bins * 2 + static_cast<usize>(bin);
     modalBinRanges.addEntry(static_cast<int32>(feature), ranges[rangeOffset]);
     modalBinRanges.addEntry(static_cast<int32>(feature), ranges[rangeOffset + 1]);
@@ -533,8 +614,13 @@ void appendModalRange(NeighborList<T>& modalBinRanges, usize feature, const T& v
 }
 
 /**
- * @brief Streams an externally sorted record set and reports each contiguous
- * (feature, value) run to @p groupFunction.
+ * @brief Streams sorted modal records and reports each feature/value run.
+ * @tparam T Modal value type.
+ * @tparam GroupFunction Callable that accepts feature, value, and count.
+ * @param externalSort Finished modal-record sorter.
+ * @param shouldCancel Cancellation flag.
+ * @param groupFunction Receives each contiguous modal-value run.
+ * @return Sort I/O or cancellation result.
  *
  * Reading in fixed record pages bounds memory while the external sorter keeps
  * exact modal grouping from requiring the full input in RAM.
@@ -601,6 +687,17 @@ Result<> scanSortedModalRecords(const IExternalSort& externalSort, const std::at
 
 /**
  * @brief Exact provider-free modal fallback for one feature.
+ * @tparam T Input value type.
+ * @tparam MaskT Mask value type.
+ * @tparam GroupFunction Callable that accepts modal value and count.
+ * @param inputStore Input values.
+ * @param featureIdsStore Maps tuples to features.
+ * @param maskStore Optional mask store.
+ * @param tupleCount Input tuple count.
+ * @param featureId Feature to scan.
+ * @param shouldCancel Cancellation flag.
+ * @param groupFunction Receives each distinct value and count.
+ * @return Bulk-I/O, count-overflow, or cancellation result.
  *
  * Repeated bounded scans select the next distinct value and count it. This can
  * be slower than external sorting, but it preserves exact results without an
@@ -696,12 +793,27 @@ Result<> scanFallbackModalGroups(const AbstractDataStore<T>& inputStore, const A
 }
 
 /**
- * @brief OOC implementation for one type-dispatched input array.
+ * @brief Computes one bounded histogram for a type-dispatched input array.
+ * @tparam T Input and bin-range value type.
+ * @tparam MaskT Mask value type.
+ * @param inputArray Input array.
+ * @param binRangesArray Receives bin ranges.
+ * @param featureIdsStore Maps tuples to features.
+ * @param maskStore Optional mask store.
+ * @param countsArray Receives histogram counts.
+ * @param mostPopulatedArray Receives most-populated bin data.
+ * @param modalBinRanges Optional modal-range list.
+ * @param inputValues Histogram parameters.
+ * @param numFeatures Number of discovered features.
+ * @param overflow Counts values outside histogram ranges.
+ * @param shouldCancel Cancellation flag.
+ * @return Validation, bulk-I/O, sort, overflow, or cancellation result.
  *
- * The algorithm separates discovery, bin construction, counting, modal
- * reduction, and output writes. Each cell pass uses fixed-size pages. Modal
- * values use external sorting when available and the exact bounded fallback
- * otherwise; neither path requires a scratch array proportional to all tuples.
+ * The algorithm separates discovery, bin construction, counting, modal reduction,
+ * and output writes. Cell scans use fixed pages. Feature-scale arrays depend on
+ * feature and bin counts, not input tuple count. Exact modal values use external
+ * sorting when available or repeated bounded scans otherwise. Cancellation before
+ * final bulk writes leaves feature-scale output contents unwritten.
  */
 template <typename T, typename MaskT>
 Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& binRangesArray, const AbstractDataStore<int32>& featureIdsStore, const AbstractDataStore<MaskT>* maskStore,
@@ -799,8 +911,7 @@ Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& bin
     return result;
   };
 
-  // Pass 1 discovers each feature's sample count and extrema. Bin ranges cannot
-  // be finalized until these values are known for the entire input.
+  // Discover each feature's sample count and extrema before range construction.
   for(usize offset = 0; offset < tupleCount; offset += k_HistogramChunkTuples)
   {
     if(shouldCancel)
@@ -902,8 +1013,7 @@ Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& bin
     }
   }
 
-  // Pass 2 routes every accepted cell directly to its feature/bin and, when
-  // requested, appends a compact modal record to the external sorter.
+  // Route each accepted tuple to its feature/bin and optionally append a modal record.
   for(usize offset = 0; offset < tupleCount; offset += k_HistogramChunkTuples)
   {
     if(shouldCancel)
@@ -1006,8 +1116,7 @@ Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& bin
     mostPopulated[feature * 2 + 1] = *highest;
   }
 
-  // Modal reduction is a separate phase because it needs globally grouped
-  // values. The histogram counts themselves are already complete at this point.
+  // Modal reduction follows counting because it needs globally grouped values.
   if constexpr(!std::is_same_v<T, bool>)
   {
     if(modalBinRanges != nullptr)
@@ -1018,8 +1127,7 @@ Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& bin
       {
         if(lengths[feature] > 0 && std::fabs(increments[feature]) < 1.0E-10F)
         {
-          // The Direct algorithm historically writes its parallel feature-range start/end
-          // indices for a degenerate increment. Its sequential range is [0, numFeatures).
+          // Degenerate modal ranges use [0, numFeatures) for every populated feature.
           typedModalBinRanges.addEntry(static_cast<int32>(feature), static_cast<T>(0));
           typedModalBinRanges.addEntry(static_cast<int32>(feature), static_cast<T>(numFeatures));
         }
@@ -1094,10 +1202,28 @@ Result<> generateScanlineHistogram(const IDataArray& inputArray, IDataArray& bin
   return mostPopulatedStore.copyFromBuffer(0, nonstd::span<const uint64>(mostPopulated.data(), mostPopulated.size()));
 }
 
-/** @brief Dispatches the OOC histogram implementation across input and mask types. */
+/**
+ * @struct HistogramScanlineFunctor
+ * @brief Dispatches bounded histograms by input and mask type.
+ */
 struct HistogramScanlineFunctor
 {
-  /** @brief Selects Boolean, UInt8, or absent mask storage and runs the typed scan. */
+  /**
+   * @brief Selects Boolean, UInt8, or absent mask storage for a bounded scan.
+   * @tparam T Input and bin-range value type.
+   * @param inputArray Input array.
+   * @param binRangesArray Receives bin ranges.
+   * @param featureIdsStore Maps tuples to features.
+   * @param maskArray Optional mask array.
+   * @param countsArray Receives histogram counts.
+   * @param mostPopulatedArray Receives most-populated bin data.
+   * @param modalBinRanges Optional modal-range list.
+   * @param inputValues Histogram parameters.
+   * @param numFeatures Number of discovered features.
+   * @param overflow Counts values outside histogram ranges.
+   * @param shouldCancel Cancellation flag.
+   * @return Result from the typed bounded scan.
+   */
   template <typename T>
   Result<> operator()(const IDataArray& inputArray, IDataArray& binRangesArray, const AbstractDataStore<int32>& featureIdsStore, const IDataArray* maskArray, DataArray<uint64>& countsArray,
                       DataArray<uint64>& mostPopulatedArray, INeighborList* modalBinRanges, const ComputeArrayHistogramByFeatureInputValues& inputValues, usize numFeatures,
@@ -1118,18 +1244,30 @@ struct HistogramScanlineFunctor
   }
 };
 
-/** @brief Dispatch wrapper that preserves the original resident implementation. */
+/**
+ * @class ComputeArrayHistogramByFeatureDirect
+ * @brief Invokes the existing resident histogram implementation.
+ */
 class ComputeArrayHistogramByFeatureDirect
 {
 public:
-  /** @brief Retains the dispatcher-owned direct callback for the duration of the call. */
+  /**
+   * @brief Stores the direct callback for synchronous dispatch.
+   * @tparam ArgsT Additional dispatch argument types.
+   * @param executeDirect Resident implementation callback.
+   * @param args Forwarded arguments ignored by this wrapper.
+   * @pre executeDirect outlives this wrapper.
+   */
   template <typename... ArgsT>
-  explicit ComputeArrayHistogramByFeatureDirect(const std::function<Result<>()>& executeDirect, ArgsT&&...)
+  explicit ComputeArrayHistogramByFeatureDirect(const std::function<Result<>()>& executeDirect, ArgsT&&... args)
   : m_ExecuteDirect(executeDirect)
   {
   }
 
-  /** @brief Executes the original in-memory algorithm. */
+  /**
+   * @brief Executes the resident implementation callback.
+   * @return Callback result.
+   */
   Result<> operator()() const
   {
     return m_ExecuteDirect();
@@ -1140,14 +1278,31 @@ private:
 };
 
 /**
- * @brief Dispatch wrapper for the bounded, store-neutral histogram implementation.
+ * @class ComputeArrayHistogramByFeatureScanline
+ * @brief Stores borrowed inputs for the bounded histogram implementation.
+ *
  * References remain owned by ComputeArrayHistogramByFeature and are used synchronously.
  */
 class ComputeArrayHistogramByFeatureScanline
 {
 public:
-  /** @brief Captures the input/output stores and options needed by the typed scan. */
-  ComputeArrayHistogramByFeatureScanline(const std::function<Result<>()>&, const IDataArray& inputArray, IDataArray& binRangesArray, const AbstractDataStore<int32>& featureIdsStore,
+  /**
+   * @brief Stores inputs and outputs for one bounded typed scan.
+   * @param executeDirect Resident callback ignored by the scanline wrapper.
+   * @param inputArray Input array.
+   * @param binRangesArray Receives bin ranges.
+   * @param featureIdsStore Maps tuples to features.
+   * @param maskArray Optional mask array.
+   * @param countsArray Receives histogram counts.
+   * @param mostPopulatedArray Receives most-populated bin data.
+   * @param modalBinRanges Optional modal-range list.
+   * @param inputValues Histogram parameters.
+   * @param numFeatures Number of discovered features.
+   * @param overflow Counts values outside histogram ranges.
+   * @param shouldCancel Cancellation flag.
+   * @pre Referenced arrays, stores, inputValues, overflow, and shouldCancel outlive this wrapper.
+   */
+  ComputeArrayHistogramByFeatureScanline(const std::function<Result<>()>& executeDirect, const IDataArray& inputArray, IDataArray& binRangesArray, const AbstractDataStore<int32>& featureIdsStore,
                                          const IDataArray* maskArray, DataArray<uint64>& countsArray, DataArray<uint64>& mostPopulatedArray, INeighborList* modalBinRanges,
                                          const ComputeArrayHistogramByFeatureInputValues& inputValues, usize numFeatures, std::atomic<usize>& overflow, const std::atomic_bool& shouldCancel)
   : m_InputArray(inputArray)
@@ -1164,7 +1319,10 @@ public:
   {
   }
 
-  /** @brief Runtime-dispatches the bounded implementation on the input value type. */
+  /**
+   * @brief Runtime-dispatches the bounded implementation by input value type.
+   * @return Result from the bounded typed scan.
+   */
   Result<> operator()() const
   {
     return ExecuteDataFunction(HistogramScanlineFunctor{}, m_InputArray.getDataType(), m_InputArray, m_BinRangesArray, m_FeatureIdsStore, m_MaskArray, m_CountsArray, m_MostPopulatedArray,
@@ -1186,7 +1344,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeArrayHistogramByFeature::ComputeArrayHistogramByFeature(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel,
                                                                ComputeArrayHistogramByFeatureInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -1196,10 +1353,8 @@ ComputeArrayHistogramByFeature::ComputeArrayHistogramByFeature(DataStructure& da
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeArrayHistogramByFeature::~ComputeArrayHistogramByFeature() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeArrayHistogramByFeature::operator()()
 {
   const int32 numBins = m_InputValues->NumberOfBins;
@@ -1209,6 +1364,7 @@ Result<> ComputeArrayHistogramByFeature::operator()()
   const auto& featureIdsArray = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
   const auto& featureIdsStore = featureIdsArray.getDataStoreRef();
 
+  // Discover the feature count before output changes so entry cancellation preserves existing output values.
   Result<usize> featureCountResult = findFeatureCount(featureIdsStore, m_ShouldCancel);
   if(featureCountResult.invalid())
   {
@@ -1274,6 +1430,8 @@ Result<> ComputeArrayHistogramByFeature::operator()()
       return {};
     };
 
+    // Every read and created write target participates in storage-based dispatch.
+    // A disk-backed participant requires the bounded implementation.
     Result<> executeResult;
     if(maskArray != nullptr && modalBinRanges != nullptr)
     {

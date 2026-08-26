@@ -15,46 +15,59 @@ using namespace nx::core;
 
 namespace
 {
-// Represents a 2D edge segment in the XY plane produced by slicing a triangle at a Z-plane.
+/**
+ * @struct SliceEdge
+ * @brief Stores an XY edge produced by a triangle-plane intersection.
+ */
 struct SliceEdge
 {
-  float32 x1, y1;  // First endpoint
-  float32 x2, y2;  // Second endpoint
-  usize faceIndex; // Index of the triangle face that produced this edge
+  float32 x1, y1;
+  float32 x2, y2;
+  usize faceIndex;
 };
 
-// Represents a scanline-edge intersection used for sorting and filling.
+/**
+ * @struct ScanlineIntersection
+ * @brief Stores one X crossing and its source triangle.
+ */
 struct ScanlineIntersection
 {
-  float32 x;       // X coordinate of the intersection
-  usize faceIndex; // Face that was crossed
+  float32 x;
+  usize faceIndex;
 };
 
-// Precomputed per-triangle Z-range for fast rejection during Z-slice processing.
+/**
+ * @struct TriangleZRange
+ * @brief Stores one triangle's inclusive Z bounds.
+ */
 struct TriangleZRange
 {
   float32 zMin = 0.0f;
   float32 zMax = 0.0f;
 };
 
-// -----------------------------------------------------------------------------
-// Compute the intersection of a triangle with a horizontal Z-plane.
-// Uses a half-open interval (z >= zPlane is "above") to avoid double-counting
-// at shared vertices and edges.
-// Returns true if a valid (non-degenerate) edge was produced.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Intersects one triangle with a horizontal Z plane.
+ * @param verts Provides triangle coordinates.
+ * @param zPlane Specifies the plane coordinate.
+ * @param outX1 Receives first edge X coordinate.
+ * @param outY1 Receives first edge Y coordinate.
+ * @param outX2 Receives second edge X coordinate.
+ * @param outY2 Receives second edge Y coordinate.
+ * @return True when the intersection produces a nondegenerate edge.
+ *
+ * The half-open vertex classification prevents duplicate crossings at shared vertices.
+ */
 bool sliceTriangleAtZ(const std::array<Point3Df, 3>& verts, float32 zPlane, float32& outX1, float32& outY1, float32& outX2, float32& outY2)
 {
-  // Classify each vertex: true = above or on the plane, false = below
+  // Vertices on the plane belong to the upper half-space.
   std::array<bool, 3> above = {verts[0][2] >= zPlane, verts[1][2] >= zPlane, verts[2][2] >= zPlane};
 
-  // If all vertices are on the same side, no intersection
   if(above[0] == above[1] && above[1] == above[2])
   {
     return false;
   }
 
-  // Find the two points where triangle edges cross the Z-plane
   float32 pts[2][2];
   int32 numPts = 0;
 
@@ -76,7 +89,7 @@ bool sliceTriangleAtZ(const std::array<Point3Df, 3>& verts, float32 zPlane, floa
     return false;
   }
 
-  // Skip degenerate zero-length edges (vertex exactly on the plane)
+  // Reject a crossing that collapses to one point.
   float32 dx = pts[1][0] - pts[0][0];
   float32 dy = pts[1][1] - pts[0][1];
   if(dx * dx + dy * dy < 1e-12f)
@@ -91,18 +104,33 @@ bool sliceTriangleAtZ(const std::array<Point3Df, 3>& verts, float32 zPlane, floa
   return true;
 }
 
-// -----------------------------------------------------------------------------
-// Worker class that rasterizes a single Z-slice into a thread-local buffer,
-// then copies results back to the output DataArray via the parent algorithm's
-// mutex-protected sendThreadSafeSliceUpdate() method using bulk copyFromBuffer.
-//
-// All input data is accessed through pre-loaded contiguous memory buffers
-// (plain pointers), avoiding per-element virtual dispatch on AbstractDataStore.
-// -----------------------------------------------------------------------------
+/**
+ * @class ZSliceWorker
+ * @brief Rasterizes one Z slice from resident mesh buffers.
+ * @tparam T Specifies the Feature-ID scalar type.
+ *
+ * The worker owns its output slice and edge lists. It borrows immutable mesh
+ * buffers until the task group finishes.
+ */
 template <typename T>
 class ZSliceWorker
 {
 public:
+  /**
+   * @brief Creates one borrowed Z-slice worker.
+   * @param algorithm Owns the mutex-protected output method.
+   * @param zSlice Specifies the output Z index.
+   * @param xDim Specifies output X cells.
+   * @param yDim Specifies output Y cells.
+   * @param numTriangles Specifies source triangle count.
+   * @param numFaceLabelComps Specifies face-label components per triangle.
+   * @param origin Specifies output grid origin.
+   * @param spacing Specifies output grid spacing.
+   * @param facesBuffer Provides flat triangle connectivity.
+   * @param verticesBuffer Provides flat XYZ vertex coordinates.
+   * @param faceLabelsBuffer Provides flat face labels.
+   * @param triZRanges Provides triangle Z bounds.
+   */
   ZSliceWorker(RegularGridSampleSurfaceMesh* algorithm, usize zSlice, usize xDim, usize yDim, usize numTriangles, usize numFaceLabelComps, FloatVec3 origin, FloatVec3 spacing,
                const IGeometry::MeshIndexType* facesBuffer, const float32* verticesBuffer, const T* faceLabelsBuffer, const std::vector<TriangleZRange>& triZRanges)
   : m_Algorithm(algorithm)
@@ -120,6 +148,9 @@ public:
   {
   }
 
+  /**
+   * @brief Rasterizes and writes the assigned Z slice.
+   */
   void operator()() const
   {
     usize cellsPerSlice = m_XDim * m_YDim;
@@ -128,7 +159,7 @@ public:
 
     float32 zCoord = m_Origin[2] + (static_cast<float32>(m_ZSlice) + 0.5f) * m_Spacing[2];
 
-    // ----- Find all triangles spanning this Z and compute 2D edges -----
+    // Intersect triangles whose Z bounds include this slice center.
     std::vector<SliceEdge> edges;
     for(usize t = 0; t < m_NumTriangles; t++)
     {
@@ -152,13 +183,12 @@ public:
       }
     }
 
-    // ----- Scanline fill for each Y row -----
+    // Fill each Y row from sorted triangle crossings.
     std::vector<ScanlineIntersection> intersections;
     for(usize y = 0; y < m_YDim; y++)
     {
       float32 yCoord = m_Origin[1] + (static_cast<float32>(y) + 0.5f) * m_Spacing[1];
 
-      // Find X-intersections of this scanline with all 2D edges
       intersections.clear();
       for(const auto& edge : edges)
       {
@@ -174,7 +204,7 @@ public:
           eYMax = edge.y1;
         }
 
-        // Half-open interval [yMin, yMax) to avoid double-counting at endpoints
+        // A half-open Y interval prevents duplicate crossings at shared endpoints.
         if(yCoord < eYMin || yCoord >= eYMax)
         {
           continue;
@@ -183,7 +213,7 @@ public:
         float32 dy = edge.y2 - edge.y1;
         if(std::abs(dy) < 1e-10f)
         {
-          continue; // Skip horizontal edges
+          continue;
         }
 
         float32 t = (yCoord - edge.y1) / dy;
@@ -191,10 +221,9 @@ public:
         intersections.push_back({xIntersect, edge.faceIndex});
       }
 
-      // Sort intersections by X coordinate
       std::sort(intersections.begin(), intersections.end(), [](const ScanlineIntersection& a, const ScanlineIntersection& b) { return a.x < b.x; });
 
-      // Walk left to right, toggling feature IDs at each crossing
+      // Walk left to right and toggle the active Feature ID at each crossing.
       T currentFeature = 0;
       usize nextIsect = 0;
       usize rowOffset = y * m_XDim;
@@ -203,7 +232,6 @@ public:
       {
         float32 xCoord = m_Origin[0] + (static_cast<float32>(x) + 0.5f) * m_Spacing[0];
 
-        // Process all crossings up to this voxel center
         while(nextIsect < intersections.size() && intersections[nextIsect].x <= xCoord)
         {
           usize faceIdx = intersections[nextIsect].faceIndex;
@@ -219,9 +247,7 @@ public:
             label1 = T{0};
           }
 
-          // Toggle: if we are currently in one of the two bordering features,
-          // switch to the other. This correctly handles entering, exiting,
-          // and transitioning between adjacent features.
+          // Matching labels toggle entry, exit, and adjacent-feature transitions.
           if(currentFeature == label0)
           {
             currentFeature = label1;
@@ -232,8 +258,7 @@ public:
           }
           else
           {
-            // Neither label matches current feature (first crossing from
-            // outside or mesh inconsistency). Pick the positive label.
+            // For an unmatched crossing, prefer the only positive label.
             currentFeature = 0;
             if(label0 > 0 && label1 <= 0)
             {
@@ -245,8 +270,7 @@ public:
             }
             else
             {
-              // Both positive but neither matches -- take the larger label
-              // as a deterministic fallback.
+              // Two unmatched positive labels use the larger deterministic fallback.
               currentFeature = std::max(label0, label1);
             }
           }
@@ -258,7 +282,7 @@ public:
       }
     }
 
-    // ----- Copy results back to the output DataArray under mutex via copyFromBuffer -----
+    // Generic DataStore writes stay behind the parent mutex.
     m_Algorithm->sendThreadSafeSliceUpdate(m_ZSlice, sliceBuffer.get(), cellsPerSlice);
   }
 
@@ -277,21 +301,29 @@ private:
   const std::vector<TriangleZRange>& m_TriZRanges;
 };
 
-// -----------------------------------------------------------------------------
-// Functor dispatched by ExecuteDataFunctionIntType to handle the templated T.
-// Pre-loads all geometry input data into contiguous memory buffers via
-// copyIntoBuffer, then dispatches Z-slice workers in parallel. Workers
-// operate on plain memory pointers with no per-element virtual dispatch.
-// -----------------------------------------------------------------------------
+/**
+ * @struct ZSliceFunctor
+ * @brief Materializes mesh inputs and schedules typed Z-slice workers.
+ */
 struct ZSliceFunctor
 {
+  /**
+   * @brief Runs typed scanline rasterization.
+   * @tparam T Specifies the Feature-ID scalar type.
+   * @param algorithm Owns the mutex-protected output method.
+   * @param dataStructure Provides source and output arrays.
+   * @param shouldCancel Stops later preprocessing or worker scheduling when true.
+   * @param messageHandler Receives phase messages.
+   * @param imageGeom Defines the output grid.
+   * @param triangleGeom Provides mesh connectivity and vertices.
+   * @param faceLabelsArrayPath Identifies source face labels.
+   *
+   * The function does not inspect input bulk-read results.
+   */
   template <typename T>
   void operator()(RegularGridSampleSurfaceMesh* algorithm, DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& messageHandler,
                   const ImageGeom& imageGeom, const TriangleGeom& triangleGeom, const DataPath& faceLabelsArrayPath)
   {
-    // -------------------------------------------------------------------------
-    // 1. Get references to input data stores
-    // -------------------------------------------------------------------------
     SizeVec3 dims = imageGeom.getDimensions();
     FloatVec3 origin = imageGeom.getOrigin();
     FloatVec3 spacing = imageGeom.getSpacing();
@@ -309,25 +341,15 @@ struct ZSliceFunctor
     usize numFaceLabelComps = faceLabelsArray.getNumberOfComponents();
     const auto& faceLabelsStore = faceLabelsArray.getDataStoreRef();
 
-    // -------------------------------------------------------------------------
-    // 2. Pre-load all input geometry data into contiguous memory buffers
-    //    via copyIntoBuffer to avoid per-element virtual dispatch on
-    //    AbstractDataStore in the hot loops. This is proportional to triangle
-    //    count (geometry size), not voxel count, so it's not an O(n) per-voxel
-    //    allocation.
-    // -------------------------------------------------------------------------
-
-    // Faces buffer: numTriangles * 3 elements (MeshIndexType)
+    // Materialize mesh inputs once to remove DataStore access from worker threads.
     usize facesCount = numTriangles * 3;
     auto facesBuffer = std::make_unique<IGeometry::MeshIndexType[]>(facesCount);
     facesStore.copyIntoBuffer(0, nonstd::span<IGeometry::MeshIndexType>(facesBuffer.get(), facesCount));
 
-    // Vertices buffer: numVertices * 3 elements (float32)
     usize verticesCount = numVertices * 3;
     auto verticesBuffer = std::make_unique<float32[]>(verticesCount);
     verticesStore.copyIntoBuffer(0, nonstd::span<float32>(verticesBuffer.get(), verticesCount));
 
-    // Face labels buffer: numTriangles * numFaceLabelComps elements (T)
     usize faceLabelsCount = numTriangles * numFaceLabelComps;
     auto faceLabelsBuffer = std::make_unique<T[]>(faceLabelsCount);
     faceLabelsStore.copyIntoBuffer(0, nonstd::span<T>(faceLabelsBuffer.get(), faceLabelsCount));
@@ -337,10 +359,7 @@ struct ZSliceFunctor
       return;
     }
 
-    // -------------------------------------------------------------------------
-    // 3. Precompute per-triangle Z-range for fast rejection using the
-    //    pre-loaded buffers (plain memory access, no virtual dispatch)
-    // -------------------------------------------------------------------------
+    // Precompute Z bounds so each worker rejects nonintersecting triangles quickly.
     messageHandler({IFilter::Message::Type::Info, "Preprocessing triangle data..."});
 
     std::vector<TriangleZRange> triZRanges(numTriangles);
@@ -363,10 +382,7 @@ struct ZSliceFunctor
       return;
     }
 
-    // -------------------------------------------------------------------------
-    // 4. Dispatch Z-slices in parallel using ParallelTaskAlgorithm.
-    //    Workers read from the pre-loaded buffers (plain pointers).
-    // -------------------------------------------------------------------------
+    // Schedule Z slices while the borrowed mesh buffers remain alive.
     messageHandler({IFilter::Message::Type::Info, fmt::format("Sampling surface mesh using scanline rasterization ({} Z-slices)...", zDim)});
 
     ParallelTaskAlgorithm taskAlgorithm;
@@ -385,7 +401,6 @@ struct ZSliceFunctor
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 RegularGridSampleSurfaceMesh::RegularGridSampleSurfaceMesh(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                            RegularGridSampleSurfaceMeshInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -395,10 +410,8 @@ RegularGridSampleSurfaceMesh::RegularGridSampleSurfaceMesh(DataStructure& dataSt
 {
 }
 
-// -----------------------------------------------------------------------------
 RegularGridSampleSurfaceMesh::~RegularGridSampleSurfaceMesh() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> RegularGridSampleSurfaceMesh::operator()()
 {
   const auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);

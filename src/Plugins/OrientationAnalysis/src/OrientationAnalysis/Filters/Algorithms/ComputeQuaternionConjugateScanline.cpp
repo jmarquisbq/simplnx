@@ -15,11 +15,11 @@ namespace
 {
 constexpr usize k_QuaternionComponents = 4;
 
-// 65,536 tuples keep the reusable buffer at 1 MiB regardless of total array size.
+// A 65,536-tuple chunk keeps the reusable buffer at 1 MiB regardless of the
+// total array size.
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugateScanline::ComputeQuaternionConjugateScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                        const ComputeQuaternionConjugateInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -29,10 +29,8 @@ ComputeQuaternionConjugateScanline::ComputeQuaternionConjugateScanline(DataStruc
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugateScanline::~ComputeQuaternionConjugateScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeQuaternionConjugateScanline::operator()()
 {
   const auto& input = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuaternionDataArrayPath);

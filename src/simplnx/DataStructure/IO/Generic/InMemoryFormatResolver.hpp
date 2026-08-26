@@ -2,26 +2,31 @@
 
 #include "simplnx/DataStructure/IO/Generic/IDataStoreFormatResolver.hpp"
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 /**
- * @brief The default store-format policy: every array is in-memory.
+ * @class InMemoryFormatResolver
+ * @brief Selects in-memory storage for every object.
  *
- * Installed as the process-wide default resolver by libsimplnx when no other resolver is set, and used
- * as the standalone in-core build's only policy. Header-only and trivial.
+ * libsimplnx installs this process-wide policy when an application does not
+ * supply another resolver. The resolver ignores array size and location.
  */
 class InMemoryFormatResolver : public IDataStoreFormatResolver
 {
 public:
   /**
    * @brief Selects the default in-memory store for every array.
+   * @param dataStructure Unused containing DataStructure.
+   * @param arrayPath Unused object path.
+   * @param numericType Unused element data type.
+   * @param dataSizeBytes Unused object size in bytes.
+   * @return Empty format name, which selects the default in-memory store.
    *
-   * The empty format name is the storage-neutral signal consumed by the
-   * array-creation utilities to use their normal in-memory implementation.
-   * This resolver deliberately ignores array size: applications that want to
-   * place sufficiently large arrays out of core install a different policy.
-   *
-   * @return An empty format name, selecting the default in-memory store.
+   * Array-creation utilities interpret the empty name as the default in-memory format.
    */
   std::string resolveFormat(const DataStructure& /*dataStructure*/, const DataPath& /*arrayPath*/, DataType /*numericType*/, uint64 /*dataSizeBytes*/) const override
   {

@@ -14,7 +14,9 @@ using namespace nx::core;
 namespace
 {
 /**
+ * @struct IdentifySampleFunctor
  * @brief Resident breadth-first implementation specialized for the effective image dimensionality.
+ * @tparam ImageDimsStateT Effective image dimensionality and face topology.
  *
  * It intentionally retains full-volume visited/sample vectors and component
  * queues because those give the lowest overhead for in-memory masks. Dispatch
@@ -23,7 +25,18 @@ namespace
 template <detail::ImageDimensionality ImageDimsStateT>
 struct IdentifySampleFunctor
 {
-  /** @brief Retains the largest good component and optionally fills enclosed bad components in place. */
+  /**
+   * @brief Retains the largest true component and optionally fills enclosed false components.
+   * @tparam T Mask value type.
+   * @param imageGeom Supplies dimensions.
+   * @param goodVoxelsPtr Mask modified in place.
+   * @param fillHoles True to fill false components that do not touch a boundary.
+   * @param messageHandler Receives progress messages.
+   * @param shouldCancel Signals cancellation between image rows.
+   *
+   * The search does not check cancellation within a component. The initial seed
+   * is not marked when it enters the queue, so a back edge can enqueue it twice.
+   */
   template <typename T>
   void operator()(const ImageGeom* imageGeom, IDataArray* goodVoxelsPtr, bool fillHoles, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
   {
@@ -54,8 +67,7 @@ struct IdentifySampleFunctor
     std::vector<bool> sample(totalPoints, false);
     int64 biggestBlock = 0;
 
-    // In this loop over the data we are finding the biggest contiguous set of GoodVoxels and calling that the 'sample'  All GoodVoxels that do not touch the 'sample'
-    // are flipped to be called 'bad' voxels or 'not sample'
+    // Find the largest true component. Equal sizes favor the later component.
     for(int64 zLoopIdx = 0; zLoopIdx < dims[2]; zLoopIdx++)
     {
       const int64 zStride = dims[0] * dims[1] * zLoopIdx;
@@ -122,8 +134,7 @@ struct IdentifySampleFunctor
     sample.clear();
     checked.assign(totalPoints, false);
 
-    // In this loop we are going to 'close' all the 'holes' inside the region already identified as the 'sample' if the user chose to do so.
-    // This is done by flipping all 'bad' voxel features that do not touch the outside of the sample (i.e. they are fully contained inside the 'sample').
+    // Fill false components that do not touch the image boundary.
     if(fillHoles)
     {
       messageHelper.sendMessage("Filling holes in sample...");
@@ -144,9 +155,8 @@ struct IdentifySampleFunctor
 
             if(!checked[voxelIndex] && !goodVoxels.getValue(voxelIndex))
             {
-              // Initialized true only for SingleVoxelImage (k_NeighborCount == 0): with no face
-              // neighbors the boundary-flagging loop below never runs, so a lone bad voxel must be
-              // treated as touching the boundary (matches the V&V IdentifySampleFunctor semantics).
+              // A single-voxel image has no neighbors, so the loop cannot detect a boundary.
+              // Initialize true to keep that voxel outside hole filling. This matches the V&V semantics.
               bool touchesBoundary = k_NeighborCount == 0;
               currentVList.push_back(voxelIndex);
               usize count = 0;
@@ -195,6 +205,11 @@ struct IdentifySampleFunctor
 
 /**
  * @brief Selects the correct neighbor topology when one or more image dimensions contain a single cell.
+ * @tparam FunctorT Worker template for one dimensionality state.
+ * @tparam ArgsT Types of the forwarded worker arguments.
+ * @param dataType Runtime mask value type.
+ * @param imageGeom Supplies image dimensions.
+ * @param args Arguments forwarded to the selected worker.
  *
  * Treating unit dimensions as flat prevents the BFS from inventing duplicate
  * neighbors and preserves the established 3D, 2D, 1D, and single-cell behavior.
@@ -207,7 +222,7 @@ void ProcessVoxels(const DataType& dataType, const ImageGeom* imageGeom, ArgsT&&
   const bool zDimEmpty = imageGeom->getNumZCells() == 1;
   const uint8 emptyDimCount = static_cast<uint8>(xDimEmpty) + static_cast<uint8>(yDimEmpty) + static_cast<uint8>(zDimEmpty);
 
-  // Treat dimensions of 1 as flat for image geom
+  // Treat a unit dimension as flat.
   if(emptyDimCount == 0)
   {
     return ExecuteDataFunction(FunctorT<Image3D>{}, dataType, imageGeom, std::forward<ArgsT>(args)...);

@@ -235,8 +235,7 @@ Result<std::string> ObjectIO::readStringAttribute(const std::string& attributeNa
   std::vector<char> attributeOutput;
   Result<std::string> returnResult = {};
 
-  // open(), hasAttribute() and getName() each self-lock, so they run BEFORE this method's
-  // leaf lock (holding the non-recursive ApiLock across them would self-deadlock).
+  // Resolve self-locking accessors before the attribute leaf critical section.
   open();
   if(!hasAttribute(attributeName))
   {
@@ -301,8 +300,7 @@ Result<> ObjectIO::writeStringAttribute(const std::string& attributeName, const 
   Result<> returnError = {};
   size_t size = text.size();
 
-  // deleteAttribute() self-locks; it runs BEFORE this method's leaf lock. getId() also
-  // self-locks, so the id is resolved before the bare-H5 critical section below.
+  // Resolve self-locking deletion and ID access before the attribute leaf section.
   deleteAttribute(attributeName);
   const hid_t selfId = getId();
 

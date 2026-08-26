@@ -5,43 +5,75 @@
 
 #include <string>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 class DataPath;
 class DataStructure;
 
 /**
- * @brief Policy interface that decides which storage format a DataArray/NeighborList should use.
+ * @class IDataStoreFormatResolver
+ * @brief Selects a storage format for array and NeighborList creation.
  *
- * A resolver is consulted at array-creation and import time (see ArrayCreationUtilities::CreateArray
- * and the OOC import-finalize path) only AFTER the core "unstructured geometry => in-core" gate
- * (ParentGeometrySupportsOoc) and only when no explicit per-filter format was given. It returns a
- * registered DataIOCollection format name (e.g. "HDF5-OOC") or "" for the in-memory default.
+ * Creation and import consult the resolver only when no explicit format is set.
+ * ParentGeometrySupportsOoc() first rejects parents that require resident storage.
+ * The returned name must identify a registered DataIOCollection format. An empty
+ * name selects the default in-memory format.
  *
- * Implementations MUST be const and thread-safe: a single shared resolver instance may be consulted
- * concurrently by multiple DataStructures (e.g. one window running a pipeline while another visualizes
- * a dragged-in file). They carry no mutable state.
+ * One shared resolver can serve several DataStructures concurrently. Implementations
+ * must make const calls thread-safe and must not depend on mutable request state.
  */
 class SIMPLNX_EXPORT IDataStoreFormatResolver
 {
 public:
+  /**
+   * @brief Destroys the storage-format resolver.
+   */
   virtual ~IDataStoreFormatResolver() noexcept;
 
   /**
-   * @brief Decide the storage format for an array about to be created/imported.
-   * @param dataStructure The DataStructure that contains (or will contain) the array
-   * @param arrayPath The DataPath where the array lives/will be created
-   * @param numericType The element data type
-   * @param dataSizeBytes Total array size in bytes (0 when unknown, e.g. an unpopulated NeighborList)
-   * @return A registered format name, or "" for the in-memory default
+   * @brief Selects the storage format for an array or NeighborList.
+   * @param dataStructure Contains or will contain the object.
+   * @param arrayPath Identifies the object location.
+   * @param numericType Specifies the element data type.
+   * @param dataSizeBytes Total array bytes, or zero when size is unknown.
+   * @return Registered format name, or an empty name for the in-memory default.
    */
   virtual std::string resolveFormat(const DataStructure& dataStructure, const DataPath& arrayPath, DataType numericType, uint64 dataSizeBytes) const = 0;
 
 protected:
+  /**
+   * @brief Constructs a storage-format resolver.
+   */
   IDataStoreFormatResolver() = default;
-  IDataStoreFormatResolver(const IDataStoreFormatResolver&) = default;
-  IDataStoreFormatResolver(IDataStoreFormatResolver&&) noexcept = default;
-  IDataStoreFormatResolver& operator=(const IDataStoreFormatResolver&) = default;
-  IDataStoreFormatResolver& operator=(IDataStoreFormatResolver&&) noexcept = default;
+
+  /**
+   * @brief Copies a storage-format resolver.
+   * @param other Resolver to copy.
+   */
+  IDataStoreFormatResolver(const IDataStoreFormatResolver& other) = default;
+
+  /**
+   * @brief Moves a storage-format resolver.
+   * @param other Resolver to move.
+   */
+  IDataStoreFormatResolver(IDataStoreFormatResolver&& other) noexcept = default;
+
+  /**
+   * @brief Copies resolver state.
+   * @param other Resolver to copy.
+   * @return This resolver.
+   */
+  IDataStoreFormatResolver& operator=(const IDataStoreFormatResolver& other) = default;
+
+  /**
+   * @brief Moves resolver state.
+   * @param other Resolver to move.
+   * @return This resolver.
+   */
+  IDataStoreFormatResolver& operator=(IDataStoreFormatResolver&& other) noexcept = default;
 };
 } // namespace nx::core

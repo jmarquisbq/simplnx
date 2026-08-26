@@ -15,73 +15,57 @@ namespace nx::core
 
 /**
  * @struct CAxisSegmentFeaturesInputValues
- * @brief Holds all user-supplied parameters for the CAxisSegmentFeatures algorithm.
+ * @brief Identifies c-axis segmentation inputs.
+ *
+ * MisorientationTolerance is in radians. ActiveArrayPath reserves tuple zero
+ * for the background feature.
  */
 struct ORIENTATIONANALYSIS_EXPORT CAxisSegmentFeaturesInputValues
 {
-  float32 MisorientationTolerance = 0.0f;           ///< Maximum c-axis misalignment angle (radians) for grouping voxels into the same feature
-  bool UseMask = false;                             ///< Whether to exclude masked voxels from segmentation
-  bool RandomizeFeatureIds = false;                 ///< Whether to randomize feature IDs after segmentation for better visual contrast
-  SegmentFeatures::NeighborScheme NeighborScheme{}; ///< Face-only (6) or all-connected (26) neighbor connectivity
-  DataPath ImageGeometryPath;                       ///< Path to the IGridGeometry defining the 3D voxel grid
-  DataPath QuatsArrayPath;                          ///< Path to the Float32 quaternion array (4 components per cell)
-  DataPath CellPhasesArrayPath;                     ///< Path to the Int32 cell phases array
-  DataPath MaskArrayPath;                           ///< Path to the Bool/UInt8 mask array (only used when UseMask is true)
-  DataPath CrystalStructuresArrayPath;              ///< Path to the UInt32 crystal structures ensemble array
-  DataPath FeatureIdsArrayPath;                     ///< Path to the output Int32 feature IDs array
-  DataPath CellFeatureAttributeMatrixPath;          ///< Path to the Feature-level AttributeMatrix (resized to match feature count)
-  DataPath ActiveArrayPath;                         ///< Path to the output UInt8 Active array (1 = active feature, 0 = reserved slot 0)
+  float32 MisorientationTolerance = 0.0f;
+  bool UseMask = false;
+  bool RandomizeFeatureIds = false;
+  SegmentFeatures::NeighborScheme NeighborScheme{};
+  DataPath ImageGeometryPath;
+  DataPath QuatsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath MaskArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellFeatureAttributeMatrixPath;
+  DataPath ActiveArrayPath;
 };
 
 /**
  * @class CAxisSegmentFeatures
- * @brief Segments a hexagonal EBSD dataset into features (grains) based on
- * c-axis alignment rather than full crystallographic misorientation.
+ * @brief Segments hexagonal EBSD cells by c-axis alignment.
  *
- * The c-axis is the [0001] direction in hexagonal crystal systems (HCP metals
- * like titanium, zirconium, magnesium). Two neighboring voxels are grouped into
- * the same feature when the angle between their sample-frame c-axis directions
- * is within MisorientationTolerance. Because the c-axis is bidirectional
- * (parallel and antiparallel are equivalent), the check accepts both
- * w <= tolerance and (pi - w) <= tolerance.
+ * The algorithm compares sample-frame [0001] directions. Parallel and
+ * antiparallel c axes are equivalent. Positive unmasked phase IDs must select
+ * a hexagonal crystal structure.
  *
- * The c-axis direction is obtained by converting each voxel's quaternion
- * orientation to a 3x3 orientation matrix, transposing it, and multiplying by
- * the crystal-frame c-axis unit vector [0,0,1] to get the sample-frame direction.
- *
- * Every positive phase that participates in segmentation must be hexagonal
- * (Hexagonal_High 6/mmm or Hexagonal_Low 6/m). Phase-0 and masked-out cells
- * are excluded from validation because they cannot seed or join a feature.
- *
- * ## Connected-Component Labeling
- *
- * Identical to EBSDSegmentFeatures: operator() segments the volume with the
- * base-class connected-component labeling algorithm (SegmentFeatures::executeCCL()),
- * which processes data one Z-slice at a time to keep memory usage bounded.
- *
- * ## Rolling 2-Slot Slice Buffers
- *
- * Same architecture as EBSDSegmentFeatures: prepareForSlice() bulk-reads each
- * Z-slice's quaternion, phase, and mask data into a rolling 2-slot buffer.
- * The isValidVoxel() and areNeighborsSimilar() methods use the buffer fast path
- * when the needed slices are loaded, falling back to direct DataStore access
- * for non-adjacent slice comparisons during periodic boundary merging.
- *
- * The pre-validation phase scan also uses OOC-efficient batch reading: phases
- * are read one Z-slice at a time via copyIntoBuffer() rather than per-element
- * getValue() calls.
+ * SegmentFeatures performs connected-component labeling one slice at a time.
+ * Two local slices supply quaternion, phase, and mask data for normal and
+ * periodic comparisons. Bulk reads avoid per-element OOC access. Direct array
+ * access is retained outside CCL and gives no generic DataStore thread-safety
+ * guarantee.
  */
 class ORIENTATIONANALYSIS_EXPORT CAxisSegmentFeatures : public SegmentFeatures
 {
 public:
   /**
-   * @brief Constructs the algorithm with all required references and parameters.
-   * @param dataStructure The DataStructure containing all input/output arrays.
-   * @param mesgHandler Handler for sending progress messages to the UI.
-   * @param shouldCancel Atomic flag checked between iterations to support cancellation.
-   * @param inputValues User-supplied parameters controlling the segmentation behavior.
+   * @brief Initializes c-axis segmentation.
+   * @param dataStructure Provides selected arrays and the geometry.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies segmentation settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   CAxisSegmentFeatures(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, CAxisSegmentFeaturesInputValues* inputValues);
+  /**
+   * @brief Destroys the c-axis segmentation executor.
+   */
   ~CAxisSegmentFeatures() noexcept override;
 
   CAxisSegmentFeatures(const CAxisSegmentFeatures&) = delete;
@@ -90,83 +74,73 @@ public:
   CAxisSegmentFeatures& operator=(CAxisSegmentFeatures&&) noexcept = delete;
 
   /**
-   * @brief Executes the c-axis segmentation algorithm using connected-component
-   * labeling.
-   * @return Result<> indicating success or any errors encountered during execution.
+   * @brief Executes c-axis connected-component labeling.
+   * @return Success, or a phase, mask, or bulk-I/O error.
    */
   Result<> operator()();
 
 protected:
   /**
-   * @brief Checks whether a voxel can participate in c-axis segmentation.
+   * @brief Checks whether a voxel can seed or join a feature.
+   * @param point Identifies the voxel.
+   * @return True if the mask permits the voxel and its phase is positive.
    *
-   * When slice buffers are active, reads from the in-memory buffer (fast path);
-   * otherwise falls back to direct DataStore access.
-   *
-   * @param point Linear voxel index.
-   * @return true if the voxel passes mask and phase > 0 checks.
+   * Active slice buffers avoid a DataStore access. CCL rejects a nonresident
+   * slice instead of reading it directly.
    */
   bool isValidVoxel(int64 point) const override;
 
   /**
-   * @brief Determines whether two neighboring voxels have sufficiently aligned
-   * c-axes to belong to the same feature.
+   * @brief Checks c-axis alignment for neighboring voxels.
+   * @param point1 Identifies the source voxel.
+   * @param point2 Identifies the neighbor voxel.
+   * @return True if the cells share a phase and meet the c-axis tolerance.
    *
-   * When both voxels' Z-slices are in the rolling buffer, all data is read
-   * from local memory. Otherwise falls back to direct DataStore access.
-   *
-   * @param point1 First voxel index.
-   * @param point2 Second (neighbor) voxel index.
-   * @return true if both share the same phase and their c-axis misalignment is within tolerance.
+   * The comparison accepts antiparallel c axes. Active buffers keep CCL reads
+   * local.
    */
   bool areNeighborsSimilar(int64 point1, int64 point2) const override;
 
   /**
-   * @brief Pre-loads a Z-slice's quaternion, phase, and mask data into the
-   * rolling 2-slot buffer for OOC-efficient access during CCL.
+   * @brief Loads a Z slice into a two-slot LRU buffer.
+   * @param iz Identifies the slice, or a negative value to disable buffering.
+   * @param dimX Specifies the X dimension.
+   * @param dimY Specifies the Y dimension.
+   * @param dimZ Specifies the Z dimension.
+   * @return Success, or a mask or source bulk-I/O error.
    *
-   * Slot assignment: even slices -> slot 0, odd slices -> slot 1. Passing
-   * iz < 0 disables slice buffering.
-   *
-   * @param iz Z-slice index to load, or -1 to disable buffering.
-   * @param dimX Number of voxels in X.
-   * @param dimY Number of voxels in Y.
-   * @param dimZ Number of voxels in Z.
+   * Resident slices are reused. LRU replacement supports periodic comparisons.
    */
   Result<> prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ) override;
 
 private:
-  const CAxisSegmentFeaturesInputValues* m_InputValues = nullptr; ///< Non-owning pointer to user-supplied parameters
+  const CAxisSegmentFeaturesInputValues* m_InputValues = nullptr;
 
-  Float32Array* m_QuatsArray = nullptr;                                           ///< Pointer to the quaternion array (4 components per cell)
-  Int32Array* m_CellPhases = nullptr;                                             ///< Pointer to the cell phases array
-  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxelsArray = nullptr; ///< Mask comparator for filtering valid voxels
-  Int32Array* m_FeatureIdsArray = nullptr;                                        ///< Pointer to the output feature IDs array
+  Float32Array* m_QuatsArray = nullptr;
+  Int32Array* m_CellPhases = nullptr;
+  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxelsArray = nullptr;
+  Int32Array* m_FeatureIdsArray = nullptr;
 
   /**
-   * @brief Allocates the rolling 2-slot slice buffers for OOC optimization.
-   * Each slot holds one full XY slice of quaternions, phases, and mask flags.
-   * @param dimX Number of voxels in X.
-   * @param dimY Number of voxels in Y.
+   * @brief Allocates two local X-Y slice buffers.
+   * @param dimX Specifies the X dimension.
+   * @param dimY Specifies the Y dimension.
    */
   void allocateSliceBuffers(int64 dimX, int64 dimY);
 
   /**
-   * @brief Releases the slice buffers and resets m_UseSliceBuffers to false.
+   * @brief Releases local slice buffers.
    */
   void deallocateSliceBuffers();
 
-  // Rolling 2-slot input buffers for OOC optimization.
-  // Pre-loading input data into these avoids per-element OOC overhead
-  // during neighbor comparisons in the CCL algorithm.
-  std::vector<float32> m_QuatBuffer;                  ///< 2 * sliceSize * 4 quaternion components
-  std::vector<int32> m_PhaseBuffer;                   ///< 2 * sliceSize phase IDs
-  std::vector<uint8> m_MaskBuffer;                    ///< 2 * sliceSize mask flags
-  int64 m_BufSliceSize = 0;                           ///< Number of voxels per XY slice (dimX * dimY)
-  std::array<int64, 2> m_BufferedSliceZ = {-1, -1};   ///< Z-indices currently loaded in each buffer slot
-  std::array<uint64, 2> m_BufferUseSequence = {0, 0}; ///< LRU sequence number for each slot
-  uint64 m_NextBufferUseSequence = 1;                 ///< Next sequence number assigned on a prepare call
-  bool m_UseSliceBuffers = false;                     ///< Whether slice buffers are active
+  std::vector<float32> m_QuatBuffer;
+  std::vector<int32> m_PhaseBuffer;
+  std::vector<uint8> m_MaskBuffer;
+  int64 m_BufSliceSize = 0;
+  std::array<int64, 2> m_BufferedSliceZ = {-1, -1};
+  std::array<uint64, 2> m_BufferUseSequence = {0, 0};
+  uint64 m_NextBufferUseSequence = 1;
+  bool m_UseSliceBuffers = false;
 };
 
 } // namespace nx::core

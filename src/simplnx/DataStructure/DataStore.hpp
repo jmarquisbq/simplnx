@@ -19,31 +19,56 @@
 #include <string>
 #include <vector>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
+
 /**
  * @class DataStore
- * @brief The DataStore class handles the storing and retrieval of data for
- * use in DataArrays.
- * @tparam T
+ * @brief Stores typed values in contiguous in-memory storage.
+ * @tparam T Stored value type.
  */
 template <typename T>
 class DataStore : public AbstractDataStore<T>
 {
 public:
+  /**
+   * @brief Names the abstract data-store base type.
+   */
   using parent_type = AbstractDataStore<T>;
+
+  /**
+   * @brief Names the stored value type.
+   */
   using value_type = typename AbstractDataStore<T>::value_type;
+
+  /**
+   * @brief Names the mutable value-proxy type.
+   */
   using reference = typename AbstractDataStore<T>::reference;
 
+  /**
+   * @brief Names the DataStore record type.
+   */
   static constexpr const char k_DataStore[] = "DataStore";
+
+  /**
+   * @brief Names the data-object identifier record.
+   */
   static constexpr const char k_DataObjectId[] = "DataObjectId";
+
+  /**
+   * @brief Names the data-array type record.
+   */
   static constexpr const char k_DataArrayTypeName[] = "DataArray";
 
   /**
-   * @brief Creates a new DataStore with a single tuple dimensions of 'numTuples' and
-   * a single component dimension of {1}
-   * @param numTuples
-   * @param initValue
+   * @brief Creates a one-component data store.
+   * @param numTuples Number of tuples.
+   * @param initValue Optional value that initializes every element.
    */
   DataStore(usize numTuples, std::optional<T> initValue)
   : DataStore({numTuples}, {1}, initValue)
@@ -51,10 +76,10 @@ public:
   }
 
   /**
-   * @brief Constructs a DataStore with the specified tupleSize and tupleCount.
-   * @param tupleShape The dimensions of the tuples
-   * @param componentShape The dimensions of the component at each tuple
-   * @param initValue
+   * @brief Creates a data store with a tuple and component shape.
+   * @param tupleShape Tuple dimensions in slowest-to-fastest order.
+   * @param componentShape Component dimensions in slowest-to-fastest order.
+   * @param initValue Optional value that initializes every element.
    */
   DataStore(const ShapeType& tupleShape, const ShapeType& componentShape, std::optional<T> initValue)
   : parent_type()
@@ -72,10 +97,13 @@ public:
   }
 
   /**
-   * @brief Constructs a DataStore from an existing buffer.
-   * @param buffer
-   * @param tupleShape
-   * @param componentShape
+   * @brief Takes ownership of an existing value buffer.
+   *
+   * The buffer must hold getSize() values for the supplied shapes. Future growth
+   * uses a mudflap value because the constructor has no initialization value.
+   * @param buffer Owning contiguous value buffer.
+   * @param tupleShape Tuple dimensions in slowest-to-fastest order.
+   * @param componentShape Component dimensions in slowest-to-fastest order.
    */
   DataStore(std::unique_ptr<value_type[]> buffer, ShapeType tupleShape, ShapeType componentShape)
   : parent_type()
@@ -85,13 +113,13 @@ public:
   , m_NumComponents(std::accumulate(m_ComponentShape.cbegin(), m_ComponentShape.cend(), static_cast<usize>(1), std::multiplies<>()))
   , m_NumTuples(std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<usize>(1), std::multiplies<>()))
   {
-    // Because no init value is passed into the constructor, we will use a "mudflap" style value that is easy to debug.
+    // Future growth needs a diagnostic value because the supplied buffer has no initialization value.
     m_InitValue = GetMudflap<T>();
   }
 
   /**
-   * @brief Copy constructor
-   * @param other
+   * @brief Copies a data store and its values.
+   * @param other Source data store.
    */
   DataStore(const DataStore& other)
   : parent_type()
@@ -108,8 +136,8 @@ public:
   }
 
   /**
-   * @brief Move constructor
-   * @param other
+   * @brief Moves a data store and its values.
+   * @param other Source data store.
    */
   DataStore(DataStore&& other) noexcept
   : parent_type()
@@ -122,17 +150,12 @@ public:
   {
   }
 
-  /**
-   * @brief Copy assignment.
-   * @param rhs
-   * @return
-   */
   DataStore& operator=(const DataStore& rhs) = delete;
 
   /**
-   * @brief Move assignment.
-   * @param rhs
-   * @return
+   * @brief Moves data-store state into this store.
+   * @param rhs Source data store.
+   * @return This data store.
    */
   DataStore& operator=(DataStore&& rhs)
   {
@@ -145,20 +168,19 @@ public:
     return *this;
   }
 
+  /**
+   * @brief Destroys the data store.
+   */
   ~DataStore() override = default;
 
-  /**
-   * @brief Returns the number of tuples in the DataStore.
-   * @return usize
-   */
   usize getNumberOfTuples() const override
   {
     return m_NumTuples;
   }
 
   /**
-   * @brief Returns the pointer to the allocated data. Const version
-   * @return
+   * @brief Returns the contiguous value buffer.
+   * @return Pointer valid until this store is resized, moved, or destroyed.
    */
   const T* data() const
   {
@@ -166,63 +188,37 @@ public:
   }
 
   /**
-   * @brief Returns the pointer to the allocated data. Non-const version
-   * @return
+   * @brief Returns the contiguous mutable value buffer.
+   * @return Pointer valid until this store is resized, moved, or destroyed.
    */
   T* data()
   {
     return m_Data.get();
   }
 
-  /**
-   * @brief Returns the number of elements in each Tuple.
-   * @return usize
-   */
   usize getNumberOfComponents() const override
   {
     return m_NumComponents;
   }
 
-  /**
-   * @brief Returns the dimensions of the Tuples
-   * @return
-   */
   const ShapeType& getTupleShape() const override
   {
     return m_TupleShape;
   }
 
-  /**
-   * @brief Returns the dimensions of the Components
-   * @return
-   */
   const ShapeType& getComponentShape() const override
   {
     return m_ComponentShape;
   }
 
-  /**
-   * @brief Returns the store type e.g. in memory, out of core, etc.
-   * @return StoreType
-   */
   IDataStore::StoreType getStoreType() const override
   {
     return IDataStore::StoreType::InMemory;
   }
 
   /**
-   * @brief Returns recovery metadata for an in-memory store.
-   *
-   * In-memory DataStores have no backing file or external state, so the
-   * recovery file's HDF5 dataset for this array contains all the data
-   * needed to reconstruct the store. No extra key-value attributes are
-   * required, so this returns an empty map.
-   *
-   * Out-of-core store subclasses override this to return the file path,
-   * dataset path, chunk shape, etc. needed to reattach to their backing
-   * storage after a crash.
-   *
-   * @return std::map<std::string, std::string> Empty map.
+   * @brief Returns no recovery metadata.
+   * @return Empty metadata map because recovery stores in-memory values.
    */
   std::map<std::string, std::string> getRecoveryMetadata() const override
   {
@@ -230,7 +226,8 @@ public:
   }
 
   /**
-   * @brief This method copies a value to the member variable m_InitValue
+   * @brief Sets the value used when the store grows.
+   * @param value Value that initializes new elements.
    */
   void setInitValue(T value)
   {
@@ -238,58 +235,40 @@ public:
   }
 
   /**
-   * @brief This method sets the shape of the dimensions to `tupleShape`.
+   * @brief Changes the tuple shape.
    *
-   * There are 3 possibilities when using this function:
-   * [1] The number of tuples of the new shape is *LESS* than the original. In this
-   * case a memory allocation will take place and the first 'N' elements of data
-   * will be copied into the new array. The remaining data is *LOST*
-   *
-   * [2] The number of tuples of the new shape is *EQUAL* to the original. In this
-   * case the shape is set and the function returns.
-   *
-   * [3] The number of tuples of the new shape is *GREATER* than the original. In
-   * this case a new array is allocated and all the data from the original array
-   * is copied into the new array and the remaining elements are initialized to
-   * the default initialization value.
-   *
-   * @param tupleShape The new shape of the data where the dimensions are "C" ordered
-   * from *slowest* to *fastest*.
+   * A size change retains values in the shared prefix. When existing storage
+   * grows, added values use the initialization or mudflap value. A size change can invalidate pointers and spans.
+   * @param tupleShape New tuple dimensions in slowest-to-fastest order.
    */
   void resizeTuples(const ShapeType& tupleShape) override
   {
     auto oldSize = this->getSize();
-    // Calculate the total number of values in the new array
     m_TupleShape = tupleShape;
     m_NumTuples = std::accumulate(m_TupleShape.cbegin(), m_TupleShape.cend(), static_cast<usize>(1), std::multiplies<>());
 
     usize newSize = getNumberOfComponents() * m_NumTuples;
 
-    if(m_Data.get() == nullptr) // Data was never allocated
+    if(m_Data.get() == nullptr)
     {
       auto data = new value_type[newSize];
       m_Data.reset(data);
       return;
     }
 
-    // The caller is reshaping the array without actually effecting its overall number
-    // of elements. Old was 100 x 3 and the new was 300. Both with a {1} comp dim.
+    // Matching value counts change shape metadata without reallocating storage.
     if(newSize == oldSize)
     {
       return;
     }
 
-    // We have now figured out that the old array and the new array are different sizes so
-    // copy the old data into the newly allocated data array or as much or as little
-    // as possible
     auto data = new value_type[newSize];
     for(usize i = 0; i < newSize && i < oldSize; i++)
     {
       data[i] = m_Data.get()[i];
     }
 
-    // If we are sizing to a larger number of tuples, initialize the leftover array with the init
-    // value that was passed in during construction.
+    // New values use the configured initialization value.
     T initValue = m_InitValue.has_value() ? *m_InitValue : GetMudflap<T>();
     for(usize i = oldSize; i < newSize; i++)
     {
@@ -299,21 +278,15 @@ public:
     m_Data.reset(data);
   }
 
-  /**
-   * @brief Returns the value found at the specified index of the DataStore.
-   * This cannot be used to edit the value found at the specified index.
-   * @param index
-   * @return value_type
-   */
   value_type getValue(usize index) const override
   {
     return m_Data.get()[index];
   }
 
   /**
-   * @brief Sets the value stored at the specified index.
-   * @param index
-   * @param value
+   * @brief Stores a value at a flat index.
+   * @param index Flat value index.
+   * @param value Value to store.
    */
   void setValue(usize index, value_type value) override
   {
@@ -321,73 +294,56 @@ public:
   }
 
   /**
-   * @brief Copies a contiguous range of values from this in-memory data store
-   * into the caller-provided buffer. For the in-memory DataStore this is a
-   * simple bounds-checked std::copy from the raw backing array.
+   * @brief Copies contiguous values into caller-owned storage.
    *
-   * @param startIndex The starting flat element index to read from
-   * @param buffer A span to receive the copied values; its size determines how
-   *               many elements are read
-   * @return Result<> valid on success; invalid if `[startIndex, startIndex + buffer.size())`
-   *         exceeds getSize().
+   * This is the in-memory fast path for storage-neutral bulk I/O.
+   * @param startIndex First flat value index to read.
+   * @param buffer Receives copied values.
+   * @return Error if the requested range exceeds this store.
    */
   Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
   {
     const usize count = buffer.size();
 
-    // Bounds check: ensure the requested range fits within the store
     if(startIndex + count > this->getSize())
     {
       return MakeErrorResult(-6020, fmt::format("DataStore bulk read failed: requested range [{}, {}) exceeds store size ({}). Requested {} elements starting at index {}.", startIndex,
                                                 startIndex + count, this->getSize(), count, startIndex));
     }
 
-    // Direct memory copy from the contiguous backing array into the caller's buffer
     std::copy(m_Data.get() + startIndex, m_Data.get() + startIndex + count, buffer.data());
     return {};
   }
 
   /**
-   * @brief Copies values from the caller-provided buffer into a contiguous
-   * range of this in-memory data store. For the in-memory DataStore this is
-   * a simple bounds-checked std::copy into the raw backing array.
+   * @brief Copies caller-owned values into contiguous storage.
    *
-   * @param startIndex The starting flat element index to write to
-   * @param buffer A span containing the values to write; its size determines
-   *               how many elements are written
-   * @return Result<> valid on success; invalid if `[startIndex, startIndex + buffer.size())`
-   *         exceeds getSize().
+   * This is the in-memory fast path for storage-neutral bulk I/O.
+   * @param startIndex First flat value index to write.
+   * @param buffer Values to copy.
+   * @return Error if the requested range exceeds this store.
    */
   Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
   {
     const usize count = buffer.size();
 
-    // Bounds check: ensure the requested range fits within the store
     if(startIndex + count > this->getSize())
     {
       return MakeErrorResult(-6021, fmt::format("DataStore bulk write failed: requested range [{}, {}) exceeds store size ({}). Requested {} elements starting at index {}.", startIndex,
                                                 startIndex + count, this->getSize(), count, startIndex));
     }
 
-    // Direct memory copy from the caller's buffer into the contiguous backing array
     std::copy(buffer.begin(), buffer.end(), m_Data.get() + startIndex);
     return {};
   }
 
   /**
-   * @brief Reads the values contained in the given N-dimensional extent.
+   * @brief Reads a tuple-space extent into a new value vector.
    *
-   * Provides a dedicated 3D fast path (the visualization hot path) that
-   * memcpys each contiguous X span when stride[2]==1 and falls back to a
-   * per-tuple copy when X is strided, plus a 1D strided fast path and a generic
-   * N-dimensional fallback. The extent axes are in tuple-space dimension order
-   * — the same order as getTupleShape().
-   *
-   * @param extent The N-dimensional extent to read (min/max/stride per axis in
-   *               tuple-space dimension order — same order as getTupleShape()).
-   * @return std::vector<T> of length extent.totalElements() * numComponents,
-   *         row-major with components as the fastest-varying dimension.
-   *         Returns an empty vector if the extent does not match the tuple shape.
+   * The 3D path copies contiguous X rows. Strided and other dimensions use
+   * index mapping. Boolean output writes packed vector values without a temporary.
+   * @param extent Tuple-space extent with minimum, maximum, and stride values.
+   * @return Extent values in row-major, component-fastest order, or an empty vector when invalid.
    */
   std::vector<T> readExtent(const Extent& extent) const override
   {
@@ -410,9 +366,7 @@ public:
     std::vector<T> result(totalValues);
     if constexpr(std::is_same_v<T, bool>)
     {
-      // std::vector<bool> does not expose contiguous bool storage, so write its
-      // packed proxy elements directly instead of allocating an output-sized
-      // temporary bool array.
+      // Packed vector<bool> storage requires direct proxy writes.
       const usize numComponents = getNumberOfComponents();
       const usize outputTupleCount = static_cast<usize>(extent.totalElements());
       for(usize outputTupleIndex = 0; outputTupleIndex < outputTupleCount; ++outputTupleIndex)
@@ -447,15 +401,11 @@ public:
   }
 
   /**
-   * @brief Reads an N-dimensional extent directly into caller-owned storage.
+   * @brief Reads a tuple-space extent into caller-owned storage.
    *
-   * The 3D path copies contiguous X rows with std::memcpy and handles strided
-   * X coordinates tuple by tuple. The 1D path performs a strided tuple copy;
-   * every other dimensionality uses a generic row-major index mapping.
-   *
-   * @param extent N-dimensional tuple-space extent to read.
-   * @param destination Exact-sized output span in row-major,
-   *        component-fastest order.
+   * The 3D path copies contiguous X rows. Other layouts use index mapping.
+   * @param extent Tuple-space extent with minimum, maximum, and stride values.
+   * @param destination Receives exactly `extent.totalElements() * getNumberOfComponents()` values.
    * @throws std::invalid_argument If the extent or destination size is invalid.
    */
   void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
@@ -571,17 +521,13 @@ public:
   }
 
   /**
-   * @brief Writes data within the given N-dimensional extent.
+   * @brief Writes values into a tuple-space extent.
    *
-   * Write-side counterpart of readExtent: same dimension order, same
-   * row-major layout with components as the fastest-varying dimension.
-   * Implements the 3D fast path via std::memcpy for contiguous X spans;
-   * falls back to 1D strided iteration otherwise. 2D/>3D are silently
-   * ignored (callers should validate extent.dimensions()).
-   *
-   * @param extent The N-dimensional extent to write
-   * @param data Span containing the data (extent.totalElements() * numComp
-   *             elements, row-major).
+   * The 3D path copies contiguous X rows. The 1D path writes strided tuples.
+   * Other dimensions leave this store unchanged. The span must contain at least
+   * `extent.totalElements() * getNumberOfComponents()` values.
+   * @param extent Tuple-space extent with minimum, maximum, and stride values.
+   * @param data Values in row-major, component-fastest order.
    */
   void writeExtent(const Extent& extent, nonstd::span<const T> data) override
   {
@@ -633,7 +579,7 @@ public:
               continue;
             }
           }
-          // Per-tuple fallback (stride > 1 OR T=bool).
+          // Strided and boolean values require tuple-by-tuple writes.
           for(uint64 xi = 0; xi < xCountStrided; ++xi)
           {
             const usize destOff = destRowStart + static_cast<usize>(xi * xStride) * numComp;
@@ -667,10 +613,10 @@ public:
   }
 
   /**
-   * @brief Returns the value found at the specified index of sthe DataStore.
-   * This cannot be used to edit the value found at the specified index.
-   * @param index
-   * @return value_type
+   * @brief Returns a value at a flat index.
+   * @param index Flat value index.
+   * @return Stored value.
+   * @throws std::out_of_range If index is not valid.
    */
   value_type at(usize index) const override
   {
@@ -682,9 +628,10 @@ public:
   }
 
   /**
-   * @brief Adds value to value at index (equivalent to +=)
-   * @param index
-   * @param value
+   * @brief Adds a value at a flat index.
+   * @param index Flat value index.
+   * @param value Value to add.
+   * @throws std::runtime_error If T is bool.
    */
   void add(usize index, value_type value) override
   {
@@ -699,9 +646,10 @@ public:
   }
 
   /**
-   * @brief Subtracts value to value at index (equivalent to -=)
-   * @param index
-   * @param value
+   * @brief Subtracts a value at a flat index.
+   * @param index Flat value index.
+   * @param value Value to subtract.
+   * @throws std::runtime_error If T is bool.
    */
   void sub(usize index, value_type value) override
   {
@@ -716,9 +664,10 @@ public:
   }
 
   /**
-   * @brief Multiplies value at index by value (equivalent to *=)
-   * @param index
-   * @param value
+   * @brief Multiplies a value at a flat index.
+   * @param index Flat value index.
+   * @param value Multiplier.
+   * @throws std::runtime_error If T is bool.
    */
   void mul(usize index, value_type value) override
   {
@@ -733,9 +682,10 @@ public:
   }
 
   /**
-   * @brief Divides value at index by value (equivalent to /=)
-   * @param index
-   * @param value
+   * @brief Divides a value at a flat index.
+   * @param index Flat value index.
+   * @param value Divisor.
+   * @throws std::runtime_error If T is bool.
    */
   void div(usize index, value_type value) override
   {
@@ -750,9 +700,10 @@ public:
   }
 
   /**
-   * @brief Takes remainder of value at index divided by value (equivalent to %=)
-   * @param index
-   * @param value
+   * @brief Replaces a value with its remainder.
+   * @param index Flat value index.
+   * @param value Divisor.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void rem(usize index, value_type value) override
   {
@@ -767,9 +718,10 @@ public:
   }
 
   /**
-   * @brief Bitwise AND of value at index with value (equivalent to &=)
-   * @param index
-   * @param value
+   * @brief Applies a bitwise AND at a flat index.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void bitwiseAND(usize index, value_type value) override
   {
@@ -784,9 +736,10 @@ public:
   }
 
   /**
-   * @brief Bitwise OR of value at index with value (equivalent to |=)
-   * @param index
-   * @param value
+   * @brief Applies a bitwise OR at a flat index.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void bitwiseOR(usize index, value_type value) override
   {
@@ -801,9 +754,10 @@ public:
   }
 
   /**
-   * @brief Bitwise XOR of value at index with value (equivalent to ^=)
-   * @param index
-   * @param value
+   * @brief Applies a bitwise XOR at a flat index.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void bitwiseXOR(usize index, value_type value) override
   {
@@ -818,9 +772,10 @@ public:
   }
 
   /**
-   * @brief Bitwise left shift of value at index with value (equivalent to <<=)
-   * @param index
-   * @param value
+   * @brief Shifts a value left at a flat index.
+   * @param index Flat value index.
+   * @param value Shift count.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void bitwiseLShift(usize index, value_type value) override
   {
@@ -835,9 +790,10 @@ public:
   }
 
   /**
-   * @brief Bitwise right shift of value at index with value (equivalent to >>=)
-   * @param index
-   * @param value
+   * @brief Shifts a value right at a flat index.
+   * @param index Flat value index.
+   * @param value Shift count.
+   * @throws std::runtime_error If T is bool or floating point.
    */
   void bitwiseRShift(usize index, value_type value) override
   {
@@ -852,9 +808,8 @@ public:
   }
 
   /**
-   * @brief Swaps bytes of value at index
-   * @param index
-   * @param value
+   * @brief Swaps the byte order of a value.
+   * @param index Flat value index.
    */
   void byteSwap(usize index) override
   {
@@ -863,9 +818,9 @@ public:
   }
 
   /**
-   * @brief Swaps values at index1 and index2
-   * @param index1
-   * @param index2
+   * @brief Swaps two values.
+   * @param index1 First flat value index.
+   * @param index2 Second flat value index.
    */
   void swap(usize index1, usize index2) override
   {
@@ -873,8 +828,8 @@ public:
   }
 
   /**
-   * @brief Returns a deep copy of the data store and all its data.
-   * @return std::unique_ptr<IDataStore>
+   * @brief Makes an independent copy of this store.
+   * @return Owning copy of this store.
    */
   std::unique_ptr<IDataStore> deepCopy() const override
   {
@@ -882,8 +837,8 @@ public:
   }
 
   /**
-   * @brief Returns a data store of the same type as this but with default initialized data.
-   * @return std::unique_ptr<IDataStore>
+   * @brief Creates an in-memory store with the same shapes.
+   * @return Owning store initialized with zero values.
    */
   std::unique_ptr<IDataStore> createNewInstance() const override
   {
@@ -891,8 +846,8 @@ public:
   }
 
   /**
-   * @brief Creates a span view over the data store's contents.
-   * @return nonstd::span<T> A span providing access to the data
+   * @brief Creates a mutable span over contiguous values.
+   * @return Span valid until this store is resized, moved, or destroyed.
    */
   nonstd::span<T> createSpan()
   {
@@ -900,14 +855,19 @@ public:
   }
 
   /**
-   * @brief Creates a const span view over the data store's contents.
-   * @return nonstd::span<const T> A const span providing read-only access to the data
+   * @brief Creates a read-only span over contiguous values.
+   * @return Span valid until this store is resized, moved, or destroyed.
    */
   nonstd::span<const T> createSpan() const
   {
     return {data(), this->getSize()};
   }
 
+  /**
+   * @brief Writes contiguous values to a binary file.
+   * @param absoluteFilePath Destination file path.
+   * @return Error code and message.
+   */
   std::pair<int32, std::string> writeBinaryFile(const std::string& absoluteFilePath) const override
   {
     std::ofstream outStrm(absoluteFilePath, std::ios_base::out | std::ios_base::binary);
@@ -919,6 +879,11 @@ public:
     return writeBinaryFile(outStrm);
   }
 
+  /**
+   * @brief Writes contiguous values to a binary stream.
+   * @param outputStream Destination stream.
+   * @return Error code and message.
+   */
   std::pair<int32, std::string> writeBinaryFile(std::ostream& outputStream) const override
   {
     usize totalElements = getNumberOfComponents() * getNumberOfTuples();
@@ -933,11 +898,21 @@ public:
     return {0, ""};
   }
 
+  /**
+   * @brief Reads HDF5 values into contiguous storage.
+   * @param dataset HDF5 dataset to read.
+   * @return Error from the HDF5 read.
+   */
   Result<> readHdf5(const HDF5::DatasetIO& dataset) override
   {
     return dataset.readIntoSpan(createSpan());
   }
 
+  /**
+   * @brief Writes contiguous values to an HDF5 dataset.
+   * @param dataset HDF5 dataset to write.
+   * @return Error from the HDF5 write.
+   */
   Result<> writeHdf5(HDF5::DatasetIO& dataset) const override
   {
     HDF5::DatasetIO::DimsType dims(m_TupleShape.begin(), m_TupleShape.end());
@@ -955,19 +930,58 @@ private:
   std::optional<T> m_InitValue;
 };
 
-// Declare aliases
+/**
+ * @brief Names an in-memory uint8 data store.
+ */
 using UInt8DataStore = DataStore<uint8>;
+
+/**
+ * @brief Names an in-memory uint16 data store.
+ */
 using UInt16DataStore = DataStore<uint16>;
+
+/**
+ * @brief Names an in-memory uint32 data store.
+ */
 using UInt32DataStore = DataStore<uint32>;
+
+/**
+ * @brief Names an in-memory uint64 data store.
+ */
 using UInt64DataStore = DataStore<uint64>;
 
+/**
+ * @brief Names an in-memory int8 data store.
+ */
 using Int8DataStore = DataStore<int8>;
+
+/**
+ * @brief Names an in-memory int16 data store.
+ */
 using Int16DataStore = DataStore<int16>;
+
+/**
+ * @brief Names an in-memory int32 data store.
+ */
 using Int32DataStore = DataStore<int32>;
+
+/**
+ * @brief Names an in-memory int64 data store.
+ */
 using Int64DataStore = DataStore<int64>;
 
+/**
+ * @brief Names an in-memory bool data store.
+ */
 using BoolDataStore = DataStore<bool>;
 
+/**
+ * @brief Names an in-memory float32 data store.
+ */
 using Float32DataStore = DataStore<float32>;
+
+/**
+ * @brief Names an in-memory float64 data store.
+ */
 using Float64DataStore = DataStore<float64>;
 } // namespace nx::core

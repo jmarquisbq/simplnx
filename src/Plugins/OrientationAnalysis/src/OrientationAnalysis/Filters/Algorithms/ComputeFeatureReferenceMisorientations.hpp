@@ -11,48 +11,52 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeFeatureReferenceMisorientations algorithm.
+ * @struct ComputeFeatureReferenceMisorientationsInputValues
+ * @brief Identifies feature-reference misorientation inputs.
+ *
+ * ReferenceOrientation selects the average quaternion or the farthest
+ * grain-boundary cell.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeFeatureReferenceMisorientationsInputValues
 {
-  ChoicesParameter::ValueType ReferenceOrientation;  ///< 0 = average orientation, 1 = orientation farthest from boundary
-  DataPath FeatureAttributeMatrixPath;               ///< Feature-level AttributeMatrix (used for tuple count in mode 1)
-  DataPath FeatureIdsArrayPath;                      ///< Cell-level Int32 feature ID per voxel
-  DataPath CellPhasesArrayPath;                      ///< Cell-level Int32 phase index per voxel
-  DataPath QuatsArrayPath;                           ///< Cell-level Float32 quaternions (4 components)
-  DataPath GBEuclideanDistancesArrayPath;            ///< Cell-level Float32 grain boundary Euclidean distances (mode 1 only)
-  DataPath AvgQuatsArrayPath;                        ///< Feature-level Float32 average quaternions (mode 0 only)
-  DataPath CrystalStructuresArrayPath;               ///< Ensemble-level UInt32 crystal structure Laue classes
-  DataPath FeatureReferenceMisorientationsArrayName; ///< Output: Cell-level Float32 misorientation angle (degrees)
-  DataPath FeatureAvgMisorientationsArrayName;       ///< Output: Feature-level Float32 average misorientation (degrees)
-  DataPath FeatureEuclideanCentersPath;              ///< Output: Feature-level Float32 Euclidean center coordinates (mode 1)
+  ChoicesParameter::ValueType ReferenceOrientation;
+  DataPath FeatureAttributeMatrixPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath QuatsArrayPath;
+  DataPath GBEuclideanDistancesArrayPath;
+  DataPath AvgQuatsArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath FeatureReferenceMisorientationsArrayName;
+  DataPath FeatureAvgMisorientationsArrayName;
+  DataPath FeatureEuclideanCentersPath;
 };
 
 /**
  * @class ComputeFeatureReferenceMisorientations
- * @brief Computes the misorientation angle between each voxel and its Feature's
- *        reference orientation, plus the per-Feature average of those angles.
+ * @brief Computes cell misorientation to each feature reference.
  *
- * Two reference modes are supported:
- *   - **Mode 0**: Reference is the Feature's average quaternion (from AvgQuats).
- *   - **Mode 1**: Reference is the voxel farthest from the grain boundary
- *     (identified by maximum grain-boundary Euclidean distance).
- *
- * ## OOC Optimization
- *
- * All cell-level arrays (featureIds, phases, quats, GB distances) are read
- * in chunks of 65536 tuples via `copyIntoBuffer()`. Feature-level arrays
- * (avgQuats, crystal structures) are cached entirely in local vectors at
- * algorithm start. The cell-level misorientation output is written back in
- * matching chunks via `copyFromBuffer()`. In mode 1, the center-voxel
- * identification pass also uses chunked I/O. This strategy converts per-element
- * virtual dispatch into bulk sequential I/O, eliminating OOC performance cliffs.
+ * The reference is an average quaternion or the farthest grain-boundary cell.
+ * Cell data uses 65,536-tuple buffers. Feature and ensemble data stays local
+ * because feature IDs access it in random order.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeFeatureReferenceMisorientations
 {
 public:
+  /**
+   * @brief Initializes feature-reference misorientation computation.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and reference mode.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeFeatureReferenceMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                          ComputeFeatureReferenceMisorientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the feature-reference misorientation executor.
+   */
   ~ComputeFeatureReferenceMisorientations() noexcept;
 
   ComputeFeatureReferenceMisorientations(const ComputeFeatureReferenceMisorientations&) = delete;
@@ -61,11 +65,19 @@ public:
   ComputeFeatureReferenceMisorientations& operator=(ComputeFeatureReferenceMisorientations&&) noexcept = delete;
 
   /**
-   * @brief Executes the misorientation computation using chunked bulk I/O.
-   * @return Result<> with any errors encountered during execution.
+   * @brief Computes feature-reference misorientations.
+   * @pre Positive cell feature and phase IDs are within their selected arrays.
+   * @return Result from feature-index validation.
+   *
+   * Cancellation returns success with completed output chunks preserved.
+   * Current bulk-I/O Result values are not inspected.
    */
   Result<> operator()();
 
+  /**
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 private:

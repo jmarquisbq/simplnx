@@ -18,8 +18,14 @@
 
 namespace nx::core
 {
+
 /**
- * @brief Action for creating a Tetrahedral or Hexehedral Geometry in a DataStructure
+ * @class CreateGeometry3DAction
+ * @brief Creates a three-dimensional geometry and its support arrays.
+ * @tparam Geometry3DType Tetrahedral or hexahedral geometry type to create.
+ *
+ * Copy, Move, and Reference attach supplied topology arrays. Create allocates
+ * new topology arrays and attribute matrices.
  */
 template <typename Geometry3DType>
 class CreateGeometry3DAction : public IDataCreationAction
@@ -27,16 +33,6 @@ class CreateGeometry3DAction : public IDataCreationAction
 public:
   using DimensionType = std::vector<size_t>;
 
-  /**
-   * @brief Constructor to create the 3D geometry and allocate a default arrays for the shared vertex & shared calls lists
-   * @param geometryPath The path to the created geometry
-   * @param numCells The number of cells in the geometry
-   * @param numVertices The number of vertices in the geometry
-   * @param vertexAttributeMatrixName The name of the vertex AttributeMatrix to be created
-   * @param cellAttributeMatrixName The name of the cell AttributeMatrix to be created
-   * @param sharedVerticesName The name of the shared vertex list array to be created
-   * @param sharedCellsName The name of the shared cell list array to be created
-   */
   CreateGeometry3DAction(const DataPath& geometryPath, size_t numCells, size_t numVertices, const std::string& vertexAttributeMatrixName, const std::string& cellAttributeMatrixName,
                          const std::string& sharedVerticesName, const std::string& sharedCellsName)
   : IDataCreationAction(geometryPath)
@@ -49,15 +45,6 @@ public:
   {
   }
 
-  /**
-   * @brief Constructor to create the 3D geometry using existing vertices & cells arrays by either copying, moving, or referencing them
-   * @param geometryPath The path to the created geometry
-   * @param inputVerticesArrayPath The path to the existing vertices array
-   * @param inputCellsArrayPath The path to the existing cells array
-   * @param vertexAttributeMatrixName The name of the vertex AttributeMatrix to be created
-   * @param cellAttributeMatrixName The name of the cell AttributeMatrix to be created
-   * @param arrayType Tells whether to copy, move, or reference the existing input vertices array
-   */
   CreateGeometry3DAction(const DataPath& geometryPath, const DataPath& inputVerticesArrayPath, const DataPath& inputCellsArrayPath, const std::string& vertexAttributeMatrixName,
                          const std::string& cellAttributeMatrixName, const ArrayHandlingType& arrayType)
   : IDataCreationAction(geometryPath)
@@ -79,11 +66,13 @@ public:
   CreateGeometry3DAction& operator=(CreateGeometry3DAction&&) noexcept = delete;
 
   /**
-   * @brief Applies this action's change to the given DataStructure in the given mode.
-   * Returns any warnings/errors. On error, DataStructure is not guaranteed to be consistent.
-   * @param dataStructure The DataStructure to modify
-   * @param mode The mode (Preflight or Execute)
-   * @return Result<> Result with any errors or warnings
+   * @brief Creates and configures the cell geometry.
+   * @param dataStructure Destination data structure.
+   * @param mode Preflight or execute action mode.
+   * @return Validation, allocation, or reparenting errors.
+   *
+   * Copy, Move, and Reference materialize out-of-core topology arrays in place.
+   * Unstructured geometry visualization requires in-memory topology access.
    */
   Result<> apply(DataStructure& dataStructure, Mode mode) const override
   {
@@ -93,13 +82,11 @@ public:
     const DataPath cellDataPath = getCellDataPath();
     const DataPath vertexDataPath = getVertexDataPath();
 
-    // Check for empty Geometry DataPath
     if(getCreatedPath().empty())
     {
       return MakeErrorResult(-5601, fmt::format("{}CreateGeometry3DAction: Geometry Path cannot be empty", prefix));
     }
 
-    // Check if the Geometry Path already exists
     const BaseGroup* parentObject = dataStructure.getDataAs<BaseGroup>(getCreatedPath());
     if(parentObject != nullptr)
     {
@@ -115,41 +102,34 @@ public:
         return MakeErrorResult(-5603, fmt::format("{}CreateGeometry3DAction: Geometry could not be created at path:'{}'", prefix, getCreatedPath().toString()));
       }
     }
-    // Get the Parent ID
     if(!dataStructure.getId(parentPath).has_value())
     {
       return MakeErrorResult(-5604, fmt::format("{}CreateGeometry3DAction: Parent Id was not available for path:'{}'", prefix, parentPath.toString()));
     }
 
-    // Get the vertices list if we are using an existing array
     const auto vertices = dataStructure.getDataAs<Float32Array>(m_InputVertices);
     if(m_ArrayHandlingType != ArrayHandlingType::Create && vertices == nullptr)
     {
       return MakeErrorResult(-5605, fmt::format("{}CreateGeometry3DAction: Could not find vertices array at path '{}'", prefix, m_InputVertices.toString()));
     }
 
-    // Get the faces list if we are using an existing array
     const auto cells = dataStructure.getDataAs<DataArray<MeshIndexType>>(m_InputCells);
     if(m_ArrayHandlingType != ArrayHandlingType::Create && cells == nullptr)
     {
       return MakeErrorResult(-5606, fmt::format("{}CreateGeometry3DAction: Could not find cells array at path '{}'", prefix, m_InputCells.toString()));
     }
 
-    // Create the Geometry
     auto geometry3d = Geometry3DType::Create(dataStructure, getCreatedPath().getTargetName(), dataStructure.getId(parentPath).value());
     DimensionType cellTupleShape = {m_NumCells};
-    DimensionType vertexTupleShape = {m_NumVertices}; // We probably don't know how many Vertices there are but take what ever the developer sends us
+    DimensionType vertexTupleShape = {m_NumVertices};
 
-    // For Copy/Move/Reference, read shapes and materialize OOC stores upfront
     if(m_ArrayHandlingType != ArrayHandlingType::Create)
     {
       cellTupleShape = cells->getTupleShape();
       vertexTupleShape = vertices->getTupleShape();
 
-      // If the source arrays have OOC-backed stores, materialize them into
-      // in-core stores. These arrays may have been created OOC earlier in
-      // the pipeline when they lived outside any geometry. Unstructured/poly
-      // geometry topology arrays must be in-core for the visualization layer.
+      // Unstructured geometry visualization requires in-memory vertex and cell
+      // topology. Materialize supplied out-of-core arrays before attachment.
       if(vertices->getIDataStore()->getStoreType() == IDataStore::StoreType::OutOfCore)
       {
         auto inCoreStore = std::make_shared<DataStore<float32>>(vertexTupleShape, ShapeType{3}, std::optional<float32>{});
@@ -223,7 +203,6 @@ public:
     else
     {
       const DataPath cellsPath = getCreatedPath().createChildPath(m_SharedCellsName);
-      // Create the default DataArray that will hold the CellList and Vertices.
       Result result = ArrayCreationUtilities::CreateArray<MeshIndexType>(dataStructure, cellTupleShape, {Geometry3DType::k_NumVerts}, cellsPath, mode);
       if(result.invalid())
       {
@@ -236,7 +215,7 @@ public:
       }
       geometry3d->setPolyhedraList(*polyhedronList);
 
-      // Create the Vertex Array with a component size of 3
+      // Vertices use three coordinates.
       const DataPath vertexPath = getCreatedPath().createChildPath(m_SharedVerticesName);
 
       result = ArrayCreationUtilities::CreateArray<float>(dataStructure, vertexTupleShape, {3}, vertexPath, mode);
@@ -252,7 +231,6 @@ public:
       geometry3d->setVertices(*vertexArray);
     }
 
-    // Create the vertex and cell AttributeMatrix
     auto* cellAttributeMatrix = AttributeMatrix::Create(dataStructure, m_CellDataName, cellTupleShape, geometry3d->getId());
     if(cellAttributeMatrix == nullptr)
     {
@@ -270,10 +248,6 @@ public:
     return {};
   }
 
-  /**
-   * @brief Returns a copy of the action.
-   * @return UniquePointer A unique pointer to the cloned action
-   */
   UniquePointer clone() const override
   {
     auto action =
@@ -284,54 +258,35 @@ public:
     return action;
   }
 
-  /**
-   * @brief Returns the path of the 3D geometry to be created.
-   * @return const DataPath& The geometry path
-   */
   const DataPath& geometryPath() const
   {
     return getCreatedPath();
   }
 
-  /**
-   * @brief Returns the path of the cell AttributeMatrix.
-   * @return DataPath The cell data path
-   */
   DataPath getCellDataPath() const
   {
     return getCreatedPath().createChildPath(m_CellDataName);
   }
 
-  /**
-   * @brief Returns the path of the vertex AttributeMatrix.
-   * @return DataPath The vertex data path
-   */
   DataPath getVertexDataPath() const
   {
     return getCreatedPath().createChildPath(m_VertexDataName);
   }
 
-  /**
-   * @brief Returns the number of cells.
-   * @return IGeometry::MeshIndexType The number of cells
-   */
   IGeometry::MeshIndexType numCells() const
   {
     return m_NumCells;
   }
 
-  /**
-   * @brief Returns the number of vertices (estimated in some circumstances).
-   * @return IGeometry::MeshIndexType The number of vertices
-   */
   IGeometry::MeshIndexType numVertices() const
   {
     return m_NumVertices;
   }
 
   /**
-   * @brief Returns all of the DataPaths to be created.
-   * @return std::vector<DataPath>
+   * @brief Returns paths created by this action.
+   * @return Geometry and attribute-matrix paths. Create and Copy also return
+   * topology-array paths.
    */
   std::vector<DataPath> getAllCreatedPaths() const override
   {

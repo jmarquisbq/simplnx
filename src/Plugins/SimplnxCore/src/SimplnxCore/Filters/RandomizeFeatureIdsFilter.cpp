@@ -90,10 +90,9 @@ IFilter::PreflightResult RandomizeFeatureIdsFilter::preflightImpl(const DataStru
 
   nx::core::Result<OutputActions> resultOutputActions;
 
-  // Inform users that the following arrays are going to be modified in place
-  // FeatureIds array is going to be remapped
+  // Preflight reports that execution remaps Feature IDs in place.
   nx::core::MarkDataPathModified(dataStructure, resultOutputActions, featureIdsPath);
-  // Feature Attribute Matrix arrays are going to be reordered
+  // Preflight reports that execution reorders Feature AttributeMatrix arrays in place.
   nx::core::AppendDataObjectModifications(dataStructure, resultOutputActions.value().modifiedActions, featureAMPath, {});
 
   return {std::move(resultOutputActions)};

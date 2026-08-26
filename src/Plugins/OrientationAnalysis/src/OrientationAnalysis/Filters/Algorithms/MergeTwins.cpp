@@ -105,9 +105,8 @@ bool MergeTwins::determineGrouping(int32 referenceFeature, int32 neighborFeature
   return false;
 }
 
-// -----------------------------------------------------------------------------
 void MergeTwins::groupFeaturesExecute()
-{ // This code used to be in GroupFeatures Superclass
+{
   auto& conNeighborList = m_DataStructure.getDataRefAs<NeighborList<int32>>(m_InputValues->ContiguousNeighborListArrayPath);
   std::vector<int32_t> groupList;
 
@@ -171,20 +170,6 @@ void MergeTwins::groupFeaturesExecute()
   }
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Merges twin-related features by clustering grains that share a 60-degree
- * <111> misorientation (sigma-3 twin relationship). The algorithm first identifies
- * twin pairs using the inherited groupFeatures framework, then assigns parent IDs
- * to every voxel based on the feature-to-parent mapping.
- *
- * OOC strategy: The cellParentIds array is initialized via chunked copyFromBuffer
- * (rather than a single fill() call) to avoid per-element OOC overhead. The
- * feature-to-parent mapping is cached in a local vector, then the voxel-level
- * parent assignment loop reads featureIds in 64K-tuple chunks via copyIntoBuffer,
- * looks up parents from the local cache, and bulk-writes cellParentIds via
- * copyFromBuffer.
- */
 Result<> MergeTwins::operator()()
 {
   Result result = {};
@@ -228,16 +213,11 @@ Result<> MergeTwins::operator()()
 
   featureParentIds[0] = 0; // set feature 0 to be parent 0
 
-  // This kicks off the main clustering algorithm. This was taken from SIMPL::GroupFeatures
-  // with sections of the function removed that would _never_ get hit.
   groupFeaturesExecute();
 
-  // Now that the newly created Feature Attribute Matrix is sized correctly, fill
-  // the `Active` array with True values
   auto& active = m_DataStructure.getDataAs<BoolArray>(m_InputValues->ActiveArrayPath)->getDataStoreRef();
   active.fill(true);
 
-  // Check the number of Parents that were created....
   usize totalFeatures = active.getNumberOfTuples();
   if(totalFeatures < 2)
   {
@@ -245,16 +225,12 @@ Result<> MergeTwins::operator()()
         result, ConvertResult(MakeErrorResult<OutputActions>(-23501, "The number of grouped Features was 0 or 1 which means no grouped Features were detected. A grouping value may be set too high")));
   }
 
-  // Cache feature-level featureParentIds into a local vector. The voxel loop
-  // below looks up the parent for each voxel's feature (random access by
-  // featureId), which would thrash OOC chunks if done via DataStore operator[].
+  // The local feature-parent cache avoids random OOC lookup in the cell loop.
   const usize numFeatures = featureParentIds.getNumberOfTuples();
   std::vector<int32> featureParentIdsCache(numFeatures);
   featureParentIds.copyIntoBuffer(0, nonstd::span<int32>(featureParentIdsCache.data(), numFeatures));
 
-  // Assign parent IDs to every voxel using chunked bulk I/O: read a chunk of
-  // featureIds, look up each feature's parent from the local cache, then
-  // bulk-write the parent IDs back to the cellParentIds DataStore.
+  // Chunked cells use the local feature-parent cache.
   int32 numParents = 0;
   {
     constexpr usize k_ChunkSize = 65536;

@@ -42,6 +42,14 @@ namespace
 {
 const bool k_UseDiscreteHeatMap = false;
 
+/**
+ * @class ComputeIntensityStereographicProjection
+ * @brief Converts one sphere-coordinate family to an intensity image.
+ *
+ * Discrete mode counts projected samples. Lambert mode builds two hemisphere
+ * squares and creates their stereographic projection. Parallel tasks use
+ * separate coordinate and intensity arrays.
+ */
 class ComputeIntensityStereographicProjection
 {
 public:
@@ -66,7 +74,8 @@ public:
       float32* xyzPtr = m_XYZCoords->getPointer(0);
       for(usize i = 0; i < numCoords; i++)
       {
-        if(xyzPtr[i * 3 + 2] < 0.0f) // If the unit sphere data is in the southern hemisphere
+        // Reflect southern-hemisphere directions before stereographic projection.
+        if(xyzPtr[i * 3 + 2] < 0.0f)
         {
           xyzPtr[i * 3 + 0] *= -1.0f;
           xyzPtr[i * 3 + 1] *= -1.0f;
@@ -92,10 +101,8 @@ public:
       }
       lambert->createStereographicProjection(m_Config->imageDim, *m_Intensity);
 
-      // This next function (writeLambertData) is experimental but should be left in to
-      // make sure it will still compile. At some point I will get back to the development
-      // of this alternate pole figure generation.
-      // writeLambertData(lambert);
+      // writeLambertData() remains compiled as an offline diagnostic helper.
+      // Production generation does not write its hardcoded debug files.
     }
   }
 
@@ -433,45 +440,40 @@ std::vector<ebsdlib::DoubleArrayType::Pointer> createIntensityPoleFigures(ebsdli
 
   const usize numOrientations = config.eulers->getNumberOfTuples();
 
-  // Create an Array to hold the XYZ Coordinates which are the coords on the sphere.
-  // this is size for CUBIC ONLY, <001> Family
+  // Allocate one sphere-coordinate array for each pole family.
   std::array<int32, 3> symSize = ops.getNumSymmetry();
 
   const ShapeType dims = {3};
   const ebsdlib::FloatArrayType::Pointer xyz001 = ebsdlib::FloatArrayType::CreateArray(numOrientations * symSize[0], dims, label0 + std::string("xyzCoords"), true);
-  // this is size for CUBIC ONLY, <011> Family
   const ebsdlib::FloatArrayType::Pointer xyz011 = ebsdlib::FloatArrayType::CreateArray(numOrientations * symSize[1], dims, label1 + std::string("xyzCoords"), true);
-  // this is size for CUBIC ONLY, <111> Family
   const ebsdlib::FloatArrayType::Pointer xyz111 = ebsdlib::FloatArrayType::CreateArray(numOrientations * symSize[2], dims, label2 + std::string("xyzCoords"), true);
 
   config.sphereRadius = 1.0f;
 
-  // Generate the coords on the sphere **** Parallelized
+  // EbsdLib expands each Euler orientation through the selected symmetry operators.
   ops.generateSphereCoordsFromEulers(config.eulers, xyz001.get(), xyz011.get(), xyz111.get(), config.hexConvention);
 
-  // These arrays hold the "intensity" images which eventually get converted to an actual Color RGB image
-  // Generate the modified Lambert projection images (Squares, 2 of them, 1 for northern hemisphere, 1 for southern hemisphere
+  // Each intensity array receives a Lambert or discrete stereographic image.
   const ebsdlib::DoubleArrayType::Pointer intensity001 = ebsdlib::DoubleArrayType::CreateArray(config.imageDim * config.imageDim, label0 + "_Intensity_Image", true);
   const ebsdlib::DoubleArrayType::Pointer intensity011 = ebsdlib::DoubleArrayType::CreateArray(config.imageDim * config.imageDim, label1 + "_Intensity_Image", true);
   const ebsdlib::DoubleArrayType::Pointer intensity111 = ebsdlib::DoubleArrayType::CreateArray(config.imageDim * config.imageDim, label2 + "_Intensity_Image", true);
 
-  // Compute the Stereographic Data in parallel
+  // Pole families use independent arrays and can run in parallel.
   ParallelTaskAlgorithm taskRunner;
   taskRunner.setParallelizationEnabled(true);
   taskRunner.execute(ComputeIntensityStereographicProjection(xyz001.get(), &config, intensity001.get(), normalizeToMRD));
   taskRunner.execute(ComputeIntensityStereographicProjection(xyz011.get(), &config, intensity011.get(), normalizeToMRD));
   taskRunner.execute(ComputeIntensityStereographicProjection(xyz111.get(), &config, intensity111.get(), normalizeToMRD));
-  taskRunner.wait(); // This will spill over if the number of DataArrays to process does not divide evenly by the number of threads.
+  taskRunner.wait();
 
   return {intensity001, intensity011, intensity111};
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 typename EbsdDataArray<T>::Pointer flipAndMirrorPoleFigure(EbsdDataArray<T>* src, const ebsdlib::PoleFigureConfiguration_t& config)
 {
   typename EbsdDataArray<T>::Pointer converted = EbsdDataArray<T>::CreateArray(config.imageDim * config.imageDim, src->getComponentDimensions(), src->getName(), true);
-  // We need to flip the image "vertically", which means the bottom row becomes
+  // Reverse row order while preserving each row's X order.
   for(int y = 0; y < config.imageDim; y++)
   {
     const int destY = config.imageDim - 1 - y;
@@ -489,7 +491,6 @@ typename EbsdDataArray<T>::Pointer flipAndMirrorPoleFigure(EbsdDataArray<T>* src
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 WritePoleFigure::WritePoleFigure(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WritePoleFigureInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -498,15 +499,11 @@ WritePoleFigure::WritePoleFigure(DataStructure& dataStructure, const IFilter::Me
 {
 }
 
-// -----------------------------------------------------------------------------
 WritePoleFigure::~WritePoleFigure() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> WritePoleFigure::operator()()
 {
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
-  // Ensure the complete path to the output file exists or can be created
+  // Create the requested disk-output directory before phase processing.
   if(m_InputValues->WriteImageToDisk)
   {
     if(!fs::exists(m_InputValues->OutputPath))
@@ -534,47 +531,34 @@ Result<> WritePoleFigure::operator()()
       maskCompare = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->MaskArrayPath);
     } catch(const std::out_of_range& exception)
     {
-      // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-      // some other context that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+      // Direct callers can bypass preflight, so return an invalid mask as a Result.
       return MakeErrorResult(-53900, fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString()));
     }
   }
 
-  // Find the total number of angles we have based on the number of Tuples of the
-  // Euler Angles array
   const usize numPoints = eulerAngles.getNumberOfTuples();
-  // Find how many phases we have by getting the number of Crystal Structures
   const usize numPhases = crystalStructures.getNumberOfTuples();
 
-  // Create the Image Geometry that will serve as the final storage location for each
-  // pole figure. We are just giving it a default size for now, it will be resized
-  // further down the algorithm.
+  // Initialize output geometry to one figure. A composite can resize it later.
   ShapeType tupleShape = {1, static_cast<usize>(m_InputValues->ImageSize), static_cast<usize>(m_InputValues->ImageSize)};
   auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->OutputImageGeometryPath);
   auto cellAttrMatPath = imageGeom.getCellDataPath();
   imageGeom.setDimensions({static_cast<usize>(m_InputValues->ImageSize), static_cast<usize>(m_InputValues->ImageSize), 1});
   imageGeom.getCellData()->resizeTuples(tupleShape);
 
-  // Chunk size for streaming reads from (possibly OOC-backed) input arrays.
-  // Sized so each cell's working set (1 int32 phase + 3 float32 eulers +
-  // optional mask) fits comfortably in L2/L3 cache and the HDF5 chunked-
-  // read path hits whole chunks per call rather than per-element.
+  // Phase and Euler page buffers total one MiB. MaskCompareUtilities does not
+  // use this page and can still perform per-tuple store access.
   constexpr usize k_StreamChunkTuples = 65536;
 
   std::vector<int32> phaseChunk(k_StreamChunkTuples);
   std::vector<float32> eulerChunk(k_StreamChunkTuples * 3);
 
-  // Loop over all the voxels gathering the Euler angles for a specific phase into an array.
-  // Inside the phase loop we stream the input arrays in fixed-size chunks via
-  // copyIntoBuffer() rather than indexing one element at a time, which would
-  // fire one HDF5 read per [] on OOC-backed stores. Streaming keeps peak
-  // memory bounded to k_StreamChunkTuples * 16 bytes (~1 MB) regardless of
-  // input size; we never materialize the full input arrays in-core.
+  // Scan cell inputs twice per phase. The first pass counts selected tuples.
+  // The second pass fills an EbsdLib array whose size equals the phase count.
   for(usize phase = 1; phase < numPhases; ++phase)
   {
     usize count = 0;
-    // First find out how many voxels we are going to have. This is probably faster to loop twice than to
-    // keep allocating memory everytime we find one.
+    // Count first so the phase array needs one allocation.
     for(usize chunkStart = 0; chunkStart < numPoints; chunkStart += k_StreamChunkTuples)
     {
       const usize chunkLen = std::min(k_StreamChunkTuples, numPoints - chunkStart);
@@ -596,7 +580,7 @@ Result<> WritePoleFigure::operator()()
     subEulerAnglesPtr->initializeWithValue(std::numeric_limits<float32>::signaling_NaN());
     ebsdlib::FloatArrayType& subEulerAngles = *subEulerAnglesPtr;
 
-    // Now loop through the Euler angles again and this time add them to the sub-Euler angle Array.
+    // Fill the allocated phase array during the second input scan.
     count = 0;
     for(usize chunkStart = 0; chunkStart < numPoints; chunkStart += k_StreamChunkTuples)
     {
@@ -621,9 +605,7 @@ Result<> WritePoleFigure::operator()()
     if(subEulerAnglesPtr->getNumberOfTuples() == 0)
     {
       continue;
-    } // Skip because we have no Pole Figure data
-
-    // std::vector<ebsdlib::UInt8ArrayType::Pointer> figures;
+    }
 
     ebsdlib::PoleFigureConfiguration_t config;
     config.eulers = subEulerAnglesPtr.get();
@@ -685,7 +667,8 @@ Result<> WritePoleFigure::operator()()
       if(intensityImages.size() == 3)
       {
         DataPath amPath = m_InputValues->IntensityGeometryDataPath.createChildPath(write_pole_figure::k_ImageAttrMatName);
-        // If there is more than a single phase we will need to add more arrays to the DataStructure
+        // Preflight creates phase-one arrays. Later phases create their arrays here.
+        // The current implementation does not inspect these creation Results.
         if(phase > 1)
         {
           const std::vector<size_t> intensityImageDims = {static_cast<usize>(config.imageDim), static_cast<usize>(config.imageDim), 1ULL};
@@ -709,10 +692,8 @@ Result<> WritePoleFigure::operator()()
           intensityImages[imageIndex] = flipAndMirrorPoleFigure<double>(intensityImages[imageIndex].get(), config);
         }
 
-        // Bulk-write the intensity plot images into the DataStructure arrays.
-        // std::copy with operator[] iterators falls into per-element writes on
-        // OOC-backed stores (one HDF5 write per pixel). copyFromBuffer issues
-        // a single write per array.
+        // Each intensity image uses one destination transfer. The current
+        // implementation does not inspect the transfer Result.
         {
           const usize plotElems = static_cast<usize>(intensityImages[0]->getNumberOfTuples()) * intensityImages[0]->getNumberOfComponents();
           intensityPlot1Array.getDataStoreRef().copyFromBuffer(0, nonstd::span<const float64>(intensityImages[0]->getPointer(0), plotElems));
@@ -744,7 +725,6 @@ Result<> WritePoleFigure::operator()()
 
     if(m_InputValues->SaveAsImageGeometry || m_InputValues->WriteImageToDisk)
     {
-      // Build the composite configuration
       ebsdlib::CompositePoleFigureConfiguration_t compositeConfig;
       compositeConfig.eulers = subEulerAnglesPtr.get();
       compositeConfig.imageDim = m_InputValues->ImageSize;
@@ -769,9 +749,7 @@ Result<> WritePoleFigure::operator()()
       compositeConfig.title = m_InputValues->Title;
       compositeConfig.hexConvention = m_InputValues->HexConvention;
 
-      // Generate the composite pole figure image. GeneratePoleFigureComposite routes
-      // discrete (non-heatmap) figures to the vector marker renderer and everything
-      // else to the raster PoleFigureCompositor.
+      // Discrete figures use the marker renderer. Other figures use the raster compositor.
       ebsdlib::CompositePoleFigureResult compositeResult = ebsdlib::GeneratePoleFigureComposite(compositeConfig);
 
       if(compositeResult.image == nullptr)
@@ -784,13 +762,12 @@ Result<> WritePoleFigure::operator()()
 
       if(m_InputValues->SaveAsImageGeometry)
       {
-        // Ensure the final Image Geometry is sized correctly.
+        // Match the output geometry to the composite page.
         imageGeom.setDimensions({static_cast<usize>(pageWidth), static_cast<usize>(pageHeight), 1});
         imageGeom.getCellData()->resizeTuples({1, static_cast<usize>(pageHeight), static_cast<usize>(pageWidth)});
         tupleShape[0] = 1;
         tupleShape[1] = pageHeight;
         tupleShape[2] = pageWidth;
-        // Create an output array to hold the RGB formatted color image
         auto imageArrayPath = cellAttrMatPath.createChildPath(fmt::format("Phase_{}", phase));
         auto arrayCreationResult = ArrayCreationUtilities::CreateArray<uint8>(m_DataStructure, tupleShape, {3ULL}, imageArrayPath, IDataAction::Mode::Execute);
         if(arrayCreationResult.invalid())
@@ -798,12 +775,8 @@ Result<> WritePoleFigure::operator()()
           return arrayCreationResult;
         }
 
-        // Get a reference to the RGB final array and then copy ONLY the RGB
-        // pixels from the RGBA data. Build the packed RGB buffer in memory
-        // first, then write it out in a single copyFromBuffer call. Writing
-        // per-element via operator[] would issue one HDF5 hit per byte on
-        // OOC-backed imageData (~786K hits for a 512x512 image); bulk writes
-        // collapse that to one.
+        // Pack RGB components from the RGBA composite and use one destination
+        // transfer. The current implementation does not inspect its Result.
         auto& imageData = m_DataStructure.getDataRefAs<UInt8Array>(imageArrayPath);
         imageData.fill(0);
         const usize tupleCount = static_cast<usize>(pageHeight) * pageWidth;
@@ -818,9 +791,9 @@ Result<> WritePoleFigure::operator()()
         imageData.getDataStoreRef().copyFromBuffer(0, nonstd::span<const uint8>(rgbBuf.data(), rgbBuf.size()));
       }
 
-      // Write out the full RGBA data
       if(m_InputValues->WriteImageToDisk)
       {
+        // Disk output is PNG regardless of the retained ImageFormat setting.
         const std::string filename = fmt::format("{}/{}{}.png", m_InputValues->OutputPath.string(), m_InputValues->ImagePrefix, phase);
         auto result = PngWriter::WriteColorImage(filename, pageWidth, pageHeight, 4, compositeResult.image->getPointer(0));
         if(result.first < 0)

@@ -17,6 +17,13 @@ constexpr usize k_InvalidIndex = std::numeric_limits<usize>::max();
 
 /**
  * @brief Maps each reference coordinate on one axis to its containing sampling-cell index.
+ * @param referenceDim Specifies reference cells on the axis.
+ * @param referenceOrigin Specifies reference origin on the axis.
+ * @param referenceSpacing Specifies reference spacing on the axis.
+ * @param sampleDim Specifies sampling cells on the axis.
+ * @param sampleOrigin Specifies sampling origin on the axis.
+ * @param sampleSpacing Specifies sampling spacing on the axis.
+ * @return Sampling-cell index for each reference coordinate, or an invalid sentinel.
  *
  * Precomputing these O(axis length) maps removes repeated coordinate arithmetic
  * from every array and marks out-of-bounds positions explicitly for fill handling.
@@ -42,6 +49,14 @@ std::vector<usize> ComputeAxisIndices(usize referenceDim, float32 referenceOrigi
 
 /**
  * @brief Resamples one typed array with checked source-row reads and destination-row writes.
+ * @tparam T Specifies the array scalar type.
+ * @param sourceArray Provides sampling-grid cell values.
+ * @param destinationArray Receives reference-grid cell values.
+ * @param sampleGeom Defines sampling-grid coordinates.
+ * @param referenceGeom Defines reference-grid coordinates.
+ * @param fillValue Supplies values outside the sampling extent.
+ * @param shouldCancel Stops before later reference Z slices when true.
+ * @return First bulk-I/O error, or success after completion or cancellation.
  *
  * A row cache is reused across repeated mapped Y/Z coordinates. The X map is then
  * applied entirely in memory, keeping both I/O and scratch bounded to row size.
@@ -120,10 +135,23 @@ Result<> CopyArray(const IDataArray& sourceArray, IDataArray& destinationArray, 
   return {};
 }
 
-/** @brief Dispatches a runtime DataType to the matching typed row-copy specialization. */
+/**
+ * @struct CopyArrayFunctor
+ * @brief Dispatches a runtime DataType to typed row resampling.
+ */
 struct CopyArrayFunctor
 {
-  /** @brief Executes the typed row-buffered copy for one source/destination pair. */
+  /**
+   * @brief Executes one typed row-buffered copy.
+   * @tparam T Specifies the array scalar type.
+   * @param source Provides sampling-grid cell values.
+   * @param destination Receives reference-grid cell values.
+   * @param sampleGeom Defines sampling-grid coordinates.
+   * @param referenceGeom Defines reference-grid coordinates.
+   * @param fillValue Supplies values outside the sampling extent.
+   * @param shouldCancel Stops before later reference Z slices when true.
+   * @return First bulk-I/O error, or success after completion or cancellation.
+   */
   template <typename T>
   Result<> operator()(const IDataArray& source, IDataArray& destination, const ImageGeom& sampleGeom, const ImageGeom& referenceGeom, float64 fillValue, const std::atomic_bool& shouldCancel) const
   {

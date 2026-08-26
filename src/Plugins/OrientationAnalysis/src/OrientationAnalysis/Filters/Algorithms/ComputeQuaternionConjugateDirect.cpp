@@ -10,6 +10,14 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @class ComputeQuaternionConjugateImpl
+ * @brief Conjugates direct quaternion tuple ranges.
+ *
+ * ParallelDataAlgorithm can invoke copied workers for separate ranges. The
+ * direct loop reads and writes Float32Array elements. This worker does not
+ * establish generic DataArray or DataStore thread safety.
+ */
 class ComputeQuaternionConjugateImpl
 {
 private:
@@ -18,6 +26,14 @@ private:
   const std::atomic_bool* m_ShouldCancel;
 
 public:
+  /**
+   * @brief Initializes a direct quaternion range worker.
+   * @param inputQuat Provides input quaternion tuples.
+   * @param outputQuat Receives conjugated quaternion tuples.
+   * @param shouldCancel Signals cancellation.
+   * @pre The arrays contain matching four-component tuples.
+   * @pre Each argument remains valid while the parallel algorithm executes.
+   */
   ComputeQuaternionConjugateImpl(const Float32Array* inputQuat, Float32Array* outputQuat, const std::atomic_bool* shouldCancel)
   : m_Input(inputQuat)
   , m_Output(outputQuat)
@@ -25,6 +41,13 @@ public:
   {
   }
 
+  /**
+   * @brief Conjugates a half-open tuple range.
+   * @param start Identifies the first tuple.
+   * @param end Identifies the tuple after the last tuple.
+   *
+   * Cancellation stops this range before its next tuple write.
+   */
   void convert(size_t start, size_t end) const
   {
     for(size_t i = start; i < end; i++)
@@ -40,6 +63,10 @@ public:
     }
   }
 
+  /**
+   * @brief Conjugates a parallel tuple range.
+   * @param range Identifies the half-open tuple range.
+   */
   void operator()(const Range& range) const
   {
     convert(range.min(), range.max());
@@ -47,7 +74,6 @@ public:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugateDirect::ComputeQuaternionConjugateDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                    const ComputeQuaternionConjugateInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -57,16 +83,13 @@ ComputeQuaternionConjugateDirect::ComputeQuaternionConjugateDirect(DataStructure
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugateDirect::~ComputeQuaternionConjugateDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeQuaternionConjugateDirect::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeQuaternionConjugateDirect::operator()()
 {
   const auto& input = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuaternionDataArrayPath);

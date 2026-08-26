@@ -302,7 +302,7 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogramByFeature: All Histogram Calculatio
   const std::string modalBinRanges = "Modal Bin Ranges";
   Arguments args;
 
-  // Execute the Find Array Statistics Filter
+  // Execute the configured filter.
   {
     ComputeArrayHistogramByFeatureFilter filter;
 
@@ -322,16 +322,13 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogramByFeature: All Histogram Calculatio
     args.insertOrAssign(ComputeArrayHistogramByFeatureFilter::k_HistoMostPopulatedBinName_Key, std::make_any<std::string>(mostPopulatedBin));
     args.insertOrAssign(ComputeArrayHistogramByFeatureFilter::k_HistoModalBinRangesName_Key, std::make_any<std::string>(modalBinRanges));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Check resulting values
   {
     DataPath histogramPath = histogramsDataPath.createChildPath(fmt::format("\"{}\" Histogram", inputArrayName));
     auto* dataGroup = dataStructure.getDataAs<DataGroup>(histogramPath);
@@ -763,8 +760,7 @@ TEST_CASE("SimplnxCore::ComputeArrayHistogramByFeature: degenerate custom range 
   std::vector<uint64> scanlineCounts;
   std::vector<int32> scanlineRanges;
   const auto scanline = executeInt32ModalCase(scanlineScope, values, featureIds, 2, 7.0, 7.0, true, DataPath({"DegenerateScanline"}), &scanlineCounts, &scanlineRanges);
-  // This is the historical serial range oracle: every populated feature receives [0, numFeatures).
-  // Before normalization Direct wrote its TBB worker's local [start, end) range here.
+  // Every populated feature must use the complete range [0, numFeatures).
   REQUIRE(direct == std::vector<int32>{0, 1024});
   REQUIRE(directModalLists[512] == direct);
   REQUIRE(directModalLists[1023] == direct);

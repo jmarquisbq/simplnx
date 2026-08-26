@@ -7,7 +7,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientations::ComputeKernelAvgMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                  ComputeKernelAvgMisorientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -17,10 +16,8 @@ ComputeKernelAvgMisorientations::ComputeKernelAvgMisorientations(DataStructure& 
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientations::~ComputeKernelAvgMisorientations() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeKernelAvgMisorientations::operator()()
 {
   const auto* featureIds = m_DataStructure.getDataAs<IDataArray>(m_InputValues->FeatureIdsArrayPath);

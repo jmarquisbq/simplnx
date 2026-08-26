@@ -85,19 +85,19 @@ void RequireEdgeCoordinates(const EdgeGeom& edgeGeom, usize edgeIndex, const std
 }
 
 /**
- * @brief Verifies the computed Edge Geometry against the exemplar Edge Geometry
- * @param dataStructure
- * @param exemplarDataPath
- * @param computedDataPath
+ * @brief Verifies the computed Edge Geometry against the exemplar Edge Geometry.
+ * @param dataStructure Contains computed and exemplar geometries.
+ * @param exemplarDataPath Exemplar EdgeGeom path.
+ * @param computedDataPath Computed EdgeGeom path.
  */
 void VerifyOutput(const DataStructure& dataStructure, const DataPath& exemplarDataPath, const DataPath& computedDataPath)
 {
-  // Verify the output edge geometry was created
+  // The filter must create the output edge geometry.
   const auto* computedEdgeGeom = dataStructure.getDataAs<EdgeGeom>(computedDataPath);
   REQUIRE(computedEdgeGeom != nullptr);
 
   // const DataPath exemplarDataPath({"Feature Boundaries Max Z"});
-  //  Compare Geometries
+  // Compare geometry metadata and arrays.
   {
     const auto* exemplarGeom = dataStructure.getDataAs<EdgeGeom>(exemplarDataPath);
     REQUIRE(exemplarGeom != nullptr);

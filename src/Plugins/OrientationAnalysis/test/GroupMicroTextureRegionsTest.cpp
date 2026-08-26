@@ -59,17 +59,18 @@ const DataPath k_ContigNeighborListPath = k_FeatureDataPath.createChildPath(k_Co
 const DataPath k_CrystalStructuresPath = k_EnsembleDataPath.createChildPath(k_CrystalStructuresName);
 const DataPath k_NewFeatureAMPath = k_ImageGeomPath.createChildPath(k_NewFeatureAMName);
 
-// Quaternion for a pure Bunge ZXZ Euler rotation (phi1=0, Phi=phiDeg, phi2=0). This is a pure
-// rotation about the x-axis by phiDeg degrees, which tilts the crystal c-axis (originally along
-// +z in crystal frame) by phiDeg degrees in the sample y-z plane. For two features with pure-Phi
-// tilts of phiA and phiB degrees, the c-axis angular distance is |phiA - phiB| degrees, folded
-// into [0, 90] via the (pi - w) symmetry in the algorithm. Storage convention: {x, y, z, w}.
+// Pure-Phi Bunge rotations tilt the c-axis by phiDeg. The c-axis metric folds
+// antiparallel directions into [0,90]. Quaternions use x,y,z,w order.
 std::array<float32, 4> QuatFromPhiDeg(float32 phiDeg)
 {
   const float32 halfAngleRad = (phiDeg * 0.5f) * 3.14159265358979323846f / 180.0f;
   return {std::sin(halfAngleRad), 0.0f, 0.0f, std::cos(halfAngleRad)};
 }
 
+/**
+ * @struct FixtureData
+ * @brief Holds arrays for one analytical microtexture fixture.
+ */
 struct FixtureData
 {
   DataStructure ds;
@@ -85,14 +86,12 @@ struct FixtureData
   UInt32Array* crystalStructures = nullptr;
 };
 
-// Build a minimal {nX,1,1} ImageGeom with one cell per feature (FeatureIds[i] = i+1, so cell 0
-// belongs to feature 1, cell 1 to feature 2, etc.). Background feature 0 is allocated but no
-// cell is assigned to it; it exists only so the FeaturePhases / NeighborList arrays have a 0-th
-// tuple available. CrystalStructures[0] is a sentinel; CrystalStructures[1] is Hexagonal_High.
+// Build one cell per real feature. Feature zero remains available as the
+// background tuple. Valid features use Hexagonal_High.
 FixtureData CreateScaffold(usize numFeatures)
 {
   FixtureData td;
-  const usize nX = numFeatures - 1; // one cell per real feature
+  const usize nX = numFeatures - 1;
   const usize numCells = nX;
   const usize numCrystalStructures = 2;
 
@@ -112,26 +111,23 @@ FixtureData CreateScaffold(usize numFeatures)
   td.neighborList = NeighborList<int32>::Create(td.ds, k_ContigNeighborListName, ShapeType{numFeatures}, td.featureAM->getId());
   td.crystalStructures = CreateTestDataArray<uint32>(td.ds, k_CrystalStructuresName, {numCrystalStructures}, {1}, td.ensembleAM->getId());
 
-  // One cell per real feature (cell k -> feature k+1).
   for(usize k = 0; k < numCells; k++)
   {
     (*td.featureIds)[k] = static_cast<int32>(k + 1);
   }
 
-  // Feature 0 is the background; real features get phase 1 (Hex_High).
   (*td.featurePhases)[0] = 0;
   for(usize f = 1; f < numFeatures; f++)
   {
     (*td.featurePhases)[f] = 1;
   }
 
-  // Default volumes to 1.0 (uniform). Caller overrides if running-average behaviour matters.
+  // Uniform volumes are the baseline for running-average tests.
   for(usize f = 0; f < numFeatures; f++)
   {
     (*td.volumes)[f] = 1.0f;
   }
 
-  // Identity quaternion {x=0, y=0, z=0, w=1} everywhere by default — caller overrides per feature.
   for(usize f = 0; f < numFeatures; f++)
   {
     (*td.avgQuats)[f * 4 + 0] = 0.0f;
@@ -140,13 +136,12 @@ FixtureData CreateScaffold(usize numFeatures)
     (*td.avgQuats)[f * 4 + 3] = 1.0f;
   }
 
-  // Empty neighbor list per feature by default — caller overrides.
   for(usize f = 0; f < numFeatures; f++)
   {
     td.neighborList->setList(static_cast<int32>(f), std::make_shared<std::vector<int32>>(std::vector<int32>{}));
   }
 
-  (*td.crystalStructures)[0] = 999u; // sentinel
+  (*td.crystalStructures)[0] = 999u;
   (*td.crystalStructures)[1] = static_cast<uint32>(ebsdlib::CrystalStructure::Hexagonal_High);
 
   return td;
@@ -165,9 +160,8 @@ void SetNeighbors(FixtureData& td, int32 featureIdx, std::vector<int32> neighbor
   td.neighborList->setList(featureIdx, std::make_shared<std::vector<int32>>(std::move(neighbors)));
 }
 
-// Builds a cell-dense, feature-sparse fixture. The 16 real features form one connected chain
-// with identical c-axes, so every feature must receive the same parent id. Each Z slice maps to
-// one feature, ensuring the filter's final cell remap visits all 8,000,000 cells.
+// This cell-dense fixture maps each Z slice to one connected feature. The final
+// remap must visit every cell in the eight-million-cell volume.
 FixtureData BuildLargeBenchmarkFixture(usize dimension)
 {
   constexpr usize k_RealFeatureCount = 16;
@@ -240,11 +234,7 @@ FixtureData BuildLargeBenchmarkFixture(usize dimension)
   return td;
 }
 
-// Build the canonical 5-feature pure-Phi Bunge fixture used by both the Pure-Phi Class 1 test
-// and the RandomizeParentIds invariance test. 5 real features (1..5) + background feature 0.
-// Phi: F1=0, F2=5, F3=60, F4=63, F5=25 (degrees). Contiguous neighbor adjacency:
-//   F1 -- F2 -- F3 -- F4    and    F5 (isolated)
-// Under a 10 deg tolerance the expected groupings are: {F1,F2}, {F3,F4}, {F5}.
+// The five-feature chain yields {F1,F2}, {F3,F4}, and {F5} at 10 degrees.
 FixtureData Build5FeaturePureBunge()
 {
   FixtureData td = CreateScaffold(/*numFeatures=*/6);
@@ -294,12 +284,9 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
 {
   using namespace AnalyticalFixtures;
 
-  // See Build5FeaturePureBunge() for the layout: 5 real features arranged so that the expected
-  // groupings under a 10 deg tolerance are {F1,F2}, {F3,F4}, {F5}.
   FixtureData td = Build5FeaturePureBunge();
 
-  // Tolerance 10 deg, UseRunningAverage=false (compare against seed's c-axis), RandomizeParentIds=false
-  // (deterministic parent-id assignment), Seed=42 (deterministic seed-iteration order).
+  // Fixed seed and disabled randomization make parent IDs deterministic.
   Arguments args = BuildArgs(/*cAxisToleranceDeg=*/10.0f, /*useRunningAverage=*/false, /*randomizeParentIds=*/false, /*seed=*/42ULL);
 
   GroupMicroTextureRegionsFilter filter;
@@ -313,14 +300,14 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
   REQUIRE_NOTHROW(td.ds.getDataRefAs<Int32Array>(k_CellDataPath.createChildPath(k_CellParentIdsName)));
   const auto& cellParentIds = td.ds.getDataRefAs<Int32Array>(k_CellDataPath.createChildPath(k_CellParentIdsName));
 
-  // Class 1 (Analytical) — grouping outcome: paired features share a parent, non-paired don't.
-  CHECK(featureParentIds[1] == featureParentIds[2]); // F1, F2 grouped
-  CHECK(featureParentIds[3] == featureParentIds[4]); // F3, F4 grouped
-  CHECK(featureParentIds[1] != featureParentIds[3]); // F1/F2 group != F3/F4 group
-  CHECK(featureParentIds[5] != featureParentIds[1]); // F5 is alone, different from F1/F2 group
-  CHECK(featureParentIds[5] != featureParentIds[3]); // F5 is alone, different from F3/F4 group
+  // Class 1 checks the three expected parent groups.
+  CHECK(featureParentIds[1] == featureParentIds[2]);
+  CHECK(featureParentIds[3] == featureParentIds[4]);
+  CHECK(featureParentIds[1] != featureParentIds[3]);
+  CHECK(featureParentIds[5] != featureParentIds[1]);
+  CHECK(featureParentIds[5] != featureParentIds[3]);
 
-  // Class 4 (Invariant) — all real features assigned a positive parent id; three distinct groups.
+  // Class 4 requires positive parent IDs and three groups.
   CHECK(featureParentIds[1] > 0);
   CHECK(featureParentIds[2] > 0);
   CHECK(featureParentIds[3] > 0);
@@ -329,7 +316,7 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
   std::set<int32> distinctParents{featureParentIds[1], featureParentIds[2], featureParentIds[3], featureParentIds[4], featureParentIds[5]};
   CHECK(distinctParents.size() == 3);
 
-  // Class 4 (Invariant) — cell parent ids must equal feature parent ids of the underlying feature.
+  // Class 4 requires cell and feature parent IDs to agree.
   REQUIRE_NOTHROW(td.ds.getDataRefAs<Int32Array>(k_FeatureIdsPath));
   const auto& featureIds = td.ds.getDataRefAs<Int32Array>(k_FeatureIdsPath);
   for(usize k = 0; k < featureIds.getNumberOfTuples(); k++)
@@ -337,7 +324,7 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
     CHECK(cellParentIds[k] == featureParentIds[featureIds[k]]);
   }
 
-  // New feature attribute matrix should be sized to >= maxParent + 1 (index 0 reserved).
+  // The parent matrix includes the reserved zero index.
   const auto& newFeatureAM = td.ds.getDataRefAs<AttributeMatrix>(k_NewFeatureAMPath);
   int32 maxParent = 0;
   for(usize f = 1; f < featureParentIds.getNumberOfTuples(); f++)
@@ -349,12 +336,10 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
   }
   CHECK(newFeatureAM.getNumberOfTuples() == static_cast<usize>(maxParent + 1));
 
-  // Active array: present and sized to AM, default value true everywhere.
   REQUIRE_NOTHROW(td.ds.getDataRefAs<BoolArray>(k_NewFeatureAMPath.createChildPath(k_ActiveName)));
   const auto& active = td.ds.getDataRefAs<BoolArray>(k_NewFeatureAMPath.createChildPath(k_ActiveName));
   CHECK(active.getNumberOfTuples() == newFeatureAM.getNumberOfTuples());
 
-  // Seed value array: written and contains the seed we asked for.
   REQUIRE_NOTHROW(td.ds.getDataRefAs<UInt64Array>(DataPath({k_SeedArrayName})));
   CHECK(td.ds.getDataRefAs<UInt64Array>(DataPath({k_SeedArrayName}))[0] == 42ULL);
 
@@ -363,20 +348,10 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
 
 TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: RandomizeParentIds invariants", "[OrientationAnalysis][GroupMicroTextureRegionsFilter][Class4]")
 {
-  // Randomization shuffles the parent-id LABELS but cannot change the GROUPING. The Class 4
-  // (Invariant) assertions below are what randomization must preserve:
-  //   (a) Same equivalence classes — features that grouped before still group together after.
-  //   (b) Same number of distinct groups.
-  //   (c) Cell parent ids agree with feature parent ids of the underlying feature.
-  //   (d) Parent ids stay positive (0 is reserved for unassigned).
-  //   (e) Same seed -> identical shuffle across runs.
-  // We do NOT assert that "the shuffle differs from the identity permutation" because some
-  // small-N seed combinations may legitimately yield the identity; the framework property is
-  // determinism, not non-identity. The non-identity sanity check is done loosely at the end
-  // by comparing against the non-randomized baseline.
+  // Randomization can relabel parents but must preserve grouping, positivity,
+  // cell-parent mapping, and deterministic same-seed output.
   using namespace AnalyticalFixtures;
 
-  // Baseline run: deterministic parent ids (no shuffle).
   FixtureData tdA = Build5FeaturePureBunge();
   Arguments argsA = BuildArgs(10.0f, /*useRunningAverage=*/false, /*randomizeParentIds=*/false, /*seed=*/42ULL);
   GroupMicroTextureRegionsFilter filter;
@@ -388,7 +363,6 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: RandomizeParentI
   }
   const auto& parentIdsA = tdA.ds.getDataRefAs<Int32Array>(k_FeatureDataPath.createChildPath(k_FeatureParentIdsName));
 
-  // Randomized run with seed=42.
   FixtureData tdB = Build5FeaturePureBunge();
   Arguments argsB = BuildArgs(10.0f, /*useRunningAverage=*/false, /*randomizeParentIds=*/true, /*seed=*/42ULL);
   {
@@ -401,7 +375,6 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: RandomizeParentI
   const auto& cellParentIdsB = tdB.ds.getDataRefAs<Int32Array>(k_CellDataPath.createChildPath(k_CellParentIdsName));
   const auto& featureIdsB = tdB.ds.getDataRefAs<Int32Array>(k_FeatureIdsPath);
 
-  // Second randomized run with seed=42 — for the determinism invariant.
   FixtureData tdC = Build5FeaturePureBunge();
   Arguments argsC = BuildArgs(10.0f, /*useRunningAverage=*/false, /*randomizeParentIds=*/true, /*seed=*/42ULL);
   {
@@ -412,8 +385,6 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: RandomizeParentI
   }
   const auto& parentIdsC = tdC.ds.getDataRefAs<Int32Array>(k_FeatureDataPath.createChildPath(k_FeatureParentIdsName));
 
-  // (a) Equivalence classes preserved between A (no shuffle) and B (shuffled): for every pair
-  //     of features, they share a parent id in A iff they share one in B.
   for(int32 i = 1; i <= 5; i++)
   {
     for(int32 j = i + 1; j <= 5; j++)
@@ -424,33 +395,28 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: RandomizeParentI
     }
   }
 
-  // (b) Same number of distinct groups before and after the shuffle (must equal the 3 hand-derived).
   std::set<int32> distinctA{parentIdsA[1], parentIdsA[2], parentIdsA[3], parentIdsA[4], parentIdsA[5]};
   std::set<int32> distinctB{parentIdsB[1], parentIdsB[2], parentIdsB[3], parentIdsB[4], parentIdsB[5]};
   CHECK(distinctA.size() == 3);
   CHECK(distinctB.size() == 3);
 
-  // (c) Cell parent ids agree with feature parent ids of the underlying feature, post-shuffle.
   for(usize k = 0; k < featureIdsB.getNumberOfTuples(); k++)
   {
     CHECK(cellParentIdsB[k] == parentIdsB[featureIdsB[k]]);
   }
 
-  // (d) Positivity preserved post-shuffle.
   for(int32 f = 1; f <= 5; f++)
   {
     CHECK(parentIdsB[f] > 0);
   }
 
-  // (e) Determinism: same seed -> identical shuffle result. Compare every feature's parent id.
   for(usize f = 0; f < parentIdsB.getNumberOfTuples(); f++)
   {
     CHECK(parentIdsB[f] == parentIdsC[f]);
   }
 
-  // Loose non-identity check: at least one feature's parent id changed after shuffling. With the
-  // 5-feature / 3-group setup and the std::mt19937_64 default-seed-driven shuffle, the identity
-  // permutation is exceedingly unlikely; a hit here would mean the shuffle didn't run at all.
+  // An identity permutation is generally valid. This fixed fixture and seed
+  // must change at least one parent label to prove randomization executed.
   bool anyDifferent = false;
   for(int32 f = 1; f <= 5; f++)
   {
@@ -469,13 +435,8 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
 {
   using namespace AnalyticalFixtures;
 
-  // 3 real features on a chain F1 -- F2 -- F3. F1 c-axis at Phi=0, F2 at Phi=8, F3 at Phi=20.
-  //   - F1 -- F2 : 8 deg  -- under 10 deg tolerance -> GROUP
-  //   - F2 -- F3 : 12 deg -- over 10 deg tolerance using F2's c-axis (since UseRunningAverage=false,
-  //                          the algorithm compares each candidate to the BFS seed's c-axis, but
-  //                          inside the BFS walk over already-grouped features, comparison is from
-  //                          THAT feature's c-axis, not the original seed's) -> DO NOT BRIDGE
-  // Expected: 2 distinct groups -> {F1, F2}, {F3}.
+  // Disabled running average compares each BFS edge against the current feature.
+  // The 12-degree F2/F3 edge does not bridge at the 10-degree tolerance.
   FixtureData td = CreateScaffold(/*numFeatures=*/4);
 
   SetAvgQuat(td, 1, QuatFromPhiDeg(0.0f));
@@ -507,9 +468,8 @@ TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Class 1 Analytic
 
 TEST_CASE("OrientationAnalysis::GroupMicroTextureRegionsFilter: Regression — runs in default UseNonContiguousNeighbors=false mode", "[OrientationAnalysis][GroupMicroTextureRegionsFilter][Regression]")
 {
-  // Pins the defect-A fix: prior to the fix, execute() unconditionally returned error -99345 when
-  // UseNonContiguousNeighbors=false because the null-pointer guard on the non-contiguous list was
-  // outside the if-block that populated it. Filter could not run in its primary mode.
+  // The default contiguous-neighbor mode must execute without a noncontiguous
+  // list.
   using namespace AnalyticalFixtures;
 
   FixtureData td = CreateScaffold(/*numFeatures=*/3);

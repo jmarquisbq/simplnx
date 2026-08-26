@@ -16,6 +16,16 @@ namespace
 // Keep OOC scratch independent of the selected array's tuple count.
 constexpr usize k_TargetChunkValues = 65536;
 
+/**
+ * @brief Transfers selected and remaining components through fixed-value chunks.
+ * @tparam T Array value type.
+ * @param inputArray Supplies complete tuples.
+ * @param extractedArray Receives the selected scalar, or is null.
+ * @param reducedArray Receives remaining components, or is null.
+ * @param componentIndex Selects the source component.
+ * @param shouldCancel Signals cancellation between chunks.
+ * @return Success, or the first bulk-transfer error.
+ */
 template <typename T>
 Result<> TransferComponentsInChunks(const IDataArray& inputArray, IDataArray* extractedArray, IDataArray* reducedArray, usize componentIndex, const std::atomic_bool& shouldCancel)
 {
@@ -108,6 +118,19 @@ Result<> TransferComponentsInChunks(const IDataArray& inputArray, IDataArray* ex
   return {};
 }
 
+/**
+ * @brief Transfers components with contiguous access when all stores permit it.
+ * @tparam T Array value type.
+ * @param inputArray Supplies complete tuples.
+ * @param extractedArray Receives the selected scalar, or is null.
+ * @param reducedArray Receives remaining components, or is null.
+ * @param componentIndex Selects the source component.
+ * @param shouldCancel Signals cancellation between chunks.
+ * @return Success, or a fallback bulk-transfer error.
+ *
+ * A non-contiguous participant routes the complete operation to the chunked
+ * implementation. This avoids mixing direct and abstract access.
+ */
 template <typename T>
 Result<> TransferComponentsDirect(const IDataArray& inputArray, IDataArray* extractedArray, IDataArray* reducedArray, usize componentIndex, const std::atomic_bool& shouldCancel)
 {
@@ -180,6 +203,10 @@ Result<> TransferComponentsDirect(const IDataArray& inputArray, IDataArray* extr
   return {};
 }
 
+/**
+ * @struct TransferComponentsDirectFunctor
+ * @brief Dispatches the preferred direct implementation by runtime value type.
+ */
 struct TransferComponentsDirectFunctor
 {
   template <typename T>
@@ -189,6 +216,10 @@ struct TransferComponentsDirectFunctor
   }
 };
 
+/**
+ * @struct TransferComponentsScanlineFunctor
+ * @brief Dispatches the bounded implementation by runtime value type.
+ */
 struct TransferComponentsScanlineFunctor
 {
   template <typename T>
@@ -198,6 +229,10 @@ struct TransferComponentsScanlineFunctor
   }
 };
 
+/**
+ * @class ExtractComponentAsArrayDirect
+ * @brief Resolves arrays and requests the preferred direct transfer.
+ */
 class ExtractComponentAsArrayDirect
 {
 public:
@@ -224,6 +259,10 @@ private:
   const ExtractComponentAsArrayInputValues* m_InputValues = nullptr;
 };
 
+/**
+ * @class ExtractComponentAsArrayScanline
+ * @brief Resolves arrays and requests bounded bulk transfer.
+ */
 class ExtractComponentAsArrayScanline
 {
 public:

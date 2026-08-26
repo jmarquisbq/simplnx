@@ -16,13 +16,22 @@ using namespace nx::core;
 
 namespace
 {
+// Each source, mask, Feature ID, and output tile contains at most 128 tuples.
 constexpr usize k_TileTuples = 128;
 
 /**
- * @brief Reads an optional Bool or UInt8 mask into a byte tile with a uniform representation.
+ * @brief Reads an optional mask into a uniform byte tile.
+ * @param dataStructure Contains the optional mask.
+ * @param inputValues Selects mask use and path.
+ * @param offset First mask tuple.
+ * @param count Number of mask tuples.
+ * @param buffer Receives zero or nonzero byte values.
+ * @param boolBuffer Supplies contiguous temporary storage for Bool masks.
+ * @return Mask bulk-read or unsupported-type result.
+ * @pre buffer and boolBuffer contain at least count values.
  *
- * Materializing only the requested range avoids a cell-count synthetic mask and
- * lets the pairwise loop use the same branch for either supported mask type.
+ * A requested range avoids a tuple-count synthetic mask and gives the pairwise
+ * loop one representation for Bool and UInt8 values.
  */
 Result<> ReadMask(DataStructure& dataStructure, const SilhouetteInputValues& inputValues, usize offset, usize count, std::vector<uint8>& buffer, bool* boolBuffer)
 {
@@ -54,13 +63,17 @@ Result<> ReadMask(DataStructure& dataStructure, const SilhouetteInputValues& inp
 }
 
 /**
- * @brief Computes exact silhouette scores with bounded outer and inner tuple tiles.
+ * @brief Computes exact silhouette scores with bounded tuple tiles.
+ * @tparam T Specifies the clustering-array value type.
+ * @param dataStructure Contains participating arrays.
+ * @param shouldCancel Signals cancellation between passes and tiles.
+ * @param inputValues Selects metric, mask, and paths.
+ * @return Bulk-I/O, mask-type, Feature ID, or size-overflow result.
+ * @pre Participating arrays have equal tuple counts.
  *
- * The scan is deliberately multi-pass: feature discovery permits sparse IDs,
- * feature counting supplies the exact mean denominators, and the tiled all-pairs
- * pass retains only one outer tile's feature accumulators. This preserves the
- * original distance and tie behavior without resident state proportional to all
- * tuples.
+ * Feature discovery permits sparse IDs. Counting supplies exact mean
+ * denominators. The pair pass retains one outer tile's cluster accumulators.
+ * Cancellation returns success and does not roll back completed output tiles.
  */
 template <typename T>
 Result<> ExecuteScanline(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const SilhouetteInputValues& inputValues)
@@ -72,7 +85,7 @@ Result<> ExecuteScanline(DataStructure& dataStructure, const std::atomic_bool& s
   const usize tupleCount = featureStore.getNumberOfTuples();
   const usize componentCount = inputStore.getNumberOfComponents();
 
-  // Phase 1: map sparse positive feature IDs to dense accumulator columns.
+  // Map sparse positive Feature IDs to dense accumulator columns.
   std::unordered_map<int32, usize> denseFeatureIds;
   std::vector<int32> featureBuffer(k_TileTuples);
   std::vector<uint8> maskBuffer(k_TileTuples, 1);
@@ -113,7 +126,7 @@ Result<> ExecuteScanline(DataStructure& dataStructure, const std::atomic_bool& s
     return MakeErrorResult(-54083, "Silhouette tile buffer size overflows the platform usize limit");
   }
 
-  // Phase 2: count enabled tuples so every feature distance is normalized exactly once.
+  // Count enabled tuples so each cluster sum has one mean denominator.
   std::vector<float64> featureCounts(clusterCount + 1, 0.0);
   for(usize offset = 0; offset < tupleCount; offset += k_TileTuples)
   {
@@ -142,7 +155,7 @@ Result<> ExecuteScanline(DataStructure& dataStructure, const std::atomic_bool& s
     }
   }
 
-  // Phase 3: compare each bounded outer tile with every bounded inner tile and flush its scores.
+  // Compare each outer tile with all inner tiles, then publish its scores.
   std::vector<T> outerValues(k_TileTuples * componentCount);
   std::vector<T> innerValues(k_TileTuples * componentCount);
   std::vector<int32> innerFeatures(k_TileTuples);
@@ -255,16 +268,25 @@ Result<> ExecuteScanline(DataStructure& dataStructure, const std::atomic_bool& s
 }
 
 /**
- * @brief Adapts runtime numeric dispatch to the typed ExecuteScanline function.
+ * @class SilhouetteScanlineRunner
+ * @brief Adapts runtime numeric dispatch to ExecuteScanline().
+ * @tparam T Specifies the clustering-array value type.
  *
- * The runner stores references because RunTemplateClass requires a class-template
- * callable; it does not extend the lifetime of any borrowed input.
+ * RunTemplateClass requires a class-template callable. This adapter borrows the
+ * execution context and does not extend any lifetime.
  */
 template <typename T>
 class SilhouetteScanlineRunner
 {
 public:
-  /** @brief Captures the borrowed execution context and result slot for typed dispatch. */
+  /**
+   * @brief Initializes one typed dispatch adapter.
+   * @param dataStructure Contains participating arrays.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects metric, mask, and paths.
+   * @param result Receives the typed calculation result.
+   * @pre All arguments outlive this adapter.
+   */
   SilhouetteScanlineRunner(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const SilhouetteInputValues* inputValues, Result<>& result)
   : m_DataStructure(dataStructure)
   , m_ShouldCancel(shouldCancel)
@@ -273,7 +295,9 @@ public:
   {
   }
 
-  /** @brief Runs the selected numeric specialization and stores its checked result. */
+  /**
+   * @brief Runs the selected numeric specialization and stores its result.
+   */
   void operator()()
   {
     m_Result = ExecuteScanline<T>(m_DataStructure, m_ShouldCancel, *m_InputValues);

@@ -64,11 +64,10 @@ void LDFTestCase2D(const DataPath& targetPath, float32 epsilonVal, int32 minPtsV
   const DataPath k_GeneratedAMPath = DataPath{{targetPath.getTargetName() + k_AMPostFix}};
 
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     DBSCANFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(DBSCANFilter::k_ParseOrderIndex_Key, std::make_any<ChoicesParameter::ValueType>(to_underlying(DBSCAN::ParseOrder::LowDensityFirst)));
     args.insertOrAssign(DBSCANFilter::k_Epsilon_Key, std::make_any<float32>(epsilonVal));
     args.insertOrAssign(DBSCANFilter::k_MinPoints_Key, std::make_any<int32>(minPtsVal));
@@ -77,16 +76,14 @@ void LDFTestCase2D(const DataPath& targetPath, float32 epsilonVal, int32 minPtsV
     args.insertOrAssign(DBSCANFilter::k_FeatureIdsArrayName_Key, std::make_any<std::string>(k_GeneratedIdsName));
     args.insertOrAssign(DBSCANFilter::k_FeatureAMPath_Key, std::make_any<DataPath>(k_GeneratedAMPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = filter.execute(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Write the DataStructure out to the file system
+  // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   UnitTest::WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/7_0_DBSCAN_LDF_2d_{}_test.dream3d", unit_test::k_BinaryTestOutputDir, targetPath.getTargetName())));
 #endif
@@ -128,11 +125,10 @@ void RandomTestCase2D(const DataPath& targetPath, float32 epsilonVal, int32 minP
   uint64 k_Seed = std::mt19937_64::default_seed;
 
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     DBSCANFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(DBSCANFilter::k_ParseOrderIndex_Key, std::make_any<ChoicesParameter::ValueType>(randomType));
     args.insertOrAssign(DBSCANFilter::k_SeedValue_Key, std::make_any<uint64>(k_Seed)); // Will be ignored if randomType == DBSCAN::ParseOrder::Random
     args.insertOrAssign(DBSCANFilter::k_SeedArrayName_Key, std::make_any<std::string>("seed_array"));
@@ -143,16 +139,14 @@ void RandomTestCase2D(const DataPath& targetPath, float32 epsilonVal, int32 minP
     args.insertOrAssign(DBSCANFilter::k_FeatureIdsArrayName_Key, std::make_any<std::string>(k_GeneratedIdsName));
     args.insertOrAssign(DBSCANFilter::k_FeatureAMPath_Key, std::make_any<DataPath>(k_GeneratedAMPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = filter.execute(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Write the DataStructure out to the file system
+  // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   UnitTest::WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/7_0_DBSCAN_Random_2d_{}_test.dream3d", unit_test::k_BinaryTestOutputDir, targetPath.getTargetName())));
 #endif
@@ -292,11 +286,10 @@ TEST_CASE("SimplnxCore::DBSCAN: 3D Test (LowDensityFirst)", "[SimplnxCore][DBSCA
   const DataPath k_GeneratedAMPath = vertexGeom.createChildPath(targetPath.getTargetName() + k_AMPostFix);
 
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     DBSCANFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(DBSCANFilter::k_ParseOrderIndex_Key, std::make_any<ChoicesParameter::ValueType>(to_underlying(DBSCAN::ParseOrder::LowDensityFirst)));
     args.insertOrAssign(DBSCANFilter::k_Epsilon_Key, std::make_any<float32>(0.0099999998f));
     args.insertOrAssign(DBSCANFilter::k_MinPoints_Key, std::make_any<int32>(5));
@@ -305,16 +298,14 @@ TEST_CASE("SimplnxCore::DBSCAN: 3D Test (LowDensityFirst)", "[SimplnxCore][DBSCA
     args.insertOrAssign(DBSCANFilter::k_FeatureIdsArrayName_Key, std::make_any<std::string>(k_GeneratedIdsName));
     args.insertOrAssign(DBSCANFilter::k_FeatureAMPath_Key, std::make_any<DataPath>(k_GeneratedAMPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Write the DataStructure out to the file system
+  // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   UnitTest::WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/7_0_DBSCAN_LDF_3d_test.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
@@ -385,7 +376,7 @@ TEST_CASE("SimplnxCore::DBSCANFilter: SIMPL Backwards Compatibility", "[SimplnxC
       CHECK(pipelineFilter->getComments().empty());
 
       const Arguments args = pipelineFilter->getArguments();
-      // Complex type (AMPathBuilderFilterParameterConverter) - verified by successful pipeline loading
+      // Successful pipeline loading verifies the AMPathBuilderFilterParameterConverter value.
       CHECK(args.value<float32>(DBSCANFilter::k_Epsilon_Key) == 2.5f);
       CHECK(args.value<int32>(DBSCANFilter::k_MinPoints_Key) == 5);
       CHECK(args.value<ChoicesParameter::ValueType>(DBSCANFilter::k_DistanceMetric_Key) == 0);

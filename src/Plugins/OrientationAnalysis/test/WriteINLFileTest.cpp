@@ -44,7 +44,7 @@ const std::string k_NumFeatures = "NumFeatures";
 const fs::path k_ExemplarFilePath = fs::path(fmt::format("{}/INL_writer/INLWriterExemplar.inl", unit_test::k_TestFilesDir));
 const fs::path k_WrittenFilePath = fs::path(fmt::format("{}/WriteINLFile.inl", unit_test::k_BinaryTestOutputDir));
 
-void CompareResults() // compare hash of both file strings
+void CompareResults()
 {
   REQUIRE(fs::exists(k_WrittenFilePath));
   REQUIRE(fs::exists(k_ExemplarFilePath));
@@ -53,7 +53,7 @@ void CompareResults() // compare hash of both file strings
   {
     throw std::runtime_error(fmt::format("{} must be stream readable!", k_ExemplarFilePath.string()));
   }
-  // skip 2 lines to avoid time write out and versioning
+  // Ignore the timestamp and version header lines.
   exemplarFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
   exemplarFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
@@ -63,7 +63,7 @@ void CompareResults() // compare hash of both file strings
     throw std::runtime_error(fmt::format("{} must be stream readable!", k_WrittenFilePath.string()));
   }
 
-  // ignore versioning
+  // Ignore the generated version line.
   generatedFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
   std::string exemplar = "";
@@ -90,18 +90,18 @@ TEST_CASE("OrientationAnalysis::WriteINLFileFilter: Valid Filter Execution", "[O
 {
   UnitTest::LoadPlugins();
 
+  // AlgorithmTestScope forces the selected path and records its target-call
+  // witness.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "INL_writer.tar.gz", "INL_writer");
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   WriteINLFileFilter filter;
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/INL_writer/6_6_INL_writer.dream3d", unit_test::k_TestFilesDir)));
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(WriteINLFileFilter::k_OutputFile_Key, std::make_any<FileSystemPathParameter::ValueType>(k_WrittenFilePath));
   args.insertOrAssign(WriteINLFileFilter::k_ImageGeomPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100})));
   args.insertOrAssign(WriteINLFileFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100, Constants::k_EbsdScanData, Constants::k_FeatureIds})));
@@ -111,11 +111,9 @@ TEST_CASE("OrientationAnalysis::WriteINLFileFilter: Valid Filter Execution", "[O
   args.insertOrAssign(WriteINLFileFilter::k_MaterialNameArrayPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100, Constants::k_Phase_Data, ::k_MaterialName})));
   args.insertOrAssign(WriteINLFileFilter::k_NumFeaturesArrayPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100, Constants::k_Phase_Data, ::k_NumFeatures})));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 

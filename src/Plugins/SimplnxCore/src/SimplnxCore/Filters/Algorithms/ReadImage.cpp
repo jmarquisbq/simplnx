@@ -21,7 +21,10 @@ using namespace nx::core;
 
 namespace
 {
-/** @brief Source crop and destination shape used to request and place one decoded image row. */
+/**
+ * @struct CropWindow
+ * @brief Stores source crop bounds and destination image shape.
+ */
 struct CropWindow
 {
   usize srcWidth = 0;
@@ -33,7 +36,15 @@ struct CropWindow
   usize numComponents = 1;
 };
 
-/** @brief Extracts a typed element from raw decoder bytes without violating alignment or aliasing rules. */
+/**
+ * @brief Copies one typed element from raw decoder bytes.
+ * @tparam T Specifies the decoded scalar type.
+ * @param data Provides decoder bytes.
+ * @param byteOffset Specifies the first byte to copy.
+ * @return Decoded value.
+ *
+ * memcpy avoids alignment and aliasing violations.
+ */
 template <typename T>
 T ReadElementAs(const uint8* data, usize byteOffset)
 {
@@ -42,10 +53,20 @@ T ReadElementAs(const uint8* data, usize byteOffset)
   return value;
 }
 
-/** @brief Copies decoder bytes whose scalar type already matches the destination through one checked bulk write. */
+/**
+ * @struct CopyPixelDataFunctor
+ * @brief Writes decoder bytes when source and destination types match.
+ */
 struct CopyPixelDataFunctor
 {
-  /** @brief Copies one row/band into the runtime-selected destination store type. */
+  /**
+   * @brief Copies one decoded row segment to the destination store.
+   * @tparam T Specifies the shared source and destination scalar type.
+   * @param dataArray Receives decoded values.
+   * @param bytes Provides a complete number of typed values.
+   * @param destinationOffset Specifies the first destination value.
+   * @return Destination bulk-write result.
+   */
   template <typename T>
   Result<> operator()(IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
@@ -57,20 +78,29 @@ struct CopyPixelDataFunctor
   }
 };
 
-/** @brief Converts one decoder row/band from SrcT to a normalized destination scalar type. */
+/**
+ * @struct ConvertPixelDataFunctor
+ * @brief Converts decoder bytes through normalized scalar values.
+ * @tparam SrcT Specifies the decoder scalar type.
+ */
 template <typename SrcT>
 struct ConvertPixelDataFunctor
 {
-  /** @brief Saturates, normalizes, converts, and bulk-writes one bounded decoded byte range. */
+  /**
+   * @brief Converts and writes one decoded row segment.
+   * @tparam DestT Specifies the destination scalar type.
+   * @param dataArray Receives converted values.
+   * @param bytes Provides a complete number of source values.
+   * @param destinationOffset Specifies the first destination value.
+   * @return Destination bulk-write result.
+   */
   template <typename DestT>
   Result<> operator()(IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
     auto& dataStore = dataArray.template getIDataStoreRefAs<AbstractDataStore<DestT>>();
 
-    // For integer source/dest types the saturation value is the type's max. For floating-point
-    // we follow stb's HDR convention that pixel values lie in [0, 1] and saturate outside that
-    // range. Without this the integer-max divisor produced near-zero output for any HDR float
-    // input (e.g. 0.5 / float32::max() ≈ 0) and rendered every converted pixel black.
+    // Integer types use their positive maximum. Floating-point image data uses
+    // the stb HDR range [0, 1]. This rule prevents valid HDR values from becoming black.
     constexpr double srcMax = std::is_floating_point_v<SrcT> ? 1.0 : static_cast<double>(std::numeric_limits<SrcT>::max());
     constexpr double destMax = std::is_floating_point_v<DestT> ? 1.0 : static_cast<double>(std::numeric_limits<DestT>::max());
 
@@ -79,8 +109,7 @@ struct ConvertPixelDataFunctor
     for(usize i = 0; i < elementCount; ++i)
     {
       const SrcT srcValue = ReadElementAs<SrcT>(bytes.data(), i * sizeof(SrcT));
-      // Clamp into the source's saturation range before normalizing so HDR floats > 1.0 or
-      // negative values do not wrap around through the destination's representable range.
+      // Clamp before normalization so exterior values do not wrap in the destination type.
       const double clampedSrc = std::clamp(static_cast<double>(srcValue), 0.0, srcMax);
       const double normalized = clampedSrc / srcMax;
       convertedValues[i] = static_cast<DestT>(normalized * destMax);
@@ -89,10 +118,21 @@ struct ConvertPixelDataFunctor
   }
 };
 
-/** @brief Performs the second runtime dispatch from source scalar type to destination scalar type. */
+/**
+ * @struct DispatchConversionFunctor
+ * @brief Dispatches the destination type after source-type dispatch.
+ */
 struct DispatchConversionFunctor
 {
-  /** @brief Invokes the matching source/destination conversion specialization. */
+  /**
+   * @brief Invokes one source/destination conversion specialization.
+   * @tparam SrcT Specifies the decoder scalar type.
+   * @param destType Selects the destination scalar type.
+   * @param dataArray Receives converted values.
+   * @param bytes Provides a complete number of source values.
+   * @param destinationOffset Specifies the first destination value.
+   * @return Destination bulk-write result.
+   */
   template <typename SrcT>
   Result<> operator()(DataType destType, IDataArray& dataArray, std::span<const uint8> bytes, usize destinationOffset)
   {
@@ -101,7 +141,6 @@ struct DispatchConversionFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ReadImage::ReadImage(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ReadImageInputValues& inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -110,10 +149,8 @@ ReadImage::ReadImage(DataStructure& dataStructure, const IFilter::MessageHandler
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadImage::~ReadImage() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ReadImage::operator()()
 {
   const auto& inputFilePath = m_InputValues.inputFilePath;
@@ -165,10 +202,8 @@ Result<> ReadImage::operator()()
     }
     else // PhysicalSubvolume
     {
-      // Convert physical coordinates to source voxel indices using the file's native origin/spacing.
-      // The ImageGeom's origin/spacing may have been overridden in preflight, but cropping bounds are
-      // interpreted against whatever origin/spacing was active when the crop filter ran. In the
-      // Preprocessed case, overrides were applied before cropping, so we mirror them here.
+      // Interpret physical bounds with the spatial metadata used during preflight.
+      // Preprocessed mode applies requested overrides before this conversion.
       FloatVec3 srcOrigin = metadata.origin.value_or(FloatVec3{0.0f, 0.0f, 0.0f});
       FloatVec3 srcSpacing = metadata.spacing.value_or(FloatVec3{1.0f, 1.0f, 1.0f});
       if(m_InputValues.originSpacingProcessing == OriginSpacingProcessing::Preprocessed)
@@ -231,6 +266,8 @@ Result<> ReadImage::operator()()
   const usize bytesPerComponent = GetDataTypeSize(srcType);
   const usize bytesPerPixel = window.numComponents * bytesPerComponent;
   bool cancelled = false;
+  // The decoder streams row segments directly to the destination. Cancellation
+  // returns success and retains segments written before the callback stops.
   Result<> streamResult = imageIO->readPixelDataRows(inputFilePath, [&](usize sourceRow, usize sourceColumn, usize pixelCount, std::span<const uint8> pixels) -> Result<> {
     if(m_ShouldCancel)
     {

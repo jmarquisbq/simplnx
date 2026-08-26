@@ -7,32 +7,28 @@
 
 using namespace nx::core;
 
-//-----------------------------------------------------------------------------
 std::string ArrayCreationUtilities::ResolveStorageFormat(const DataStructure& dataStructure, const DataPath& path, DataType numericType, uint64 dataSizeBytes, const std::string& requestedFormat)
 {
-  // (1) An unstructured/poly geometry ancestor forces in-core regardless of preference or override
-  //     (OOC stores for those geometry types do not exist). This gate is authoritative.
+  // Geometry compatibility is authoritative because unsupported geometry stores do not exist.
   if(!ParentGeometrySupportsOoc(dataStructure, path))
   {
     return "";
   }
-  // (2) An explicit per-filter override wins over the resolver.
+  // A compatible geometry permits an explicit format to override automatic policy.
   if(!requestedFormat.empty())
   {
     return requestedFormat;
   }
-  // (3) Otherwise let the DataStructure's resolver decide (in-memory default => "").
+  // The DataStructure resolver handles the remaining automatic request.
   return dataStructure.formatResolver().resolveFormat(dataStructure, path, numericType, dataSizeBytes);
 }
 
-//-----------------------------------------------------------------------------
 bool ArrayCreationUtilities::ParentGeometrySupportsOoc(const DataStructure& dataStructure, const DataPath& arrayPath)
 {
   DataPath parentPath = arrayPath.getParent();
   while(parentPath.getLength() > 0)
   {
-    // getData returns nullptr for a non-existent intermediate container; dynamic_cast<const IGeometry*>(nullptr)
-    // is nullptr, so such levels are skipped — this is why the array leaf itself need not exist.
+    // Missing containers are skipped, so the future leaf object does not need to exist.
     const auto* obj = dataStructure.getData(parentPath);
     if(const auto* geom = dynamic_cast<const IGeometry*>(obj))
     {
@@ -41,10 +37,10 @@ bool ArrayCreationUtilities::ParentGeometrySupportsOoc(const DataStructure& data
     }
     parentPath = parentPath.getParent();
   }
-  return true; // no geometry ancestor -> eligible (e.g., feature/ensemble attribute matrices)
+  // Objects without a geometry ancestor are structurally eligible for OOC storage.
+  return true;
 }
 
-//-----------------------------------------------------------------------------
 bool ArrayCreationUtilities::CheckMemoryRequirement(const DataStructure& dataStructure, uint64 requiredMemory)
 {
   static const uint64 k_AvailableMemory = Memory::GetTotalMemory();
@@ -52,7 +48,6 @@ bool ArrayCreationUtilities::CheckMemoryRequirement(const DataStructure& dataStr
   return memoryUsage < k_AvailableMemory;
 }
 
-//-----------------------------------------------------------------------------
 bool ArrayCreationUtilities::WouldExceedAvailableMemory(uint64 currentUsageBytes, uint64 requiredMemory, uint64 availableBytes)
 {
   // Overflow-safe form of (currentUsageBytes + requiredMemory) > availableBytes.

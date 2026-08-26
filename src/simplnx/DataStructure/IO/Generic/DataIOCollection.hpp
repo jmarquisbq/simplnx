@@ -36,86 +36,149 @@ class DataStructure;
 class IDataIOManager;
 
 /**
- * @brief The DataIOCollection class contains all known IDataIOManagers for the current Application instance.
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
+/**
+ * @class DataIOCollection
+ * @brief Owns registered storage-format managers for one Application.
+ *
+ * The collection always owns the built-in in-memory and HDF5 managers. Plugins
+ * add optional managers during application setup. Map iteration defines the
+ * fallback order for capabilities and recovery overrides.
+ *
+ * ArrayCreationUtilities resolves storage policy before factory creation. The
+ * collection selects a manager for that identifier. Unknown numeric and
+ * NeighborList formats fall back to the built-in in-memory manager.
+ *
+ * Import code installs resolver policy on the DataStructure before finalization.
+ * The collection does not retain that resolver or the borrowed HDF5 reader.
+ *
+ * Registration and lifecycle changes are not synchronized with lookups. Finish
+ * registration before concurrent creation, import, or manager iteration.
  */
 class SIMPLNX_EXPORT DataIOCollection
 {
 public:
+  /**
+   * @brief Maps format names to shared I/O managers.
+   */
   using map_type = std::map<std::string, std::shared_ptr<IDataIOManager>>;
+
+  /**
+   * @brief Names a mutable manager-map iterator.
+   */
   using iterator = typename map_type::iterator;
+
+  /**
+   * @brief Names a read-only manager-map iterator.
+   */
   using const_iterator = typename map_type::const_iterator;
 
   /**
-   * @brief Callback that eagerly loads a single DataObject's data from HDF5 into memory.
-   * Constructed by the loading infrastructure and used by Dream3dIO import and the
-   * OOC import strategy to bring individual arrays fully into memory.
+   * @brief Names a callback that eagerly loads one imported DataObject.
+   *
+   * The import path supplies a valid DataStructure and object path. The callback
+   * returns its HDF5 load result to the finalizing manager.
    */
   using EagerLoadFnc = std::function<Result<>(DataStructure& dataStructure, const DataPath& path)>;
 
   /**
-   * @brief Human-readable display labels for the two built-in entries that
-   * getFormatDisplayNames() always provides: the empty "" sentinel (let the format
-   * resolver decide) and the reserved in-memory format. A plugin registers its own
-   * format's label via registerFormatDisplayName().
+   * @brief Labels automatic format resolution.
    */
   static inline constexpr const char* k_AutomaticDisplayName = "Automatic";
+
+  /**
+   * @brief Labels explicit in-memory storage.
+   */
   static inline constexpr const char* k_InMemoryDisplayName = "In Memory";
 
+  /**
+   * @brief Creates the built-in in-memory and HDF5 managers.
+   */
   DataIOCollection();
+
+  /**
+   * @brief Destroys the collection and its shared managers.
+   */
   ~DataIOCollection() noexcept;
 
   /**
-   * Adds a specified data IO manager for reading and writing to the target format.
-   * @param manager
-   * @return Result<> with an error if the manager is null or attempts to register
-   * under the reserved k_InMemoryFormat name.
+   * @brief Registers or replaces a non-core I/O manager.
+   * @param manager Shared manager to retain.
+   * @return Valid result or an error for a null manager or reserved in-memory name.
+   *
+   * The manager format name is the map key. Debug builds assert that no more
+   * than one manager finalizes deferred imports.
    */
   Result<> addIOManager(std::shared_ptr<IDataIOManager> manager);
 
   /**
-   * @brief Returns the IDataIOManager for the specified format name.
-   * Simplnx comes with HDF5 IO Manager.
-   * Additional IDataIOManagers are added through plugins.
-   * @param formatName
-   * @return std::shared_ptr<IDataIOManager>
+   * @brief Returns a manager for one format name.
+   * @param formatName Registered format identifier.
+   * @return Shared manager, or null when formatName is not registered.
    */
   std::shared_ptr<IDataIOManager> getManager(const std::string& formatName) const;
 
+  /**
+   * @brief Reports external-sort capability across registered managers.
+   * @return True when at least one manager advertises external sorting.
+   */
   bool hasExternalSortCapability() const;
+
+  /**
+   * @brief Creates an external sorter through the first capable manager.
+   * @param config Sort configuration.
+   * @return Owned sorter or a capability or manager-creation error.
+   *
+   * Map order chooses the manager. A creation error does not try a later manager.
+   */
   Result<std::unique_ptr<IExternalSort>> createExternalSort(const ExternalSortConfig& config) const;
+
+  /**
+   * @brief Reports temporary-record-store capability across registered managers.
+   * @return True when at least one manager advertises temporary record storage.
+   */
   bool hasTemporaryRecordStoreCapability() const;
+
+  /**
+   * @brief Creates temporary records through the first capable manager.
+   * @param config Record-store configuration.
+   * @return Owned record store or a capability or manager-creation error.
+   *
+   * Map order chooses the manager. A creation error does not try a later manager.
+   */
   Result<std::unique_ptr<ITemporaryRecordStore>> createTemporaryRecordStore(const TemporaryRecordStoreConfig& config) const;
 
   /**
-   * @brief Returns a vector of names used to reference available DataStructure IO formats.
-   * @return std::vector<std::string>
+   * @brief Returns format names that create numeric stores.
+   * @return Registered numeric-store format identifiers in map order.
    */
   std::vector<std::string> getFormatNames() const;
 
-  /**
-   * @brief Checks if a data store creation function exists for the specified type.
-   * @param type The data store type name
-   * @return bool True if the creation function exists, false otherwise
-   */
   bool hasDataStoreCreationFunction(const std::string& type) const;
 
   /**
-   * @brief Creates a data store of the specified type and dimensions.
-   * @param type The data store type name
-   * @param numericType The numeric data type
-   * @param tupleShape The shape of the tuple dimensions
-   * @param componentShape The shape of the component dimensions
-   * @return std::unique_ptr<IDataStore> Unique pointer to the created data store
+   * @brief Creates a numeric store for a requested format.
+   * @param type Requested format identifier.
+   * @param numericType Numeric value type.
+   * @param tupleShape Tuple dimensions.
+   * @param componentShape Component dimensions.
+   * @return Owned store from the first manager that handles type.
+   *
+   * If no manager handles type, the built-in in-memory manager provides the
+   * fallback store.
    */
   std::unique_ptr<IDataStore> createDataStore(const std::string& type, DataType numericType, const ShapeType& tupleShape, const ShapeType& componentShape);
 
   /**
-   * @brief Creates a typed data store with the specified dimensions.
-   * @tparam T The data type for the store
-   * @param type The data store type name
-   * @param tupleShape The shape of the tuple dimensions
-   * @param componentShape The shape of the component dimensions
-   * @return std::shared_ptr<AbstractDataStore<T>> Shared pointer to the created typed data store
+   * @brief Creates a typed numeric store for a requested format.
+   * @tparam T Numeric value type.
+   * @param type Requested format identifier.
+   * @param tupleShape Tuple dimensions.
+   * @param componentShape Component dimensions.
+   * @return Shared typed store, or null when the selected factory returns an incompatible store.
    */
   template <typename T>
   std::shared_ptr<AbstractDataStore<T>> createDataStoreWithType(const std::string& type, const ShapeType& tupleShape, const ShapeType& componentShape)
@@ -126,20 +189,23 @@ public:
   }
 
   /**
-   * @brief Creates a list store of the specified type and dimensions.
-   * @param type The list store type name
-   * @param numericType The numeric data type
-   * @param tupleShape The shape of the tuple dimensions
-   * @return std::unique_ptr<IListStore> Unique pointer to the created list store
+   * @brief Creates a NeighborList store for a requested format.
+   * @param type Requested format identifier.
+   * @param numericType Numeric value type.
+   * @param tupleShape Tuple dimensions.
+   * @return Owned list store from the first manager that handles type.
+   *
+   * If no manager handles type, the built-in in-memory manager provides the
+   * fallback store.
    */
   std::unique_ptr<IListStore> createListStore(const std::string& type, DataType numericType, const ShapeType& tupleShape) const;
 
   /**
-   * @brief Creates a typed list store with the specified dimensions.
-   * @tparam T The data type for the store
-   * @param dataFormat The list store format name
-   * @param tupleShape The shape of the tuple dimensions
-   * @return std::shared_ptr<AbstractListStore<T>> Shared pointer to the created typed list store
+   * @brief Creates a typed NeighborList store for a requested format.
+   * @tparam T List element type.
+   * @param dataFormat Requested format identifier.
+   * @param tupleShape Tuple dimensions.
+   * @return Shared typed list store, or null when the selected factory returns an incompatible store.
    */
   template <typename T>
   std::shared_ptr<AbstractListStore<T>> createListStoreWithType(const std::string& dataFormat, const ShapeType& tupleShape) const
@@ -149,143 +215,108 @@ public:
     return std::dynamic_pointer_cast<AbstractListStore<T>>(listStore);
   }
 
-  /**
-   * @brief Checks whether any registered IO manager provides a factory for
-   * creating StringStores of the specified format.
-   *
-   * @param type The format name to query
-   * @return true if at least one registered IO manager has a StringStore factory for @p type
-   */
   bool hasStringStoreCreationFnc(const std::string& type) const;
 
   /**
-   * @brief Creates a StringStore (backing store for StringArray) of the
-   * specified format and dimensions.
+   * @brief Creates a StringArray store for a requested format.
+   * @param type Requested format identifier.
+   * @param tupleShape String-array tuple dimensions.
+   * @return Owned string store, or null when no manager handles type.
    *
-   * Searches all registered IO managers for one that handles the requested
-   * format, then delegates to its StringStoreCreateFnc factory. The resulting
-   * store may be in-memory or disk-backed depending on the IO manager.
-   *
-   * @param type       The format name to use
-   * @param tupleShape Tuple dimensions for the string array
-   * @return A new AbstractStringStore, or nullptr if no factory handles @p type
+   * String stores have no in-memory fallback. A requested format must register
+   * a StringStore factory.
    */
   std::unique_ptr<AbstractStringStore> createStringStore(const std::string& type, const ShapeType& tupleShape);
 
   /**
-   * @brief Finalizes all stores after pipeline execution.
+   * @brief Finalizes stores through every registered manager.
+   * @param dataStructure DataStructure that owns pipeline output stores.
    *
-   * Called after a pipeline finishes executing. Fans out to each registered IO manager's
-   * onFinalizeStores() lifecycle hook. The out-of-core manager uses this to transition its stores
-   * from write mode to read-only (close HDF5 write handles and re-open as read handles); the
-   * in-memory core manager's hook is a no-op.
-   *
-   * @param dataStructure The DataStructure whose stores should be finalized
+   * Managers run in map order. An out-of-core manager can close write handles
+   * and reopen read handles. The core in-memory manager is a no-op.
    */
   void finalizeStores(DataStructure& dataStructure);
 
   /**
-   * @brief Returns true if any registered IO manager finalizes .dream3d imports (overrides
-   * finalizesImport). The importer uses this to decide whether to defer data loading to a finalizer
-   * (e.g. the OOC manager) or eager-load everything in-core.
+   * @brief Reports whether deferred DREAM3D import finalization is available.
+   * @return True when a manager reports finalizesImport().
+   *
+   * The importer uses this result to defer array loading. Configuration must
+   * provide no more than one finalizing manager.
    */
   bool anyManagerFinalizesImport() const;
 
   /**
-   * @brief Dispatches import finalization to the first registered manager that finalizes imports.
-   * Returns std::nullopt when no manager finalizes (the caller then eager-loads in-core). The chosen
-   * manager replaces the placeholders it owns and leaves the rest as Empty placeholders for the caller.
+   * @brief Dispatches deferred import finalization to the unique capable manager.
+   * @param dataStructure DataStructure containing imported placeholders and resolver policy.
+   * @param paths Selected top-level imported paths.
+   * @param fileReader Source DREAM3D reader borrowed for this call.
+   * @return Finalizer result, or std::nullopt when no manager finalizes imports.
+   *
+   * The selected manager leaves placeholders it does not own. The importer later
+   * eager-loads those remaining placeholders in memory. If invalid configuration
+   * provides more than one finalizer, map order selects the first manager.
    */
   std::optional<Result<>> onImportFinalize(DataStructure& dataStructure, const std::vector<DataPath>& paths, const nx::core::HDF5::FileIO& fileReader);
 
   /**
-   * @brief Offers a recovery-write override to each registered manager; the first that returns a value
-   * (non-nullopt) handles the write. Returns std::nullopt if none handle it (caller uses the normal path).
+   * @brief Offers a recovery-write override to registered managers.
+   * @param writer Active DREAM3D writer borrowed for this call.
+   * @param dataObject DataObject to write.
+   * @param parentGroup Destination group borrowed for this call.
+   * @return First manager result in map order, or std::nullopt for normal serialization.
    */
   std::optional<Result<>> onRecoveryWrite(nx::core::HDF5::DataStructureWriter& writer, const DataObject* dataObject, nx::core::HDF5::GroupIO& parentGroup);
 
   /**
-   * @brief Fans a base-directory update out to all registered managers (no-op for those that don't use it).
+   * @brief Propagates a working-file base directory to all managers.
+   * @param path Directory for manager-specific session files.
    */
   void setBaseDirectory(const std::filesystem::path& path);
 
   /**
-   * @brief Fans a shutdown call out to all registered managers (flush/clear caches before temp cleanup).
+   * @brief Shuts down all managers before temporary-file cleanup.
+   *
+   * Managers can flush dirty data and clear caches during this fan-out.
    */
   void shutdownManagers();
 
-  /**
-   * @brief Returns an iterator to the beginning of the manager collection.
-   * @return iterator Iterator to the beginning
-   */
   iterator begin();
 
-  /**
-   * @brief Returns an iterator to the end of the manager collection.
-   * @return iterator Iterator to the end
-   */
   iterator end();
 
-  /**
-   * @brief Returns a const iterator to the beginning of the manager collection.
-   * @return const_iterator Const iterator to the beginning
-   */
   const_iterator begin() const;
 
-  /**
-   * @brief Returns a const iterator to the end of the manager collection.
-   * @return const_iterator Const iterator to the end
-   */
   const_iterator end() const;
 
   /**
-   * @brief Registers a human-readable display name for a data store format.
+   * @brief Registers a display label for a storage format.
+   * @param formatName Internal format identifier.
+   * @param displayName User-visible format label.
    *
-   * Associates an internal format name (e.g., "HDF5-OOC") with a user-friendly
-   * label (e.g., "HDF5 Out-of-Core") for display in the DataStoreFormatParameter
-   * dropdown.
-   *
-   * @param formatName   The internal format identifier
-   * @param displayName  The human-readable label shown in the UI
+   * A later registration replaces the label for formatName.
    */
   void registerFormatDisplayName(const std::string& formatName, const std::string& displayName);
 
   /**
-   * @brief Returns all known format display names as (formatName, displayName) pairs.
+   * @brief Returns storage-format identifiers and display labels.
+   * @return Format-label pairs with Automatic and In Memory first.
    *
-   * The returned list always starts with:
-   *   - ("", "Automatic") -- lets the resolver decide
-   *   - (Preferences::k_InMemoryFormat, "In Memory") -- explicit in-memory
-   *
-   * Followed by any additionally registered entries (e.g., ("HDF5-OOC", "HDF5 Out-of-Core")).
-   *
-   * @return Vector of (formatName, displayName) pairs
+   * Registered labels follow in map order.
    */
   std::vector<std::pair<std::string, std::string>> getFormatDisplayNames() const;
 
   /**
-   * @brief Produces a human-readable, multi-line description of every registered
-   * IO manager and the store types it can create.
+   * @brief Builds a multi-line summary of manager factory capabilities.
+   * @return Error-message-ready table of manager labels and store factories.
    *
-   * Intended for error messages when a createXxxStore() call returns nullptr so
-   * the user can immediately see which format names are available and what each
-   * one supports. Each row lists the manager's display name (falling back to its
-   * format-name identifier) followed by the set of factories it registers:
-   * DataStore, ListStore, StringStore.
-   *
-   * Example output:
-   * @code
-   * Registered IO managers and their capabilities:
-   *   In Memory : DataStore, ListStore
-   *   HDF5      : DataStore, ListStore, StringStore
-   * @endcode
-   *
-   * @return A multi-line string ready to drop into a fmt::format error message.
+   * Each row uses a registered display label or the format identifier. The row
+   * lists numeric, NeighborList, and StringArray factory support.
    */
   std::string generateManagerListString() const;
 
 private:
   map_type m_ManagerMap;
-  std::map<std::string, std::string> m_FormatDisplayNames; ///< Registered human-readable format names
+  std::map<std::string, std::string> m_FormatDisplayNames;
 };
 } // namespace nx::core

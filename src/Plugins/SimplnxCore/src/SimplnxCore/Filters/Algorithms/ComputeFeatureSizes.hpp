@@ -15,49 +15,57 @@ namespace nx::core
 {
 
 /**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
+/**
  * @struct ComputeFeatureSizesInputValues
- * @brief Holds all user-configured parameters for the ComputeFeatureSizes algorithm.
+ * @brief Stores filter values for feature-size execution.
  */
 struct SIMPLNXCORE_EXPORT ComputeFeatureSizesInputValues
 {
-  DataObjectNameParameter::ValueType EquivalentDiametersName;              ///< Output: equivalent spherical/circular diameter array name.
-  AttributeMatrixSelectionParameter::ValueType FeatureAttributeMatrixPath; ///< Feature-level Attribute Matrix.
-  ArraySelectionParameter::ValueType FeatureIdsPath;                       ///< Per-cell Feature ID array.
-  GeometrySelectionParameter::ValueType InputImageGeometryPath;            ///< Input ImageGeom or RectGridGeom.
-  DataObjectNameParameter::ValueType NumElementsName;                      ///< Output: per-feature voxel count array name.
-  BoolParameter::ValueType SaveElementSizes;                               ///< If true, persist per-element sizes in the Geometry.
-  DataObjectNameParameter::ValueType VolumesName;                          ///< Output: per-feature volume/area array name.
+  DataObjectNameParameter::ValueType EquivalentDiametersName;
+  AttributeMatrixSelectionParameter::ValueType FeatureAttributeMatrixPath;
+  ArraySelectionParameter::ValueType FeatureIdsPath;
+  GeometrySelectionParameter::ValueType InputImageGeometryPath;
+  DataObjectNameParameter::ValueType NumElementsName;
+  BoolParameter::ValueType SaveElementSizes; ///< True to retain generated geometry element sizes.
+  DataObjectNameParameter::ValueType VolumesName;
 };
 
 /**
  * @class ComputeFeatureSizes
- * @brief Dispatcher that selects between the in-core (Direct) and out-of-core (Scanline)
- * feature-size algorithms at runtime.
+ * @brief Dispatches ImageGeom and RectGrid feature-size calculation.
  *
- * This class contains no algorithm logic itself. Its operator()() inspects the storage
- * backing of the FeatureIds array and calls
- * `DispatchAlgorithm<ComputeFeatureSizesDirect, ComputeFeatureSizesScanline>(...)`.
+ * Each feature receives a voxel count, an area or volume, and an equivalent diameter.
  *
- * **Algorithm overview**: For each feature in an Image Geometry or Rectilinear Grid
- * Geometry, compute its volume (or area in 2D), equivalent spherical/circular diameter,
- * and voxel count.
+ * Dispatch uses FeatureIdsPath only. Direct execution uses parallel per-element access. Scanline
+ * execution uses sequential bulk transfers. Output and RectGrid element-size storage do not select
+ * the path.
  *
- * **Dispatch rules** (see AlgorithmDispatch.hpp):
- * - If the FeatureIds array is backed by in-memory DataStore, the Direct variant is used.
- *   It parallelizes the per-voxel counting/summation across Z-slices with thread-local
- *   accumulators.
- * - If the FeatureIds array uses out-of-core (chunked) storage, the Scanline variant is
- *   used. It streams FeatureIds (and element sizes for RectGrid) in fixed-size chunks via
- *   copyIntoBuffer() to avoid per-voxel chunk thrashing.
- * - Global test-override flags (ForceOocAlgorithm, ForceInCoreAlgorithm) can override the
- *   automatic detection for unit testing.
+ * The direct path uses requireStoresInMemory() only to disable parallel scheduling for a nonresident
+ * Feature ID store. It does not pin, lock, or make generic DataArray or DataStore access safe.
  *
- * @see ComputeFeatureSizesDirect, ComputeFeatureSizesScanline, DispatchAlgorithm
+ * @see ComputeFeatureSizesDirect.
+ * @see ComputeFeatureSizesScanline.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureSizes
 {
 public:
+  /**
+   * @brief Initializes the feature-size dispatcher.
+   * @param dataStructure Contains geometry, Feature IDs, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects outputs and required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeFeatureSizes(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeatureSizesInputValues* inputValues);
+  /**
+   * @brief Destroys the feature-size dispatcher.
+   */
   ~ComputeFeatureSizes() noexcept;
 
   ComputeFeatureSizes(const ComputeFeatureSizes&) = delete;
@@ -66,17 +74,19 @@ public:
   ComputeFeatureSizes& operator=(ComputeFeatureSizes&&) noexcept = delete;
 
   /**
-   * @brief Dispatches to the Direct (in-core) or Scanline (out-of-core) variant based on
-   * whether the FeatureIds array uses out-of-core storage.
-   * @return Result<> indicating success or error.
+   * @brief Computes requested feature sizes.
+   * @return Success, or an implementation error.
+   *
+   * Direct and scanline paths check cancellation at different phase boundaries. Both can return
+   * success with partially written feature outputs.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                ///< Reference to the DataStructure.
-  const ComputeFeatureSizesInputValues* m_InputValues = nullptr; ///< User-configured parameters.
-  const std::atomic_bool& m_ShouldCancel;                        ///< Cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;               ///< Message handler for progress.
+  DataStructure& m_DataStructure;
+  const ComputeFeatureSizesInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

@@ -36,10 +36,8 @@ uint64 CacheMemoryBudgetManager::defaultBudgetBytes()
   {
     return k_MinBudget;
   }
-  // 50% of RAM raised to the 1 GiB floor, then clamped to maxBudgetBytes() so
-  // the default never exceeds the cap on low-RAM machines (below 12 GiB the
-  // 6 GiB reserve makes the cap smaller than half of RAM). The cap is never
-  // below the floor, so the result stays within [1 GiB, cap].
+  // Start with half of RAM and apply the 1-GiB floor.
+  // The maximum budget then preserves the required operating-system and application reserve.
   return std::min(std::max(totalRam / 2, k_MinBudget), maxBudgetBytes());
 }
 
@@ -50,9 +48,8 @@ uint64 CacheMemoryBudgetManager::maxBudgetBytes()
   {
     return k_MinBudget;
   }
-  // Reserve a fixed 6 GiB headroom, but never allow more than 95% of RAM.
-  // 0.95 * total computed as (total - total/20) to stay in integer math and
-  // avoid overflow.
+  // Reserve 6 GiB, but do not permit more than 95 percent of RAM.
+  // Subtraction by one twentieth keeps the percentage calculation in integer arithmetic and avoids multiplication overflow.
   const uint64 reserved = (totalRam > k_BudgetReserveBytes) ? (totalRam - k_BudgetReserveBytes) : 0;
   const uint64 fraction95 = totalRam - totalRam / 20;
   const uint64 cap = std::min(reserved, fraction95);
@@ -109,8 +106,7 @@ void CacheMemoryBudgetManager::release(AllocationHandle handle)
 
 bool CacheMemoryBudgetManager::setBudgetBytes(uint64 bytes)
 {
-  // Clamp the UPPER bound only. maxBudgetBytes() takes no lock, so compute it
-  // before acquiring m_Mutex.
+  // Clamp only the upper bound. Calculate the machine limit before acquiring m_Mutex.
   const uint64 maxAllowed = maxBudgetBytes();
   bool clamped = false;
   if(bytes > maxAllowed)
@@ -149,7 +145,6 @@ std::vector<CacheMemoryBudgetManager::AllocationHandle> CacheMemoryBudgetManager
 
   while(!m_Entries.empty() && m_UsedBytes + needed > m_BudgetBytes)
   {
-    // Find entry with oldest lastAccessed using a direct iterator
     auto oldest = m_Entries.end();
     for(auto it = m_Entries.begin(); it != m_Entries.end(); ++it)
     {
@@ -167,12 +162,13 @@ std::vector<CacheMemoryBudgetManager::AllocationHandle> CacheMemoryBudgetManager
     const auto handlerIter = m_SubsystemHandlers.find(oldest->second.subsystem);
     if(handlerIter != m_SubsystemHandlers.end())
     {
+      // A delegated subsystem releases entries later. Avoid duplicate requests while its accounting is pending.
       const uint64 deficit = (m_UsedBytes + needed) - m_BudgetBytes;
       handlerIter->second(deficit);
       break;
     }
 
-    // Invoke eviction callback under mutex (must be non-blocking)
+    // The callback runs under m_Mutex and can only mark its entry for later removal.
     if(oldest->second.onEvict)
     {
       oldest->second.onEvict();

@@ -19,7 +19,8 @@ namespace
 constexpr usize k_ChunkValues = 65536;
 
 /**
- * @brief Combines one runtime-selected numeric type through bounded bulk datastore transfers.
+ * @struct CombineAttributeArraysImpl
+ * @brief Combines one runtime-selected DataArray type through bounded bulk datastore transfers.
  */
 struct CombineAttributeArraysImpl
 {
@@ -93,7 +94,8 @@ struct CombineAttributeArraysImpl
             return readResult;
           }
 
-          // Keep the original tuple/component traversal order so comparisons, including NaN handling, are unchanged.
+          // Preserve tuple and component traversal order. NaN values do not
+          // update either bound through these ordered comparisons.
           for(usize tupleIndex = 0; tupleIndex < tupleCount; tupleIndex++)
           {
             for(usize compIndex = 0; compIndex < numComps; compIndex++)
@@ -171,7 +173,6 @@ struct CombineAttributeArraysImpl
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 CombineAttributeArrays::CombineAttributeArrays(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                CombineAttributeArraysInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -181,16 +182,13 @@ CombineAttributeArrays::CombineAttributeArrays(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 CombineAttributeArrays::~CombineAttributeArrays() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& CombineAttributeArrays::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> CombineAttributeArrays::operator()()
 {
   if(m_ShouldCancel)

@@ -86,7 +86,7 @@ TEST_CASE("Extent::Overlaps", "[Extent]")
 
   SECTION("Adjacent extents do not overlap")
   {
-    // a ends at 3, b starts at 4 — they touch but don't share any element
+    // a ends at 3, b starts at 4 — they touch but do not share any element
     Extent a({0, 0}, {3, 3});
     Extent b({4, 0}, {7, 3});
     REQUIRE_FALSE(a.overlaps(b));

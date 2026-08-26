@@ -1,47 +1,12 @@
-// -----------------------------------------------------------------------------
-// IdentifySampleCCL.cpp -- Out-of-core CCL for sample identification
-// -----------------------------------------------------------------------------
-//
-// This file implements the out-of-core optimized variant of the IdentifySample
-// algorithm. It replaces the BFS flood-fill approach (see IdentifySampleBFS.cpp)
-// with scanline Connected Component Labeling (CCL) and a "replay" technique
-// designed to process data in strict Z-slice sequential order, avoiding chunk
-// thrashing in OOC storage.
-//
-// ## Architecture: Generic CCL + Replay
-//
-// The implementation is built on two generic template functions:
-//
-// 1. runForwardCCL<T>(store, dims, condition, cancel)
-//    Performs a single forward scan through the volume in Z-Y-X order. For each
-//    voxel where `condition` returns true, assigns a provisional label by
-//    checking three backward neighbors (x-1, y-1, z-1) in a rolling 2-slice
-//    label buffer. Records equivalences and sizes in bounded external fixed
-//    records. Returns a CCLResult containing that state and the largest root.
-//
-// 2. replayForwardCCL<T>(store, dims, equivalences, condition, action, cancel)
-//    Re-executes the exact same forward scan to re-derive the same provisional
-//    labels deterministically. For each labeled voxel, resolves the provisional
-//    label to its root through the external equivalence table, then calls
-//    `action(data, inSlice, root, x, y, z)` to apply per-voxel logic. If the
-//    action modifies the slice data, the slice is written back via copyFromBuffer.
-//
-// This "run then replay" pattern avoids O(volume) label storage. The trade-off
-// is reading each Z-slice twice (once during run, once during replay), but for
-// OOC datasets the memory savings are critical -- the volume itself may not fit
-// in RAM.
-//
-// ## Phase Structure
-//
-// The IdentifySampleCCLFunctor orchestrates up to four phases:
-//   Phase 1: runForwardCCL on good voxels -> find largest component
-//   Phase 2: replayForwardCCL on good voxels -> mask non-sample voxels
-//   Phase 3: runForwardCCL on bad voxels -> find hole components (if FillHoles)
-//   Phase 4a: replayForwardCCL on bad voxels -> identify boundary-touching roots
-//   Phase 4b: replayForwardCCL on bad voxels -> fill interior holes
-//
-// See IdentifySampleCCL.hpp for detailed algorithm documentation.
-// -----------------------------------------------------------------------------
+/**
+ * @file IdentifySampleCCL.cpp
+ * @brief Implements bounded scanline connected-component labeling (CCL) for sample identification.
+ *
+ * Breadth-first search (BFS) has random neighbor access that can repeatedly load and evict disk-backed
+ * chunks. CCL scans Z-Y-X slices sequentially. A replay repeats deterministic
+ * label assignment instead of retaining one label for every voxel. The replay
+ * costs an extra sequential read but keeps label memory proportional to two slices.
+ */
 
 #include "IdentifySampleCCL.hpp"
 
@@ -65,53 +30,32 @@ using namespace nx::core;
 
 namespace
 {
-// =============================================================================
-// runForwardCCL
-// =============================================================================
-// Generic Z-slice-sequential Connected Component Labeling function that works
-// on any boolean condition. It processes the volume one Z-slice at a time using
-// copyIntoBuffer for OOC-friendly reads, and a rolling 2-slice label buffer
-// instead of storing labels for the entire volume.
-//
-// How it works:
-//   - Scans voxels in Z-slice order (z, y, x innermost). For each voxel where
-//     `condition(sliceData, inSlice)` returns true, checks three backward
-//     neighbors (x-1, y-1, z-1) for existing labels.
-//   - If no labeled neighbor exists, assigns a new provisional label.
-//   - If multiple differently-labeled neighbors exist, unites them through the
-//     external equivalence table.
-//   - Tracks component counts in external records, so the largest root needs no
-//     resident per-label state.
-//
-// The `condition` lambda determines which voxels to label. For example:
-//   - `data[inSlice] == true` labels good voxels (sample identification)
-//   - `!data[inSlice]` labels bad voxels (hole detection)
-//
-// Returns a CCLResult containing bounded external equivalences, the next
-// available label, and the largest root/size.
-// =============================================================================
 /**
- * @brief Owns the externally backed equivalence state and summary produced by one forward CCL pass.
+ * @struct CCLResult
+ * @brief Owns one forward CCL pass's equivalence state and summary.
  *
- * Only the largest root and size remain resident; the label relationships are
- * replayed from the input during later phases instead of storing one label per cell.
+ * Replay re-derives provisional labels instead of storing one label per voxel.
  */
 struct CCLResult
 {
-  std::unique_ptr<ExternalEquivalence> equivalences;
-  uint64 nextLabel = 1;
-  uint64 largestRoot = 0;
-  uint64 largestSize = 0;
+  std::unique_ptr<ExternalEquivalence> equivalences; // Owns bounded external label relationships.
+  uint64 nextLabel = 1;                              // First unused provisional label.
+  uint64 largestRoot = 0;                            // Root label of the largest component.
+  uint64 largestSize = 0;                            // Voxel count of the largest component.
 };
 
-constexpr uint64 k_RecordsPerPage = 4096;
-constexpr usize k_MaxCachedPages = 16;
+constexpr uint64 k_RecordsPerPage = 4096; // Bounds records read or written in one cache page.
+constexpr usize k_MaxCachedPages = 16;    // Bounds resident temporary-record cache pages.
 
 /**
  * @brief Creates fixed-record scratch through the registered provider, with an explicitly permitted resident fallback.
+ * @param recordSize Bytes in one record.
+ * @param recordCount Initial record count.
+ * @param allowInMemoryFallback True to permit resident scratch.
+ * @return Temporary record store or a provider error.
  *
- * Genuine OOC callers pass false so missing external storage fails closed rather
- * than silently allocating cell-count scratch in RAM.
+ * Disk-backed callers set allowInMemoryFallback false. This prevents a missing
+ * provider from silently allocating cell-count scratch in RAM.
  */
 Result<std::unique_ptr<ITemporaryRecordStore>> CreateTemporaryRecordStore(uint64 recordSize, uint64 recordCount, bool allowInMemoryFallback)
 {
@@ -136,7 +80,12 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateTemporaryRecordStore(uint64
   return result;
 }
 
-/** @brief Creates one lazily initialized external-equivalence node for every possible provisional label. */
+/**
+ * @brief Creates external equivalence nodes for provisional labels.
+ * @param maximumLabel Largest possible provisional label.
+ * @param allowInMemoryFallback True to permit resident scratch.
+ * @return External equivalence table or a record-store error.
+ */
 Result<std::unique_ptr<ExternalEquivalence>> CreateEquivalences(uint64 maximumLabel, bool allowInMemoryFallback)
 {
   if(maximumLabel == std::numeric_limits<uint64>::max())
@@ -152,15 +101,21 @@ Result<std::unique_ptr<ExternalEquivalence>> CreateEquivalences(uint64 maximumLa
 }
 
 /**
- * @brief Externally stored Boolean flags for component roots that touch a domain boundary.
+ * @class ExternalRootFlags
+ * @brief Stores boundary-touch flags for component roots.
  *
- * Hole filling uses these flags during a later replay, avoiding a label-count
- * resident vector when the number of components is large.
+ * Hole filling reads these flags during replay. The cache avoids a root-count
+ * resident vector when a volume has many components.
  */
 class ExternalRootFlags
 {
 public:
-  /** @brief Creates zero-initialized root-flag storage and its bounded cache. */
+  /**
+   * @brief Creates zero-initialized root flags and a bounded cache.
+   * @param maximumLabel Largest possible root label.
+   * @param allowInMemoryFallback True to permit resident scratch.
+   * @return Root flags or a record-store or allocation error.
+   */
   static Result<std::unique_ptr<ExternalRootFlags>> Create(uint64 maximumLabel, bool allowInMemoryFallback)
   {
     auto storeResult = CreateTemporaryRecordStore(sizeof(uint8), maximumLabel + 1, allowInMemoryFallback);
@@ -177,13 +132,23 @@ public:
     }
   }
 
-  /** @brief Marks one resolved root as boundary-connected. */
+  /**
+   * @brief Marks one root as boundary connected.
+   * @param label Resolved root label.
+   * @param shouldCancel Cancellation flag.
+   * @return Cache write or cancellation result.
+   */
   Result<> mark(uint64 label, const std::atomic_bool& shouldCancel)
   {
     return m_Cache.write(label, uint8{1}, shouldCancel);
   }
 
-  /** @brief Tests one resolved root through the bounded page cache. */
+  /**
+   * @brief Tests one root through the bounded page cache.
+   * @param label Resolved root label.
+   * @param shouldCancel Cancellation flag.
+   * @return True when label is boundary connected, or a cache result.
+   */
   Result<bool> isMarked(uint64 label, const std::atomic_bool& shouldCancel)
   {
     auto result = m_Cache.read(label, shouldCancel);
@@ -194,14 +159,21 @@ public:
     return {result.value() != 0};
   }
 
-  /** @brief Flushes dirty flag pages before the subsequent replay reads them. */
+  /**
+   * @brief Flushes dirty root-flag pages before replay reads them.
+   * @param shouldCancel Cancellation flag.
+   * @return Cache flush or cancellation result.
+   */
   Result<> flush(const std::atomic_bool& shouldCancel)
   {
     return m_Cache.flush(shouldCancel);
   }
 
 private:
-  /** @brief Takes ownership of the validated flag store and binds its bounded cache. */
+  /**
+   * @brief Takes ownership of a validated root-flag store.
+   * @param store Root-flag record store.
+   */
   explicit ExternalRootFlags(std::unique_ptr<ITemporaryRecordStore> store)
   : m_Store(std::move(store))
   , m_Cache(*m_Store, k_RecordsPerPage, k_MaxCachedPages)
@@ -214,7 +186,19 @@ private:
 
 /**
  * @brief Labels a 3D volume in Z/Y/X order with two resident label slices and external equivalences.
- * @return Externally backed label relationships plus the largest component summary.
+ * @tparam T Mask value type.
+ * @tparam ConditionFn Callable that selects a voxel in the current slice.
+ * @param store Mask store.
+ * @param dimX Image X dimension.
+ * @param dimY Image Y dimension.
+ * @param dimZ Image Z dimension.
+ * @param condition Selects voxels to label.
+ * @param shouldCancel Cancellation flag.
+ * @return CCL state, partial state on cancellation, or bulk-I/O or equivalence error.
+ *
+ * Each voxel compares only x-1, y-1, and z-1. Two rolling label slices are
+ * enough for this traversal and avoid a volume-sized label array.
+ * The pass flushes equivalence pages before a replay resolves labels.
  */
 template <typename T, typename ConditionFn>
 Result<CCLResult> runForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 dimY, int64 dimZ, ConditionFn condition, const std::atomic_bool& shouldCancel)
@@ -234,10 +218,7 @@ Result<CCLResult> runForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 d
   }
   result.equivalences = std::move(equivalencesResult.value());
 
-  // Rolling 2-slice buffer: only the current and previous Z-slice labels are
-  // kept in memory. The scanline CCL only looks at backward neighbors (x-1,
-  // y-1, z-1), so two slices suffice. This gives O(dimX * dimY) memory
-  // instead of O(volume).
+  // Two rolling slices cover the only backward neighbors needed by Z-Y-X traversal.
   std::vector<int64> labelBuffer(2 * sliceSize, 0);
   auto sliceData = std::make_unique<T[]>(sliceSize);
 
@@ -268,7 +249,6 @@ Result<CCLResult> runForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 d
           continue;
         }
 
-        // Backward neighbor checks from label buffer
         int64 nbrA = 0, nbrB = 0, nbrC = 0;
 
         if(x > 0)
@@ -342,9 +322,7 @@ Result<CCLResult> runForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 d
     }
   }
 
-  // ExternalEquivalence carries component sizes in disk-backed records. Scan
-  // only roots in ascending label order so equal-size ties retain the original
-  // implementation's final (largest label) winner.
+  // Ascending root scans make an equal-size tie select the largest label.
   for(uint64 label = 1; label < result.nextLabel; label++)
   {
     auto rootResult = result.equivalences->find(label, shouldCancel);
@@ -375,36 +353,23 @@ Result<CCLResult> runForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 d
   return {std::move(result)};
 }
 
-// =============================================================================
-// replayForwardCCL
-// =============================================================================
-// Re-derives labels by running the exact same forward CCL scan a second time
-// (same Z-slice order, same scanline traversal, same union-find). Since CCL
-// label assignment is fully deterministic given the same scan order and
-// condition, the re-derived provisional labels match the original ones from
-// runForwardCCL exactly. The union-find (already flattened) is then used to
-// resolve each provisional label to its root.
-//
-// The `action` lambda is called for each labeled voxel with its resolved root
-// label, the slice data buffer, and the voxel's (x, y, z) coordinates. It
-// returns true if the slice data was modified, so the slice can be written back
-// via copyFromBuffer. This allows per-voxel decisions (e.g., "mask out if
-// root != largestRoot", or "fill if root is an interior hole") without ever
-// storing labels for the entire volume.
-//
-// This is the key OOC trick: by re-computing labels on the fly using only a
-// 2-slice rolling buffer, we avoid O(volume) label storage. The trade-off is
-// reading the data twice, but for OOC datasets the memory savings are critical.
-//
-// Note: the union-find unite() calls from the first pass are not repeated here
-// because the union-find is already flattened. We only need the label
-// assignment logic to re-derive the same provisional labels.
-// =============================================================================
 /**
  * @brief Re-derives the first pass's provisional labels and applies an action using resolved roots.
+ * @tparam T Mask value type.
+ * @tparam ConditionFn Callable that selects a voxel in the current slice.
+ * @tparam ActionFn Callable that processes one resolved voxel label.
+ * @param store Mask store.
+ * @param dimX Image X dimension.
+ * @param dimY Image Y dimension.
+ * @param dimZ Image Z dimension.
+ * @param equivalences Provisional-label equivalences from the forward scan.
+ * @param condition Selects voxels to label.
+ * @param action Processes a resolved root and reports slice modification.
+ * @param shouldCancel Cancellation flag.
+ * @return Bulk-I/O, equivalence, action, or cancellation result.
  *
- * Replaying trades one sequential read pass for removal of a full-volume label
- * array, which is the central bounded-memory choice in this implementation.
+ * The identical traversal re-derives the same labels without another unite pass.
+ * A modified slice writes back once after all its voxel actions complete.
  */
 template <typename T, typename ConditionFn, typename ActionFn>
 Result<> replayForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 dimY, int64 dimZ, ExternalEquivalence& equivalences, ConditionFn condition, ActionFn action,
@@ -443,7 +408,6 @@ Result<> replayForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 dimY, i
           continue;
         }
 
-        // Re-derive label (same logic, no union-find unites needed since already flattened)
         int64 nbrA = 0, nbrB = 0, nbrC = 0;
 
         if(x > 0)
@@ -485,7 +449,6 @@ Result<> replayForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 dimY, i
 
         labelBuffer[curOff + inSlice] = assignedLabel;
 
-        // Apply the action with the re-derived label
         auto rootResult = equivalences.find(static_cast<uint64>(assignedLabel), shouldCancel);
         if(rootResult.invalid())
         {
@@ -515,7 +478,21 @@ Result<> replayForwardCCL(AbstractDataStore<T>& store, int64 dimX, int64 dimY, i
   return {};
 }
 
-/** @brief Performs the same bounded CCL operation on one already buffered 2D plane. */
+/**
+ * @brief Labels one buffered 2D plane with rolling row labels.
+ * @tparam T Mask value type.
+ * @tparam ConditionFn Callable that selects a plane value.
+ * @param data Plane data.
+ * @param dim1 Plane fast dimension.
+ * @param dim2 Plane slow dimension.
+ * @param condition Selects values to label.
+ * @param allowInMemoryFallback True to permit resident temporary records.
+ * @param shouldCancel Cancellation flag.
+ * @return CCL state, partial state on cancellation, or an equivalence error.
+ *
+ * Two label rows cover left and above neighbors. This keeps per-plane CCL
+ * memory proportional to its row width.
+ */
 template <typename T, typename ConditionFn>
 Result<CCLResult> runPlaneCCL(T* data, int64 dim1, int64 dim2, ConditionFn condition, bool allowInMemoryFallback, const std::atomic_bool& shouldCancel)
 {
@@ -606,7 +583,20 @@ Result<CCLResult> runPlaneCCL(T* data, int64 dim1, int64 dim2, ConditionFn condi
   return {std::move(result)};
 }
 
-/** @brief Replays a buffered 2D plane's labels and invokes an action for each selected value. */
+/**
+ * @brief Replays buffered 2D labels and invokes an action for each selected value.
+ * @tparam T Mask value type.
+ * @tparam ConditionFn Callable that selects a plane value.
+ * @tparam ActionFn Callable that processes a resolved plane root.
+ * @param data Plane data.
+ * @param dim1 Plane fast dimension.
+ * @param dim2 Plane slow dimension.
+ * @param equivalences Provisional-label equivalences from the plane scan.
+ * @param condition Selects values to label.
+ * @param action Processes each resolved root.
+ * @param shouldCancel Cancellation flag.
+ * @return Equivalence, action, or cancellation result.
+ */
 template <typename T, typename ConditionFn, typename ActionFn>
 Result<> replayPlaneCCL(T* data, int64 dim1, int64 dim2, ExternalEquivalence& equivalences, ConditionFn condition, ActionFn action, const std::atomic_bool& shouldCancel)
 {
@@ -648,7 +638,17 @@ Result<> replayPlaneCCL(T* data, int64 dim1, int64 dim2, ExternalEquivalence& eq
   return {};
 }
 
-/** @brief Retains the largest good 2D component and optionally fills non-boundary bad components. */
+/**
+ * @brief Retains the largest good plane component and optionally fills holes.
+ * @tparam T Mask value type.
+ * @param data Plane data modified in place.
+ * @param dim1 Plane fast dimension.
+ * @param dim2 Plane slow dimension.
+ * @param fillHoles True to fill non-boundary bad components.
+ * @param allowInMemoryFallback True to permit resident temporary records.
+ * @param shouldCancel Cancellation flag.
+ * @return CCL, root-flag, replay, or cancellation result.
+ */
 template <typename T>
 Result<> identifyPlane(T* data, int64 dim1, int64 dim2, bool fillHoles, bool allowInMemoryFallback, const std::atomic_bool& shouldCancel)
 {
@@ -725,10 +725,26 @@ Result<> identifyPlane(T* data, int64 dim1, int64 dim2, bool fillHoles, bool all
       shouldCancel);
 }
 
-/** @brief Dispatches Bool/UInt8 plane extraction, bounded plane CCL, and checked write-back. */
+/**
+ * @struct IdentifySampleSliceCCLFunctor
+ * @brief Dispatches bounded slice-by-slice CCL by mask value type.
+ */
 struct IdentifySampleSliceCCLFunctor
 {
-  /** @brief Processes every plane of the selected orientation with one plane buffer at a time. */
+  /**
+   * @brief Processes selected planes with one plane buffer at a time.
+   * @tparam T Mask value type.
+   * @param imageGeom Image geometry that supplies dimensions.
+   * @param maskArray Mask array modified in place.
+   * @param fillHoles True to fill non-boundary bad components.
+   * @param plane Selected plane orientation.
+   * @param messageHandler Receives slice progress messages.
+   * @param shouldCancel Cancellation flag.
+   * @return Bulk-I/O, CCL, or cancellation result.
+   *
+   * XY planes transfer contiguously. XZ planes transfer contiguous rows. YZ
+   * planes bulk-read Z slices before extracting and updating one column.
+   */
   template <typename T>
   Result<> operator()(const ImageGeom* imageGeom, IDataArray* maskArray, bool fillHoles, IdentifySampleSliceBySliceFunctor::Plane plane, const IFilter::MessageHandler& messageHandler,
                       const std::atomic_bool& shouldCancel) const
@@ -863,41 +879,25 @@ struct IdentifySampleSliceCCLFunctor
   }
 };
 
-// =============================================================================
-// IdentifySampleCCLFunctor
-// =============================================================================
-// Z-slice-sequential scanline CCL implementation for identifying the largest
-// connected component of good voxels in a 3D image geometry, then optionally
-// filling interior holes. Processes data one Z-slice at a time using
-// copyIntoBuffer/copyFromBuffer for OOC-friendly access, using a 2-slice
-// rolling buffer (O(slice) memory) instead of O(volume).
-//
-// The algorithm has up to four phases:
-//
-// Phase 1: Forward CCL on good voxels
-//   Run runForwardCCL with condition = (goodVoxels[inSlice] == true) to
-//   discover all connected components and find the largest one by voxel count.
-//
-// Phase 2: Replay CCL to mask non-sample voxels
-//   Run replayForwardCCL with the same good-voxel condition. For each voxel
-//   whose resolved root != largestRoot, set goodVoxels to false (removing
-//   satellite regions/noise). No O(volume) label storage is needed -- labels
-//   are recomputed on the fly.
-//
-// Phase 3 (if fillHoles): Forward CCL on bad voxels
-//   Run runForwardCCL with condition = (!goodVoxels[inSlice]) to discover all
-//   connected components of non-sample space (potential holes + exterior).
-//
-// Phase 4 (if fillHoles): Replay CCL to identify and fill interior holes
-//   First replay: for each bad-voxel component, check if any voxel lies on
-//   a domain boundary. Mark boundary-touching roots in a boolean vector.
-//   Second replay: for each bad voxel whose root is NOT boundary-touching,
-//   set goodVoxels to true (filling the interior hole).
-// =============================================================================
-/** @brief Dispatches the full-volume bounded CCL and replay pipeline by mask value type. */
+/**
+ * @struct IdentifySampleCCLFunctor
+ * @brief Runs full-volume bounded CCL and replay by mask value type.
+ */
 struct IdentifySampleCCLFunctor
 {
-  /** @brief Runs largest-sample retention followed by optional boundary-aware hole filling. */
+  /**
+   * @brief Retains the largest sample and optionally fills interior holes.
+   * @tparam T Mask value type.
+   * @param imageGeom Image geometry that supplies dimensions.
+   * @param goodVoxelsPtr Mask array modified in place.
+   * @param fillHoles True to fill non-boundary bad components.
+   * @param messageHandler Receives progress messages.
+   * @param shouldCancel Cancellation flag.
+   * @return CCL, replay, root-flag, bulk-I/O, or cancellation result.
+   *
+   * The function discovers good components, replays to remove non-sample roots,
+   * then optionally identifies boundary-connected bad roots before filling holes.
+   */
   template <typename T>
   Result<> operator()(const ImageGeom* imageGeom, IDataArray* goodVoxelsPtr, bool fillHoles, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
   {
@@ -908,9 +908,7 @@ struct IdentifySampleCCLFunctor
     const int64 dimY = static_cast<int64>(udims[1]);
     const int64 dimZ = static_cast<int64>(udims[2]);
 
-    // --- Phase 1: Forward CCL on good voxels ----------------------------------
-    // Discover all connected components of good voxels and find the largest one.
-    // The condition lambda selects voxels where goodVoxels[inSlice] is true.
+    // Discover good components and select the largest root.
     auto goodCondition = [](const T* data, usize inSlice) -> bool { return static_cast<bool>(data[inSlice]); };
     auto cclResult = runForwardCCL<T>(goodVoxels, dimX, dimY, dimZ, goodCondition, shouldCancel);
     if(cclResult.invalid())
@@ -923,11 +921,7 @@ struct IdentifySampleCCLFunctor
       return {};
     }
 
-    // --- Phase 2: Replay CCL to mask non-sample voxels ----------------------
-    // Re-derive labels using a second forward pass with the same scan order
-    // and condition. For each voxel whose resolved root is not the largest
-    // component, set goodVoxels to false (removing satellite regions/noise).
-    // No O(volume) label storage is needed -- labels are recomputed on the fly.
+    // Replay the same traversal to remove good voxels outside the largest root.
     const uint64 largestRoot = cclResult.value().largestRoot;
     auto replayGoodResult = replayForwardCCL<T>(
         goodVoxels, dimX, dimY, dimZ, *cclResult.value().equivalences, goodCondition,
@@ -950,13 +944,9 @@ struct IdentifySampleCCLFunctor
       return {};
     }
 
-    // --- Phase 3: Forward CCL on bad voxels (hole detection) -----------------
-    // Only runs if fillHoles is true. Discovers connected components of
-    // non-good voxels (the complement of the sample). These include both
-    // exterior empty space and interior holes.
     if(fillHoles)
     {
-      // Condition selects voxels where goodVoxels[inSlice] is false (bad data)
+      // Discover bad components. Boundary-connected roots are exterior space.
       auto holeCondition = [](const T* data, usize inSlice) -> bool { return !static_cast<bool>(data[inSlice]); };
       auto holeCCL = runForwardCCL<T>(goodVoxels, dimX, dimY, dimZ, holeCondition, shouldCancel);
       if(holeCCL.invalid())
@@ -969,12 +959,7 @@ struct IdentifySampleCCLFunctor
         return {};
       }
 
-      // --- Phase 4a: Replay CCL to identify boundary-touching roots ---------
-      // Replay the hole CCL to re-derive labels. For each labeled voxel,
-      // check if it lies on a domain boundary face. If so, mark its resolved
-      // root as boundary-touching. Components that touch the boundary are
-      // exterior space (not holes). This avoids O(volume) label storage by
-      // re-computing labels on the fly.
+      // Replay bad labels to mark roots that touch a domain boundary.
       const bool allowInMemoryFallback = goodVoxels.getStoreType() != IDataStore::StoreType::OutOfCore;
       auto boundaryRootsResult = ExternalRootFlags::Create(holeCCL.value().nextLabel, allowInMemoryFallback);
       if(boundaryRootsResult.invalid())
@@ -993,7 +978,7 @@ struct IdentifySampleCCLFunctor
                 return ConvertInvalidResult<bool>(std::move(markResult));
               }
             }
-            return {false}; // Never modifies data
+            return {false};
           },
           shouldCancel);
       if(boundaryResult.invalid())
@@ -1011,11 +996,7 @@ struct IdentifySampleCCLFunctor
         return {};
       }
 
-      // --- Phase 4b: Replay CCL again to fill interior holes ----------------
-      // A third replay of the same CCL (same condition, same union-find) to
-      // apply the fill. For each bad voxel whose root is NOT boundary-touching,
-      // it must be an interior hole fully enclosed by the sample -- set it to
-      // true. Boundary-touching components are exterior and left as-is.
+      // Replay bad labels again to fill roots that do not touch the boundary.
       auto fillResult = replayForwardCCL<T>(
           goodVoxels, dimX, dimY, dimZ, *holeCCL.value().equivalences, holeCondition,
           [&boundaryRoots, &shouldCancel](T* data, usize inSlice, uint64 root, usize /*x*/, usize /*y*/, usize /*z*/) -> Result<bool> {
@@ -1042,7 +1023,6 @@ struct IdentifySampleCCLFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 IdentifySampleCCL::IdentifySampleCCL(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const IdentifySampleInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -1051,10 +1031,8 @@ IdentifySampleCCL::IdentifySampleCCL(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 IdentifySampleCCL::~IdentifySampleCCL() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> IdentifySampleCCL::operator()()
 {
   auto* inputData = m_DataStructure.getDataAs<IDataArray>(m_InputValues->MaskArrayPath);

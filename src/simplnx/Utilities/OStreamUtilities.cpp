@@ -16,21 +16,30 @@ using namespace nx::core;
 
 namespace // for nonmember functions
 {
-const std::array<std::string, 5> k_DelimiterStrings = {" ", ";", ",", ":", "\t"}; // Don't reorder
+// Delimiter underlying values index this table. Keep the enum and table order equal.
+const std::array<std::string, 5> k_DelimiterStrings = {" ", ";", ",", ":", "\t"};
 
 /**
- * @brief implicit writing of **NeighborList**'s elements to outputStrm
- * @tparam ScalarType The primitive type attached to **NeighborList**
- * @param outputStrm the ostream to write to
- * @param inputNeighborList The **NeighborList** that will have its values translated into strings
- * @param mesgHandler The message handler to dump progress updates to
- * // default parameters
- * @param delimiter The delimiter to insert between values
- * @param hasIndex bool to determine if index must be printed
- * @param hasHeaders bool to determine if headers must be printed
+ * @struct PrintNeighborList
+ * @brief Dispatches delimited text output for one neighbor-list value type.
  */
 struct PrintNeighborList
 {
+  /**
+   * @brief Writes all lists and optional index and header fields.
+   * @tparam ScalarType Specifies the neighbor value type.
+   * @param outputStrm Receives text output.
+   * @param inputNeighborList Supplies the runtime-validated neighbor list.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Supplies the cancellation flag.
+   * @param delimiter Specifies field separation.
+   * @param hasIndex True to write each list index.
+   * @param hasHeader True to write column names.
+   * @return Valid result. This function does not report stream failures.
+   * @pre inputNeighborList is non-null and has the dispatched ScalarType.
+   *
+   * Cancellation is checked with throttled progress and can leave partial output.
+   */
   template <typename ScalarType>
   Result<> operator()(std::ostream& outputStrm, INeighborList* inputNeighborList, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const std::string& delimiter = ",",
                       bool hasIndex = false, bool hasHeader = false)
@@ -86,7 +95,7 @@ struct PrintNeighborList
         outputStrm << "\n";
       }
     }
-    else // no index
+    else
     {
       for(size_t list = 0; list < neighborList.getNumberOfLists(); list++)
       {
@@ -130,22 +139,31 @@ struct PrintNeighborList
 };
 
 /**
+ * @struct PrintDataArray
  * @brief Writes a numeric DataArray as delimited text using bounded contiguous reads.
  *
- * The page size is derived from a fixed byte target so resident and disk-backed
- * stores follow the same path without allocating storage proportional to the
- * full array. Formatting still proceeds tuple by tuple to preserve the existing
- * file layout and cancellation/progress behavior.
- * @tparam ScalarType The primitive type attached to **DataArray**
- * @param outputStrm the ostream to write to
- * @param inputDataArray The **DataArray** that will have its values translated into strings
- * @param mesgHandler The message handler to dump progress updates to
- * // default parameters
- * @param delimiter The delimiter to insert between values
- * @param componentsPerLine The number of components per line
+ * A fixed byte target sets the page size. Resident and disk-backed stores use
+ * the same path. Memory does not grow with the full array. Tuple-wise formatting
+ * preserves the file layout.
  */
 struct PrintDataArray
 {
+  /**
+   * @brief Writes one runtime-typed numeric array as text.
+   * @tparam ScalarType Specifies the array value type.
+   * @param outputStrm Receives text output.
+   * @param inputDataArray Supplies the numeric array.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Supplies the cancellation flag.
+   * @param delimiter Specifies value separation.
+   * @param tuplesPerLine Specifies tuples per line. Zero selects one.
+   * @return Valid result or the first bounded store-read error.
+   * @pre The array has at least one component. tuplesPerLine is nonnegative.
+   * @pre Component and page-size products fit usize.
+   *
+   * Cancellation returns a valid result and can leave partial output. Text stream
+   * failures are not reported by this function.
+   */
   template <typename ScalarType>
   Result<> operator()(std::ostream& outputStrm, const IDataArray& inputDataArray, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const std::string& delimiter = ",",
                       int32 tuplesPerLine = 0)
@@ -186,7 +204,6 @@ struct PrintDataArray
           return {};
         }
 
-        // Write out all the components for this tuple
         for(size_t index = 0; index < numComps; index++)
         {
           const ScalarType value = values[localTuple * numComps + index];
@@ -207,7 +224,7 @@ struct PrintDataArray
             outputStrm << delimiter;
           }
         }
-        // Now figure out if we need a new line character or if we need the delimiter instead.
+        // A tuple group ends with a newline. Other tuples end with the delimiter.
         tuplesWritten++;
         if(tuplesWritten == tuplesPerLine)
         {
@@ -225,6 +242,7 @@ struct PrintDataArray
 };
 
 /**
+ * @struct PrintBinaryDataArray
  * @brief Writes a numeric DataArray in bounded contiguous pages. Byte swapping,
  * when requested, is applied only to the caller-owned page and never mutates the
  * source array.
@@ -232,12 +250,15 @@ struct PrintDataArray
 struct PrintBinaryDataArray
 {
   /**
-   * @brief Streams one type-dispatched array to @p outputStrm in fixed-size pages.
-   * @param outputStrm Destination stream owned by the caller.
-   * @param inputDataArray Numeric array whose runtime type is @p ScalarType.
-   * @param shouldCancel Stops before the next page when set.
-   * @param swapEndian Whether each value should be byte-swapped in the temporary page.
-   * @return The first storage-read or stream-write failure, or success after all pages.
+   * @brief Streams one runtime-typed array in fixed-size pages.
+   * @tparam ScalarType Specifies the array value type.
+   * @param outputStrm Receives binary output.
+   * @param inputDataArray Supplies the numeric array.
+   * @param shouldCancel Supplies the cancellation flag.
+   * @param swapEndian True to byte-swap each temporary value.
+   * @return First store-read or stream-write error, or a valid result.
+   *
+   * Cancellation returns a valid result and can leave partial output.
    */
   template <typename ScalarType>
   Result<> operator()(std::ostream& outputStrm, const IDataArray& inputDataArray, const std::atomic_bool& shouldCancel, bool swapEndian)
@@ -278,13 +299,15 @@ struct PrintBinaryDataArray
 };
 
 /**
- * @brief writing of **StringArray**'s elements to outputStrm
- * @param absoluteFilePath The output path to write to
- * @param inputStringArray The **StringArray** that will have its values translated into strings
- * @param mesgHandler The message handler to dump progress updates to
- * // default parameters
- * @param delimiter The delimiter to insert between values
- * @return A result object with any errors or warnings
+ * @brief Writes one string value per line.
+ * @param outputStrm Receives text output.
+ * @param inputStringArray Supplies string tuples.
+ * @param mesgHandler Receives progress messages.
+ * @param shouldCancel Supplies the cancellation flag.
+ * @param delimiter Reserved for API consistency. This function does not use it.
+ * @return Valid result. This function does not report stream failures.
+ *
+ * Cancellation is checked with throttled progress and can leave partial output.
  */
 Result<> PrintStringArray(std::ostream& outputStrm, const StringArray& inputStringArray, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                           const std::string& delimiter = ",")
@@ -312,8 +335,8 @@ Result<> PrintStringArray(std::ostream& outputStrm, const StringArray& inputStri
 }
 
 /**
- * @brief Type-erased interface used to interleave one tuple from each selected
- * array into a shared ASCII row.
+ * @class ITupleWriter
+ * @brief Provides type-erased tuple interleaving for a shared ASCII row.
  *
  * Implementations retain only references to source arrays and any bounded read
  * cache. They must not outlive the referenced DataStructure objects.
@@ -323,20 +346,34 @@ class ITupleWriter
 public:
   ITupleWriter() = default;
   virtual ~ITupleWriter() = default;
-  /** @brief Appends tuple @p tupleIndex to the caller-owned stream. */
+  /**
+   * @brief Appends one tuple to a caller-owned stream.
+   * @param outputStrm Receives tuple values.
+   * @param tupleIndex Identifies the source tuple.
+   */
   virtual void write(std::ostream& outputStrm, usize tupleIndex) const = 0;
 
-  /** @brief Appends this array's column name or component column names. */
+  /**
+   * @brief Appends this array's column names.
+   * @param outputStrm Receives header text.
+   */
   virtual void writeHeader(std::ostream& outputStrm) const = 0;
 };
 
-/** @brief Tuple writer for StringArray values, which require no numeric type dispatch. */
+/**
+ * @class StringTupleWriter
+ * @brief Writes quoted StringArray tuples without numeric type dispatch.
+ */
 class StringTupleWriter : public ITupleWriter
 {
   using DataArrayType = StringArray;
 
 public:
-  /** @brief Borrows the source StringArray and copies its surrounding delimiter. */
+  /**
+   * @brief Creates a writer with one borrowed source array.
+   * @param iDataArray Supplies the array and must outlive this writer.
+   * @param delimiter Specifies the copied quote or delimiter text.
+   */
   StringTupleWriter(const StringArray& iDataArray, const std::string& delimiter)
   : m_DataArray(dynamic_cast<const StringArray&>(iDataArray))
   , m_Delimiter(delimiter)
@@ -350,13 +387,20 @@ public:
   StringTupleWriter& operator=(const StringTupleWriter&) = delete;
   StringTupleWriter& operator=(StringTupleWriter&&) noexcept = delete;
 
-  /** @brief Appends one quoted string tuple to the shared ASCII row. */
+  /**
+   * @brief Appends one surrounded string tuple.
+   * @param outputStrm Receives the value.
+   * @param tupleIndex Identifies the source tuple.
+   */
   void write(std::ostream& outputStrm, usize tupleIndex) const override
   {
     outputStrm << m_Delimiter << m_DataArray[tupleIndex] << m_Delimiter;
   }
 
-  /** @brief Appends the single StringArray column name. */
+  /**
+   * @brief Appends the single StringArray column name.
+   * @param outputStrm Receives the header.
+   */
   void writeHeader(std::ostream& outputStrm) const override
   {
     outputStrm << m_DataArray.getName();
@@ -368,10 +412,12 @@ private:
 };
 
 /**
+ * @class TupleWriter
  * @brief Numeric tuple writer with a one-megabyte forward read cache.
+ * @tparam ScalarType Specifies the numeric array value type.
  *
- * WriteASCIIData requests tuples in increasing order. Caching the surrounding
- * page converts those requests into bulk store reads while keeping memory
+ * PrintDataSetsToSingleFile requests tuples in increasing order. Caching the
+ * surrounding page converts those requests into bulk store reads while keeping memory
  * bounded independently of array size. A nonsequential request simply replaces
  * the cache with a page beginning at that tuple.
  */
@@ -385,6 +431,7 @@ public:
    * @brief Borrows one typed source store and allocates its fixed one-megabyte forward page.
    * @param iDataArray Runtime-validated source array that must outlive this writer.
    * @param delimiter Borrowed component delimiter that must outlive this writer.
+   * @pre The source has at least one component. Page-size products fit usize.
    */
   TupleWriter(const IDataArray& iDataArray, const std::string& delimiter)
   : m_Name(iDataArray.getName())
@@ -399,8 +446,13 @@ public:
   ~TupleWriter() override = default;
 
   /**
-   * @brief Appends one numeric tuple, refilling the bounded page only when necessary.
+   * @brief Appends one numeric tuple and refills the bounded page when necessary.
+   * @param outputStrm Receives tuple values.
+   * @param tupleIndex Identifies the source tuple.
    * @throws std::runtime_error When the source DataStore page cannot be read.
+   * @pre tupleIndex is less than the source tuple count. The source has at least one component.
+   *
+   * Stream failures are not reported.
    */
   void write(std::ostream& outputStrm, usize tupleIndex) const override
   {
@@ -408,8 +460,7 @@ public:
     {
       m_BufferStartTuple = tupleIndex;
       m_BufferTupleCount = std::min(m_TuplesPerBuffer, m_DataStore.getNumberOfTuples() - tupleIndex);
-      // Refill only when the requested tuple falls outside the current forward
-      // page. Sequential ASCII export therefore performs one store read per page.
+      // Sequential tuple requests perform one store read for each forward page.
       Result<> readResult = m_DataStore.copyIntoBuffer(tupleIndex * m_NumComps, nonstd::span<ScalarType>(m_Values.get(), m_BufferTupleCount * m_NumComps));
       if(readResult.invalid())
       {
@@ -444,10 +495,12 @@ public:
     }
   }
 
-  /** @brief Appends one column name per component using the configured delimiter. */
+  /**
+   * @brief Appends one column name for each component.
+   * @param outputStrm Receives header text.
+   */
   void writeHeader(std::ostream& outputStrm) const override
   {
-    // If there is only 1 component then write the name of the array and return
     if(m_NumComps == 1)
     {
       outputStrm << m_Name;
@@ -476,10 +529,20 @@ private:
   mutable usize m_BufferTupleCount = 0;
 };
 
-/** @brief Type-dispatch adapter that creates the matching numeric TupleWriter. */
+/**
+ * @struct AddTupleWriter
+ * @brief Creates the numeric TupleWriter selected by runtime type dispatch.
+ */
 struct AddTupleWriter
 {
-  /** @brief Constructs and appends the numeric tuple writer selected by runtime type dispatch. */
+  /**
+   * @brief Constructs and appends one typed tuple writer.
+   * @tparam ScalarType Specifies the numeric array value type.
+   * @param writers Receives the new writer.
+   * @param iDataArray Supplies the source array.
+   * @param delimiter Supplies the component delimiter and must outlive the writer.
+   * @return Valid result.
+   */
   template <typename ScalarType>
   Result<> operator()(std::vector<std::shared_ptr<ITupleWriter>>& writers, const IDataArray& iDataArray, const std::string& delimiter)
   {
@@ -491,30 +554,11 @@ struct AddTupleWriter
 
 namespace nx::core::OStreamUtilities
 {
-/**
- * @brief turns the enum in this API to respective character as a string
- * @param delim the underlying value of the enum type
- */
 std::string DelimiterToString(uint64 delim)
 {
   return k_DelimiterStrings[delim];
 };
 
-/**
- * @brief [BINARY CAPABLE, unless neighborlist][Multiple File Output] | Writes out to multiple files | !!!!endianess must be addressed in calling class!!!!
- * @param objectPaths The vector of datapaths for respective dataObjects to be written out
- * @param dataStructure The simplnx datastructure where *objectPaths* datacontainers are stored
- * @param directoryPath The path to the directory to write files to | used to create outputStrm paths for ofstream
- * @param mesgHandler The handler to send progress updates to
- * @param shouldCancel The atomic boolean that determines cancel
- * //params with defaults
- * @param fileExtension The extension to create and write to files with
- * @param exportToBinary The boolean that determines if it writes out binary
- * @param delimiter The delimiter to be inserted into string | leave blank if binary is end output
- * @param includeIndex The boolean that determines if "Feature_IDs" are printed | leave blank if binary is end output
- * @param includeHeaders The boolean that determines if headers are printed | leave blank if binary is end output
- * @param componentsPerLine The amount of elements to be inserted before newline character | leave blank if binary is end output
- */
 Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, DataStructure& dataStructure, const std::string& directoryPath, const IFilter::MessageHandler& mesgHandler,
                                       const std::atomic_bool& shouldCancel, const std::string& fileExtension, bool exportToBinary, const std::string& delimiter, bool includeIndex, bool includeHeaders,
                                       size_t tuplesPerLine, bool swapEndian)
@@ -538,7 +582,8 @@ Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, 
     auto outputFilePath = atomicFile.tempFilePath().string();
     mesgHandler(IFilter::Message::Type::Info, fmt::format("Writing IArray ({}) to output file {}", dataPath.getTargetName(), outputFilePath));
 
-    // Scope file writer in code block to get around file lock on windows (enforce destructor order)
+    // Close the stream before AtomicFile renames its temporary file. Windows does
+    // not permit that rename while this stream still owns the file handle.
     {
       std::ofstream outStrm(outputFilePath, std::ios_base::out | std::ios_base::binary);
 
@@ -589,17 +634,6 @@ Result<> PrintDataSetsToMultipleFiles(const std::vector<DataPath>& objectPaths, 
   return {};
 }
 
-/**
- * @brief [Single Output][Custom OStream] | Writes one IArray child to some OStream
- * @param outputStrm The already opened output string to write to
- * @param objectPath The datapath for respective dataObject to be written out
- * @param dataStructure The simplnx datastructure where *objectPath* datacontainer is stored
- * //params with defaults
- * @param delimiter The delimiter to be inserted into string
- * @param includeIndex The boolean that determines if "Feature_IDs" are printed
- * @param includeHeaders The boolean that determines if headers are printed
- * @param componentsPerLine The amount of elements to be inserted before newline character
- */
 void PrintSingleDataObject(std::ostream& outputStrm, const DataPath& objectPath, DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                            const std::string& delimiter, bool includeIndex, bool includeHeaders, size_t componentsPerLine)
 {
@@ -622,20 +656,6 @@ void PrintSingleDataObject(std::ostream& outputStrm, const DataPath& objectPath,
   }
 };
 
-/**
- * @brief [Single Output][Custom OStream] | writes out multiple arrays to ostream
- * @param outputStrm The already opened output string to write to
- * @param objectPaths The vector of datapaths for respective dataObjects to be written out
- * @param dataStructure The simplnx datastructure where *objectPaths* datacontainers are stored
- * @param mesgHandler The handler to send progress updates to
- * @param shouldCancel The atomic boolean that determines cancel
- * //params with defaults
- * @param delimiter The delimiter to be inserted into string
- * @param includeIndex The boolean that determines if "Feature_IDs" are printed
- * @param includeHeaders The boolean that determines if headers are printed
- * @param componentsPerLine The amount of elements to be inserted before newline character
- * @param neighborLists The list of dataPaths of neighborlists to include
- */
 void PrintDataSetsToSingleFile(std::ostream& outputStrm, const std::vector<DataPath>& objectPaths, DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler,
                                const std::atomic_bool& shouldCancel, const std::string& delimiter, bool includeIndex, bool includeHeaders, bool writeFirstIndex, const std::string& indexName,
                                const std::vector<DataPath>& neighborLists, bool writeNumOfFeatures)
@@ -644,7 +664,7 @@ void PrintDataSetsToSingleFile(std::ostream& outputStrm, const std::vector<DataP
   usize numTuples = firstDataArray.getNumberOfTuples();
   auto start = std::chrono::steady_clock::now();
 
-  // Create our wrapper classes for each DataArray
+  // Type-erased writers let one tuple loop interleave different array types.
   std::vector<std::shared_ptr<ITupleWriter>> writers;
   for(const auto& selectedArrayPath : objectPaths)
   {
@@ -680,7 +700,6 @@ void PrintDataSetsToSingleFile(std::ostream& outputStrm, const std::vector<DataP
     outputStrm << featureCount << "\n";
   }
 
-  // Write out the header line
   if(includeHeaders)
   {
     if(includeIndex)
@@ -703,7 +722,7 @@ void PrintDataSetsToSingleFile(std::ostream& outputStrm, const std::vector<DataP
     return;
   }
 
-  // Loop on ever tuple using our predefined writer for each data array
+  // Feature-oriented exports can omit background tuple zero.
   size_t writerIndexStart = 0;
   if(!writeFirstIndex)
   {

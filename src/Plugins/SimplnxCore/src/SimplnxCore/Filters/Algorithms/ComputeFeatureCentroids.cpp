@@ -17,13 +17,10 @@ using namespace nx::core;
 
 namespace
 {
-/// Number of FeatureId tuples to read per bulk I/O call. 64K tuples balances
-/// between minimizing the number of copyIntoBuffer() round-trips and keeping
-/// the per-chunk buffer small enough to stay in L2 cache.
+// Each bulk read contains 65,536 Feature IDs. This keeps the staging buffer cache-sized.
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureCentroids::ComputeFeatureCentroids(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                  ComputeFeatureCentroidsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -33,39 +30,13 @@ ComputeFeatureCentroids::ComputeFeatureCentroids(DataStructure& dataStructure, c
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureCentroids::~ComputeFeatureCentroids() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeFeatureCentroids::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes the centroid of each feature using chunked bulk I/O and Kahan
- * summation.
- *
- * Algorithm:
- *   1. Read FeatureIds in 64K-tuple chunks via copyIntoBuffer().
- *   2. For each voxel in the chunk, compute its XYZ voxel-center coordinate from
- *      the flat index, origin, and spacing (avoiding ImageGeom::getCoords() virtual call).
- *   3. Accumulate each coordinate component into a Kahan sum keyed by feature ID.
- *   4. Track per-feature min/max XYZ indices for periodic boundary detection.
- *   5. Divide accumulated sums by voxel counts to produce centroids.
- *   6. Write all centroids to the output DataStore in one copyFromBuffer() call.
- *   7. If IsPeriodic, adjust centroids for features that wrap around geometry bounds.
- *
- * OOC optimization rationale:
- *   The previous implementation used a ParallelDataAlgorithm with per-element
- *   operator[] access on FeatureIds, plus DataStore-backed accumulation arrays.
- *   For OOC FeatureIds stores, every operator[] triggered a chunk load. The
- *   chunked approach reduces chunk operations from O(totalVoxels) to
- *   O(totalVoxels / 64K), and plain-vector accumulators eliminate virtual dispatch
- *   entirely for the feature-level bookkeeping.
- */
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureCentroids::operator()()
 {
   const auto* featureIdsPtr = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
@@ -85,10 +56,7 @@ Result<> ComputeFeatureCentroids::operator()()
   const usize yPoints = imageGeom.getNumYCells();
   const usize zPoints = imageGeom.getNumZCells();
 
-  // Plain std::vectors for accumulation instead of DataStore-backed arrays.
-  // These are feature-level (small, typically thousands of elements), so they
-  // fit easily in memory. Using plain vectors avoids AbstractDataStore virtual
-  // dispatch on every accumulation step in the hot voxel loop.
+  // Feature-sized vectors avoid DataStore calls in the voxel accumulation loop.
   const usize featureElems3 = totalFeatures * 3;
   const usize featureElems2 = totalFeatures * 2;
   std::vector<float64> kahanSum(featureElems3, 0.0);
@@ -110,8 +78,7 @@ Result<> ComputeFeatureCentroids::operator()()
   const usize totalVoxels = xPoints * yPoints * zPoints;
   const usize xySize = xPoints * yPoints;
 
-  // Main voxel loop: read FeatureIds in 64K-tuple chunks via copyIntoBuffer().
-  // Each chunk is processed from the local buffer with zero OOC overhead.
+  // Each chunk resolves coordinates and feature accumulation from local values.
   auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
   for(usize offset = 0; offset < totalVoxels; offset += k_ChunkTuples)
   {
@@ -126,8 +93,7 @@ Result<> ComputeFeatureCentroids::operator()()
     for(usize idx = 0; idx < chunkCount; idx++)
     {
       const int32 featureId = featureIdBuf[idx];
-      // Feature 0 is a valid tuple and must be accumulated just like every
-      // other non-negative feature ID; only negative/unassigned IDs are skipped.
+      // Feature zero is valid. Only negative or unassigned IDs are skipped.
       if(featureId < 0)
       {
         continue;
@@ -163,8 +129,7 @@ Result<> ComputeFeatureCentroids::operator()()
     }
   }
 
-  // Finalize centroids: divide Kahan sums by voxel counts, then bulk-write
-  // all centroids to the output DataStore in a single copyFromBuffer() call.
+  // One bulk write publishes all finalized Kahan means.
   std::vector<float32> centroidsBuf(featureElems3, 0.0f);
   for(usize featureId = 0; featureId < totalFeatures; featureId++)
   {
@@ -185,8 +150,7 @@ Result<> ComputeFeatureCentroids::operator()()
 
     ShapeType tupleShape{totalFeatures};
     ShapeType componentShape{2};
-    // These are scratch buffers passed by reference to AdjustCentroidsForPeriodicFaces;
-    // they never live in a DataStructure, so they're allocated as plain in-memory stores.
+    // Periodic adjustment receives plain stores because these feature ranges never enter the DataStructure.
     auto rangeXStorePtr = std::make_shared<DataStore<uint64>>(tupleShape, componentShape, uint64{0});
     auto rangeYStorePtr = std::make_shared<DataStore<uint64>>(tupleShape, componentShape, uint64{0});
     auto rangeZStorePtr = std::make_shared<DataStore<uint64>>(tupleShape, componentShape, uint64{0});

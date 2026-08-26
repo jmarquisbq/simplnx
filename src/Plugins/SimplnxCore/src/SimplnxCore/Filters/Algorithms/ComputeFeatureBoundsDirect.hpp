@@ -7,17 +7,37 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
 struct ComputeFeatureBoundsInputValues;
 
 /**
  * @class ComputeFeatureBoundsDirect
- * @brief Computes feature bounds using contiguous datastore access and feature-sized
- * index extrema for in-memory image inputs.
+ * @brief Computes feature bounds with resident direct access.
+ *
+ * ImageGeom input uses feature-sized index extrema and row runs. Other supported geometries use
+ * direct vertex and connectivity access. The normal dispatcher avoids this path for out-of-core
+ * Feature IDs. A forced direct out-of-core run can perform per-element store access.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureBoundsDirect
 {
 public:
+  /**
+   * @brief Initializes the direct feature-bound algorithm.
+   * @param dataStructure Contains geometry, Feature IDs, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation before computation starts.
+   * @param inputValues Selects output layout and required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
+   */
   ComputeFeatureBoundsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeFeatureBoundsInputValues* inputValues);
+  /**
+   * @brief Destroys the direct feature-bound algorithm.
+   */
   ~ComputeFeatureBoundsDirect() noexcept;
 
   ComputeFeatureBoundsDirect(const ComputeFeatureBoundsDirect&) = delete;
@@ -25,6 +45,13 @@ public:
   ComputeFeatureBoundsDirect& operator=(const ComputeFeatureBoundsDirect&) = delete;
   ComputeFeatureBoundsDirect& operator=(ComputeFeatureBoundsDirect&&) noexcept = delete;
 
+  /**
+   * @brief Computes feature bounds with direct element access.
+   * @return Success, or a geometry or feature-sizing error.
+   *
+   * A cancellation signal before execution returns success without output changes. The direct path
+   * does not inspect cancellation after it starts.
+   */
   Result<> operator()();
 
 private:

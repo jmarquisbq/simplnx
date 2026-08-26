@@ -31,11 +31,9 @@ TEST_CASE("OrientationAnalysis::ReadH5Ebsd: Valid filter execution", "[Orientati
 
   auto* filterList = Application::Instance()->getFilterList();
 
-  // Read Exemplar DREAM3D File
   auto exemplarFilePath = fs::path(fmt::format("{}/Small_IN100.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = LoadDataStructure(exemplarFilePath);
 
-  // ReadH5EbsdFilter
   DataStructure dataStructure;
   {
     ReadH5EbsdFilter filter;
@@ -54,11 +52,9 @@ TEST_CASE("OrientationAnalysis::ReadH5Ebsd: Valid filter execution", "[Orientati
     args.insertOrAssign(ReadH5EbsdFilter::k_CellAttributeMatrixName_Key, std::make_any<std::string>(Constants::k_CellData));
     args.insertOrAssign(ReadH5EbsdFilter::k_CellEnsembleAttributeMatrixName_Key, std::make_any<std::string>(Constants::k_EnsembleAttributeMatrix));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = filter.execute(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
@@ -67,7 +63,6 @@ TEST_CASE("OrientationAnalysis::ReadH5Ebsd: Valid filter execution", "[Orientati
   WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/read_h5ebsd_test.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
 
-  // Loop and compare each array from the 'Exemplar Data / CellData' to the 'Data Container / CellData' group
   {
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<AttributeMatrix>(Constants::k_CellAttributeMatrix));
     auto& cellDataGroup = dataStructure.getDataRefAs<AttributeMatrix>(Constants::k_CellAttributeMatrix);
@@ -75,7 +70,6 @@ TEST_CASE("OrientationAnalysis::ReadH5Ebsd: Valid filter execution", "[Orientati
     auto& cellEnsembleDataGroup = dataStructure.getDataRefAs<AttributeMatrix>(Constants::k_CellEnsembleAttributeMatrixPath);
     std::vector<DataPath> selectedArrays;
 
-    // Create the vector of selected cell DataPaths
     for(auto& child : cellDataGroup)
     {
       selectedArrays.push_back(Constants::k_CellAttributeMatrix.createChildPath(child.second->getName()));
@@ -89,6 +83,8 @@ TEST_CASE("OrientationAnalysis::ReadH5Ebsd: Valid filter execution", "[Orientati
     {
       if(arrayPath.getTargetName() == ::k_MaterialName)
       {
+        // MaterialName is a StringArray. The numeric-array switch cannot
+        // compare it.
         continue;
       }
       REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(arrayPath));

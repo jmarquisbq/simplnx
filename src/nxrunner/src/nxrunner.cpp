@@ -59,11 +59,17 @@ constexpr StringLiteral k_LogFileParamShort = "-l";
 constexpr StringLiteral k_ConvertParamShort = "-c";
 constexpr StringLiteral k_CacheMemoryBudgetParamLong = "--cache-memory-budget";
 
+/**
+ * @brief Loads plugins from nxrunner build and application package locations.
+ *
+ * The first location supports developer and CI build trees. On non-Windows
+ * platforms, the second location supports the Plugins directory in an
+ * application package.
+ */
 void LoadApp()
 {
   auto app = Application::GetOrCreateInstance();
-  // Try loading plugins from the directory that the executable is in.
-  // This is the default for developer build trees and CI build trees
+  // The executable directory is the plugin location in developer and CI build trees.
   fs::path appPath = app->getCurrentDir();
   auto result = app->loadPlugins(appPath, true);
   if(result.invalid())
@@ -71,12 +77,11 @@ void LoadApp()
     fmt::print(stderr, "Error loading plugins from '{}'\n", appPath.string());
   }
 
-  // For non-windows platforms we need to look in the actual 'Plugins'
-  // directory which is up one directory from the executable.
+  // Non-Windows packages keep plugins in a sibling Plugins directory.
 #ifndef _MSC_VER
   {
     appPath = appPath.parent_path();
-    // Check if there is a Plugins Folder inside the app package
+    // Do not report an error when the optional package directory does not exist.
     if(fs::exists(appPath / "Plugins"))
     {
       appPath = appPath / "Plugins";
@@ -90,12 +95,24 @@ void LoadApp()
 #endif
 }
 
+/**
+ * @class CliStream
+ * @brief Mirrors nxrunner output to stdout and an optional log file.
+ *
+ * The stream always writes to stdout. After setLogFile() succeeds, each later
+ * value and line terminator also writes to the truncated log file.
+ */
 class CliStream
 {
 public:
   CliStream() = default;
   ~CliStream() noexcept = default;
 
+  /**
+   * @brief Opens a log file and truncates its existing content.
+   * @param filepath Nonempty destination path.
+   * @return An error if the path is empty or the file cannot open.
+   */
   Result<> setLogFile(const std::filesystem::path& filepath)
   {
     if(filepath.empty() || filepath.string().length() == 0)
@@ -115,6 +132,12 @@ public:
     return {};
   }
 
+  /**
+   * @brief Writes one value to stdout and the open log file.
+   * @tparam T Specifies the value type.
+   * @param value Value to write.
+   * @return This stream.
+   */
   template <typename T>
   CliStream& operator<<(T value)
   {
@@ -125,6 +148,10 @@ public:
     }
     return *this;
   }
+  /**
+   * @brief Writes and flushes a line terminator to each active stream.
+   * @return This stream.
+   */
   CliStream& endline()
   {
     std::cout << std::endl;
@@ -141,22 +168,35 @@ private:
 
 CliStream cliOut;
 
+/**
+ * @enum ArgumentType
+ * @brief Identifies an nxrunner command-line operation.
+ */
 enum class ArgumentType
 {
-  Invalid,
-  Execute,
-  Preflight,
-  Help,
-  Logfile,
-  Convert,
-  CacheMemoryBudget
+  Invalid,          ///< Marks an unsupported operand.
+  Execute,          ///< Runs a pipeline.
+  Preflight,        ///< Preflights a pipeline.
+  Help,             ///< Displays command help.
+  Logfile,          ///< Selects a log file.
+  Convert,          ///< Converts a legacy pipeline.
+  CacheMemoryBudget ///< Overrides the cache budget for this process.
 };
 
+/**
+ * @struct Argument
+ * @brief Stores one parsed command-line operand and its optional value.
+ */
 struct Argument
 {
   ArgumentType type;
   std::string value;
 
+  /**
+   * @brief Creates a parsed argument.
+   * @param targetType Operand type.
+   * @param targetValue Operand value, or an empty string when no value exists.
+   */
   Argument(ArgumentType targetType, std::string targetValue = "")
   : type(targetType)
   , value(targetValue)
@@ -166,6 +206,14 @@ struct Argument
 
 using CliArguments = std::vector<Argument>;
 
+/**
+ * @brief Copies one command-line token to a string.
+ * @param argc Number of command-line tokens.
+ * @param argv Command-line token array.
+ * @param index Token index.
+ * @return The selected token, or an empty string when index is greater than argc.
+ * @pre index must be less than argc for safe access.
+ */
 std::string toString(int argc, char* argv[], int index)
 {
   if(index > argc)
@@ -176,6 +224,13 @@ std::string toString(int argc, char* argv[], int index)
   return std::string(argv[index]);
 }
 
+/**
+ * @brief Reads the value after an operand and advances its token index.
+ * @param argc Number of command-line tokens.
+ * @param argv Command-line token array.
+ * @param index Operand index, updated to the value index when a value exists.
+ * @return The operand value, or an empty string if the next token starts another operand.
+ */
 std::string ParseArgument(int argc, char* argv[], int& index)
 {
   std::string argStr;
@@ -183,7 +238,7 @@ std::string ParseArgument(int argc, char* argv[], int& index)
   {
     argStr = argv[index];
 
-    // Check if starting another operand
+    // A leading hyphen starts the next operand, so the current operand has no value.
     if(argStr[0] == '-')
     {
       index--;
@@ -193,6 +248,12 @@ std::string ParseArgument(int argc, char* argv[], int& index)
   return argStr;
 }
 
+/**
+ * @brief Parses nxrunner operands and their optional values.
+ * @param argc Number of command-line tokens.
+ * @param argv Command-line token array.
+ * @return Parsed arguments, or an error when no operand exists.
+ */
 Result<CliArguments> ParseParameters(int argc, char* argv[])
 {
   if(argc < 2)
@@ -259,6 +320,13 @@ Result<CliArguments> ParseParameters(int argc, char* argv[])
   return {args};
 }
 
+/**
+ * @brief Writes Result diagnostics and converts the first error code to a process code.
+ * @tparam T Specifies the Result value type.
+ * @param result Result to print.
+ * @return 0 for a valid Result, or the first error code for an invalid Result.
+ * @pre An invalid Result must contain at least one error.
+ */
 template <typename T = void>
 int PrintResult(const Result<T>& result)
 {
@@ -280,6 +348,11 @@ int PrintResult(const Result<T>& result)
   return result.errors()[0].code;
 }
 
+/**
+ * @brief Preflights a loaded pipeline while a CLI observer reports progress.
+ * @param pipeline Pipeline to preflight.
+ * @return An error if Pipeline::preflight() returns false.
+ */
 Result<> PreflightPipeline(Pipeline& pipeline)
 {
   const CLI::PipelineObserver obs(&pipeline);
@@ -297,6 +370,11 @@ Result<> PreflightPipeline(Pipeline& pipeline)
   return {};
 }
 
+/**
+ * @brief Executes a loaded pipeline while a CLI observer reports progress.
+ * @param pipeline Pipeline to execute.
+ * @return An error if Pipeline::execute() returns false.
+ */
 Result<> ExecutePipeline(Pipeline& pipeline)
 {
   const CLI::PipelineObserver obs(&pipeline);
@@ -313,6 +391,14 @@ Result<> ExecutePipeline(Pipeline& pipeline)
   return {};
 }
 
+/**
+ * @brief Loads and executes the pipeline named by an argument.
+ * @param arg Execute operand with a pipeline path value.
+ * @return Load diagnostics or the pipeline execution result.
+ *
+ * A `.json` path is a legacy pipeline. The helper returns its load result and
+ * instructs the user to convert the file before execution.
+ */
 Result<> ExecutePipeline(const Argument& arg)
 {
   std::string pipelinePath = arg.value;
@@ -351,6 +437,14 @@ Result<> ExecutePipeline(const Argument& arg)
   return ExecutePipeline(pipeline);
 }
 
+/**
+ * @brief Loads and preflights the pipeline named by an argument.
+ * @param arg Preflight operand with a pipeline path value.
+ * @return Load diagnostics or the pipeline preflight result.
+ *
+ * A `.json` path is a legacy pipeline. The helper returns its load result and
+ * instructs the user to convert the file before preflight.
+ */
 Result<> PreflightPipeline(const Argument& arg)
 {
   std::string pipelinePath = arg.value;
@@ -389,6 +483,16 @@ Result<> PreflightPipeline(const Argument& arg)
   return PreflightPipeline(pipeline);
 }
 
+/**
+ * @brief Converts or validates the pipeline named by an argument.
+ * @param arg Convert operand with a pipeline path value.
+ * @param printConvertedPipeline True to write the converted JSON to CLI output.
+ * @param saveConverted True to save converted legacy input as a .d3dpipeline file.
+ * @return Conversion or validation diagnostics.
+ *
+ * A `.json` input uses the legacy converter. A `.d3dpipeline` input receives a
+ * validation load and is never rewritten.
+ */
 Result<> ConvertPipeline(const Argument& arg, bool printConvertedPipeline, bool saveConverted)
 {
   std::string pipelinePath = arg.value;
@@ -447,6 +551,9 @@ Result<> ConvertPipeline(const Argument& arg, bool printConvertedPipeline, bool 
   return ConvertResult(std::move(loadPipelineResult));
 }
 
+/**
+ * @brief Writes the nxrunner command summary.
+ */
 void DisplayDefaultHelp()
 {
   cliOut << "Options:\n";
@@ -462,6 +569,9 @@ void DisplayDefaultHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes help for pipeline execution.
+ */
 void DisplayExecuteHelp()
 {
   cliOut << "To execute a target pipeline file:\n\t";
@@ -470,6 +580,9 @@ void DisplayExecuteHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes help for pipeline preflight.
+ */
 void DisplayPreflightHelp()
 {
   cliOut << "To preflight a target pipeline file:\n\t";
@@ -478,6 +591,9 @@ void DisplayPreflightHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes help for legacy pipeline conversion.
+ */
 void DisplayConvertHelp()
 {
   cliOut << "To convert a target SIMPL pipeline file:\n\t";
@@ -486,6 +602,9 @@ void DisplayConvertHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes help for log-file output.
+ */
 void DisplayLogfileHelp()
 {
   cliOut << "To export output a log file:\n\t";
@@ -493,6 +612,9 @@ void DisplayLogfileHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes help for the process cache-budget override.
+ */
 void DisplayCacheMemoryBudgetHelp()
 {
   cliOut << "To override the cache memory budget for this run:\n\t";
@@ -501,6 +623,11 @@ void DisplayCacheMemoryBudgetHelp()
   cliOut.endline();
 }
 
+/**
+ * @brief Writes general or operand-specific help.
+ * @param arguments Parsed arguments whose second operand selects detailed help.
+ * @return An error for unsupported help syntax.
+ */
 Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
 {
   if(arguments.size() == 1)
@@ -542,12 +669,22 @@ Result<> DisplayHelpMenu(const std::vector<Argument>& arguments)
   return nx::core::MakeErrorResult(k_FailedParsingArguments, ss);
 }
 
+/**
+ * @brief Creates an error for an unsupported command-line argument.
+ * @param argument Invalid argument.
+ * @return An invalid-argument Result.
+ */
 Result<> CreateArgumentError(const Argument& argument)
 {
   std::string errorMessage = fmt::format("Failed to parse argument: {}", argument.value);
   return nx::core::MakeErrorResult(k_InvalidArgumentError, errorMessage);
 }
 
+/**
+ * @brief Opens the log file named by an argument.
+ * @param argument Logfile operand with a path value.
+ * @return The log-stream open result.
+ */
 Result<> SetLogFile(const Argument& argument)
 {
   std::filesystem::path filepath(argument.value);
@@ -555,6 +692,12 @@ Result<> SetLogFile(const Argument& argument)
 }
 } // namespace
 
+/**
+ * @brief Runs the nxrunner command-line interface.
+ * @param argc Number of command-line tokens.
+ * @param argv Command-line token array.
+ * @return 0 on success, or a diagnostic error code on failure.
+ */
 int main(int argc, char* argv[])
 {
   cliOut << fmt::format("nxrunner: Version {} Build Date:{}\n\n", nx::core::Version::Package(), nx::core::Version::BuildDate());
@@ -577,7 +720,7 @@ int main(int argc, char* argv[])
 
   std::optional<uint64> overrideCacheMemoryBudgetBytes;
 
-  // Set log file and check for parsing errors
+  // Apply options that must take effect before plugin loading or target execution.
   for(const Argument& argument : arguments)
   {
     switch(argument.type)
@@ -628,14 +771,24 @@ int main(int argc, char* argv[])
     }
   }
 
-  // Load the Simplnx Application instance and load the plugins
+  // Create the Application before the temporary preference override.
   auto app = nx::core::Application::GetOrCreateInstance();
 
+  /**
+   * @struct PreferencesCacheBudgetRestorer
+   * @brief Restores the process preference after a command-line cache-budget override.
+   *
+   * The restorer does not save preferences to disk. It removes the key if the
+   * key did not exist before this nxrunner invocation.
+   */
   struct PreferencesCacheBudgetRestorer
   {
     Preferences* prefs = nullptr;
     bool wasPresent = false;
     uint64 originalValue = 0;
+    /**
+     * @brief Restores or removes the cache-budget preference key.
+     */
     ~PreferencesCacheBudgetRestorer()
     {
       if(prefs == nullptr)
@@ -666,11 +819,10 @@ int main(int argc, char* argv[])
         cacheBudgetRestorer.originalValue = preferences->cacheMemoryBudgetBytes();
       }
       preferences->setCacheMemoryBudgetBytes(*overrideCacheMemoryBudgetBytes);
-      // Apply the override to the running budget manager as well. setBudgetBytes
-      // clamps to the machine-safe maximum. Without this, the OOC chunk/stride
-      // caches would run at the manager's default budget and the override would
-      // be silently ignored in headless runs. (Clamping is silent here, matching
-      // the GUI-only-logging design decision.)
+      // The preference does not update the running manager. Apply the value there too.
+      // setBudgetBytes() clamps the request to the machine-safe maximum.
+      // This call keeps headless OOC caches from using the manager's default budget.
+      // The CLI stays silent when clamping because only the GUI reports that event.
       nx::core::CacheMemoryBudgetManager::instance().setBudgetBytes(*overrideCacheMemoryBudgetBytes);
     }
   }
@@ -713,7 +865,7 @@ int main(int argc, char* argv[])
 #endif
 
   int errorCode = 0;
-  // Run target operation
+  // Run only the first target operation. Earlier parsing handled process-wide options.
   switch(arguments[0].type)
   {
   case ArgumentType::Help: {
@@ -772,8 +924,7 @@ int main(int argc, char* argv[])
   }
   }
 
-  // Print Results and set error code
-
+  // Print all collected diagnostics. The last nonzero result becomes the process code.
   for(const auto& result : results)
   {
     if(int code = PrintResult(result); code != 0)

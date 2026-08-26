@@ -26,8 +26,8 @@ using LaueOpsContainerType = std::vector<LaueOpsShPtrType>;
 namespace gbpd_metric_based
 {
 /**
- * @brief The TriAreaAndNormals class defines a container that stores the area of a given triangle
- * and the two normals for grains on either side of the triangle
+ * @class TriAreaAndNormals
+ * @brief Stores one triangle area and its grain normals.
  */
 class TriAreaAndNormals
 {
@@ -59,8 +59,11 @@ public:
 };
 
 /**
- * @brief The TrianglesSelector class implements a threaded algorithm that determines which triangles to
- * include in the GBPD calculation
+ * @class TrianglesSelector
+ * @brief Selects triangles for GBPD calculation.
+ *
+ * The worker reads triangle arrays through specialized resident access. This
+ * does not establish generic DataArray or DataStore thread safety.
  */
 class TrianglesSelector
 {
@@ -149,7 +152,6 @@ public:
   }
 
 private:
-  // corresponding to Phase of Interest
   bool m_ExcludeTripleLines;
   const IGeometry::SharedFaceList& m_Triangles;
   const Int8Array& m_NodeTypes;
@@ -170,8 +172,8 @@ private:
 };
 
 /**
- * @brief The ProbeDistribution class implements a threaded algorithm that determines the distribution values
- * for the GBPD
+ * @class ProbeDistribution
+ * @brief Calculates GBPD values at sample points.
  */
 class ProbeDistribution
 {
@@ -232,7 +234,7 @@ public:
 
             if(gamma1 < m_LimitDist)
             {
-              // Kahan summation algorithm
+              // Kahan summation reduces area-accumulation error.
               const float64 y = selectedTriangle.Area - c;
               const float64 t = m_DistributionValues[ptIdx] + y;
               c = (t - m_DistributionValues[ptIdx]) - y;
@@ -281,7 +283,6 @@ private:
 
 } // namespace gbpd_metric_based
 
-// -----------------------------------------------------------------------------
 ComputeGBPDMetricBased::ComputeGBPDMetricBased(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                ComputeGBPDMetricBasedInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -291,16 +292,13 @@ ComputeGBPDMetricBased::ComputeGBPDMetricBased(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeGBPDMetricBased::~ComputeGBPDMetricBased() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeGBPDMetricBased::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeGBPDMetricBased::operator()()
 {
   auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
@@ -315,13 +313,7 @@ Result<> ComputeGBPDMetricBased::operator()()
   auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeometryPath);
   const IGeometry::SharedFaceList& triangles = triangleGeom.getFacesRef();
 
-  // Bulk-read the feature-level (Euler angles, phases) and ensemble-level (crystal
-  // structures) arrays into local vectors. The parallel TrianglesSelector and the
-  // distinct-boundary loop below index these randomly by feature ID; when these arrays
-  // are out-of-core, leaving them in their DataStores turns every triangle into a
-  // per-element disk/cache lookup (the cause of a measured ~2x slowdown vs in-core).
-  // These are feature/ensemble-sized (orders of magnitude smaller than the mesh), so
-  // caching them is bounded, not an O(mesh) allocation.
+  // Feature and ensemble caches prevent random per-triangle OOC access.
   const usize numEulerElements = eulerAngles.getSize();
   std::vector<float32> eulerCache(numEulerElements);
   eulerAngles.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(eulerCache.data(), numEulerElements));
@@ -342,8 +334,7 @@ Result<> ComputeGBPDMetricBased::operator()()
         -8325, fmt::format("Unsupported CrystalStructure value {} for phase index {}.", static_cast<uint32>(crystalStructuresCache[m_InputValues->PhaseOfInterest]), m_InputValues->PhaseOfInterest));
   }
 
-  // -------------------- check if directories are ok and if output files can be opened -----------
-  // Make sure the file name ends with _1 so the GMT scripts work correctly
+  // GMT scripts require the _1 filename suffix.
   fs::path distributionOutput = m_InputValues->DistOutputFile;
   std::string distFName = m_InputValues->DistOutputFile.stem().string();
   if(!distFName.empty() && !StringUtilities::ends_with(distFName, "_1"))
@@ -394,8 +385,8 @@ Result<> ComputeGBPDMetricBased::operator()()
   // ------------------------------ generation of sampling points ----------------------------------
   m_MessageHandler(IFilter::Message::Type::Info, "Generating sampling points");
 
-  // generate "Golden Section Spiral", see http://www.softimageblog.com/archives/115
-  const int numSamplePtsWholeSphere = 2 * m_InputValues->NumSamplPts; // here we generate points on the whole sphere
+  // The golden-section spiral distributes points across the sphere.
+  const int numSamplePtsWholeSphere = 2 * m_InputValues->NumSamplPts;
   std::vector<float64> samplePtsXHemisphere(0);
   std::vector<float64> samplePtsYHemisphere(0);
   std::vector<float64> samplePtsZHemisphere(0);
@@ -426,7 +417,7 @@ Result<> ComputeGBPDMetricBased::operator()()
     }
   }
 
-  // now, select the points from the SST
+  // Select points inside the fundamental symmetry triangle.
   for(usize ptIdxHemisphere = 0; ptIdxHemisphere < samplePtsXHemisphere.size(); ptIdxHemisphere++)
   {
     if(getCancel())
@@ -581,7 +572,7 @@ Result<> ComputeGBPDMetricBased::operator()()
     AppendSamplePtsFixedZenith(samplePtsX, samplePtsY, samplePtsZ, 90.0 * Constants::k_PiOver180D, 0.0, 120.0 * Constants::k_PiOver180D, limitDist);
   }
 
-  // ---------  find triangles corresponding to Phase of Interests, and their normals in crystal reference frames ---------
+  // Select phase-of-interest triangles and transform their normals.
   const usize numMeshTriangles = faceAreas.getNumberOfTuples();
 
 #ifdef SIMPLNX_ENABLE_MULTICORE
@@ -734,7 +725,6 @@ Result<> ComputeGBPDMetricBased::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
 void ComputeGBPDMetricBased::AppendSamplePtsFixedZenith(std::vector<float64>& xVec, std::vector<float64>& yVec, std::vector<float64>& zVec, float64 theta, float64 minPhi, float64 maxPhi, float64 step)
 {
   for(float64 phi = minPhi; phi <= maxPhi; phi += step)
@@ -748,7 +738,6 @@ void ComputeGBPDMetricBased::AppendSamplePtsFixedZenith(std::vector<float64>& xV
   zVec.push_back(std::cos(theta));
 }
 
-// -----------------------------------------------------------------------------
 void ComputeGBPDMetricBased::AppendSamplePtsFixedAzimuth(std::vector<float64>& xVec, std::vector<float64>& yVec, std::vector<float64>& zVec, float64 phi, float64 minTheta, float64 maxTheta,
                                                          float64 step)
 {

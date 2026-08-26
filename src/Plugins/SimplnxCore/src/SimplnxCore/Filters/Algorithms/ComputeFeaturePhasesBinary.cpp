@@ -13,18 +13,32 @@
 using namespace nx::core;
 namespace
 {
-/// Limits cell data transfers to five megabytes while keeping the 200^3 benchmark aligned to complete Z-slices.
+// One million Feature IDs and mask values use at most five MiB of cell staging memory.
 constexpr usize k_TargetChunkTuples = 1'000'000;
 
 /**
- * @brief Streams feature ids and mask values through bounded buffers and updates a feature-indexed cache.
+ * @struct ComputeFeaturePhasesBinaryFunctor
+ * @brief Assigns binary feature phases from bounded cell buffers.
  *
- * Cell order is deliberately serial because repeated feature ids use last-cell-wins semantics. The output cache
- * grows only to the largest referenced feature id and preserves pre-existing values for feature ids not present in
- * the input. This avoids per-cell DataStore access without allocating cell-sized scratch arrays.
+ * Serial cell order preserves last-cell-wins semantics. The output cache grows to the largest
+ * referenced Feature ID and retains unreferenced output values.
  */
 struct ComputeFeaturePhasesBinaryFunctor
 {
+  /**
+   * @brief Assigns phases from one mask element type.
+   * @tparam MaskType Specifies the mask element type.
+   * @param featureIdsArray Supplies cell Feature IDs.
+   * @param maskArray Supplies cell mask values.
+   * @param featurePhasesArray Receives feature phases.
+   * @param featureIdsPath Identifies the Feature ID array for errors.
+   * @param featurePhasesPath Identifies the output array for errors.
+   * @param shouldCancel Signals cancellation between cell chunks.
+   * @return Success, or a Feature ID or bulk-I/O error.
+   *
+   * When a checkpoint observes cancellation, the method returns success before
+   * its final output write.
+   */
   template <typename MaskType>
   Result<> operator()(const IDataArray& featureIdsArray, const IDataArray& maskArray, IDataArray& featurePhasesArray, const DataPath& featureIdsPath, const DataPath& featurePhasesPath,
                       const std::atomic_bool& shouldCancel) const
@@ -105,7 +119,6 @@ struct ComputeFeaturePhasesBinaryFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeaturePhasesBinary::ComputeFeaturePhasesBinary(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                        ComputeFeaturePhasesBinaryInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -115,10 +128,8 @@ ComputeFeaturePhasesBinary::ComputeFeaturePhasesBinary(DataStructure& dataStruct
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeaturePhasesBinary::~ComputeFeaturePhasesBinary() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeaturePhasesBinary::operator()()
 {
   const auto& featureIdsArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->FeatureIdsArrayPath);

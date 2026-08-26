@@ -58,7 +58,7 @@ void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize d
   const usize blocksPerDimX = dimX / blockSize;
   const usize blocksPerDimY = dimY / blockSize;
 
-  // Build data using Z-slice buffered writes for OOC efficiency
+  // Use Z-slice buffered writes to limit OOC memory use.
   std::vector<int32> featureIdsBuf(sliceSize);
   std::vector<float32> eulerBuf(sliceSize * 3);
   std::vector<int32> phasesBuf(sliceSize);
@@ -119,14 +119,14 @@ TEST_CASE("SimplnxCore::ErodeDilateBadDataFilter: Generate Test Data", "[Simplnx
   const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "erode_dilate_bad_data";
   fs::create_directories(outputDir);
 
-  // Small input data (20x20x20, blockSize=5)
+  // The small fixture uses a 20-cubed volume and block size 5.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 20, 20, 20, 5);
     UnitTest::WriteTestDataStructure(buildDS, outputDir / "small_input.dream3d");
   }
 
-  // Large input data (200x200x200, blockSize=25)
+  // The large fixture uses a 200-cubed volume and block size 25.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 200, 200, 200, 25);

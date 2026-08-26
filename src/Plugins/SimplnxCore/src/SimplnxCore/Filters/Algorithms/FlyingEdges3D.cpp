@@ -8,12 +8,22 @@ using namespace nx::core;
 
 namespace
 {
-/** @brief Type-dispatch adapter that runs and validates the four Flying Edges passes. */
+/**
+ * @struct ExecuteFlyingEdgesFunctor
+ * @brief Dispatches and validates the four Flying Edges passes.
+ */
 struct ExecuteFlyingEdgesFunctor
 {
   /**
-   * @brief Executes classification, prefix allocation, and output generation for
-   * the input scalar type, propagating any bounded source-read failure.
+   * @brief Runs one scalar specialization.
+   * @tparam T Input scalar type.
+   * @param image Supplies dimensions and coordinates.
+   * @param iDataArray Supplies scalar point values.
+   * @param isoVal Specifies the contour value before conversion to T.
+   * @param triangleGeom Receives surface points and faces.
+   * @param normals Receives point normals.
+   * @param normAM Owns the normals array.
+   * @return Success, or a source bulk-read error from pass 1, 2, or 4.
    */
   template <typename T>
   Result<> operator()(const ImageGeom& image, const IDataArray* iDataArray, float64 isoVal, TriangleGeom& triangleGeom, Float32AbstractDataStore& normals, AttributeMatrix& normAM)
@@ -29,7 +39,7 @@ struct ExecuteFlyingEdgesFunctor
     }
     flyingEdges.pass3();
 
-    // pass 3 resized normals so be sure to resize parent AM
+    // Pass 3 resizes normals. Keep the parent AttributeMatrix consistent.
     normAM.resizeTuples(normals.getTupleShape());
 
     if(Result<> result = flyingEdges.pass4(); result.invalid())
@@ -69,7 +79,7 @@ Result<> FlyingEdges3D::operator()()
   auto triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->triangleGeomPath);
   auto& normalsStore = m_DataStructure.getDataAs<Float32Array>(m_InputValues->normalsArrayPath)->getDataStoreRef();
 
-  // auto created so must have a parent
+  // Preflight creates normals under an AttributeMatrix.
   DataPath normAMPath = m_InputValues->normalsArrayPath.getParent();
 
   auto& normAM = m_DataStructure.getDataRefAs<AttributeMatrix>(normAMPath);

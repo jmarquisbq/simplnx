@@ -8,7 +8,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugate::ComputeQuaternionConjugate(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                        ComputeQuaternionConjugateInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -18,16 +17,13 @@ ComputeQuaternionConjugate::ComputeQuaternionConjugate(DataStructure& dataStruct
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeQuaternionConjugate::~ComputeQuaternionConjugate() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeQuaternionConjugate::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeQuaternionConjugate::operator()()
 {
   const auto& input = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuaternionDataArrayPath);

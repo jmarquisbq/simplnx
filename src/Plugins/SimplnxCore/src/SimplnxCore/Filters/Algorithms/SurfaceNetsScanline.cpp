@@ -1,37 +1,6 @@
 /**
  * @file SurfaceNetsScanline.cpp
- * @brief Out-of-core (OOC) optimized implementation of the SurfaceNets algorithm.
- *
- * This file reimplements the Surface Nets algorithm without using the MMSurfaceNet
- * library (which requires O(volume) memory and per-element FeatureIds access).
- * Instead, it reads FeatureIds via copyIntoBuffer() in Z-slice pairs and uses
- * a bounded cache over fixed-width padded-cell records.
- *
- * ## Key Differences from SurfaceNetsDirect
- *
- * 1. **No MMSurfaceNet/MMCellMap**: The Direct variant delegates cell classification
- *    to MMSurfaceNet, which allocates a Cell for every padded voxel (O(volume)).
- *    The Scanline variant performs cell classification inline using MMCellFlag
- *    directly, storing fixed-width padded-cell records in temporary storage.
- *
- * 2. **FeatureIds access**: Direct passes the full array to MMSurfaceNet which
- *    reads via operator[]. Scanline reads two Z-slices at a time via
- *    copyIntoBuffer() and resolves cell corner labels from the buffered slices
- *    using the cornerLabel() helper.
- *
- * 3. **Smoothing**: Direct delegates to MMSurfaceNet::relax() which operates on
- *    the full MMCellMap. Scanline performs smoothing through bounded
- *    temporary-record neighbor lookups.
- *
- * 4. **Edge quad generation**: Direct uses MMCellMap::getEdgeQuad() which looks
- *    up neighboring cells in the O(volume) cell array. Scanline uses the
- *    fixed padded-cell record store.
- *
- * 5. **Output writes**: Direct writes per-element. Scanline streams output in
- *    fixed-size bulk chunks.
- *
- * Temporary storage is file-backed for actual OOC dispatches; all resident
- * buffers have fixed chunk or page bounds.
+ * @brief Implements Surface Nets with slice I/O and external padded-cell records.
  */
 
 #include <array>
@@ -69,6 +38,12 @@ using LabelType = int32;
 
 /**
  * @brief Packs a padded-grid (i,j,k) coordinate into a fixed record-store index.
+ * @param i Padded X coordinate.
+ * @param j Padded Y coordinate.
+ * @param k Padded Z coordinate.
+ * @param paddedX Padded X dimension.
+ * @param paddedXY Product of padded X and Y dimensions.
+ * @return Flat padded-cell record index.
  */
 inline uint64 cellRecordIndex(int32 i, int32 j, int32 k, int32 paddedX, int32 paddedXY)
 {
@@ -77,33 +52,48 @@ inline uint64 cellRecordIndex(int32 i, int32 j, int32 k, int32 paddedX, int32 pa
 
 /**
  * @brief Adjusts a node type value for vertices on the exterior boundary.
- * Same logic as SurfaceNetsDirect but operates on a record-resident node type.
+ * @param value Current node type.
+ * @return Boundary-adjusted node type.
+ *
+ * Values below 10 receive an increment of 10. Marked values receive one.
  */
 constexpr inline int8 CalculatePadding(int8 value)
 {
   return value + ((9 * static_cast<int8>(value < 10)) + 1);
 }
 
-/** @brief Position and final vertex ID used while choosing a deterministic quad diagonal. */
+/**
+ * @struct VertexData
+ * @brief Stores a mesh vertex ID and position for quad triangulation.
+ */
 struct VertexData
 {
   usize VertexId = 0;
   std::array<float32, 3> Position;
 };
 
-/** @brief Computes the cross product used only for comparing alternative triangle areas. */
+/**
+ * @brief Computes a three-dimensional cross product.
+ * @param vert0 First vector.
+ * @param vert1 Second vector.
+ * @param result Local output copy. The caller's array is unchanged.
+ */
 void crossProduct(const std::array<float32, 3>& vert0, const std::array<float32, 3> vert1, std::array<float32, 3> result)
 {
-  // Cross product of vectors v0 and v1
   result[0] = vert0[1] * vert1[2] - vert0[2] * vert1[1];
   result[1] = vert0[2] * vert1[0] - vert0[0] * vert1[2];
   result[2] = vert0[0] * vert1[1] - vert0[1] * vert1[0];
 }
 
-/** @brief Returns one candidate triangle's area for minimum-area quad triangulation. */
+/**
+ * @brief Computes a triangle area from three positions.
+ * @param vert0 First position.
+ * @param vert1 Second position.
+ * @param vert2 Third position.
+ * @return Zero because crossProduct() receives its result by value.
+ */
 float32 triangleArea(std::array<float32, 3>& vert0, std::array<float32, 3>& vert1, std::array<float32, 3>& vert2)
 {
-  // Area of triangle with vertex positions p0, p1, p2
   const std::array<float32, 3> v01 = {vert1[0] - vert0[0], vert1[1] - vert0[1], vert1[2] - vert0[2]};
   const std::array<float32, 3> v02 = {vert2[0] - vert0[0], vert2[1] - vert0[1], vert2[2] - vert0[2]};
   std::array<float32, 3> cross = {0.0f, 0.0f, 0.0f};
@@ -113,14 +103,17 @@ float32 triangleArea(std::array<float32, 3>& vert0, std::array<float32, 3>& vert
 }
 
 /**
- * @brief Orients a surface quad and selects the lower-area of its two exact triangulations.
+ * @brief Orients a quad and selects its lower-area triangulation.
+ * @param vData Quad vertices, reordered in place.
+ * @param isQuadFrontFacing True when the initial order faces forward.
+ * @param triangleVtxIDs Receives two three-vertex triangles.
  *
- * This reproduces the Direct path's winding and diagonal choice while the
- * surrounding vertex state is supplied from bounded external records.
+ * Both area results are zero because crossProduct() cannot update its caller.
+ * Current call sites also supply zero positions. The first diagonal remains.
  */
 void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing, std::array<usize, 6>& triangleVtxIDs)
 {
-  // Order quad vertices so quad is front facing
+  // Swap side vertices when label order indicates back-facing winding.
   if(!isQuadFrontFacing)
   {
     VertexData const temp = vData[3];
@@ -128,8 +121,7 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
     vData[1] = temp;
   }
 
-  // Order quad vertices so that the two generated triangles have the minimal area. This
-  // reduces self intersections in the surface.
+  // Prefer the lower-area diagonal when positions distinguish the alternatives.
   float32 const thisArea = triangleArea(vData[0].Position, vData[1].Position, vData[2].Position) + triangleArea(vData[0].Position, vData[2].Position, vData[3].Position);
   float32 const alternateArea = triangleArea(vData[1].Position, vData[2].Position, vData[3].Position) + triangleArea(vData[1].Position, vData[3].Position, vData[0].Position);
   if(alternateArea < thisArea)
@@ -141,7 +133,7 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
     vData[3] = temp;
   }
 
-  // Generate vertex ids to triangulate the quad
+  // Emit two triangles as a fan from vertex zero.
   triangleVtxIDs[0] = vData[0].VertexId;
   triangleVtxIDs[1] = vData[1].VertexId;
   triangleVtxIDs[2] = vData[2].VertexId;
@@ -151,8 +143,17 @@ void getQuadTriangleIDs(std::array<VertexData, 4>& vData, bool isQuadFrontFacing
 }
 
 /**
- * @brief Computes the flat NX array index for a cell at padded (ci,cj,ck).
- * Returns max if outside the NX volume.
+ * @brief Converts a padded cell coordinate to a flat ImageGeom cell index.
+ * @param ci Padded X coordinate.
+ * @param cj Padded Y coordinate.
+ * @param ck Padded Z coordinate.
+ * @param paddedX Preserves the padded-dimension call signature.
+ * @param paddedY Preserves the padded-dimension call signature.
+ * @param paddedZ Preserves the padded-dimension call signature.
+ * @param dimX ImageGeom X dimension.
+ * @param dimY ImageGeom Y dimension.
+ * @param dimZ ImageGeom Z dimension.
+ * @return Flat ImageGeom index, or usize max outside the image.
  */
 inline usize edgeCellNxIndex(int32 ci, int32 cj, int32 ck, int32 paddedX, int32 paddedY, int32 paddedZ, usize dimX, usize dimY, usize dimZ)
 {
@@ -167,42 +168,41 @@ inline usize edgeCellNxIndex(int32 ci, int32 cj, int32 ck, int32 paddedX, int32 
 }
 
 /**
- * @brief Returns the FeatureId label for a corner at padded coordinates (ci,cj,ck).
+ * @brief Gets one padded corner label from two ImageGeom slices.
  *
  * Boundary corners (any coordinate at 0 or >= paddedDim-1) return MMSurfaceNet::Padding.
  * Interior corners look up the label from the appropriate slice buffer.
  *
- * @param ci Padded X coordinate of the corner
- * @param cj Padded Y coordinate of the corner
- * @param ck Padded Z coordinate of the corner
- * @param paddedX Number of padded cells in X (dimX + 2)
- * @param paddedY Number of padded cells in Y (dimY + 2)
- * @param paddedZ Number of padded cells in Z (dimZ + 2)
- * @param dimX Original NX dimension in X
- * @param dimY Original NX dimension in Y
- * @param slice0 Buffer holding NX Z-slice at index (currentK - 1)
- * @param slice0Z The NX Z-index that slice0 currently holds
- * @param slice1 Buffer holding NX Z-slice at index currentK
- * @param slice1Z The NX Z-index that slice1 currently holds
+ * @param ci Padded X corner coordinate.
+ * @param cj Padded Y corner coordinate.
+ * @param ck Padded Z corner coordinate.
+ * @param paddedX Padded X dimension.
+ * @param paddedY Padded Y dimension.
+ * @param paddedZ Padded Z dimension.
+ * @param dimX ImageGeom X dimension.
+ * @param dimY ImageGeom Y dimension.
+ * @param slice0 First buffered Feature ID slice.
+ * @param slice0Z ImageGeom Z index in slice0.
+ * @param slice1 Second buffered Feature ID slice.
+ * @param slice1Z ImageGeom Z index in slice1.
+ * @return Feature ID, or the padding label at the exterior or on a buffer miss.
  */
 inline int32 cornerLabel(int32 ci, int32 cj, int32 ck, int32 paddedX, int32 paddedY, int32 paddedZ, usize dimX, usize dimY, const std::vector<int32>& slice0, int32 slice0Z,
                          const std::vector<int32>& slice1, int32 slice1Z)
 {
-  // Boundary padding check
+  // Exterior padded corners close the mesh at the volume boundary.
   if(ci <= 0 || cj <= 0 || ck <= 0 || ci >= paddedX - 1 || cj >= paddedY - 1 || ck >= paddedZ - 1)
   {
     return MMSurfaceNet::ReservedLabel::Padding;
   }
 
-  // Convert padded corner to NX coordinates
+  // Convert to ImageGeom cell coordinates.
   const int32 nxX = ci - 1;
   const int32 nxY = cj - 1;
   const int32 nxZ = ck - 1;
 
-  // Compute the flat index within a single XY slice
   const usize sliceOffset = static_cast<usize>(nxY) * dimX + static_cast<usize>(nxX);
 
-  // Look up from the correct slice buffer
   if(nxZ == slice0Z)
   {
     return slice0[sliceOffset];
@@ -212,12 +212,11 @@ inline int32 cornerLabel(int32 ci, int32 cj, int32 ck, int32 paddedX, int32 padd
     return slice1[sliceOffset];
   }
 
-  // Should not reach here if slices are managed correctly
+  // Treat an unexpected buffer miss as exterior padding.
   return MMSurfaceNet::ReservedLabel::Padding;
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 SurfaceNetsScanline::SurfaceNetsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const SurfaceNetsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -226,33 +225,8 @@ SurfaceNetsScanline::SurfaceNetsScanline(DataStructure& dataStructure, const IFi
 {
 }
 
-// -----------------------------------------------------------------------------
 SurfaceNetsScanline::~SurfaceNetsScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Executes the full OOC Surface Nets pipeline.
- *
- * This method is the most complex OOC algorithm in the codebase because it
- * reimplements the entire Surface Nets algorithm from scratch without the
- * MMSurfaceNet library, using disk-backed fixed records and bulk I/O.
- *
- * The method is organized into numbered sections (1-13) that correspond to
- * the phases documented in the header. The sections are:
- *
- *   1-4.   Cell classification: iterate padded grid, load Z-slice pairs,
- *          classify cells using MMCellFlag, store surface cells
- *   5.     Resize vertex arrays
- *   6.     Phase 2A: Optional smoothing through bounded record pages
- *   7.     Phase 2B: Transform to world coordinates, assign node types
- *   8.     Phase 3A: Count triangles from edge crossings
- *   9.     Phase 3B: Resize face arrays
- *   10.    Phase 3C: Setup TupleTransfer
- *   11.    Phase 3D: Generate triangles and buffer output
- *   12.    Phase 3E: Fix face labels (0 -> -1)
- *   12b.   Flush all buffered output via copyFromBuffer()
- *   13.    Phase 3F: Optional winding repair
- */
 Result<> SurfaceNetsScanline::operator()()
 {
   if(m_ShouldCancel)
@@ -260,13 +234,7 @@ Result<> SurfaceNetsScanline::operator()()
     return {};
   }
 
-  // -------------------------------------------------------------------------
-  // 1. Get ImageGeom dimensions and compute padded dims.
-  // The padded grid adds 1 cell of padding on each side in each dimension,
-  // matching the convention used by MMSurfaceNet. Padding cells always have
-  // the MMSurfaceNet::Padding label, which creates boundary triangles at the
-  // volume edges.
-  // -------------------------------------------------------------------------
+  // One padding cell on each side closes surfaces at the image exterior.
   auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GridGeomDataPath);
   auto gridDimensions = imageGeom.getDimensions();
 
@@ -296,9 +264,6 @@ Result<> SurfaceNetsScanline::operator()()
   }
   const int32 paddedXY = paddedX * paddedY;
 
-  // -------------------------------------------------------------------------
-  // 2. Get the FeatureIds DataStore reference
-  // -------------------------------------------------------------------------
   auto* featureIdsArray = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
   auto& featureIdsStore = featureIdsArray->getDataStoreRef();
   const auto anyDispatchTargetOutOfCore = [&]() {
@@ -340,6 +305,8 @@ Result<> SurfaceNetsScanline::operator()()
   recordConfig.recordSize = sizeof(SurfaceCellRecord);
   recordConfig.maxRecordsPerBatch = 4096;
   recordConfig.initialRecordCount = paddedCellCount;
+  // Actual OOC targets require external records. Resident forced-path tests may
+  // use the explicit O(padded volume) in-memory fallback.
   auto recordStoreResult = DataStoreUtilities::GetIOCollection().createTemporaryRecordStore(recordConfig);
   if(recordStoreResult.valid())
   {
@@ -379,13 +346,7 @@ Result<> SurfaceNetsScanline::operator()()
     return initializeResult;
   }
 
-  // -------------------------------------------------------------------------
-  // 3. Allocate rolling slice buffers (2 NX Z-slices).
-  // Each buffer holds one full XY plane of FeatureIds. The ping-pong scheme
-  // ensures at most 2 Z-slices are in memory at once. The slice0Z/slice1Z
-  // variables track which NX Z-index each buffer currently holds, to avoid
-  // re-reading a slice that is already buffered.
-  // -------------------------------------------------------------------------
+  // Two Feature ID slices supply all eight corners of a padded cell.
   const usize sliceSize = dimX * dimY;
   std::vector<int32> sliceBufA;
   std::vector<int32> sliceBufB;
@@ -401,28 +362,14 @@ Result<> SurfaceNetsScanline::operator()()
     return MakeErrorResult(-62053, "SurfaceNets failed to allocate its bounded feature-id slice buffers.");
   }
 
-  // Pointers for ping-pong: slice0 is the "lower" Z-slice, slice1 is "upper".
-  // These are swapped at the end of each k iteration so the "upper" becomes
-  // "lower" for the next iteration.
+  // Ping-pong pointers reuse the prior upper slice as the next lower slice.
   std::vector<int32>* slice0 = &sliceBufA;
   std::vector<int32>* slice1 = &sliceBufB;
-  int32 slice0Z = -1; // NX Z-index currently in slice0 (-1 = empty)
-  int32 slice1Z = -1; // NX Z-index currently in slice1 (-1 = empty)
+  int32 slice0Z = -1;
+  int32 slice1Z = -1;
 
-  // -------------------------------------------------------------------------
-  // 4. Phase 1: Cell classification.
-  // Iterate cells in the same order as MMCellMap::setCellVertices():
-  //   k in [0, paddedZ-2), j in [0, paddedY-2), i in [0, paddedX-2)
-  //
-  // For each cell, compute the 8 corner labels using cornerLabel(), which
-  // reads from the buffered Z-slices. The corner ordering matches MMCellMap:
-  //   [0]=(i,j,k) [1]=(i+1,j,k) [2]=(i+1,j+1,k) [3]=(i,j+1,k)
-  //   [4]=(i,j,k+1) [5]=(i+1,j,k+1) [6]=(i+1,j+1,k+1) [7]=(i,j+1,k+1)
-  //
-  // MMCellFlag::set() classifies the cell: if all 8 labels are identical,
-  // it is an interior cell (no vertex). Otherwise it is a surface cell
-  // and gets stored in a padded-cell record with a sequential vertex id.
-  // -------------------------------------------------------------------------
+  // Match MMCellMap padded raster order and corner order. A label change among
+  // eight corners creates one sequential vertex ID.
   const usize totalPaddedZSlices = static_cast<usize>(paddedZ - 1);
   usize numVertices = 0;
   for(int32 k = 0; k < paddedZ - 1; k++)
@@ -431,19 +378,14 @@ Result<> SurfaceNetsScanline::operator()()
     {
       return {};
     }
-    // The 8 corners of a cell at padded (i,j,k) span NX Z-indices:
-    //   bottom face corners: ck = k     => nxZ = k - 1
-    //   top face corners:    ck = k + 1 => nxZ = k
-    // So we need NX slices at Z = (k-1) and Z = k.
-    const int32 needZ0 = k - 1; // NX Z for bottom face corners
-    const int32 needZ1 = k;     // NX Z for top face corners
+    // Bottom and top corners map to ImageGeom Z slices k-1 and k.
+    const int32 needZ0 = k - 1;
+    const int32 needZ1 = k;
 
-    // Load the two required slices
     if(needZ0 >= 0 && needZ0 < static_cast<int32>(dimZ))
     {
       if(slice0Z != needZ0 && slice1Z != needZ0)
       {
-        // Load needZ0 into slice0
         auto copyResult = featureIdsStore.copyIntoBuffer(static_cast<usize>(needZ0) * sliceSize, nonstd::span<int32>(slice0->data(), sliceSize));
         if(copyResult.invalid())
         {
@@ -456,7 +398,6 @@ Result<> SurfaceNetsScanline::operator()()
     {
       if(slice0Z != needZ1 && slice1Z != needZ1)
       {
-        // Load needZ1 into slice1
         auto copyResult = featureIdsStore.copyIntoBuffer(static_cast<usize>(needZ1) * sliceSize, nonstd::span<int32>(slice1->data(), sliceSize));
         if(copyResult.invalid())
         {
@@ -470,8 +411,7 @@ Result<> SurfaceNetsScanline::operator()()
     {
       for(int32 i = 0; i < paddedX - 1; i++)
       {
-        // Compute 8 corner labels for cell at padded (i,j,k)
-        // Corner ordering matches MMCellMap::setCellVertices():
+        // Corner order matches MMCellMap::setCellVertices():
         //   [0] = (i,   j,   k  )   left-back-bottom
         //   [1] = (i+1, j,   k  )   right-back-bottom
         //   [2] = (i+1, j+1, k  )   right-front-bottom
@@ -515,18 +455,12 @@ Result<> SurfaceNetsScanline::operator()()
       }
     }
 
-    // Roll slice buffers for the next k iteration.
-    // After processing k, the "bottom" slice (needZ0 = k-1) is no longer
-    // needed for k+1 (which will need k and k+1). So we swap so that
-    // the current "top" slice becomes the new "bottom" and the old
-    // "bottom" buffer is available for loading.
+    // Reuse the upper slice and make the other buffer available for k+1.
     std::swap(slice0, slice1);
     std::swap(slice0Z, slice1Z);
   }
 
-  // -------------------------------------------------------------------------
-  // 5. Resize TriangleGeom vertex array and associated attribute arrays
-  // -------------------------------------------------------------------------
+  // Resize vertex output after classification gives the exact count.
   auto cacheFlushResult = m_SurfaceCellCache->flush(m_ShouldCancel);
   if(cacheFlushResult.invalid())
   {
@@ -556,24 +490,9 @@ Result<> SurfaceNetsScanline::operator()()
     return MakeErrorResult(-56333, fmt::format("SurfaceNets could not resize its vertex outputs: {}", exception.what()));
   }
 
-  // -------------------------------------------------------------------------
-  // 6. Phase 2A: Relaxation (optional -- only if smoothing is requested).
-  //
-  // This reimplements MMSurfaceNet::relax() through bounded record-cache
-  // neighbor lookups instead of the O(volume) MMCellMap.
-  //
-  // For each surface vertex, the relaxation:
-  //   1. Finds up to 6 face-connected neighbors via record-cache lookup
-  //   2. Computes the average neighbor position (in cell-local coordinates)
-  //   3. Blends current position toward the average: p' = (1-alpha)*p + alpha*avg
-  //   4. Clamps to [0.5 - maxDist, 0.5 + maxDist] to keep vertices near cell centers
-  //
-  // The face participation rule depends on vertex type:
-  //   - SurfaceVertex: participates if the face has any crossing
-  //   - JunctionVertex: participates only if the face has a junction crossing
-  //
-  // Face offsets define the 6 directions to check for neighbors.
-  // -------------------------------------------------------------------------
+  // Relax in the same padded raster order as MMSurfaceNet. Surface vertices use
+  // crossed faces. Junction vertices use only junction-crossed faces. Each local
+  // coordinate blends toward the neighbor mean and remains within the clamp.
   static constexpr std::array<std::array<int32, 3>, 6> k_FaceOffsets = {{
       {-1, 0, 0}, // LeftFace
       {+1, 0, 0}, // RightFace
@@ -619,7 +538,7 @@ Result<> SurfaceNetsScanline::operator()()
 
             for(MMCellFlag::Face face = MMCellFlag::Face::LeftFace; face <= MMCellFlag::Face::TopFace; ++face)
             {
-              // Determine whether this face participates based on vertex type
+              // Vertex type selects ordinary or junction-only crossed faces.
               bool participates = false;
               if(record.Flag.vertexType() == MMCellFlag::VertexType::SurfaceVertex)
               {
@@ -659,14 +578,14 @@ Result<> SurfaceNetsScanline::operator()()
                 }
               }
 
-              // Accumulate: neighbor position + offset from current cell to neighbor cell
+              // Convert the neighbor's local position into the current cell frame.
               avgP[0] += nbrPosX + static_cast<float32>(nbrI - cellI);
               avgP[1] += nbrPosY + static_cast<float32>(nbrJ - cellJ);
               avgP[2] += nbrPosZ + static_cast<float32>(nbrK - cellK);
               numNeighbors++;
             }
 
-            // Blend current position with average neighbor position
+            // Blend with the average and clamp around the cell center.
             if(numNeighbors > 0)
             {
               avgP[0] /= static_cast<float32>(numNeighbors);
@@ -689,10 +608,8 @@ Result<> SurfaceNetsScanline::operator()()
     }
   }
 
-  // The remainder of the algorithm deliberately traverses the authoritative
-  // padded-cell records.  Do not materialize a surface-sized vertex vector or
-  // cell-to-vertex map here: either would turn a dense surface into an O(N)
-  // resident allocation during an out-of-core run.
+  // Keep padded records authoritative. A resident surface map would make a
+  // dense OOC surface require O(surface size) RAM.
   auto smoothingFlushResult = m_SurfaceCellCache->flush(m_ShouldCancel);
   if(smoothingFlushResult.invalid())
   {
@@ -741,7 +658,7 @@ Result<> SurfaceNetsScanline::operator()()
     return {};
   };
 
-  // Initialize NodeType in the same padded raster order used by Direct.
+  // Initialize node types in the same padded raster order as Direct.
   for(int32 k = 0; k < paddedZ - 1; k++)
   {
     if(m_ShouldCancel)
@@ -771,7 +688,7 @@ Result<> SurfaceNetsScanline::operator()()
     }
   }
 
-  // Count faces and apply padding mutations directly to the fixed-width records.
+  // Count faces and apply exterior-node changes before output allocation.
   usize triangleCount = 0;
   const auto countEdge = [&](int32 i, int32 j, int32 k, const SurfaceCellRecord& record, MMCellFlag::Edge edge, const std::array<std::array<int32, 3>, 4>& quadCells,
                              const std::array<int32, 3>& otherLabelOffset) -> Result<> {
@@ -837,9 +754,10 @@ Result<> SurfaceNetsScanline::operator()()
   if(recordFlushResult.invalid())
     return recordFlushResult;
 
-  // Stream vertex coordinates and node types in bounded chunks in vertex-id order.
+  // Stream vertices and node types in 4,096-vertex batches by vertex ID.
   auto voxelSize = imageGeom.getSpacing();
   auto origin = imageGeom.getOrigin();
+  // Current compatibility behavior uses Y half-spacing for the Z offset.
   const Point3Df halfVoxelOffset(0.5f * voxelSize[0], 0.5f * voxelSize[1], 0.5f * voxelSize[1]);
   constexpr usize kOutputChunkSize = 4096;
   std::vector<float32> vertexBuffer;
@@ -981,6 +899,7 @@ Result<> SurfaceNetsScanline::operator()()
     if(!record.Flag.isEdgeCrossing(edge))
       return {};
     std::array<VertexData, 4> vData{};
+    // Both implementations supply zero positions and therefore use the default diagonal.
     for(usize n = 0; n < quadCells.size(); n++)
     {
       auto quadRecord = recordAt(quadCells[n][0], quadCells[n][1], quadCells[n][2]);
@@ -1045,9 +964,7 @@ Result<> SurfaceNetsScanline::operator()()
   if(faceStart != triangleCount)
     return MakeErrorResult(-62058, "SurfaceNets streamed an unexpected number of faces.");
 
-  // -------------------------------------------------------------------------
-  // 13. Phase 3F: Winding repair
-  // -------------------------------------------------------------------------
+  // Prefer bounded external winding repair when the provider supports it.
   Result<> windingResult = {};
   if(m_InputValues->RepairTriangleWinding)
   {
@@ -1064,7 +981,7 @@ Result<> SurfaceNetsScanline::operator()()
         return MakeErrorResult(-62059,
                                "SurfaceNets cannot repair triangle winding for an out-of-core target because the active I/O provider does not support external sorting and temporary record stores.");
       }
-      // Forced-scanline tests may run entirely in memory without an external-storage provider.
+      // Resident forced-path tests can use temporary in-memory connectivity.
       m_MessageHandler("Generating Connectivity and Triangle Neighbors...");
       triangleGeom.findElementNeighbors(true);
       const auto optionalId = triangleGeom.getElementNeighborsId();

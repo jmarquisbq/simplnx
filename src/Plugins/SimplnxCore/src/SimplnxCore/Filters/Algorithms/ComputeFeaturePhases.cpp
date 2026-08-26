@@ -15,13 +15,10 @@ using namespace nx::core;
 
 namespace
 {
-/// Number of tuples to read per bulk I/O call. 64K tuples (256 KB of int32 per
-/// buffer) minimizes copyIntoBuffer() round-trips on large datasets while keeping
-/// the per-chunk working set bounded regardless of total cell count.
+// Each bulk read contains 65,536 int32 values and uses 256 KiB of cell staging memory.
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeaturePhases::ComputeFeaturePhases(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeaturePhasesInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -30,10 +27,8 @@ ComputeFeaturePhases::ComputeFeaturePhases(DataStructure& dataStructure, const I
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeaturePhases::~ComputeFeaturePhases() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeaturePhases::operator()()
 {
   auto featurePhasesArrayPath = m_InputValues->CellFeaturesAttributeMatrixPath.createChildPath(m_InputValues->FeaturePhasesArrayName);
@@ -43,9 +38,7 @@ Result<> ComputeFeaturePhases::operator()()
   const auto& featureIds = featureIdsArray.getDataStoreRef();
   auto& featurePhases = m_DataStructure.getDataAs<Int32Array>(featurePhasesArrayPath)->getDataStoreRef();
 
-  // Validate the featurePhases array is the proper size. This also guarantees
-  // every FeatureIds value indexes within [0, numFeatures), so the feature-level
-  // vectors below can be indexed without per-element bounds checks.
+  // Validation makes every Feature ID valid for the feature-sized caches.
   auto validateNumFeatResult = ValidateFeatureIdsToFeatureAttributeMatrixIndexing(m_DataStructure, m_InputValues->CellFeaturesAttributeMatrixPath, featureIdsArray, false, m_MessageHandler);
   if(validateNumFeatResult.invalid())
   {
@@ -54,19 +47,12 @@ Result<> ComputeFeaturePhases::operator()()
 
   const usize totalPoints = featureIds.getNumberOfTuples();
   const usize numFeatures = featurePhases.getNumberOfTuples();
-  // Feature-level accumulators. These scale with the feature count (small —
-  // typically thousands of entries), not the cell count, so allocating them
-  // in memory is acceptable even for out-of-core datasets. Plain vectors give
-  // O(1) indexed access in the hot per-cell loop. uint8 (not std::vector<bool>)
-  // keeps element access a simple byte load/store.
+  // Feature-sized caches avoid DataStore access in the cell loop. uint8 avoids vector<bool> proxy access.
   std::vector<int32> featurePhaseValues(numFeatures, 0);
   std::vector<uint8> featureSeen(numFeatures, 0);
   std::set<int32> warnFeatures;
 
-  // Read FeatureIds and CellPhases chunk-sequentially via copyIntoBuffer().
-  // Bulk reads amortize the per-call dispatch (and, for out-of-core stores,
-  // the chunk load) over 64K elements instead of paying it per cell. Both
-  // arrays are 1-component, so element index == tuple index.
+  // Matching chunks amortize input I/O and preserve serial last-phase order.
   auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
   auto cellPhaseBuf = std::make_unique<int32[]>(k_ChunkTuples);
   for(usize offset = 0; offset < totalPoints; offset += k_ChunkTuples)
@@ -93,13 +79,7 @@ Result<> ComputeFeaturePhases::operator()()
       const int32 gnum = featureIdBuf[i];
       const int32 phase = cellPhaseBuf[i];
 
-      // A feature warns when any of its cells carries a phase different from the
-      // first phase seen for that feature. Comparing each cell against the
-      // PREVIOUS phase stored for the feature detects exactly the same feature
-      // set: over the feature's cell sequence, "some element differs from the
-      // first" holds if and only if "some adjacent pair differs". Storing the
-      // phase unconditionally afterwards means the feature keeps the LAST phase
-      // encountered, which is also the value written to the output below.
+      // Any later phase different from the stored phase marks a conflicting feature. The cache keeps the last phase.
       if(featureSeen[gnum] != 0 && featurePhaseValues[gnum] != phase)
       {
         warnFeatures.insert(gnum);
@@ -109,9 +89,7 @@ Result<> ComputeFeaturePhases::operator()()
     }
   }
 
-  // Single bulk write of the feature-level result. One copyFromBuffer() call
-  // replaces numFeatures individual element writes, which matters for
-  // out-of-core output stores where each scattered write would dirty a chunk.
+  // One bulk write avoids scattered feature output writes.
   Result<> writeResult = featurePhases.copyFromBuffer(0, nonstd::span<const int32>(featurePhaseValues.data(), numFeatures));
   if(writeResult.invalid())
   {

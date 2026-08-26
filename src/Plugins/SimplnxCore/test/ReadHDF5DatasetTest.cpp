@@ -28,9 +28,8 @@ constexpr hsize_t COMPDIMPROD = 72;
 constexpr hsize_t TUPLEDIMPROD = 40;
 std::string m_FilePath = unit_test::k_BinaryDir.str() + "/ImportHDF5DatasetTest.h5";
 
-// -----------------------------------------------------------------------------
 //  Uses Raw Pointers to save data to the data file
-// -----------------------------------------------------------------------------
+
 template <typename T, uint8 Dims = 1>
 void writePointerArrayDataset(nx::core::HDF5::GroupIO& ptrGroupWriter)
 {
@@ -82,7 +81,6 @@ constexpr auto writePointer3DArrayDataset = &writePointerArrayDataset<T, 3>;
 template <typename T>
 constexpr auto writePointer4DArrayDataset = &writePointerArrayDataset<T, 4>;
 
-// -----------------------------------------------------------------------------
 void writeHDF5File()
 {
   if(fs::exists(m_FilePath))
@@ -144,7 +142,6 @@ void writeHDF5File()
   writePointer4DArrayDataset<float64>(ptrGroupWriter);
 }
 
-// -----------------------------------------------------------------------------
 void testFilterPreflight(ReadHDF5DatasetFilter& filter)
 {
   Arguments args;
@@ -264,7 +261,6 @@ void testFilterPreflight(ReadHDF5DatasetFilter& filter)
   SIMPLNX_RESULT_REQUIRE_VALID(results.outputActions)
 }
 
-// -----------------------------------------------------------------------------
 std::string createVectorString(const ShapeType& vec)
 {
   std::string str = "(";
@@ -281,7 +277,6 @@ std::string createVectorString(const ShapeType& vec)
   return str;
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 void DatasetTest(ReadHDF5DatasetFilter& filter, const std::list<ReadHDF5DatasetParameter::DatasetImportInfo>& importInfoList, bool useParentGroup, bool resultsValid)
 {
@@ -392,7 +387,6 @@ void DatasetTest(ReadHDF5DatasetFilter& filter, const std::list<ReadHDF5DatasetP
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void testFilterExecute(ReadHDF5DatasetFilter& filter)
 {
   //  // ******************* Test Reading Data *************************************
@@ -611,7 +605,7 @@ void testFilterExecute(ReadHDF5DatasetFilter& filter)
   }
 }
 } // namespace
-// -----------------------------------------------------------------------------
+
 TEST_CASE("SimplnxCore::ReadHDF5DatasetFilter Filter")
 {
   UnitTest::LoadPlugins();

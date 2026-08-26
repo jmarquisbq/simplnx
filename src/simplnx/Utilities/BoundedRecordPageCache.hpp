@@ -11,17 +11,21 @@
 #include <type_traits>
 #include <vector>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
+
 /**
  * @class BoundedRecordPageCache
- * @brief Non-concurrent LRU page cache for typed records in an ITemporaryRecordStore.
+ * @brief Non-concurrent least-recently-used (LRU) page cache for typed temporary records.
+ * @tparam T Specifies a trivially copyable record type.
  *
- * Algorithms use this cache when their logical state can grow with cells,
- * features, or generated mesh size but only a fixed number of record pages may
- * remain resident. Dirty pages are written back before eviction. The class is
- * intentionally non-concurrent: callers must provide external synchronization
- * or keep each instance confined to one algorithm thread.
+ * Logical state can grow with cells, features, or generated mesh size. A fixed
+ * page count bounds resident memory. Dirty pages are written before eviction.
+ * Callers must provide synchronization or confine each instance to one thread.
  *
  * The cache borrows its record store. The store must outlive the cache, and the
  * caller must call flush() before another object consumes pending writes.
@@ -46,6 +50,8 @@ public:
 
   /**
    * @brief Reads one typed record, loading and promoting its page as needed.
+   * @param index Zero-based record index.
+   * @param shouldCancel Cancellation flag.
    * @return A copy of the record or a cancellation, configuration, range, allocation, or store-I/O error.
    */
   Result<T> read(uint64 index, const std::atomic_bool& shouldCancel)
@@ -69,6 +75,9 @@ public:
 
   /**
    * @brief Updates one cached record and marks its page dirty for write-back.
+   * @param index Zero-based record index.
+   * @param value Replacement record value.
+   * @param shouldCancel Cancellation flag.
    * @return A valid result or a cancellation, configuration, range, allocation, or store-I/O error.
    */
   Result<> write(uint64 index, const T& value, const std::atomic_bool& shouldCancel)
@@ -94,6 +103,7 @@ public:
 
   /**
    * @brief Writes every dirty resident page to the backing record store.
+   * @param shouldCancel Cancellation flag.
    * @return A valid result or the first backing-store or cancellation failure.
    */
   Result<> flush(const std::atomic_bool& shouldCancel)
@@ -109,14 +119,16 @@ public:
     return {};
   }
 
-  /** @brief Returns the current resident-page count, never greater than the configured maximum. */
   usize cachedPageCount() const
   {
     return m_Pages.size();
   }
 
 private:
-  /** @brief One resident typed page and its write-back metadata. */
+  /**
+   * @struct Page
+   * @brief Stores one resident typed page and its write-back state.
+   */
   struct Page
   {
     uint64 firstRecord = 0;
@@ -127,6 +139,8 @@ private:
 
   /**
    * @brief Returns an MRU page, evicting and flushing the LRU page when the cache is full.
+   * @param pageIndex Zero-based page index.
+   * @param shouldCancel Cancellation flag.
    * @return A reference valid until a later cache operation evicts that page, or an error.
    */
   Result<std::reference_wrapper<Page>> loadPage(uint64 pageIndex, const std::atomic_bool& shouldCancel)
@@ -191,7 +205,12 @@ private:
     return {std::ref(m_Pages.front())};
   }
 
-  /** @brief Writes one dirty page and clears its dirty bit only after a successful complete write. */
+  /**
+   * @brief Writes one dirty page and clears its dirty state after a successful write.
+   * @param page Page to write when dirty.
+   * @param shouldCancel Cancellation flag.
+   * @return Valid result or a backing-store or cancellation error.
+   */
   Result<> flushPage(Page& page, const std::atomic_bool& shouldCancel)
   {
     if(!page.dirty)

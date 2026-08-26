@@ -21,6 +21,19 @@ namespace
 {
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Selects tuple indexes for one page with deterministic random draws.
+ * @param distances Supplies boundary-distance values.
+ * @param tupleCount Number of tuples in the page.
+ * @param inputValues Defines enabled noise modes and fractions.
+ * @param generator Supplies seeded random values.
+ * @param distribution Produces values in [0, 1).
+ * @param mutationIndices Receives page-local tuple indexes.
+ * @return Number of selected tuple indexes.
+ *
+ * Poisson noise consumes its independent draw even when boundary noise already
+ * selected the tuple. This preserves direct and scanline random sequences.
+ */
 usize GenerateMutationIndices(const int32* distances, usize tupleCount, const AddBadDataInputValues& inputValues, std::mt19937& generator, std::uniform_real_distribution<float32>& distribution,
                               usize* mutationIndices)
 {
@@ -47,6 +60,10 @@ usize GenerateMutationIndices(const int32* distances, usize tupleCount, const Ad
   return mutationCount;
 }
 
+/**
+ * @struct ZeroTuplesDirectFunctor
+ * @brief Zeros selected tuples through a concrete contiguous DataStore.
+ */
 struct ZeroTuplesDirectFunctor
 {
   template <typename T>
@@ -64,6 +81,12 @@ struct ZeroTuplesDirectFunctor
   }
 };
 
+/**
+ * @struct ZeroTuplesScanlineFunctor
+ * @brief Reads, mutates, and writes one selected tuple page.
+ *
+ * Page bytes scale with tuple count, component count, and element size.
+ */
 struct ZeroTuplesScanlineFunctor
 {
   template <typename T>
@@ -91,6 +114,7 @@ struct ZeroTuplesScanlineFunctor
 };
 
 /**
+ * @class AddBadDataScanline
  * @brief Streams distance and child-array chunks so disk-backed stores never see per-tuple I/O.
  */
 class AddBadDataScanline
@@ -173,6 +197,7 @@ private:
 };
 
 /**
+ * @class AddBadDataDirect
  * @brief Uses contiguous in-memory stores and only visits tuples selected by the seeded draws.
  */
 class AddBadDataDirect
@@ -250,7 +275,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 AddBadData::AddBadData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, AddBadDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -259,16 +283,13 @@ AddBadData::AddBadData(DataStructure& dataStructure, const IFilter::MessageHandl
 {
 }
 
-// -----------------------------------------------------------------------------
 AddBadData::~AddBadData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& AddBadData::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> AddBadData::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);

@@ -15,13 +15,33 @@ using namespace nx::core;
 
 namespace
 {
+// Coordinate and index outputs store x, y, and z in each tuple.
 constexpr usize k_NumComponents = 3;
+// The scanline path keeps scratch storage independent of the ImageGeom cell count.
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @class GenerateCoordinatesDirectImpl
+ * @brief Writes selected coordinate outputs through contiguous raw buffers.
+ * @tparam WriteCoordinates True to write physical coordinates.
+ * @tparam WriteIndices True to write integer cell indices.
+ *
+ * Workers receive disjoint Z ranges. This specialized raw-buffer access does not establish generic
+ * DataArray or DataStore thread safety.
+ */
 template <bool WriteCoordinates, bool WriteIndices>
 class GenerateCoordinatesDirectImpl
 {
 public:
+  /**
+   * @brief Initializes one direct coordinate worker.
+   * @param imageGeom Supplies dimensions, origin, and spacing.
+   * @param coordinates Supplies the optional physical-coordinate buffer.
+   * @param indices Supplies the optional index buffer.
+   * @param shouldCancel Signals cancellation between Z slices.
+   * @pre Requested output buffers are not null.
+   * @pre All arguments outlive the worker execution.
+   */
   GenerateCoordinatesDirectImpl(const ImageGeom& imageGeom, float32* coordinates, int32* indices, const std::atomic_bool& shouldCancel)
   : m_XCells(imageGeom.getNumXCells())
   , m_YCells(imageGeom.getNumYCells())
@@ -33,6 +53,13 @@ public:
   {
   }
 
+  /**
+   * @brief Generates selected values for one Z range.
+   * @param range Identifies the assigned Z-slice range.
+   *
+   * Cancellation stops this worker at its next Z-slice checkpoint. Earlier
+   * slices from this worker remain written.
+   */
   void operator()(const Range& range) const
   {
     const usize sliceTuples = m_XCells * m_YCells;
@@ -91,9 +118,22 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ComputeCoordinatesImageGeomScanline
+ * @brief Generates ImageGeom output with bounded bulk writes.
+ */
 class ComputeCoordinatesImageGeomScanline
 {
 public:
+  /**
+   * @brief Initializes the scanline generator.
+   * @param imageGeom Supplies dimensions, origin, and spacing.
+   * @param coordinates Identifies the optional coordinate output.
+   * @param indices Identifies the optional index output.
+   * @param shouldCancel Signals cancellation between chunks.
+   * @pre At least one output pointer is not null.
+   * @pre All arguments outlive the generator execution.
+   */
   ComputeCoordinatesImageGeomScanline(const ImageGeom& imageGeom, Float32Array* coordinates, Int32Array* indices, const std::atomic_bool& shouldCancel)
   : m_ImageGeom(imageGeom)
   , m_Coordinates(coordinates)
@@ -102,6 +142,12 @@ public:
   {
   }
 
+  /**
+   * @brief Generates the selected output arrays.
+   * @return Success, or an output bulk-I/O error.
+   *
+   * Cancellation returns success after completed output chunks. Later chunks are not written.
+   */
   Result<> operator()() const
   {
     if(m_Coordinates != nullptr && m_Indices != nullptr)
@@ -120,6 +166,14 @@ public:
   }
 
 private:
+  /**
+   * @brief Generates one selected output combination.
+   * @tparam WriteCoordinates True to generate physical coordinates.
+   * @tparam WriteIndices True to generate cell indices.
+   * @return Success, or an output bulk-I/O error.
+   *
+   * Cancellation returns success after completed output chunks. Later chunks are not written.
+   */
   template <bool WriteCoordinates, bool WriteIndices>
   Result<> generate() const
   {
@@ -212,9 +266,22 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ComputeCoordinatesImageGeomDirect
+ * @brief Generates ImageGeom output through concrete in-memory stores.
+ */
 class ComputeCoordinatesImageGeomDirect
 {
 public:
+  /**
+   * @brief Initializes the direct generator.
+   * @param imageGeom Supplies dimensions, origin, and spacing.
+   * @param coordinates Identifies the optional coordinate output.
+   * @param indices Identifies the optional index output.
+   * @param shouldCancel Signals cancellation between Z slices.
+   * @pre At least one output pointer is not null.
+   * @pre All arguments outlive the generator execution.
+   */
   ComputeCoordinatesImageGeomDirect(const ImageGeom& imageGeom, Float32Array* coordinates, Int32Array* indices, const std::atomic_bool& shouldCancel)
   : m_ImageGeom(imageGeom)
   , m_Coordinates(coordinates)
@@ -223,17 +290,25 @@ public:
   {
   }
 
+  /**
+   * @brief Generates the selected output arrays.
+   * @return Success, or a fallback scanline bulk-I/O error.
+   *
+   * Cancellation returns success. Each worker stops at its next Z-slice checkpoint.
+   * Completed slices remain written.
+   */
   Result<> operator()() const
   {
     auto* coordinatesStore = m_Coordinates == nullptr ? nullptr : dynamic_cast<Float32DataStore*>(&m_Coordinates->getDataStoreRef());
     auto* indicesStore = m_Indices == nullptr ? nullptr : dynamic_cast<Int32DataStore*>(&m_Indices->getDataStoreRef());
     if((m_Coordinates != nullptr && coordinatesStore == nullptr) || (m_Indices != nullptr && indicesStore == nullptr))
     {
-      // A forced direct path can still receive noncontiguous stores; retain bounded behavior in that case.
+      // A forced direct path delegates to scanline execution for noncontiguous stores.
       return ComputeCoordinatesImageGeomScanline(m_ImageGeom, m_Coordinates, m_Indices, m_ShouldCancel)();
     }
 
-    // Workers own disjoint complete Z ranges, so both contiguous outputs can be written without synchronization.
+    // Concrete DataStore pointers provide contiguous storage. Workers write disjoint Z ranges.
+    // This specialized raw-buffer use does not establish generic DataArray or DataStore thread safety.
     ParallelDataAlgorithm parallelAlgorithm;
     parallelAlgorithm.setRange(0, m_ImageGeom.getNumZCells());
     if(coordinatesStore != nullptr && indicesStore != nullptr)
@@ -259,7 +334,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeCoordinatesImageGeom::ComputeCoordinatesImageGeom(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          ComputeCoordinatesImageGeomInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -269,10 +343,8 @@ ComputeCoordinatesImageGeom::ComputeCoordinatesImageGeom(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeCoordinatesImageGeom::~ComputeCoordinatesImageGeom() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeCoordinatesImageGeom::operator()()
 {
   auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeomPath);

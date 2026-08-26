@@ -7,23 +7,19 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 WriteAvizoRectilinearCoordinate::WriteAvizoRectilinearCoordinate(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                  AvizoWriterInputValues* inputValues)
 : AvizoWriter(dataStructure, mesgHandler, shouldCancel, inputValues)
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteAvizoRectilinearCoordinate::~WriteAvizoRectilinearCoordinate() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> WriteAvizoRectilinearCoordinate::operator()()
 {
   return AvizoWriter::execute();
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteAvizoRectilinearCoordinate::generateHeader(FILE* outputFile) const
 {
   const auto& geom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GeometryPath);
@@ -55,7 +51,8 @@ Result<> WriteAvizoRectilinearCoordinate::generateHeader(FILE* outputFile) const
   fprintf(outputFile, "         Author \"DREAM3D-NX SimplnxCore Version 7.0.0\",\n");
   const std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   const std::string timeString = std::ctime(&currentTime);
-  fprintf(outputFile, "         DateTime \"%s\"\n", timeString.substr(0, timeString.length() - 1).c_str()); // remove the \n character from the time string
+  // ctime() includes a final newline that is not part of the quoted value.
+  fprintf(outputFile, "         DateTime \"%s\"\n", timeString.substr(0, timeString.length() - 1).c_str());
   fprintf(outputFile, "         FeatureIds Path \"%s\"\n", m_InputValues->FeatureIdsArrayPath.toString().c_str());
   fprintf(outputFile, "     }\n");
 
@@ -74,24 +71,6 @@ Result<> WriteAvizoRectilinearCoordinate::generateHeader(FILE* outputFile) const
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Writes the FeatureIds and rectilinear coordinate data to the Avizo output file.
- *
- * @section ooc_strategy OOC Strategy
- * The FeatureIds array can be very large (millions of voxels). The original implementation
- * used featureIds.data() to get a raw pointer and fwrite the entire array, but this fails
- * when the DataStore is out-of-core because data() is not available.
- *
- * The optimized version reads in chunks of k_ChunkSize (65536) tuples via copyIntoBuffer(),
- * then writes each chunk to the output file. This:
- *   - Works with any DataStore backend (in-memory or OOC).
- *   - Bounds memory to ~256 KB (65536 * sizeof(int32)) regardless of volume size.
- *   - Maintains sequential I/O pattern for both the DataStore reads and file writes.
- *
- * @param outputFile FILE pointer to the open Avizo output file.
- * @return Result<> indicating success.
- */
 Result<> WriteAvizoRectilinearCoordinate::writeData(FILE* outputFile) const
 {
   const auto& geom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GeometryPath);
@@ -104,7 +83,7 @@ Result<> WriteAvizoRectilinearCoordinate::writeData(FILE* outputFile) const
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
   const usize totalPoints = featureIds.getNumberOfTuples();
 
-  // Read FeatureIds in chunks via copyIntoBuffer() (OOC-safe) and write each chunk to file
+  // Source and file-write results are currently discarded.
   constexpr usize k_ChunkSize = 65536;
   std::vector<int32> buffer(k_ChunkSize);
   const auto& featureIdsStore = featureIds.getDataStoreRef();
@@ -124,8 +103,7 @@ Result<> WriteAvizoRectilinearCoordinate::writeData(FILE* outputFile) const
   }
   else
   {
-    // ASCII mode: read chunks, format each value individually.
-    // The "20 items per line" formatting is preserved from the original code.
+    // Current counter placement inserts a newline after 21 ASCII values.
     int itemCount = 0;
     for(usize offset = 0; offset < totalPoints; offset += k_ChunkSize)
     {

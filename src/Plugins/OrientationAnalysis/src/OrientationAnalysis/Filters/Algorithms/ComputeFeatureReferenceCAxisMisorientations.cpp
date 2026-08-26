@@ -23,7 +23,6 @@
 using namespace nx::core;
 using namespace nx::core::OrientationUtilities;
 
-// -----------------------------------------------------------------------------
 ComputeFeatureReferenceCAxisMisorientations::ComputeFeatureReferenceCAxisMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                                          ComputeFeatureReferenceCAxisMisorientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -33,33 +32,11 @@ ComputeFeatureReferenceCAxisMisorientations::ComputeFeatureReferenceCAxisMisorie
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureReferenceCAxisMisorientations::~ComputeFeatureReferenceCAxisMisorientations() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes each cell's c-axis misorientation relative to its feature's
- * average c-axis (hexagonal phases only). Also computes per-feature mean and
- * standard deviation of these misorientations.
- *
- * OOC strategy: Uses Z-slice-based bulk I/O. For each Z-plane, all cell-level
- * input arrays are read in one copyIntoBuffer call per array, processed, and
- * the per-cell output is written back with copyFromBuffer. Feature-level arrays
- * (avgCAxes, crystalStructures) are cached entirely in local vectors since
- * they are accessed randomly by featureId/phase index. A second Z-slice pass
- * re-reads the output to compute the standard deviation.
- */
 Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
 {
-
-  /* **************************************************************************
-   * Preflight: every ensemble index must resolve to a Hex Laue class for the
-   * filter to do anything. We need to know both whether any phase is hex (else
-   * hard error) and whether all phases are hex (else warn the user that non-hex
-   * phases will be skipped). Bulk-read the ensemble-level crystalStructures into
-   * local memory (tiny array); this avoids per-element OOC virtual dispatch
-   * during the main cell loop.
-   */
+  // The local ensemble cache avoids repeated cell-loop access.
   const auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
   const usize numCrystalStructures = crystalStructures.getNumberOfTuples();
   std::vector<uint32> crystalStructuresLocal(numCrystalStructures);
@@ -93,16 +70,11 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
          "Finding the feature reference c-axis misorientation requires Hexagonal-Low 6/m or Hexagonal-High 6/mmm type crystal structures. Calculations for non Hexagonal phases will be skipped."});
   }
 
-  /* **************************************************************************
-   * Obtain DataStore references for cell-level bulk I/O. All cell reads go
-   * through copyIntoBuffer (one Z-slice at a time) rather than operator[].
-   */
   const auto& featureIdsStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
   const auto& quatsStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->QuatsArrayPath).getDataStoreRef();
   const auto& cellPhasesStore = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath).getDataStoreRef();
 
-  // Cache avgCAxes locally — accessed randomly by featureId in the cell loop.
-  // Feature count is O(thousands) so this fits comfortably in RAM.
+  // Feature references stay local because cells access them by feature ID.
   const auto& avgCAxes = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->AvgCAxesArrayPath);
   const usize totalFeatures = avgCAxes.getNumberOfTuples();
   const usize avgCAxesSize = totalFeatures * 3;
@@ -113,10 +85,8 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     return readResult;
   }
 
-  // Output cell DataStore — written one Z-slice at a time via copyFromBuffer
   auto& cellRefCAxisMisStore = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureReferenceCAxisMisorientationsArrayPath).getDataStoreRef();
 
-  // Output Feature Data
   auto& featAvgCAxisMis = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureAvgCAxisMisorientationsArrayPath);
   featAvgCAxisMis.fill(0.0f);
   auto& featStdevCAxisMis = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureStdevCAxisMisorientationsArrayPath);
@@ -137,18 +107,11 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
 
   const Eigen::Vector3d cAxis{0.0, 0.0, 1.0};
 
-  // Z-slice buffers: one slice of each cell-level array is read/written per
-  // Z-plane iteration. This converts random 3D access into sequential slice I/O.
   std::vector<int32> featureIdSlice(sliceSize);
   std::vector<int32> cellPhaseSlice(sliceSize);
   std::vector<float32> quatSlice(quatSliceSize);
   std::vector<float32> outputSlice(sliceSize, 0.0f);
 
-  /* **************************************************************************
-   * Loop over all cells in the ImageGeometry, one Z-slice at a time.
-   * Each slice is bulk-read from the DataStore, processed, and the output
-   * is bulk-written back.
-   */
   for(int64 plane = 0; plane < zPoints; plane++)
   {
     if(m_ShouldCancel)
@@ -157,7 +120,6 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     }
     const usize sliceOffset = static_cast<usize>(plane) * sliceSize;
 
-    // Bulk-read this Z-slice of input cell data
     readResult = featureIdsStore.copyIntoBuffer(sliceOffset, nonstd::span<int32>(featureIdSlice.data(), sliceSize));
     if(readResult.invalid())
     {
@@ -185,26 +147,19 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
         const uint32 crystalStructureType = crystalStructuresLocal[cellPhase];
         const bool isHex = crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_High || crystalStructureType == ebsdlib::CrystalStructure::Hexagonal_Low;
 
-        // Make sure the cell is Hexagonal Laue class, the featureId and phases are valid
-        // INVALID featureIds have a value of ZERO
-        // INVALID phases have a value of ZERO
         if(isHex && cellFeatureId > 0 && cellPhase > 0)
         {
-          // Create the OrientationMatrix from the Quaternion
           ebsdlib::OrientationMatrixDType oMatrix =
               ebsdlib::QuaternionDType(quatSlice[quatLocalIdx], quatSlice[quatLocalIdx + 1], quatSlice[quatLocalIdx + 2], quatSlice[quatLocalIdx + 3]).toOrientationMatrix();
-          // Transpose the OM and multiply by cAxis to rotate cAxis
+          // The transposed matrix maps crystal [001] into the sample frame.
           Eigen::Vector3d c1 = oMatrix.transpose() * cAxis;
 
-          // normalize so that the magnitude is 1
           c1.normalize();
 
-          // normalize the features average C-Axis
           const usize avgCAxesIdx = static_cast<usize>(cellFeatureId) * 3;
           Eigen::Vector3d avgCAxisMis = {avgCAxesLocal[avgCAxesIdx], avgCAxesLocal[avgCAxesIdx + 1], avgCAxesLocal[avgCAxesIdx + 2]};
           avgCAxisMis.normalize();
 
-          // Calculate the angle between the current C-Axis and the Feature's Average C-Axis
           float64 w = ImageRotationUtilities::CosBetweenVectors(c1, avgCAxisMis);
           w = std::clamp(w, -1.0, 1.0);
           w = std::acos(w);
@@ -225,7 +180,6 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
       }
     }
 
-    // Bulk-write this Z-slice of output cell data
     Result<> writeResult = cellRefCAxisMisStore.copyFromBuffer(sliceOffset, nonstd::span<const float32>(outputSlice.data(), sliceSize));
     if(writeResult.invalid())
     {
@@ -233,9 +187,7 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     }
   }
 
-  // Per-feature average. Explicit NaN when no hex cells contributed (counts == 0); without this
-  // guard, the division below would rely on IEEE 754 0/0 -> NaN, which is correct on every
-  // platform we ship but fragile to FP-environment changes.
+  // Explicit NaN keeps no-contribution features independent of FP settings.
   MessageHelper messageHelper(m_MessageHandler);
   ThrottledMessenger throttledMessenger = messageHelper.createThrottledMessenger();
   std::vector<float32> featureAverages(totalFeatures, 0.0f);
@@ -262,9 +214,7 @@ Result<> ComputeFeatureReferenceCAxisMisorientations::operator()()
     return writeResult;
   }
 
-  // Compute the population standard deviation of misorientations per feature.
-  // This requires a second pass over cell data. We re-read featureIds and the
-  // just-written output array one Z-slice at a time (sequential OOC access).
+  // A second slice pass calculates population standard deviations.
   std::vector<double> stdevs(totalFeatures, 0.0);
   for(int64 plane = 0; plane < zPoints; plane++)
   {

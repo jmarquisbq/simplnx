@@ -18,10 +18,7 @@ CoreDataIOManager::~CoreDataIOManager() noexcept = default;
 
 std::string CoreDataIOManager::formatName() const
 {
-  // The core in-memory manager uses the reserved k_InMemoryFormat constant so
-  // that "in-memory" is distinct from "unset" (empty string). Callers that want
-  // explicit in-memory storage should pass k_InMemoryFormat; callers that pass
-  // "" are signaling "unset/auto — let the resolver decide".
+  // The reserved name distinguishes explicit resident storage from an empty automatic-format request.
   return std::string(Preferences::k_InMemoryFormat);
 }
 
@@ -31,6 +28,7 @@ void CoreDataIOManager::addCoreFactories()
 
 void CoreDataIOManager::addDataStoreFnc()
 {
+  // Resident stores ignore chunk shape but retain the common storage-factory signature.
   DataStoreCreateFnc dataStoreFnc = [](nx::core::DataType numericType, const ShapeType& tupleShape, const ShapeType& componentShape, const std::optional<ShapeType>& chunkShape) {
     std::unique_ptr<IDataStore> dataStore = nullptr;
     switch(numericType)
@@ -111,6 +109,7 @@ void CoreDataIOManager::addListStoreFnc()
       listStore = std::make_unique<Float64ListStore>(tupleShape);
       break;
     case DataType::boolean:
+      // The core ListStore implementation does not support Boolean values.
       listStore = nullptr;
       break;
     }

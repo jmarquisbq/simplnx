@@ -14,53 +14,29 @@
 
 using namespace nx::core;
 
-// =============================================================================
-// MultiThresholdObjectsScanline — Out-of-Core (OOC) Algorithm
-//
-// This file implements the out-of-core (Scanline) variant of MultiThresholdObjects.
-// It is selected by DispatchAlgorithm when any input array uses chunked on-disk
-// storage (e.g., ZarrStore / HDF5 chunked store).
-//
-// PROBLEM:
-//   The Direct variant uses getComponentValue() for per-element input reads and
-//   operator[] for per-element output writes, plus allocates an O(n) temporary
-//   result vector per threshold condition. When data is stored out-of-core:
-//   - Each getComponentValue() call may load an entire chunk from disk
-//   - The O(n) temporary vector wastes memory when only a chunk is needed
-//   - operator[] writes to the output mask may also trigger chunk load/evict
-//
-// SOLUTION — CHUNKED PROCESSING:
-//   Evaluate the complete threshold tree for one bounded tuple chunk:
-//   1. Read each threshold input via copyIntoBuffer()
-//   2. Recursively merge child results in chunk-local buffers
-//   3. Write the completed result once via copyFromBuffer()
-//
-// MEMORY SAVINGS:
-//   Peak memory is bounded by the chunk size, tree depth, and input component width,
-//   instead of the total tuple count.
-//
-// IMPLEMENTATION NOTE:
-//   Temporary buffers use std::unique_ptr<T[]> instead of std::vector<T> to avoid
-//   the std::vector<bool> specialization, which would prevent direct memory access
-//   needed for copyIntoBuffer/copyFromBuffer spans.
-// =============================================================================
+// Scanline evaluates a complete threshold tree per bounded tuple chunk. This
+// avoids disk-backed per-element access and cell-count temporary vectors.
 
 namespace
 {
 /**
- * @brief Chunk size for OOC processing. Each iteration reads/writes this many
- * tuples via bulk I/O. 64K tuples balances between minimizing I/O calls and
- * keeping per-chunk memory small.
+ * @brief Specifies the tuple count in one bulk-I/O chunk.
  */
 constexpr usize k_ChunkSize = 65536;
 
 /**
- * @brief Applies a single comparison operator to a chunk of input data, writing
- * trueValue/falseValue into the chunk-sized output buffer.
- *
- * @tparam CompT Comparison functor (std::less<>, std::greater<>, etc.)
- * @tparam InputT The input array element type
- * @tparam MaskT The output mask element type
+ * @brief Applies one comparison to a buffered input chunk.
+ * @tparam CompT Specifies the comparison functor.
+ * @tparam InputT Specifies the input scalar type.
+ * @tparam MaskT Specifies the output mask type.
+ * @param inputBuffer Provides flat input values.
+ * @param numComponents Specifies input components per tuple.
+ * @param componentIndex Specifies the compared component.
+ * @param chunkTuples Specifies tuple count in the chunk.
+ * @param trueValue Represents a match.
+ * @param falseValue Represents a nonmatch.
+ * @param outputBuffer Receives mask values.
+ * @param comparisonValue Specifies the typed comparison value.
  */
 template <class CompT, class InputT, class MaskT>
 void filterChunkWithComparison(const InputT* inputBuffer, usize numComponents, usize componentIndex, usize chunkTuples, MaskT trueValue, MaskT falseValue, MaskT* outputBuffer, InputT comparisonValue)
@@ -73,7 +49,18 @@ void filterChunkWithComparison(const InputT* inputBuffer, usize numComponents, u
 }
 
 /**
- * @brief Dispatches the comparison based on the ComparisonType enum.
+ * @brief Selects a comparison operator for one buffered input chunk.
+ * @tparam InputT Specifies the input scalar type.
+ * @tparam MaskT Specifies the output mask type.
+ * @param compOperator Specifies the comparison operator.
+ * @param inputBuffer Provides flat input values.
+ * @param numComponents Specifies input components per tuple.
+ * @param componentIndex Specifies the compared component.
+ * @param chunkTuples Specifies tuple count in the chunk.
+ * @param trueValue Represents a match.
+ * @param falseValue Represents a nonmatch.
+ * @param outputBuffer Receives mask values.
+ * @param comparisonValue Specifies the typed comparison value.
  */
 template <class InputT, class MaskT>
 void filterChunk(ArrayThreshold::ComparisonType compOperator, const InputT* inputBuffer, usize numComponents, usize componentIndex, usize chunkTuples, MaskT trueValue, MaskT falseValue,
@@ -101,7 +88,16 @@ void filterChunk(ArrayThreshold::ComparisonType compOperator, const InputT* inpu
 }
 
 /**
- * @brief Merges a chunk of new threshold results into the current output chunk.
+ * @brief Merges a child threshold chunk into the current result.
+ * @tparam MaskT Specifies the output mask type.
+ * @param chunkTuples Specifies tuple count in the chunk.
+ * @param currentBuffer Receives merged mask values.
+ * @param unionOperator Selects logical OR or AND.
+ * @param newBuffer Provides child mask values.
+ * @param inverse Inverts child values before merging when true.
+ * @param trueValue Represents a match.
+ * @param falseValue Represents a nonmatch.
+ * @param shouldCancel Stops later tuples when true.
  */
 template <typename MaskT>
 void insertThresholdChunk(usize chunkTuples, MaskT* currentBuffer, IArrayThreshold::UnionOperator unionOperator, MaskT* newBuffer, bool inverse, MaskT trueValue, MaskT falseValue,
@@ -130,11 +126,26 @@ void insertThresholdChunk(usize chunkTuples, MaskT* currentBuffer, IArrayThresho
 }
 
 /**
- * @brief Functor that reads a chunk of the input array via copyIntoBuffer and
- * applies the threshold comparison to produce chunk-sized output.
+ * @struct ChunkedThresholdHelper
+ * @brief Reads one input chunk and applies one threshold comparison.
  */
 struct ChunkedThresholdHelper
 {
+  /**
+   * @brief Evaluates one typed leaf threshold chunk.
+   * @tparam InputT Specifies the threshold input type.
+   * @tparam MaskT Specifies the output mask type.
+   * @param iDataArray Provides threshold input values.
+   * @param compOperator Specifies the comparison operator.
+   * @param compValue Specifies the comparison value.
+   * @param componentIndex Specifies the compared component.
+   * @param chunkStartTuple Specifies the first tuple index.
+   * @param chunkTuples Specifies tuple count in the chunk.
+   * @param trueValue Represents a match.
+   * @param falseValue Represents a nonmatch.
+   * @param tempBuffer Receives chunk mask values.
+   * @return Error from the input store, or success.
+   */
   template <typename InputT, typename MaskT>
   Result<> operator()(const IDataArray& iDataArray, ArrayThreshold::ComparisonType compOperator, ArrayThreshold::ComparisonValue compValue, usize componentIndex, usize chunkStartTuple,
                       usize chunkTuples, MaskT trueValue, MaskT falseValue, MaskT* tempBuffer)
@@ -142,8 +153,8 @@ struct ChunkedThresholdHelper
     const auto& inputStore = iDataArray.template getIDataStoreRefAs<AbstractDataStore<InputT>>();
     usize numComponents = inputStore.getNumberOfComponents();
 
-    // Read input chunk (flat elements = tuples * components)
-    // Use unique_ptr instead of vector to avoid std::vector<bool> specialization
+    // The array buffer avoids the std::vector<bool> specialization. Bulk I/O
+    // requires contiguous scalar storage.
     usize flatStart = chunkStartTuple * numComponents;
     usize flatCount = chunkTuples * numComponents;
     auto inputBuffer = std::make_unique<InputT[]>(flatCount);
@@ -160,7 +171,17 @@ struct ChunkedThresholdHelper
 };
 
 /**
- * @brief Recursively evaluates one threshold-tree node for only the current tuple chunk.
+ * @brief Recursively evaluates one threshold-tree node for a tuple chunk.
+ * @tparam MaskT Specifies the output mask type.
+ * @param node Specifies a threshold leaf or set.
+ * @param dataStructure Provides threshold input arrays.
+ * @param chunkStart Specifies the first tuple index.
+ * @param chunkTuples Specifies tuple count in the chunk.
+ * @param trueValue Represents a match.
+ * @param falseValue Represents a nonmatch.
+ * @param output Receives chunk mask values.
+ * @param shouldCancel Stops later tree work when true.
+ * @return Error from input bulk I/O, or success after cancellation.
  *
  * Child buffers are released as recursion unwinds, so peak scratch depends on
  * chunk size and tree depth rather than the total output tuple count.
@@ -224,10 +245,23 @@ Result<> EvaluateScanlineNode(const IArrayThreshold& node, const DataStructure& 
   return {};
 }
 
-/** @brief Dispatches the output mask type and writes one fully evaluated chunk at a time. */
+/**
+ * @struct ScanlineEvaluator
+ * @brief Evaluates complete threshold chunks and writes each output chunk.
+ */
 struct ScanlineEvaluator
 {
-  /** @brief Evaluates the complete threshold tree per bounded chunk and performs one checked output write. */
+  /**
+   * @brief Evaluates and writes one typed output mask.
+   * @tparam MaskT Specifies the output mask type.
+   * @param thresholdSet Specifies the root threshold set.
+   * @param dataStructure Provides threshold input arrays.
+   * @param outputArray Receives mask values.
+   * @param trueValue Represents a match.
+   * @param falseValue Represents a nonmatch.
+   * @param shouldCancel Stops before later chunks when true.
+   * @return Error from bulk I/O, or success after cancellation.
+   */
   template <typename MaskT>
   Result<> operator()(const ArrayThresholdSet& thresholdSet, const DataStructure& dataStructure, IDataArray& outputArray, MaskT trueValue, MaskT falseValue, const std::atomic_bool& shouldCancel)
   {
@@ -260,7 +294,6 @@ struct ScanlineEvaluator
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjectsScanline::MultiThresholdObjectsScanline(DataStructure& dataStructure, const IFilter::MessageHandler&, const std::atomic_bool& shouldCancel,
                                                              const MultiThresholdObjectsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -269,10 +302,8 @@ MultiThresholdObjectsScanline::MultiThresholdObjectsScanline(DataStructure& data
 {
 }
 
-// -----------------------------------------------------------------------------
 MultiThresholdObjectsScanline::~MultiThresholdObjectsScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> MultiThresholdObjectsScanline::operator()()
 {
   auto thresholdsObject = m_InputValues->ArrayThresholdsObject;

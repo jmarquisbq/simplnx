@@ -23,14 +23,11 @@ namespace
 {
 constexpr nx::core::int32 k_MissingFeatureAttributeMatrix = -75769;
 
-/// Number of triangles processed per bulk I/O chunk. Keeps the connectivity buffer
-/// (3 uint64 per triangle) near 1.5 MB and the area output buffer near 512 KB per chunk.
+// Each chunk holds 65,536 triangles. Connectivity uses about 1.5 MiB and areas use about 512 KiB.
 constexpr usize k_ChunkTriangles = 65536;
 
-/// Maximum vertex index span (in vertices) we are willing to bulk-load per triangle chunk.
-/// 16M vertices * 12 bytes (x,y,z float32) = ~192 MB upper bound. Filter-generated meshes
-/// cluster their vertex references spatially and will stay well under this cap; meshes
-/// that exceed it fall back to a safe per-triangle vertex read path.
+// Bulk vertex reads use no more than 16 million vertices, or about 192 MiB.
+// Larger spans use serial per-triangle reads to bound memory and avoid concurrent DataStore access.
 constexpr uint64 k_MaxVertexSpan = 16ULL * 1024 * 1024;
 } // namespace
 
@@ -71,7 +68,6 @@ Parameters ComputeTriangleAreasFilter::parameters() const
 {
   Parameters params;
 
-  // Create the parameter descriptors that are needed for this filter
   params.insertSeparator(Parameters::Separator{"Input Data Objects"});
   params.insert(std::make_unique<GeometrySelectionParameter>(k_TriangleGeometryDataPath_Key, "Triangle Geometry", "The complete path to the Geometry for which to calculate the face areas", DataPath{},
                                                              GeometrySelectionParameter::AllowedTypes{IGeometry::Type::Triangle}));
@@ -104,25 +100,20 @@ IFilter::PreflightResult ComputeTriangleAreasFilter::preflightImpl(const DataStr
 
   nx::core::Result<OutputActions> resultOutputActions;
 
-  // The parameter will have validated that the Triangle Geometry exists and is the correct type
   const auto* triangleGeom = dataStructure.getDataAs<TriangleGeom>(pTriangleGeometryDataPath);
 
-  // Get the Face AttributeMatrix from the Geometry (It should have been set at construction of the Triangle Geometry)
   const AttributeMatrix* faceAttributeMatrix = triangleGeom->getFaceAttributeMatrix();
   if(faceAttributeMatrix == nullptr)
   {
     return {MakeErrorResult<OutputActions>(k_MissingFeatureAttributeMatrix,
                                            fmt::format("Could not find Triangle Face Attribute Matrix with in the Triangle Geometry '{}'", pTriangleGeometryDataPath.toString()))};
   }
-  // Instantiate and move the action that will create the output array
   {
     DataPath createArrayDataPath = pTriangleGeometryDataPath.createChildPath(faceAttributeMatrix->getName()).createChildPath(pCalculatedAreasName);
-    // Create the face areas DataArray Action and store it into the resultOutputActions
     auto createArrayAction = std::make_unique<CreateArrayAction>(nx::core::DataType::float64, std::vector<usize>{triangleGeom->getNumberOfFaces()}, std::vector<usize>{1}, createArrayDataPath);
     resultOutputActions.value().appendAction(std::move(createArrayAction));
   }
 
-  // Return both the resultOutputActions and the preflightUpdatedValues via std::move()
   return {std::move(resultOutputActions), std::move(preflightUpdatedValues)};
 }
 
@@ -143,16 +134,15 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
   const auto& vertStore = triangleGeom->getVertices()->getDataStoreRef();
   const usize numTris = triangleGeom->getNumberOfFaces();
 
-  // Per-chunk scratch. Both buffers are bounded by k_ChunkTriangles regardless of mesh size,
-  // so total peak RAM outside vertBuf is O(chunk), not O(n).
+  // Connectivity and area buffers stay bounded by the triangle chunk size.
   auto triBuf = std::make_unique<uint64[]>(k_ChunkTriangles * 3);
   auto areaBuf = std::make_unique<float64[]>(k_ChunkTriangles);
 
-  // Vertex-coordinate scratch. Grown lazily to fit each chunk's vertex index span; bounded
-  // by k_MaxVertexSpan * 3 floats (~192 MB). Allocated here so the allocation is amortized
-  // across chunks rather than re-done every iteration.
+  // Vertex scratch grows once and remains bounded by k_MaxVertexSpan.
   std::vector<float32> vertBuf;
 
+  // The algorithm does not inspect bulk-I/O Result values. A storage error can
+  // leave partial area output.
   for(usize chunkStart = 0; chunkStart < numTris; chunkStart += k_ChunkTriangles)
   {
     if(shouldCancel)
@@ -161,10 +151,8 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
     }
     const usize chunkCount = std::min<usize>(k_ChunkTriangles, numTris - chunkStart);
 
-    // 1. Bulk-read triangle connectivity (3 vertex indices per triangle).
     triStore.copyIntoBuffer(chunkStart * 3, nonstd::span<uint64>(triBuf.get(), chunkCount * 3));
 
-    // 2. Determine the vertex-index span referenced by this triangle chunk.
     uint64 minVertIdx = std::numeric_limits<uint64>::max();
     uint64 maxVertIdx = 0;
     for(usize i = 0; i < chunkCount * 3; i++)
@@ -180,9 +168,7 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
       }
     }
 
-    // 3. Bulk-load vertex coordinates for the chunk's index range when the span is bounded.
-    //    When the span exceeds k_MaxVertexSpan the mesh's vertex indexing has very poor locality
-    //    (rare for filter-generated meshes) — fall through to a safe per-triangle read path.
+    // Bounded index spans preserve a bulk coordinate read. Sparse spans use the serial fallback.
     const uint64 vertSpan = maxVertIdx - minVertIdx + 1;
     const bool useBulkVerts = (vertSpan <= k_MaxVertexSpan);
     if(useBulkVerts)
@@ -194,8 +180,7 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
       }
       vertStore.copyIntoBuffer(minVertIdx * 3, nonstd::span<float32>(vertBuf.data(), needFloats));
 
-      // 4a. Parallel area compute. Threads read shared plain-array buffers and write disjoint
-      //     areaBuf positions — no DataStore access in the parallel region, so this is safe.
+      // Workers access only local buffers and write disjoint area positions.
       const uint64* triBufPtr = triBuf.get();
       const float32* vertBufPtr = vertBuf.data();
       float64* areaBufPtr = areaBuf.get();
@@ -223,8 +208,7 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
     }
     else
     {
-      // 4b. Fallback: per-triangle vertex reads via copyIntoBuffer. These hit the DataStore
-      //     directly, which isn't thread-safe for concurrent access, so run serially.
+      // Direct vertex reads stay serial because generic DataStore access has no concurrent guarantee.
       std::array<float32, 3> v0Buf{};
       std::array<float32, 3> v1Buf{};
       std::array<float32, 3> v2Buf{};
@@ -250,7 +234,6 @@ Result<> ComputeTriangleAreasFilter::executeImpl(DataStructure& dataStructure, c
       }
     }
 
-    // 5. Bulk-write the chunk's areas.
     areaStore.copyFromBuffer(chunkStart, nonstd::span<const float64>(areaBuf.get(), chunkCount));
   }
 

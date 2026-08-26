@@ -32,16 +32,9 @@ TEST_CASE("Memory Check", "IOTest")
   REQUIRE(storage.free > 0);
 }
 
-// =============================================================================
-// Data Format Preference Tests
-//
-// These verify the OOC-free build's storage behavior driven by the canonical
-// DataStorageMode preference. With no OOC manager registered, the only available
-// store is in-memory, so every mode produces an InMemory store; useOocData() still
-// reports the user intent (true unless ForceInCore). The OOC-build counterpart
-// (where ForceOutOfCore/Adaptive map onto "HDF5-OOC") is covered separately by the
-// OOC plugin's own DataFormatPreferenceTest, built only when OOC is compiled in.
-// =============================================================================
+// These tests verify DataStorageMode behavior when no OOC manager is registered.
+// Every created store is therefore in memory. useOocData() still reports user intent.
+// OOC builds cover disk-backed format selection in the OOC plugin tests.
 
 TEST_CASE("Data Format: ForceInCore keeps useOocData false and stores in memory", "[IOTest][DataFormat]")
 {

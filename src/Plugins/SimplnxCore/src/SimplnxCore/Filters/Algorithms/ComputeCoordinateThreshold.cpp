@@ -21,13 +21,34 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @concept GeometryType
+ * @brief Restricts node-mask workers to geometry types.
+ * @tparam T Specifies the candidate geometry type.
+ */
 template <typename T>
 concept GeometryType = std::is_base_of_v<IGeometry, T>;
 
+/**
+ * @class ComputeMaskImpl
+ * @brief Writes a coordinate-bound mask for one node geometry type.
+ * @tparam GeomT Specifies the input geometry type.
+ *
+ * The caller disables parallel execution. Generic DataArray and DataStore access
+ * has no concurrent-access guarantee.
+ */
 template <GeometryType GeomT>
 class ComputeMaskImpl
 {
 public:
+  /**
+   * @brief Initializes a node-geometry mask worker.
+   * @param geom Supplies geometry vertices and cells.
+   * @param mask Receives one mask value per cell.
+   * @param shouldInvert True to reverse mask values.
+   * @param isInBoundsFunct Tests each geometry vertex.
+   * @pre All arguments outlive the worker execution.
+   */
   ComputeMaskImpl(const GeomT& geom, UInt8AbstractDataStore& mask, bool shouldInvert, const std::function<uint8(float32, float32, float32)>& isInBoundsFunct)
   : m_Geom(geom)
   , m_Mask(mask)
@@ -35,9 +56,17 @@ public:
   , m_IsInBoundsFunct(isInBoundsFunct)
   {
   }
+  /**
+   * @brief Destroys the node-geometry mask worker.
+   */
   ~ComputeMaskImpl() = default;
 
-  // -----------------------------------------------------------------------------
+  /**
+   * @brief Writes mask values for a cell interval.
+   * @param start Identifies the first cell.
+   * @param end Identifies one past the last cell.
+   * @pre [start, end) is inside the geometry cell range.
+   */
   void compute(usize start, usize end) const
   {
     static_assert(std::is_base_of_v<INodeGeometry0D, GeomT> || std::is_base_of_v<INodeGeometry1D, GeomT> || std::is_base_of_v<INodeGeometry2D, GeomT>);
@@ -120,7 +149,10 @@ public:
     }
   }
 
-  // -----------------------------------------------------------------------------
+  /**
+   * @brief Writes mask values for an assigned cell range.
+   * @param range Identifies the cell interval.
+   */
   void operator()(const Range& range) const
   {
     compute(range.min(), range.max());
@@ -133,9 +165,21 @@ private:
   const std::function<uint8(float32, float32, float32)>& m_IsInBoundsFunct;
 };
 
+/**
+ * @brief Creates a coordinate-bound mask for a node geometry.
+ * @param geom Supplies the node geometry.
+ * @param mask Receives one value per geometry cell.
+ * @param shouldInvert True to reverse mask values.
+ * @param isInBoundsFunct Tests each geometry vertex.
+ * @return Success, or an unsupported-geometry error.
+ *
+ * The execution remains serial because generic DataArray and DataStore access
+ * has no concurrent-access guarantee.
+ */
 Result<> ExecuteNodeMask(const IGeometry& geom, UInt8AbstractDataStore& mask, bool shouldInvert, const std::function<uint8(float32, float32, float32)>& isInBoundsFunct)
 {
   ParallelDataAlgorithm dataAlg;
+  // Generic geometry and mask stores remain serial.
   dataAlg.setParallelizationEnabled(false);
   switch(geom.getGeomType())
   {
@@ -166,6 +210,15 @@ Result<> ExecuteNodeMask(const IGeometry& geom, UInt8AbstractDataStore& mask, bo
   return {};
 }
 
+/**
+ * @brief Tests whether bounds can intersect a non-image geometry.
+ * @param geom Supplies geometry bounds.
+ * @param inputValues Supplies selected coordinate bounds.
+ * @return True if geometry bounds can intersect selected bounds.
+ * @pre inputValues is not null.
+ *
+ * A false result lets the caller fill the mask without visiting every cell.
+ */
 bool PrecheckRuntimeGeom(const IGeometry& geom, const ComputeCoordinateThresholdInputValues* inputValues)
 {
   if(geom.getGeomType() == IGeometry::Type::Image)
@@ -207,7 +260,6 @@ bool PrecheckRuntimeGeom(const IGeometry& geom, const ComputeCoordinateThreshold
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThreshold::ComputeCoordinateThreshold(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                        ComputeCoordinateThresholdInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -217,10 +269,8 @@ ComputeCoordinateThreshold::ComputeCoordinateThreshold(DataStructure& dataStruct
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThreshold::~ComputeCoordinateThreshold() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeCoordinateThreshold::operator()()
 {
   const auto& geom = m_DataStructure.getDataRefAs<IGeometry>(m_InputValues->GeometryPath);

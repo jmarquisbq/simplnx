@@ -18,7 +18,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ReadCtfData::ReadCtfData(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ReadCtfDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -27,10 +26,8 @@ ReadCtfData::ReadCtfData(DataStructure& dataStructure, const IFilter::MessageHan
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadCtfData::~ReadCtfData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ReadCtfData::operator()()
 {
   m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Reading .ctf file '{}'", m_InputValues->InputFile.string()));
@@ -39,8 +36,7 @@ Result<> ReadCtfData::operator()()
   const int32_t err = reader.readFile();
   if(err < 0)
   {
-    // CtfReader does not set its error-code member on every failure path (the zero-step and
-    // zero-cells rejections only set the message), so fall back to the returned code.
+    // Some CtfReader failures supply only the returned error code.
     const int32_t errorCode = reader.getErrorCode() < 0 ? reader.getErrorCode() : err;
     return MakeErrorResult(errorCode, reader.getErrorMessage());
   }
@@ -60,18 +56,12 @@ Result<> ReadCtfData::operator()()
   return copyRawEbsdData(&reader);
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadCtfData::loadMaterialInfo(ebsdlib::CtfReader* reader) const
 {
   const std::vector<ebsdlib::CtfPhase::Pointer> phases = reader->getPhaseVector();
   if(phases.empty())
   {
-    // A "Phases 0" header parses successfully (CtfReader's error code stays 0), but a file with no
-    // phase definitions carries no usable ensemble information, and every data row's phase value
-    // would then be out of range. Reject the file with a clear message instead. (Historical note:
-    // before this guard the early return here skipped the ensemble initialization below, and since
-    // Hexagonal_High is enum value 0, the zero-filled CrystalStructures applied the +30 degree
-    // hexagonal alignment to every point.)
+    // Without phase definitions, cell phase values cannot index ensemble data.
     return MakeErrorResult(-19600, fmt::format("The .ctf file '{}' declares no phases in its header. At least one phase definition is required.", m_InputValues->InputFile.string()));
   }
 
@@ -84,10 +74,7 @@ Result<> ReadCtfData::loadMaterialInfo(ebsdlib::CtfReader* reader) const
   const std::string k_InvalidPhase = "Invalid Phase";
   const usize numTuples = crystalStructures.getNumberOfTuples();
 
-  // Initialize EVERY slot to the "Invalid Phase" defaults first. Slot 0 is always the invalid
-  // phase; CtfReader assigns phase indices sequentially (1..N) so every other slot is refilled
-  // by the loop below, but initializing them all keeps the defaults authoritative rather than
-  // relying on zero-initialized storage.
+  // Defaults preserve invalid and omitted phase slots.
   for(usize tupleIndex = 0; tupleIndex < numTuples; tupleIndex++)
   {
     crystalStructures[tupleIndex] = ebsdlib::CrystalStructure::UnknownCrystalStructure;
@@ -101,8 +88,7 @@ Result<> ReadCtfData::loadMaterialInfo(ebsdlib::CtfReader* reader) const
   for(const ebsdlib::CtfPhase::Pointer& phase : phases)
   {
     const auto phaseID = static_cast<usize>(phase->getPhaseIndex());
-    // The ensemble arrays were sized at preflight from the same file's phase count, so an index at
-    // or above the tuple count can only mean the file gained a phase between preflight and execute.
+    // An out-of-range phase indicates a file change after preflight.
     if(phaseID >= numTuples)
     {
       return MakeErrorResult(
@@ -120,21 +106,6 @@ Result<> ReadCtfData::loadMaterialInfo(ebsdlib::CtfReader* reader) const
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Copies raw EBSD data from the EbsdLib CtfReader buffers into the DataStructure arrays.
- *
- * @section ooc_strategy OOC Strategy
- * Same bulk I/O approach as ReadAngData::copyRawEbsdData():
- *   - Single-component arrays use one copyFromBuffer() call each.
- *   - Euler angles use chunked interleaving with hex correction and optional degree-to-radian
- *     conversion applied in-buffer before each chunk write.
- *   - The crystal structures array is cached locally via copyIntoBuffer() because it is
- *     ensemble-level (tiny) and is needed for every cell during hex correction checks.
- *     Reading it once avoids repeated OOC lookups during the per-cell loop.
- *
- * @param reader Pointer to the EbsdLib CtfReader that has already parsed the file.
- */
 Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
 {
   const DataPath cellAttributeMatrixPath = m_InputValues->DataContainerName.createChildPath(m_InputValues->CellAttributeMatrixName);
@@ -143,18 +114,14 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->DataContainerName);
   const usize totalCells = imageGeom.getNumberOfCells();
 
-  // The Image Geometry was sized at preflight from the file's XCells/YCells/ZCells header keys.
-  // Every copy below reads totalCells elements out of the reader's buffers, so if the reader
-  // actually produced fewer elements (a file that changed between preflight and execute), the
-  // copies would read past the end of the reader's heap buffers. Guard against that.
+  // Guard reader buffers against a file change after preflight.
   if(reader->getNumberOfElements() < totalCells)
   {
     return MakeErrorResult(-19603, fmt::format("The .ctf reader produced {} scan points but the Image Geometry created at preflight expects {}. The input file may have changed since preflight.",
                                                reader->getNumberOfElements(), totalCells));
   }
 
-  // A .ctf file's data section defines its own columns; a file missing one of the standard
-  // columns hands back a null buffer, which must be rejected rather than dereferenced.
+  // Required .ctf columns must provide reader buffers.
   auto fetchColumn = [&reader](const std::string& columnName, void*& ptr) -> Result<> {
     ptr = reader->getPointerByName(columnName);
     if(ptr == nullptr)
@@ -191,9 +158,7 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     }
   }
 
-  // Copy the Phase column verbatim. Unlike EDAX .ang files, a phase value of 0 is meaningful in
-  // .ctf files (a "zero solutions" / unindexed point) and is preserved as-is; the legacy remap of
-  // phase<1 -> 1 was deliberately removed (PR #937).
+  // .ctf phase zero identifies an unindexed point and remains unchanged.
   {
     if(m_ShouldCancel)
     {
@@ -206,9 +171,7 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     const auto* phasePtr = static_cast<const int32*>(phaseColumnPtr);
     for(usize i = 0; i < totalCells; i++)
     {
-      // The raw phase value indexes the ensemble arrays in the Euler loop below, so an
-      // out-of-range value (a corrupt file, or a phase column inconsistent with the header's
-      // phase count) would be an out-of-bounds read there. Reject it here.
+      // Validate phase values before they index ensemble data.
       if(phasePtr[i] < 0 || static_cast<usize>(phasePtr[i]) >= ensembleTupleCount)
       {
         return MakeErrorResult(
@@ -218,19 +181,14 @@ Result<> ReadCtfData::copyRawEbsdData(ebsdlib::CtfReader* reader) const
     targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const int32>(phasePtr, totalCells));
   }
 
-  // Condense the Euler Angles from 3 separate arrays into a single 3-component array, applying
-  // the optional EDAX hexagonal-alignment (+30 degrees on phi2) and degrees-to-radians
-  // conversions. Both use double-precision intermediates so the stored float32 values are the
-  // correctly-rounded results (this also matches DREAM3D 6.5.171 bit-for-bit).
+  // Interleave Euler values with optional hex correction and unit conversion.
   {
     if(m_ShouldCancel)
     {
       return {};
     }
     const auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(cellEnsembleAttributeMatrixPath.createChildPath(ebsdlib::CtfFile::CrystalStructures));
-    // Read the phase values from the reader's buffer rather than the just-written Phases array:
-    // the copy above was verbatim and range-validated, and this avoids streaming a second
-    // DataStructure array (which may be out-of-core backed) through the loop.
+    // Reuse validated reader phases to avoid a second output-array read.
     const auto* cellPhases = static_cast<const int32*>(phaseColumnPtr);
 
     // Cache the small ensemble-level array once to avoid repeated out-of-core lookups.

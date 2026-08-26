@@ -1,43 +1,6 @@
 /**
  * @file ReplaceElementAttributesWithNeighborValues.cpp
- * @brief Threshold-based neighbor replacement algorithm, optimized for
- *        out-of-core (OOC) data stores via Z-slice buffered I/O.
- *
- * ## High-Level Flow (per pass)
- *
- * 1. **Initialize rolling window** -- Load input array Z-slices 0 and 1
- *    into slots 1 (current) and 2 (next) of the three-element window.
- *
- * 2. **Scan every voxel** (Z-major, then Y, then X):
- *    - If the voxel's value fails the threshold comparison (e.g., confidence
- *      index < 0.1), examine its 6 face neighbors via the rolling window.
- *    - Among neighbors that pass the threshold, track the one with the
- *      best (most favorable) value.
- *    - Record that neighbor's global index in the per-slice mark array.
- *
- * 3. **Immediate per-slice transfer** -- After each Z-slice's XY scan
- *    completes, commit the marks via SliceBufferedTransferOneZ for every
- *    array in the Attribute Matrix. This is safe because the marks for
- *    this algorithm always point to face neighbors (within +/- 1 Z-slice),
- *    and the best-neighbor mark only writes to the current voxel (not
- *    across slices like dilation does).
- *
- * 4. **Repeat** -- If Loop is true and any voxels were modified, start a
- *    new pass. Re-read the rolling window because transfers changed values.
- *
- * ## Comparison Functors
- *
- * The algorithm supports two comparison modes via a polymorphic functor:
- * - **LessThanComparison**: Targets voxels whose value < threshold. Prefers
- *   neighbors with the highest value (closest to passing).
- * - **GreaterThanComparison**: Targets voxels whose value > threshold. Prefers
- *   neighbors with the lowest value.
- *
- * Each functor provides three comparison methods:
- * - `compare(value, threshold)`: Does this voxel fail the threshold?
- * - `compare1(neighborValue, threshold)`: Does this neighbor pass?
- * - `compare2(neighborValue, bestSoFar)`: Is this neighbor better than the
- *   current best?
+ * @brief Implements slice-buffered threshold replacement.
  */
 
 #include "ReplaceElementAttributesWithNeighborValues.hpp"
@@ -56,42 +19,51 @@ constexpr int32 k_GreaterThanIndex = 1;
 
 /**
  * @class IComparisonFunctor
- * @brief Abstract base for threshold comparison strategies.
- * @tparam T The element type of the input array being compared.
- *
- * Provides three virtual comparison methods that together define:
- * - Whether a voxel fails the threshold (compare)
- * - Whether a neighbor passes the threshold (compare1)
- * - Whether a neighbor is a better replacement than the current best (compare2)
+ * @brief Defines threshold and candidate comparisons.
+ * @tparam T Specifies the comparison-array value type.
  */
 template <typename T>
 class IComparisonFunctor
 {
 public:
   IComparisonFunctor() = default;
+  /**
+   * @brief Destroys a comparison strategy through the base interface.
+   */
   virtual ~IComparisonFunctor() = default;
 
-  IComparisonFunctor(const IComparisonFunctor&) = delete;            // Copy Constructor Not Implemented
-  IComparisonFunctor(IComparisonFunctor&&) = delete;                 // Move Constructor Not Implemented
-  IComparisonFunctor& operator=(const IComparisonFunctor&) = delete; // Copy Assignment Not Implemented
-  IComparisonFunctor& operator=(IComparisonFunctor&&) = delete;      // Move Assignment Not Implemented
+  IComparisonFunctor(const IComparisonFunctor&) = delete;
+  IComparisonFunctor(IComparisonFunctor&&) = delete;
+  IComparisonFunctor& operator=(const IComparisonFunctor&) = delete;
+  IComparisonFunctor& operator=(IComparisonFunctor&&) = delete;
 
-  /** @brief Returns true if `left` fails the threshold relative to `right`. */
+  /**
+   * @brief Tests whether a value fails a threshold.
+   * @param left Value to test.
+   * @param right Threshold value.
+   * @return True if left requires replacement.
+   */
   [[nodiscard]] virtual bool compare(T left, T right) const = 0;
-  /** @brief Returns true if `left` (a neighbor value) passes the threshold `right`. */
+  /**
+   * @brief Tests whether a neighbor passes a threshold.
+   * @param left Neighbor value.
+   * @param right Threshold value.
+   * @return True if left can supply a replacement.
+   */
   [[nodiscard]] virtual bool compare1(T left, T right) const = 0;
-  /** @brief Returns true if `left` is a better replacement candidate than `right`. */
+  /**
+   * @brief Compares a candidate with the current best value.
+   * @param left Candidate value.
+   * @param right Current best value.
+   * @return True if left must replace right.
+   */
   [[nodiscard]] virtual bool compare2(T left, T right) const = 0;
 };
 
 /**
  * @class LessThanComparison
  * @brief Targets voxels below the threshold; prefers neighbors with higher values.
- * @tparam T The element type of the input array.
- *
- * - compare: value < threshold (voxel is below cutoff)
- * - compare1: neighbor >= threshold (neighbor passes)
- * - compare2: neighbor > best (neighbor is closer to ideal)
+ * @tparam T Specifies the comparison-array value type.
  */
 template <typename T>
 class LessThanComparison : public IComparisonFunctor<T>
@@ -100,10 +72,10 @@ public:
   LessThanComparison() = default;
   ~LessThanComparison() override = default;
 
-  LessThanComparison(const LessThanComparison&) = delete;            // Copy Constructor Not Implemented
-  LessThanComparison(LessThanComparison&&) = delete;                 // Move Constructor Not Implemented
-  LessThanComparison& operator=(const LessThanComparison&) = delete; // Copy Assignment Not Implemented
-  LessThanComparison& operator=(LessThanComparison&&) = delete;      // Move Assignment Not Implemented
+  LessThanComparison(const LessThanComparison&) = delete;
+  LessThanComparison(LessThanComparison&&) = delete;
+  LessThanComparison& operator=(const LessThanComparison&) = delete;
+  LessThanComparison& operator=(LessThanComparison&&) = delete;
 
   [[nodiscard]] bool compare(T left, T right) const override
   {
@@ -122,11 +94,7 @@ public:
 /**
  * @class GreaterThanComparison
  * @brief Targets voxels above the threshold; prefers neighbors with lower values.
- * @tparam T The element type of the input array.
- *
- * - compare: value > threshold (voxel is above cutoff)
- * - compare1: neighbor <= threshold (neighbor passes)
- * - compare2: neighbor < best (neighbor is closer to ideal)
+ * @tparam T Specifies the comparison-array value type.
  */
 template <typename T>
 class GreaterThanComparison : public IComparisonFunctor<T>
@@ -134,10 +102,10 @@ class GreaterThanComparison : public IComparisonFunctor<T>
 public:
   GreaterThanComparison() = default;
   ~GreaterThanComparison() override = default;
-  GreaterThanComparison(const GreaterThanComparison&) = delete;            // Copy Constructor Not Implemented
-  GreaterThanComparison(GreaterThanComparison&&) = delete;                 // Move Constructor Not Implemented
-  GreaterThanComparison& operator=(const GreaterThanComparison&) = delete; // Copy Assignment Not Implemented
-  GreaterThanComparison& operator=(GreaterThanComparison&&) = delete;      // Move Assignment Not Implemented
+  GreaterThanComparison(const GreaterThanComparison&) = delete;
+  GreaterThanComparison(GreaterThanComparison&&) = delete;
+  GreaterThanComparison& operator=(const GreaterThanComparison&) = delete;
+  GreaterThanComparison& operator=(GreaterThanComparison&&) = delete;
 
   [[nodiscard]] bool compare(T left, T right) const override
   {
@@ -155,25 +123,20 @@ public:
 
 /**
  * @struct ExecuteTemplate
- * @brief Type-dispatched functor that implements the core threshold-replacement
- *        algorithm with OOC-optimized Z-slice buffering.
- *
- * This struct is invoked via ExecuteDataFunction, which instantiates operator()
- * with the correct element type T matching the input array's DataType.
+ * @brief Implements typed replacement with a comparison-slice window.
  */
 struct ExecuteTemplate
 {
   /**
-   * @brief Checks whether a neighbor value qualifies as a replacement and
-   *        updates the best-neighbor tracking state if so.
-   * @tparam T Element type of the input array
-   * @param comparator The active comparison functor
-   * @param neighborValue The neighbor's value from the rolling-window buffer
-   * @param ThresholdValue The user's threshold cutoff
-   * @param best [in/out] The best candidate value found so far
-   * @param bestNeighbor [in/out] Per-slice mark array tracking the best neighbor
-   * @param i In-slice index of the current voxel
-   * @param neighborPoint Global flat index of the neighbor voxel
+   * @brief Retains a passing neighbor when it is the better candidate.
+   * @tparam T Specifies the comparison-array value type.
+   * @param comparator Defines failed, passing, and better comparisons.
+   * @param neighborValue Candidate value.
+   * @param ThresholdValue Threshold converted to T by the comparator call.
+   * @param best Receives the best candidate value.
+   * @param bestNeighbor Receives the selected global source index.
+   * @param i Identifies the destination in the current slice.
+   * @param neighborPoint Identifies the candidate in the complete volume.
    */
   template <typename T>
   void CompareValues(std::shared_ptr<IComparisonFunctor<T>>& comparator, T neighborValue, float32 ThresholdValue, T& best, std::vector<int64>& bestNeighbor, usize i, int64 neighborPoint) const
@@ -186,16 +149,19 @@ struct ExecuteTemplate
   }
 
   /**
-   * @brief Core algorithm: iteratively replaces voxels that fail a threshold
-   *        comparison with the best-scoring face neighbor's data.
-   * @tparam T Element type of the input array
-   * @param imageGeom The ImageGeom defining the voxel grid dimensions
-   * @param inputIDataArray Pointer to the input data array (used for comparison)
-   * @param comparisonAlgorithm 0 = LessThan, 1 = GreaterThan
-   * @param ThresholdValue The user's threshold cutoff value
-   * @param loopUntilDone If true, repeat passes until no failing voxels remain
-   * @param shouldCancel Atomic cancellation flag
-   * @param messageHandler Handler for progress messages
+   * @brief Replaces failed tuples through one or more Z-ordered passes.
+   * @tparam T Specifies the comparison-array value type.
+   * @param imageGeom Supplies dimensions and the cell AttributeMatrix.
+   * @param inputIDataArray Supplies scalar values that select replacements.
+   * @param comparisonAlgorithm Zero selects less-than. One selects greater-than.
+   * @param ThresholdValue Threshold converted to T for comparisons.
+   * @param loopUntilDone True to repeat while any value fails.
+   * @param shouldCancel Signals cancellation between complete passes.
+   * @param messageHandler Receives progress messages.
+   *
+   * Each sibling array commits one destination slice at a time. Bulk-I/O results
+   * are discarded. Loop mode has no pass limit and can fail to terminate when a
+   * failed value has no passing face neighbor.
    */
   template <typename T>
   void operator()(const ImageGeom& imageGeom, IDataArray* inputIDataArray, int32 comparisonAlgorithm, float32 ThresholdValue, bool loopUntilDone, const std::atomic_bool& shouldCancel,
@@ -212,7 +178,7 @@ struct ExecuteTemplate
         static_cast<int64>(udims[2]),
     };
 
-    // Precompute face-neighbor index offsets and iteration order
+    // Precompute face-neighbor offsets and their deterministic tie order.
     constexpr FaceNeighborType k_NumFaceNeighbors = VoxelNeighbors<Image3D>::k_FaceNeighborCount;
     const std::array<int64, k_NumFaceNeighbors> neighborVoxelIndexOffsets = initializeFaceNeighborOffsets(dims);
     constexpr std::array<FaceNeighborType, k_NumFaceNeighbors> faceNeighborInternalIdx = initializeFaceNeighborInternalIdx();
@@ -220,30 +186,24 @@ struct ExecuteTemplate
     usize count = 0;
     bool keepGoing = true;
 
-    // Select the comparison strategy based on user choice
+    // Select the comparison strategy.
     std::shared_ptr<IComparisonFunctor<T>> comparator = std::make_shared<LessThanComparison<T>>();
     if(comparisonAlgorithm == k_GreaterThanIndex)
     {
       comparator = std::make_shared<GreaterThanComparison<T>>();
     }
 
-    // The Attribute Matrix holds all sibling arrays that should be updated
-    // together when a voxel is replaced (e.g., orientations, phases, etc.)
+    // All cell IDataArray siblings receive the selected source tuple.
     const AttributeMatrix* attrMatrix = imageGeom.getCellData();
 
-    // ---- Z-slice buffering setup ----
     const usize sliceSize = static_cast<usize>(dims[0]) * static_cast<usize>(dims[1]);
     const usize dimZ = static_cast<usize>(dims[2]);
 
-    // Per-slice best-neighbor marks: O(sliceSize) instead of O(totalPoints).
-    // Each entry is -1 (no replacement) or the global flat index of the best
-    // neighbor to copy from.
+    // Slice-sized marks avoid a volume-sized source map.
     std::vector<int64> sliceBestNeighbor(sliceSize, -1);
 
-    // Rolling window: 3 Z-slices of the input comparison array.
-    // Slot 0 = z-1, slot 1 = z (current), slot 2 = z+1.
-    // Uses unique_ptr<T[]> instead of std::vector<T> to avoid the
-    // std::vector<bool> bit-packing problem for boolean arrays.
+    // Slots zero, one, and two contain Z-1, Z, and Z+1 comparison values.
+    // Raw arrays also provide contiguous storage for bool.
     std::array<std::unique_ptr<T[]>, 3> inputSlices;
     for(auto& is : inputSlices)
     {
@@ -255,11 +215,9 @@ struct ExecuteTemplate
       inputStore.copyIntoBuffer(zOffset, nonstd::span<T>(inputSlices[slot].get(), sliceSize));
     };
 
-    // Maps face-neighbor index to rolling-window slot:
-    // -Z -> slot 0, -Y/-X/+X/+Y -> slot 1 (same Z), +Z -> slot 2
+    // Map each face direction to its comparison-buffer slot.
     constexpr std::array<usize, 6> k_NeighborSlot = {0, 1, 1, 1, 1, 2};
 
-    // ---- Main pass loop ----
     while(keepGoing)
     {
       keepGoing = false;
@@ -269,7 +227,7 @@ struct ExecuteTemplate
         break;
       }
 
-      // Re-initialize rolling window from the (potentially modified) store
+      // A new pass reads the comparison array after prior tuple transfers.
       readInputSlice(0, 1);
       if(dims[2] > 1)
       {
@@ -280,10 +238,9 @@ struct ExecuteTemplate
       int64 prog = 1;
       int64 progressInt = 0;
 
-      // ---- Z-slice scan loop ----
       for(int64 zIdx = 0; zIdx < dims[2]; zIdx++)
       {
-        // Advance the rolling window forward by one Z-slice
+        // Advance the comparison window without copying a slice.
         if(zIdx > 0)
         {
           std::swap(inputSlices[0], inputSlices[1]);
@@ -294,7 +251,6 @@ struct ExecuteTemplate
           }
         }
 
-        // ---- Inner XY scan ----
         for(int64 yIdx = 0; yIdx < dims[1]; yIdx++)
         {
           for(int64 xIdx = 0; xIdx < dims[0]; xIdx++)
@@ -302,7 +258,6 @@ struct ExecuteTemplate
             const int64 voxelIndex = zIdx * static_cast<int64>(sliceSize) + yIdx * dims[0] + xIdx;
             const usize inSlice = static_cast<usize>(yIdx * dims[0] + xIdx);
 
-            // Check if this voxel fails the threshold comparison
             if(comparator->compare(inputSlices[1][inSlice], ThresholdValue))
             {
               count++;
@@ -310,7 +265,7 @@ struct ExecuteTemplate
 
               const std::array<bool, k_NumFaceNeighbors> isValidFaceNeighbor = computeValidFaceNeighbors(xIdx, yIdx, zIdx, dims);
 
-              // Map each face neighbor to its in-slice offset
+              // Map each face direction to its in-slice position.
               const std::array<usize, 6> neighborInSlice = {
                   inSlice,                                         // -Z
                   static_cast<usize>((yIdx - 1) * dims[0] + xIdx), // -Y
@@ -320,7 +275,7 @@ struct ExecuteTemplate
                   inSlice                                          // +Z
               };
 
-              // Find the best qualifying neighbor among the 6 face neighbors
+              // Equal candidates keep the first face in the fixed direction order.
               for(const auto& faceIndex : faceNeighborInternalIdx)
               {
                 if(!isValidFaceNeighbor[faceIndex])
@@ -343,12 +298,8 @@ struct ExecuteTemplate
           }
         }
 
-        // ---- Immediate per-slice transfer ----
-        // Unlike ErodeDilateBadData where dilation marks cross Z-slices,
-        // this algorithm only marks the current voxel (the failing one) to
-        // receive data from one of its face neighbors. So the marks for
-        // each Z-slice are complete as soon as that slice's XY scan finishes.
-        // Transfer all sibling arrays in the Attribute Matrix.
+        // Immediate transfer limits mark memory to one destination slice. A
+        // source in Z-1 can already contain data copied earlier in this pass.
         for(const auto& [dataId, dataObject] : *attrMatrix)
         {
           auto* dataArrayPtr = dynamic_cast<IDataArray*>(dataObject.get());
@@ -359,7 +310,7 @@ struct ExecuteTemplate
           SliceBufferedTransferOneZ(*dataArrayPtr, sliceBestNeighbor, sliceSize, static_cast<usize>(zIdx), dimZ);
         }
 
-        // Clear per-slice marks for the next Z-slice
+        // Reuse the mark buffer for the next destination slice.
         std::fill(sliceBestNeighbor.begin(), sliceBestNeighbor.end(), -1);
       }
 
@@ -368,7 +319,7 @@ struct ExecuteTemplate
         break;
       }
 
-      // If looping is enabled and modifications were made, schedule another pass
+      // count records failed values, including values without a passing source.
       if(loopUntilDone && count > 0)
       {
         keepGoing = true;
@@ -379,7 +330,6 @@ struct ExecuteTemplate
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 ReplaceElementAttributesWithNeighborValues::ReplaceElementAttributesWithNeighborValues(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                                        ReplaceElementAttributesWithNeighborValuesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -389,24 +339,18 @@ ReplaceElementAttributesWithNeighborValues::ReplaceElementAttributesWithNeighbor
 {
 }
 
-// -----------------------------------------------------------------------------
 ReplaceElementAttributesWithNeighborValues::~ReplaceElementAttributesWithNeighborValues() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ReplaceElementAttributesWithNeighborValues::getCancel() const
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReplaceElementAttributesWithNeighborValues::operator()()
 {
   auto* srcIDataArray = m_DataStructure.getDataAs<IDataArray>(m_InputValues->InputArrayPath);
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->SelectedImageGeometryPath);
 
-  // Dispatch to the type-specific inner loop. ExecuteDataFunction instantiates
-  // ExecuteTemplate::operator()<T> with the correct element type T matching
-  // the input array's DataType (int32, float32, uint8, etc.).
   ExecuteDataFunction(ExecuteTemplate{}, srcIDataArray->getDataType(), imageGeom, srcIDataArray, m_InputValues->SelectedComparison, m_InputValues->MinConfidence, m_InputValues->Loop, m_ShouldCancel,
                       m_MessageHandler);
 

@@ -13,33 +13,41 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ReadAngData algorithm.
+ * @struct ReadAngDataInputValues
+ * @brief Identifies .ang reader inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ReadAngDataInputValues
 {
-  FileSystemPathParameter::ValueType InputFile; ///< Path to the .ang EBSD data file.
-  DataPath DataContainerName;                   ///< Path to the output DataContainer (ImageGeom).
-  std::string CellAttributeMatrixName;          ///< Name of the cell-level AttributeMatrix.
-  std::string CellEnsembleAttributeMatrixName;  ///< Name of the ensemble-level AttributeMatrix.
+  FileSystemPathParameter::ValueType InputFile;
+  DataPath DataContainerName;
+  std::string CellAttributeMatrixName;
+  std::string CellEnsembleAttributeMatrixName;
 };
 
 /**
  * @class ReadAngData
- * @brief Algorithm that reads a single .ang EBSD file into an Image Geometry.
+ * @brief Reads one .ang EBSD file into an Image Geometry.
  *
- * Parses the .ang file using EbsdLib's AngReader, then transfers the parsed data
- * into the DataStructure's cell-level and ensemble-level arrays.
- *
- * @section ooc_summary OOC Optimization Summary
- * All data transfer from the EbsdLib reader buffers into the DataStructure uses
- * copyFromBuffer() bulk writes instead of per-element operator[] access. Euler angles
- * (3 separate source arrays interleaved into 1 destination) use a chunked buffer approach
- * to bound memory while maintaining bulk I/O efficiency. See copyRawEbsdData() for details.
+ * EbsdLib owns full reader buffers. Simplnx interleaves Euler components in
+ * bounded chunks to avoid a second full-size staging buffer. Destination bulk-
+ * write Result values are not inspected.
  */
 class ORIENTATIONANALYSIS_EXPORT ReadAngData
 {
 public:
+  /**
+   * @brief Initializes .ang file reading.
+   * @param dataStructure Provides output arrays.
+   * @param msgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies the input file and output paths.
+   * @pre dataStructure, msgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ReadAngData(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ReadAngDataInputValues* inputValues);
+  /**
+   * @brief Destroys the .ang reader.
+   */
   ~ReadAngData() noexcept;
 
   ReadAngData(const ReadAngData&) = delete;
@@ -48,8 +56,10 @@ public:
   ReadAngData& operator=(ReadAngData&&) = delete;
 
   /**
-   * @brief Executes the algorithm: reads the .ang file and populates the DataStructure.
-   * @return Result<> indicating success or an EbsdLib error.
+   * @brief Reads the .ang file into output arrays.
+   * @return Success, or an EbsdLib or input-validation error.
+   *
+   * When a cancellation checkpoint observes the signal, the function returns success. Data copied before that checkpoint remains in the output arrays. Later data is not copied.
    */
   Result<> operator()();
 
@@ -60,21 +70,16 @@ private:
   const ReadAngDataInputValues* m_InputValues = nullptr;
 
   /**
-   * @brief Populates the Ensemble Attribute Matrix arrays (CrystalStructures, MaterialName,
-   * LatticeConstants) from the phase sections parsed out of the .ang header. Every slot is
-   * first initialized to the "Invalid Phase" defaults, then overwritten per parsed phase.
-   * @param reader The AngReader that has already successfully read the input file.
-   * @return Error result if no phases were parsed or a phase index falls outside the ensemble arrays.
+   * @brief Initializes ensemble arrays from parsed .ang phases.
+   * @param reader Provides parsed .ang data.
+   * @return An error if phases are missing or exceed ensemble arrays.
    */
   Result<> loadMaterialInfo(ebsdlib::AngReader* reader) const;
 
   /**
-   * @brief Copies the per-point data columns from the AngReader into the Cell Attribute Matrix
-   * arrays: remaps phase values < 1 to 1, interleaves phi1/PHI/phi2 into the 3-component
-   * EulerAngles array, and copies the remaining columns verbatim.
-   * @param reader The AngReader that has already successfully read the input file.
-   * @return Error result if the reader produced fewer scan points than the preflight-sized geometry
-   * expects (which would otherwise read past the reader's buffers).
+   * @brief Copies parsed .ang cell columns to output arrays.
+   * @param reader Provides parsed .ang data.
+   * @return An error if reader buffers are shorter than the output geometry.
    */
   Result<> copyRawEbsdData(ebsdlib::AngReader* reader) const;
 };

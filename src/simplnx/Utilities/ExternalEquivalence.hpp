@@ -5,6 +5,10 @@
 #include <limits>
 #include <new>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 /**
@@ -31,7 +35,13 @@ public:
     uint64 parent = 0;
     uint64 size = 0;
     uint64 rank = 0;
+    /**
+     * @brief Stores the lowest original label in the component.
+     */
     uint64 representative = 0;
+    /**
+     * @brief Distinguishes the current record layout from compatible legacy records.
+     */
     uint64 initialized = 0;
   };
   /**
@@ -59,7 +69,13 @@ public:
   }
 
 private:
-  /** @brief Takes ownership of a validated store and constructs its bounded typed page cache. */
+  /**
+   * @brief Takes ownership of a validated store and constructs its page cache.
+   * @param store Validated writable Node store.
+   * @param recordsPerPage Node count in one cache page.
+   * @param maxPages Maximum resident page count.
+   * @param initialComponentSize Size for a lazily initialized label.
+   */
   ExternalEquivalence(std::unique_ptr<ITemporaryRecordStore> store, uint64 recordsPerPage, usize maxPages, uint64 initialComponentSize)
   : m_Store(std::move(store))
   , m_Cache(*m_Store, recordsPerPage, maxPages)
@@ -70,6 +86,8 @@ private:
 public:
   /**
    * @brief Finds the deterministic lowest representative of a label's component.
+   * @param label Label to resolve and initialize when necessary.
+   * @param cancel Cancellation flag.
    * @return The representative or a range, cache-I/O, or cancellation error.
    */
   Result<uint64> find(uint64 label, const std::atomic_bool& cancel)
@@ -84,6 +102,9 @@ public:
   }
   /**
    * @brief Unites two components by rank while combining size and lowest-representative state.
+   * @param left Label in the first component.
+   * @param right Label in the second component.
+   * @param cancel Cancellation flag.
    * @return A valid result or a range, overflow, cache-I/O, or cancellation error.
    */
   Result<> unite(uint64 left, uint64 right, const std::atomic_bool& cancel)
@@ -123,7 +144,12 @@ public:
       return a;
     return m_Cache.write(child, c.value(), cancel);
   }
-  /** @brief Returns the accumulated size stored at a label's resolved root. */
+  /**
+   * @brief Returns the accumulated size stored at a label's resolved root.
+   * @param label Label to resolve and initialize when necessary.
+   * @param cancel Cancellation flag.
+   * @return Component size or a range, cache-I/O, or cancellation error.
+   */
   Result<uint64> componentSize(uint64 label, const std::atomic_bool& cancel)
   {
     auto root = findRoot(label, cancel);
@@ -134,7 +160,13 @@ public:
       return ConvertInvalidResult<uint64>(std::move(n));
     return {n.value().size};
   }
-  /** @brief Adds to a component's root size without materializing a per-label size array. */
+  /**
+   * @brief Adds to a component's root size without a resident per-label size array.
+   * @param label Label in the component.
+   * @param increment Size to add.
+   * @param cancel Cancellation flag.
+   * @return Valid result or a range, overflow, cache-I/O, or cancellation error.
+   */
   Result<> addSize(uint64 label, uint64 increment, const std::atomic_bool& cancel)
   {
     auto root = findRoot(label, cancel);
@@ -148,14 +180,23 @@ public:
     n.value().size += increment;
     return m_Cache.write(root.value(), n.value(), cancel);
   }
-  /** @brief Flushes dirty equivalence pages before another phase reads the backing store. */
+  /**
+   * @brief Flushes dirty equivalence pages before another phase reads the store.
+   * @param cancel Cancellation flag.
+   * @return Valid result or a backing-store or cancellation error.
+   */
   Result<> flush(const std::atomic_bool& cancel)
   {
     return m_Cache.flush(cancel);
   }
 
 private:
-  /** @brief Resolves the structural root with path-halving writes through the bounded cache. */
+  /**
+   * @brief Resolves a structural root with path-halving writes.
+   * @param label Label to resolve and initialize when necessary.
+   * @param cancel Cancellation flag.
+   * @return Root label or a range, cache-I/O, or cancellation error.
+   */
   Result<uint64> findRoot(uint64 label, const std::atomic_bool& cancel)
   {
     auto n = node(label, cancel);
@@ -180,7 +221,14 @@ private:
     }
     return {current};
   }
-  /** @brief Reads and lazily initializes one node, including compatibility with earlier record layouts. */
+  /**
+   * @brief Reads and lazily initializes one node.
+   * @param label Label and record index.
+   * @param cancel Cancellation flag.
+   * @return Node value or a range, cache-I/O, or cancellation error.
+   *
+   * A nonzero size without the marker identifies a compatible two- or three-field record layout.
+   */
   Result<Node> node(uint64 label, const std::atomic_bool& cancel)
   {
     if(label >= m_Store->recordCount())
@@ -196,7 +244,7 @@ private:
       }
       else
       {
-        // Accept records initialized by the earlier two- or three-field Node layout.
+        // Preserve records that use the compatible two- or three-field Node layout.
         n.value().representative = n.value().parent == label ? label : 0;
         n.value().initialized = k_InitializedMarker;
       }
@@ -206,6 +254,9 @@ private:
     }
     return n;
   }
+  /**
+   * @brief Marks records that use the current five-field Node layout.
+   */
   static inline constexpr uint64 k_InitializedMarker = 0x45515549564E4F44ULL;
   std::unique_ptr<ITemporaryRecordStore> m_Store;
   BoundedRecordPageCache<Node> m_Cache;

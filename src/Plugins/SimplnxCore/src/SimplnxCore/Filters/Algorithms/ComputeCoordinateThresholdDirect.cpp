@@ -13,11 +13,32 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @brief Tests whether both cell endpoints are inside a bound interval.
+ * @param minValue Identifies the cell lower coordinate.
+ * @param maxValue Identifies the cell upper coordinate.
+ * @param minBound Identifies the bound lower coordinate.
+ * @param maxBound Identifies the bound upper coordinate.
+ * @return True if both endpoints are inside the bounds.
+ */
 bool AreEndpointsInBounds(float32 minValue, float32 maxValue, float32 minBound, float32 maxBound)
 {
   return !(minBound > minValue || maxBound < minValue || minBound > maxValue || maxBound < maxValue);
 }
 
+/**
+ * @brief Writes a rectangular ImageGeom mask to contiguous storage.
+ * @param imageGeom Supplies dimensions, origin, and spacing.
+ * @param mask Receives one value per cell.
+ * @param shouldInvert True to reverse mask values.
+ * @param minPoint Supplies minimum x, y, and z bounds.
+ * @param maxPoint Supplies maximum x, y, and z bounds.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @return Success.
+ * @pre mask addresses an in-memory buffer for every ImageGeom cell.
+ *
+ * Cancellation returns success after complete Z slices. Later slices are not written.
+ */
 Result<> ComputeRectangleMask(const ImageGeom& imageGeom, uint8* mask, bool shouldInvert, const VectorFloat32Parameter::ValueType& minPoint, const VectorFloat32Parameter::ValueType& maxPoint,
                               const std::atomic_bool& shouldCancel)
 {
@@ -64,10 +85,22 @@ Result<> ComputeRectangleMask(const ImageGeom& imageGeom, uint8* mask, bool shou
   return {};
 }
 
+/**
+ * @struct SpherePredicate
+ * @brief Tests whether a point is inside a selected sphere.
+ */
 struct SpherePredicate
 {
+  // This value stores center x, y, z and radius.
   VectorFloat32Parameter::ValueType sphereInfo;
 
+  /**
+   * @brief Tests one point against the sphere.
+   * @param x Identifies the x coordinate.
+   * @param y Identifies the y coordinate.
+   * @param z Identifies the z coordinate.
+   * @return One if the point is inside or on the sphere. Returns zero otherwise.
+   */
   uint8 operator()(float32 x, float32 y, float32 z) const
   {
     const float32 xDiff = x - sphereInfo[0];
@@ -78,6 +111,20 @@ struct SpherePredicate
   }
 };
 
+/**
+ * @brief Writes an ImageGeom mask from a corner predicate.
+ * @tparam PredicateT Specifies the point-in-bounds predicate type.
+ * @param imageGeom Supplies dimensions, origin, and spacing.
+ * @param mask Receives one value per cell.
+ * @param shouldInvert True to reverse mask values.
+ * @param isInBounds Tests each cell corner.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @return Success.
+ * @pre mask addresses an in-memory buffer for every ImageGeom cell.
+ *
+ * A cell passes only when all eight corners pass. Cancellation returns success
+ * after complete Z slices. Later slices are not written.
+ */
 template <typename PredicateT>
 Result<> ComputeCornerMask(const ImageGeom& imageGeom, uint8* mask, bool shouldInvert, const PredicateT& isInBounds, const std::atomic_bool& shouldCancel)
 {
@@ -128,7 +175,6 @@ Result<> ComputeCornerMask(const ImageGeom& imageGeom, uint8* mask, bool shouldI
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThresholdDirect::ComputeCoordinateThresholdDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                    const ComputeCoordinateThresholdInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -138,10 +184,8 @@ ComputeCoordinateThresholdDirect::ComputeCoordinateThresholdDirect(DataStructure
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeCoordinateThresholdDirect::~ComputeCoordinateThresholdDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeCoordinateThresholdDirect::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GeometryPath);
@@ -149,7 +193,7 @@ Result<> ComputeCoordinateThresholdDirect::operator()()
   auto* inMemoryMask = dynamic_cast<UInt8DataStore*>(&maskStore);
   if(inMemoryMask == nullptr)
   {
-    // A forced in-core test may select this class for an OOC store; keep that case bounded.
+    // A forced direct test can receive an out-of-core store. The scanline fallback keeps I/O bounded.
     return ComputeCoordinateThresholdScanline(m_DataStructure, m_MessageHandler, m_ShouldCancel, m_InputValues)();
   }
 

@@ -11,38 +11,28 @@ struct MultiThresholdObjectsInputValues;
 
 /**
  * @class MultiThresholdObjectsScanline
- * @brief Out-of-core algorithm for multi-threshold filtering using chunked bulk I/O.
+ * @brief Evaluates a threshold tree through bounded bulk I/O.
  *
- * Instead of the Direct variant's per-element access and O(n) temporary result vector,
- * this variant processes bounded tuple chunks:
+ * Each pass evaluates 65,536 tuples. Peak scratch depends on chunk size, tree
+ * depth, and the widest input tuple instead of total tuple count.
  *
- * For each chunk it reads each required input through bulk I/O, recursively evaluates
- * the complete AND/OR/inversion tree in chunk-local buffers, then writes the completed
- * output chunk once through bulk I/O.
- *
- * This approach has two advantages for OOC data:
- *   - All input array reads use sequential bulk I/O instead of per-element access
- *   - Peak memory is bounded by chunk size, tree depth, and input component width
- *
- * The temporary buffers use std::unique_ptr<T[]> instead of std::vector<T> to avoid
- * the std::vector<bool> specialization that would prevent direct memory access.
- *
- * Selected by DispatchAlgorithm when any input array is backed by out-of-core storage.
- *
- * @see MultiThresholdObjectsDirect for the in-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * @see MultiThresholdObjectsDirect
  */
 class SIMPLNXCORE_EXPORT MultiThresholdObjectsScanline
 {
 public:
   /**
-   * @brief Constructs the out-of-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Creates a scanline threshold evaluator.
+   * @param dataStructure Provides threshold inputs and the output mask.
+   * @param mesgHandler Is unused by scanline evaluation.
+   * @param shouldCancel Stops before later input or output chunks when true.
+   * @param inputValues Specifies validated threshold settings. The caller must keep
+   * this object alive for the evaluator lifetime.
    */
   MultiThresholdObjectsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const MultiThresholdObjectsInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning evaluator.
+   */
   ~MultiThresholdObjectsScanline() noexcept;
 
   MultiThresholdObjectsScanline(const MultiThresholdObjectsScanline&) = delete;
@@ -51,15 +41,17 @@ public:
   MultiThresholdObjectsScanline& operator=(MultiThresholdObjectsScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the OOC-optimized multi-threshold filtering.
-   * @return Result<> with any errors encountered during execution
+   * @brief Evaluates and writes the mask one tuple chunk at a time.
+   * @return Input or output bulk-I/O error, or success after cancellation.
+   *
+   * Cancellation can retain complete output chunks written before the current chunk.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                  ///< Reference to the DataStructure containing all arrays
-  const MultiThresholdObjectsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                          ///< User cancellation flag
+  DataStructure& m_DataStructure;
+  const MultiThresholdObjectsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
 };
 
 } // namespace nx::core

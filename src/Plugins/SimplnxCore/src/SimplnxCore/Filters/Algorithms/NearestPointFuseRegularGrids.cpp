@@ -9,7 +9,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 NearestPointFuseRegularGrids::NearestPointFuseRegularGrids(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                            NearestPointFuseRegularGridsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -19,16 +18,13 @@ NearestPointFuseRegularGrids::NearestPointFuseRegularGrids(DataStructure& dataSt
 {
 }
 
-// -----------------------------------------------------------------------------
 NearestPointFuseRegularGrids::~NearestPointFuseRegularGrids() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& NearestPointFuseRegularGrids::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> NearestPointFuseRegularGrids::operator()()
 {
   auto& refImageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ReferenceGeometryPath);
@@ -36,8 +32,7 @@ Result<> NearestPointFuseRegularGrids::operator()()
   auto& sampleAM = m_DataStructure.getDataRefAs<AttributeMatrix>(m_InputValues->SamplingCellAttributeMatrixPath);
   Vec3<float32> sampleRes = sampleImageGeom.getSpacing();
 
-  // Further down we divide by sampleRes, so here check to make sure that no components of the resolution are 0
-  // This would be incredible unusual behavior if it were to occur.
+  // Coordinate mapping divides by sampling spacing. Reject zero spacing before dispatch.
   bool resHasZero = std::find(sampleRes.begin(), sampleRes.end(), 0.0f) != std::end(sampleRes) ? true : false;
   if(resHasZero)
   {
@@ -49,7 +44,7 @@ Result<> NearestPointFuseRegularGrids::operator()()
   auto sampleVoxelArrays = sampleAM.findAllChildrenOfType<IArray>();
   for(const auto& array : sampleVoxelArrays)
   {
-    // Only ordinary numeric/Boolean DataArrays are created and copied by this filter.
+    // The filter creates matching outputs only for numeric and Boolean DataArrays.
     if(array->getArrayType() != IArray::ArrayType::DataArray)
     {
       continue;

@@ -22,12 +22,11 @@ namespace
 const usize k_NumMisoReps = 576 * 4;
 }
 /**
- * @brief Parallel worker that computes GBCD bin indices for a chunk of surface
- * mesh triangles. Accepts raw pointers to locally cached feature-level (Euler
- * angles, phases) and ensemble-level (crystal structures) data, plus
- * offset-adjusted pointers to the current chunk of triangle labels and normals.
- * All data access is through raw pointers into local buffers -- zero OOC
- * virtual dispatch in the parallel hot loop.
+ * @class CalculateGBCDImpl
+ * @brief Computes GBCD bin indices for one triangle chunk.
+ *
+ * The worker receives local feature, ensemble, label, and normal buffers. It
+ * does not access a DataStore.
  */
 class CalculateGBCDImpl
 {
@@ -96,7 +95,6 @@ public:
         continue;
       }
 
-      // Get the normal for the triangle
       normal[0] = m_Normals[3 * triangleIndex];
       normal[1] = m_Normals[3 * triangleIndex + 1];
       normal[2] = m_Normals[3 * triangleIndex + 2];
@@ -127,12 +125,9 @@ public:
           int32 nSym = m_OrientationOps[laueClass1]->getNumSymOps();
           for(int32 j = 0; j < nSym; j++)
           {
-            // rotate g1 by symOp
             ebsdlib::Matrix3X3<float32> sym1 = m_OrientationOps[laueClass1]->getMatSymOpF(j);
             ebsdlib::Matrix3X3<float32> g1s = sym1 * g1;
-            // get the crystal directions along the triangle normals
             xstl1Norm1 = g1s * normal;
-            // get coordinates in square projection of crystal normal parallel to boundary normal
             bool nhCheck = getSquareCoord(xstl1Norm1.data(), sqCoord);
             bool nhCheckInv = !nhCheck;
             if(inversion == 1)
@@ -144,15 +139,10 @@ public:
 
             for(int32 k = 0; k < nSym; k++)
             {
-              // calculate the symmetric misorienation
               ebsdlib::Matrix3X3<float32> sym2 = m_OrientationOps[laueClass1]->getMatSymOpF(k);
-              // rotate g2 by symOp
               ebsdlib::Matrix3X3<float32> g2s = sym2 * g2;
-              // transpose rotated g2
               ebsdlib::Matrix3X3<float32> g2t = g2s.transpose();
-              // calculate delta g
               ebsdlib::Matrix3X3<float32> dg = g1s * g2t;
-              // translate matrix to euler angles
               ebsdlib::OrientationMatrixFType om(dg);
 
               ebsdlib::EulerFType eu = om.toEuler();
@@ -160,9 +150,7 @@ public:
 
               if(eulerMis[0] < nx::core::Constants::k_PiOver2D && eulerMis[1] < nx::core::Constants::k_PiOver2D && eulerMis[2] < nx::core::Constants::k_PiOver2D)
               {
-                // PHI euler angle is stored in GBCD as cos(PHI)
                 eulerMis[1] = cosf(eulerMis[1]);
-                // get the indexes that this point would be in the GBCD histogram
                 int32 gbcd_index = GBCDIndex(m_SizeGBCD.m_GbcdDeltas, m_SizeGBCD.m_GbcdSizes, m_SizeGBCD.m_GbcdLimits, eulerMis.data(), sqCoord);
                 if(gbcd_index != -1)
                 {
@@ -206,10 +194,8 @@ public:
     int32 index[k_GBCDParamCount] = {0, 0, 0, 0, 0};
     int32 flagGood = 1;
 
-    // concatenate the normalized euler angles and normalized spherical coordinate normal
     std::array<float32, k_GBCDParamCount> misEulerNorm = {eulerN[0], eulerN[1], eulerN[2], sqCoord[0], sqCoord[1]};
 
-    // Check for a valid point in the GBCD space
     for(int32 i = 0; i < k_GBCDParamCount; i++)
     {
       if(misEulerNorm[i] < gbcdLimits[i])
@@ -225,14 +211,13 @@ public:
     if(flagGood == 0)
     {
       return -1;
-    } // does not fit in the gbcd space
+    }
 
     const int32 k_N1 = gbcdSz[0];
     const int32 k_N1N2 = k_N1 * (gbcdSz[1]);
     const int32 k_N1N2N3 = k_N1N2 * (gbcdSz[2]);
     const int32 k_N1N2N3N4 = k_N1N2N3 * (gbcdSz[3]);
 
-    // determine the bin that the point should go into.
     for(usize i = 0; i < k_GBCDParamCount; i++)
     {
       index[i] = static_cast<int32>((misEulerNorm[i] - gbcdLimits[i]) / gbcdDelta[i]);
@@ -252,10 +237,11 @@ public:
   }
 
   /**
-   * @brief getSquareCoord Computes the square based coordinate based on the incoming normal
-   * @param crystalNormal Incoming normal
-   * @param sqCoord Computed square coordinate
-   * @return Boolean value for whether coordinate lies in the norther hemisphere
+   * @brief Maps a crystal normal to a square coordinate.
+   * @tparam T Specifies the floating-point coordinate type.
+   * @param crystalNormal Provides the crystal normal.
+   * @param sqCoord Receives the square coordinate.
+   * @return True if the coordinate is in the northern hemisphere.
    */
   template <typename T>
   bool getSquareCoord(T* crystalNormal, T* sqCoord) const
@@ -305,7 +291,6 @@ SizeGBCD::SizeGBCD(usize faceChunkSize, usize numMisoReps, float32 gbcdRes)
   // m_GBCDlimits[8] = 2.0f*m_pi;
   // m_GBCDlimits[9] = cosf(0.0f);
 
-  // Greg's Ranges
   m_GbcdLimits[0] = 0.0f;
   m_GbcdLimits[1] = 0.0f;
   m_GbcdLimits[2] = 0.0f;
@@ -331,7 +316,7 @@ SizeGBCD::SizeGBCD(usize faceChunkSize, usize numMisoReps, float32 gbcdRes)
   m_GbcdSizes[3] = int32(0.5 + (m_GbcdLimits[8] - m_GbcdLimits[3]) / m_GbcdDeltas[3]);
   m_GbcdSizes[4] = int32(0.5 + (m_GbcdLimits[9] - m_GbcdLimits[4]) / m_GbcdDeltas[4]);
 
-  // reset the 3rd and 4th dimensions using the square grid approach
+  // The square projection defines the last two GBCD dimensions.
   float32 totalNormalBins = m_GbcdSizes[3] * m_GbcdSizes[4];
   m_GbcdSizes[3] = int32(sqrtf(totalNormalBins) + 0.5f);
   m_GbcdSizes[4] = int32(sqrtf(totalNormalBins) + 0.5f);
@@ -348,7 +333,6 @@ void SizeGBCD::initializeBinsWithValue(int32 value)
   m_GbcdBins = std::vector<int32>(m_FaceChunkSize * m_NumMisoReps, value);
 }
 
-// -----------------------------------------------------------------------------
 ComputeGBCD::ComputeGBCD(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeGBCDInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -357,33 +341,13 @@ ComputeGBCD::ComputeGBCD(DataStructure& dataStructure, const IFilter::MessageHan
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeGBCD::~ComputeGBCD() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeGBCD::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes the Grain Boundary Character Distribution (GBCD) by
- * iterating over all triangle faces on the surface mesh in chunks of 50K
- * triangles. For each chunk, the CalculateGBCDImpl parallel worker computes
- * GBCD bin indices for each triangle, then the main loop accumulates
- * face-area-weighted contributions into the GBCD histogram. Finally, the
- * histogram is normalized to multiples of random distribution (MRD).
- *
- * OOC strategy: Feature-level arrays (Euler angles, phases) and ensemble-level
- * arrays (crystal structures) are bulk-read into local vectors at startup since
- * the parallel worker accesses them randomly by feature ID. Triangle-level
- * arrays (labels, normals, areas) are chunk-read per iteration via
- * copyIntoBuffer. The GBCD output histogram is accumulated in a local buffer
- * and bulk-written to the DataStore at the end via copyFromBuffer.
- * The CalculateGBCDImpl worker receives raw pointers into the local caches,
- * eliminating all OOC virtual dispatch from the parallel hot loop.
- */
 Result<> ComputeGBCD::operator()()
 {
   auto& eulerAngles = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->FeatureEulerAnglesArrayPath);
@@ -395,9 +359,7 @@ Result<> ComputeGBCD::operator()()
 
   auto& gbcd = m_DataStructure.getDataRefAs<Float64Array>(m_InputValues->GBCDArrayName);
 
-  // Bulk-read feature-level arrays into local vectors. The parallel worker
-  // accesses these randomly by feature ID (from triangle face labels), which
-  // would cause severe OOC chunk thrashing if left in DataStores.
+  // Triangle labels access feature data in random order.
   const usize numEulerElements = eulerAngles.getSize();
   std::vector<float32> eulersCache(numEulerElements);
   eulerAngles.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(eulersCache.data(), numEulerElements));
@@ -406,7 +368,6 @@ Result<> ComputeGBCD::operator()()
   std::vector<int32> phasesCache(numPhaseElements);
   phases.getDataStoreRef().copyIntoBuffer(0, nonstd::span<int32>(phasesCache.data(), numPhaseElements));
 
-  // Bulk-read ensemble-level crystal structures (tiny, typically < 10 entries)
   usize totalPhases = crystalStructures.getNumberOfTuples();
   std::vector<uint32> crystalStructuresCache(totalPhases);
   crystalStructures.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresCache.data(), totalPhases));
@@ -417,13 +378,11 @@ Result<> ComputeGBCD::operator()()
   {
     triangleChunkSize = totalFaces;
   }
-  // call the sizeGBCD function with proper chunkSize and numMisoReps to get Bins array set up properly
   SizeGBCD sizeGbcd(triangleChunkSize, k_NumMisoReps, m_InputValues->GBCDRes);
   int32 totalGBCDBins = sizeGbcd.m_GbcdSizes[0] * sizeGbcd.m_GbcdSizes[1] * sizeGbcd.m_GbcdSizes[2] * sizeGbcd.m_GbcdSizes[3] * sizeGbcd.m_GbcdSizes[4] * 2;
 
   MessageHelper messageHelper(m_MessageHandler);
 
-  // create an array to hold the total face area for each phase and initialize the array to 0.0
   std::vector<float64> totalFaceArea(totalPhases, 0.0);
   auto startTime = std::chrono::steady_clock::now();
   messageHelper.sendMessage("1/2 Starting GBCD Calculation and Summation Phase");

@@ -29,7 +29,6 @@ const DataPath DataArrayPath = AttributeMatrixPath.createChildPath(DataArrayName
 const size_t TUPLE_DIM = 2;
 const size_t COMPONENT_DIM = 2;
 
-// -----------------------------------------------------------------------------
 template <typename T>
 void createDataStructure(DataStructure& dataStructure)
 {
@@ -40,7 +39,6 @@ void createDataStructure(DataStructure& dataStructure)
   da->fill(static_cast<T>(0.0));
 }
 
-// -----------------------------------------------------------------------------
 Arguments getArgs(const DataPath& inputArray, DataType type, const std::string& outputArrayName)
 {
   Arguments args;
@@ -52,7 +50,6 @@ Arguments getArgs(const DataPath& inputArray, DataType type, const std::string& 
   return args;
 }
 
-// -----------------------------------------------------------------------------
 template <typename T, typename U>
 void checkConvertedArray(DataArray<T>* originalDataArray, DataArray<U>* convertedDataArray)
 {
@@ -80,7 +77,6 @@ void checkConvertedArray(DataArray<T>* originalDataArray, DataArray<U>* converte
   }
 }
 
-// -----------------------------------------------------------------------------
 template <typename T, typename U>
 void TestConversion(DataStructure& dataStructure, ConvertDataFilter& filter, std::string arrayName, DataType newType, std::string newArrayName, bool checkArray = true)
 {
@@ -99,7 +95,6 @@ void TestConversion(DataStructure& dataStructure, ConvertDataFilter& filter, std
   }
 }
 
-// -----------------------------------------------------------------------------
 void TestInt8Signed()
 {
   ConvertDataFilter filter;
@@ -118,7 +113,6 @@ void TestInt8Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt8Unsigned()
 {
   ConvertDataFilter filter;
@@ -134,7 +128,6 @@ void TestInt8Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt8Signed()
 {
   ConvertDataFilter filter;
@@ -153,7 +146,6 @@ void TestUInt8Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt8Unsigned()
 {
   ConvertDataFilter filter;
@@ -169,7 +161,6 @@ void TestUInt8Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt16Signed()
 {
   ConvertDataFilter filter;
@@ -188,7 +179,6 @@ void TestInt16Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt16Unsigned()
 {
   ConvertDataFilter filter;
@@ -204,7 +194,6 @@ void TestInt16Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt16Signed()
 {
   ConvertDataFilter filter;
@@ -223,7 +212,6 @@ void TestUInt16Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt16Unsigned()
 {
   ConvertDataFilter filter;
@@ -239,7 +227,6 @@ void TestUInt16Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt32Signed()
 {
   ConvertDataFilter filter;
@@ -258,7 +245,6 @@ void TestInt32Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt32Unsigned()
 {
   ConvertDataFilter filter;
@@ -274,7 +260,6 @@ void TestInt32Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt32Signed()
 {
   ConvertDataFilter filter;
@@ -293,7 +278,6 @@ void TestUInt32Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt32Unsigned()
 {
   ConvertDataFilter filter;
@@ -309,7 +293,6 @@ void TestUInt32Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt64Signed()
 {
   ConvertDataFilter filter;
@@ -328,7 +311,6 @@ void TestInt64Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInt64Unsigned()
 {
   ConvertDataFilter filter;
@@ -344,7 +326,6 @@ void TestInt64Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt64Signed()
 {
   ConvertDataFilter filter;
@@ -363,7 +344,6 @@ void TestUInt64Signed()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestUInt64Unsigned()
 {
   ConvertDataFilter filter;
@@ -379,7 +359,6 @@ void TestUInt64Unsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestFloat()
 {
   ConvertDataFilter filter;
@@ -398,7 +377,6 @@ void TestFloat()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestDouble()
 {
   ConvertDataFilter filter;
@@ -417,7 +395,6 @@ void TestDouble()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestBoolSigned()
 {
   ConvertDataFilter filter;
@@ -435,7 +412,6 @@ void TestBoolSigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestBoolUnsigned()
 {
   ConvertDataFilter filter;
@@ -450,7 +426,6 @@ void TestBoolUnsigned()
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
-// -----------------------------------------------------------------------------
 void TestInvalidDataArray()
 {
   ConvertDataFilter filter;
@@ -462,7 +437,6 @@ void TestInvalidDataArray()
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResults.result);
 }
 
-// -----------------------------------------------------------------------------
 void TestOverwriteArray()
 {
   ConvertDataFilter filter;
@@ -474,7 +448,6 @@ void TestOverwriteArray()
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResults.result);
 }
 
-// -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::ConvertData: Valid Execution", "[SimplnxCore][ConvertDataFilter]")
 {
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
@@ -518,7 +491,6 @@ TEST_CASE("SimplnxCore::ConvertData: Valid Execution", "[SimplnxCore][ConvertDat
   TestOverwriteArray();
 }
 
-// -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::ConvertData: In Place Execution", "[SimplnxCore][ConvertDataFilter]")
 {
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));

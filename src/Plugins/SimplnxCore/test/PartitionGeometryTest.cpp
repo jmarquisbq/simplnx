@@ -1,23 +1,6 @@
 /**
- * This file is auto generated from the original Plugins/PartitionGeometryFilter
- * runtime information. These are the steps that need to be taken to utilize this
- * unit test in the proper way.
- *
- * 1: Validate each of the default parameters that gets created.
- * 2: Inspect the actual filter to determine if the filter in its default state
- * would pass or fail BOTH the preflight() and execute() methods
- * 3: UPDATE the ```REQUIRE(result.result.valid());``` code to have the proper
- *
- * 4: Add additional unit tests to actually test each code path within the filter
- *
- * There are some example Catch2 ```TEST_CASE``` sections for your inspiration.
- *
- * NOTE the format of the ```TEST_CASE``` macro. Please stick to this format to
- * allow easier parsing of the unit tests.
- *
- * When you start working on this unit test remove "[PartitionGeometryFilter][.][UNIMPLEMENTED]"
- * from the TEST_CASE macro. This will enable this unit test to be run by default
- * and report errors.
+ * @file PartitionGeometryTest.cpp
+ * @brief Tests each partitioning mode, supported geometry, error path, and OOC algorithm path.
  */
 
 #include <catch2/catch.hpp>
@@ -82,7 +65,10 @@ const DataPath k_BenchmarkPartitionIdsPath = k_BenchmarkCellDataPath.createChild
 const DataPath k_BenchmarkPartitionGridPath({k_BenchmarkPartitionGridName});
 const DataPath k_BenchmarkPartitionGridFeatureIdsPath = k_BenchmarkPartitionGridPath.createChildPath(k_BenchmarkPartitionGridCellDataName).createChildPath(k_BenchmarkPartitionGridFeatureIdsName);
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Builds a 200-cubed ImageGeom with sequential cell values for timing tests.
+ * @param dataStructure Receives the geometry and input array.
+ */
 void BuildPartitionGeometryBenchmarkInput(DataStructure& dataStructure)
 {
   const ShapeType cellTupleShape = {k_BenchmarkDim, k_BenchmarkDim, k_BenchmarkDim};
@@ -111,7 +97,13 @@ void BuildPartitionGeometryBenchmarkInput(DataStructure& dataStructure)
   }
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Calculates the expected partition identifier for one benchmark cell.
+ * @param x Zero-based X cell coordinate.
+ * @param y Zero-based Y cell coordinate.
+ * @param z Zero-based Z cell coordinate.
+ * @return Expected identifier with the configured starting offset.
+ */
 constexpr int32 ExpectedPartitionId(usize x, usize y, usize z)
 {
   const usize partitionX = x / k_BenchmarkCellsPerPartition;
@@ -120,7 +112,15 @@ constexpr int32 ExpectedPartitionId(usize x, usize y, usize z)
   return k_BenchmarkStartingFeatureId + static_cast<int32>(partitionX + (partitionY * k_BenchmarkPartitionsPerAxis) + (partitionZ * k_BenchmarkPartitionsPerAxis * k_BenchmarkPartitionsPerAxis));
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Creates arguments for basic partitioning by partition count.
+ * @param inputGeometryPath Geometry to partition.
+ * @param attrMatrixPath AttributeMatrix that receives partition identifiers.
+ * @param partitionIdsArrayName Output identifier array name.
+ * @param numOfPartitionsPerAxis Partition counts in {X, Y, Z} order.
+ * @param maskArrayPath Optional vertex mask path.
+ * @return Configured basic-mode arguments.
+ */
 Arguments createBasicPartitionGeometryArguments(const DataPath& inputGeometryPath, const DataPath& attrMatrixPath, const std::string& partitionIdsArrayName, const IntVec3& numOfPartitionsPerAxis,
                                                 const std::optional<DataPath>& maskArrayPath)
 {
@@ -140,7 +140,16 @@ Arguments createBasicPartitionGeometryArguments(const DataPath& inputGeometryPat
   return args;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Creates arguments for an explicit regular partition grid.
+ * @param inputGeometryPath Geometry to partition.
+ * @param attrMatrixPath AttributeMatrix that receives partition identifiers.
+ * @param partitionIdsArrayName Output identifier array name.
+ * @param numOfPartitionsPerAxis Partition counts in {X, Y, Z} order.
+ * @param partitioningSchemeOrigin Partition-grid origin in geometry units.
+ * @param lengthPerPartition Partition lengths in geometry units.
+ * @return Configured advanced-mode arguments.
+ */
 Arguments createAdvancedPartitionGeometryArguments(const DataPath& inputGeometryPath, const DataPath& attrMatrixPath, const std::string& partitionIdsArrayName, const IntVec3& numOfPartitionsPerAxis,
                                                    const FloatVec3& partitioningSchemeOrigin, const FloatVec3& lengthPerPartition)
 {
@@ -155,7 +164,16 @@ Arguments createAdvancedPartitionGeometryArguments(const DataPath& inputGeometry
   return args;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Creates arguments for partitioning within an explicit bounding box.
+ * @param inputGeometryPath Geometry to partition.
+ * @param attrMatrixPath AttributeMatrix that receives partition identifiers.
+ * @param partitionIdsArrayName Output identifier array name.
+ * @param numOfPartitionsPerAxis Partition counts in {X, Y, Z} order.
+ * @param lowerLeftCoord Minimum grid coordinates in geometry units.
+ * @param upperRightCoord Maximum grid coordinates in geometry units.
+ * @return Configured bounding-box-mode arguments.
+ */
 Arguments createBoundingBoxPartitionGeometryArguments(const DataPath& inputGeometryPath, const DataPath& attrMatrixPath, const std::string& partitionIdsArrayName,
                                                       const IntVec3& numOfPartitionsPerAxis, const FloatVec3& lowerLeftCoord, const FloatVec3& upperRightCoord)
 {
@@ -171,7 +189,14 @@ Arguments createBoundingBoxPartitionGeometryArguments(const DataPath& inputGeome
   return args;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Creates arguments that use an existing partition grid.
+ * @param inputGeometryPath Geometry to partition.
+ * @param attrMatrixPath AttributeMatrix that receives partition identifiers.
+ * @param partitionIdsArrayName Output identifier array name.
+ * @param existingPSPath Existing partition-grid geometry path.
+ * @return Configured existing-grid-mode arguments.
+ */
 Arguments createExistingPartitioningSchemeGeometryArguments(const DataPath& inputGeometryPath, const DataPath& attrMatrixPath, const std::string& partitionIdsArrayName, const DataPath& existingPSPath)
 {
   Arguments args;
@@ -185,7 +210,7 @@ Arguments createExistingPartitioningSchemeGeometryArguments(const DataPath& inpu
 
 using FileSentinelType = nx::core::UnitTest::TestFileSentinel;
 using SharedFileSentinelType = std::shared_ptr<FileSentinelType>;
-// This is here so that we don't have to decompress and then delete multiple times
+// One shared sentinel keeps the extracted geometry fixtures available across each parameterized loop.
 SharedFileSentinelType s_FileSentinel;
 } // namespace
 
@@ -216,14 +241,14 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
 
   SECTION("BasicPartitionArguments")
   {
-    // Validate that we have all the arguments properly sized
+    // Parallel parameter vectors must describe the same number of geometry scenarios.
     REQUIRE(filePaths.size() > index);
     REQUIRE(partitionDimensions.size() > index);
     REQUIRE(amNames.size() > index);
     REQUIRE(maskArrayNames.size() > index);
     REQUIRE(exemplaryArrayNames.size() > index);
 
-    // First time through, decompress the test data
+    // The first geometry acquires the shared extracted fixture directory.
     if(index == 0)
     {
       s_FileSentinel = std::make_shared<FileSentinelType>(nx::core::unit_test::k_TestFilesDir, "PartitionGeometryTest.tar.gz", "PartitionGeometryTest");
@@ -239,7 +264,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
       const ReadDREAM3DFilter importD3DFilter;
       Arguments importD3DArgs;
       importD3DArgs.insert(ReadDREAM3DFilter::k_ImportFileData, Dream3dImportParameter::ImportData(filePaths[index]));
-      // Preflight the filter and check result
+      // Preflight must accept the selected geometry and partition mode.
       auto executeResult = importD3DFilter.execute(dataStructure, importD3DArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
     }
@@ -255,7 +280,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
       Arguments partitionGeometryArgs = createBasicPartitionGeometryArguments(inputGeometryPath, attrMatrixPath, partitionIdsArrayName, numOfPartitionsPerAxis, optMaskPath);
 
       const PartitionGeometryFilter filter;
-      // Execute the filter and check the result
+      // Execution must create partition identifiers for the selected geometry.
       auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -276,7 +301,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic", "[Plugins][PartitionGeo
       REQUIRE(partitionId == exemplaryId);
     }
 
-    // Last time through clean up the test files
+    // The final geometry releases and removes the shared extracted fixtures.
     if(index == lastIndex)
     {
       s_FileSentinel = nullptr;
@@ -324,7 +349,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
 
   SECTION("BasicPartitionArguments")
   {
-    // Validate that we have all the arguments properly sized
+    // Parallel parameter vectors must describe the same number of geometry scenarios.
     REQUIRE(filePaths.size() == lastIndex + 1);
     REQUIRE(partitionDimensions.size() == lastIndex + 1);
     REQUIRE(amNames.size() == lastIndex + 1);
@@ -333,7 +358,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
     REQUIRE(partitionOrigins.size() == lastIndex + 1);
     REQUIRE(partitionSpacing.size() == lastIndex + 1);
 
-    // First time through, decompress the test data
+    // The first geometry acquires the shared extracted fixture directory.
     if(index == 0)
     {
       s_FileSentinel = std::make_shared<FileSentinelType>(nx::core::unit_test::k_TestFilesDir, "PartitionGeometryTest.tar.gz", "PartitionGeometryTest");
@@ -359,7 +384,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
           createAdvancedPartitionGeometryArguments(inputGeometryPath, attrMatrixPath, partitionIdsArrayName, numOfPartitionsPerAxis, partitionOrigins[index], partitionSpacing[index]);
 
       const PartitionGeometryFilter filter;
-      // Execute the filter and check the result
+      // Execution must create partition identifiers for the selected geometry.
       auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -380,7 +405,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Advanced", "[Plugins][Partition
       REQUIRE(partitionId == exemplaryId);
     }
 
-    // Last time through clean up the test files
+    // The final geometry releases and removes the shared extracted fixtures.
     if(index == lastIndex)
     {
       s_FileSentinel = nullptr;
@@ -427,7 +452,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
 
   SECTION("BasicPartitionArguments")
   {
-    // Validate that we have all the arguments properly sized
+    // Parallel parameter vectors must describe the same number of geometry scenarios.
     REQUIRE(filePaths.size() == lastIndex + 1);
     REQUIRE(partitionDimensions.size() == lastIndex + 1);
     REQUIRE(amNames.size() == lastIndex + 1);
@@ -435,7 +460,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
     REQUIRE(lowerLeftCoords.size() == lastIndex + 1);
     REQUIRE(upperRightCoords.size() == lastIndex + 1);
 
-    // First time through, decompress the test data
+    // The first geometry acquires the shared extracted fixture directory.
     if(index == 0)
     {
       s_FileSentinel = std::make_shared<FileSentinelType>(nx::core::unit_test::k_TestFilesDir, "PartitionGeometryTest.tar.gz", "PartitionGeometryTest");
@@ -461,7 +486,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
           createBoundingBoxPartitionGeometryArguments(inputGeometryPath, attrMatrixPath, partitionIdsArrayName, numOfPartitionsPerAxis, lowerLeftCoords[index], upperRightCoords[index]);
 
       const PartitionGeometryFilter filter;
-      // Execute the filter and check the result
+      // Execution must create partition identifiers for the selected geometry.
       auto executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -482,7 +507,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Bounding Box", "[Plugins][Parti
       REQUIRE(partitionId == exemplaryId);
     }
 
-    // Last time through clean up the test files
+    // The final geometry releases and removes the shared extracted fixtures.
     if(index == lastIndex)
     {
       s_FileSentinel = nullptr;
@@ -592,11 +617,11 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Valid filter execution", "[Plug
   DataStructure dataStructure;
   const PartitionGeometryFilter filter;
 
-  // Preflight the filter and check result
+  // Preflight must accept the selected geometry and partition mode.
   auto executeResult = importD3DFilter.execute(dataStructure, importD3DArgs);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Execute the filter and check the result
+  // Execution must create partition identifiers for the selected geometry.
   executeResult = scope.executeFilter(filter, dataStructure, partitionGeometryArgs);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 

@@ -21,6 +21,13 @@ constexpr ChoicesParameter::ValueType k_ToVectorScalar = 1;
 constexpr usize k_QuaternionComponents = 4;
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Converts one quaternion component order.
+ * @tparam T Specifies the floating-point value type.
+ * @tparam ToVectorScalar Selects scalar-last output order.
+ * @param input Provides four input components.
+ * @param output Receives four output components.
+ */
 template <typename T, bool ToVectorScalar>
 void ConvertTuple(const T* input, T* output)
 {
@@ -65,6 +72,11 @@ void ConvertContiguousRange(const T* input, T* output, usize start, usize end, c
   }
 }
 
+/**
+ * @class ConvertQuaternionContiguousImpl
+ * @brief Converts contiguous quaternion ranges through raw pointers.
+ * @tparam T Specifies the floating-point value type.
+ */
 template <typename T>
 class ConvertQuaternionContiguousImpl
 {
@@ -106,6 +118,11 @@ void ConvertBuffer(T* buffer, usize tupleCount)
   }
 }
 
+/**
+ * @class ConvertQuaternionScanlineType
+ * @brief Converts bounded bulk-I/O quaternion blocks.
+ * @tparam T Specifies the floating-point value type.
+ */
 template <typename T>
 class ConvertQuaternionScanlineType
 {
@@ -167,6 +184,11 @@ private:
   const ConvertQuaternionInputValues* m_InputValues = nullptr;
 };
 
+/**
+ * @class ConvertQuaternionDirectType
+ * @brief Converts direct quaternion arrays.
+ * @tparam T Specifies the floating-point value type.
+ */
 template <typename T>
 class ConvertQuaternionDirectType
 {
@@ -206,6 +228,10 @@ private:
   const ConvertQuaternionInputValues* m_InputValues = nullptr;
 };
 
+/**
+ * @class ConvertQuaternionDirect
+ * @brief Dispatches a direct typed converter.
+ */
 class ConvertQuaternionDirect
 {
 public:
@@ -230,6 +256,10 @@ private:
   const ConvertQuaternionInputValues* m_InputValues = nullptr;
 };
 
+/**
+ * @class ConvertQuaternionScanline
+ * @brief Dispatches a scanline typed converter.
+ */
 class ConvertQuaternionScanline
 {
 public:
@@ -256,7 +286,6 @@ private:
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 ConvertQuaternion::ConvertQuaternion(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, ConvertQuaternionInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -265,16 +294,13 @@ ConvertQuaternion::ConvertQuaternion(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 ConvertQuaternion::~ConvertQuaternion() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ConvertQuaternion::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ConvertQuaternion::operator()()
 {
   const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->QuaternionDataArrayPath);

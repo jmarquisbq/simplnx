@@ -22,20 +22,40 @@
 #include <mutex>
 #include <new>
 
+/**
+ * @namespace nx::core::ImageRotationUtilities
+ * @brief Provides image and node geometry transformation utilities.
+ */
 namespace nx::core::ImageRotationUtilities
 {
 const Eigen::Vector3f k_XAxis = Eigen::Vector3f::UnitX();
 const Eigen::Vector3f k_YAxis = Eigen::Vector3f::UnitY();
 const Eigen::Vector3f k_ZAxis = Eigen::Vector3f::UnitZ();
 
+/**
+ * @typedef Matrix3fR
+ * @brief Defines a row-major 3 by 3 float matrix.
+ */
 using Matrix3fR = Eigen::Matrix<float32, 3, 3, Eigen::RowMajor>;
+/**
+ * @typedef Matrix4fR
+ * @brief Defines a row-major 4 by 4 float matrix.
+ */
 using Matrix4fR = Eigen::Matrix<float32, 4, 4, Eigen::RowMajor>;
 
+/**
+ * @typedef Vector3i64
+ * @brief Defines a three-value Int64 index vector.
+ */
 using Vector3i64 = Eigen::Array<int64, 1, 3>;
 
-// Error code reported (via FilterProgressCallback::mergeResult) when a nearest-neighbor tuple copy fails.
+// Worker result aggregation uses this code for a failed nearest-neighbor tuple copy.
 constexpr int32 k_NearestNeighborCopyFailed_Error = -6852;
 
+/**
+ * @struct RotateArgs
+ * @brief Stores source and transformed image dimensions, spacing, and origins.
+ */
 struct RotateArgs
 {
   USizeVec3 OriginalDims;
@@ -61,69 +81,69 @@ struct RotateArgs
 };
 
 /**
- * @brief
- * @param transform
- * @return
+ * @brief Formats a four-by-four transformation matrix.
+ * @param transform Specifies the matrix.
+ * @return Four signed fixed-point rows.
  */
 SIMPLNX_EXPORT std::string GenerateTransformationMatrixDescription(const ImageRotationUtilities::Matrix4fR& transform);
 
 /**
- * @brief
- * @param precomputed
- * @return
+ * @brief Copies 16 stored values to a row-major transformation matrix.
+ * @param precomputed Provides at least 16 float values.
+ * @return Copied matrix.
  */
 SIMPLNX_EXPORT Matrix4fR CopyPrecomputedToTransformationMatrix(const AbstractDataStore<float32>& precomputed);
 
 /**
- * @brief
- * @param tableData
- * @return
+ * @brief Copies a four-by-four dynamic table to a transformation matrix.
+ * @param tableData Provides four rows with four values each.
+ * @return Copied matrix.
  */
 SIMPLNX_EXPORT Matrix4fR GenerateManualTransformationMatrix(const DynamicTableParameter::ValueType& tableData);
 
 /**
- * @brief
- * @param pRotationValue
- * @return
+ * @brief Creates an axis-angle rotation matrix.
+ * @param pRotationValue Provides XYZ axis values and angle in degrees.
+ * @return Homogeneous rotation matrix.
  */
 SIMPLNX_EXPORT Matrix4fR GenerateRotationTransformationMatrix(const VectorFloat32Parameter::ValueType& pRotationValue);
 
 /**
- * @brief
- * @param pTranslationValue
- * @return
+ * @brief Creates a translation matrix.
+ * @param pTranslationValue Provides XYZ translation.
+ * @return Homogeneous translation matrix.
  */
 SIMPLNX_EXPORT Matrix4fR GenerateTranslationTransformationMatrix(const VectorFloat32Parameter::ValueType& pTranslationValue);
 
 /**
- * @brief
- * @param pScaleValue
- * @return
+ * @brief Creates an axis-aligned scale matrix.
+ * @param pScaleValue Provides XYZ scale factors.
+ * @return Homogeneous scale matrix.
  */
 SIMPLNX_EXPORT Matrix4fR GenerateScaleTransformationMatrix(const VectorFloat32Parameter::ValueType& pScaleValue);
 
 /**
- * @brief Function to determine the min and max coordinates of the transformed Image Geometry using the bounding box.
- * @param imageGeomBoundingBox
- * @param transformationMatrix
- * @return
+ * @brief Transforms a bounding box and calculates axis bounds.
+ * @param imageGeomBoundingBox Provides source bounds.
+ * @param transformationMatrix Specifies the transformation.
+ * @return X, Y, and Z minimum and maximum coordinates.
  */
 SIMPLNX_EXPORT FloatVec6 DetermineMinMaxCoords(const BoundingBox3Df& imageGeomBoundingBox, const Matrix4fR& transformationMatrix);
 
 /**
- * @brief Function to determine the min and max coordinates (bounding box) of the transformed Image Geometry.
- * @param imageGeometry
- * @param transformationMatrix
- * @return
+ * @brief Transforms ImageGeom bounds and calculates axis bounds.
+ * @param imageGeometry Provides source bounds.
+ * @param transformationMatrix Specifies the transformation.
+ * @return X, Y, and Z minimum and maximum coordinates.
  */
 SIMPLNX_EXPORT FloatVec6 DetermineMinMaxCoords(const ImageGeom& imageGeometry, const Matrix4fR& transformationMatrix);
 
 /**
- * @brief Finds the Cosine of the angle between 2 vectors
- * @tparam T
- * @param vectorA
- * @param vectorB
- * @return
+ * @brief Calculates the cosine between two vectors.
+ * @tparam T Specifies a floating-point scalar type.
+ * @param vectorA Provides the first vector.
+ * @param vectorB Provides the second vector.
+ * @return Cosine value, or 1 when either vector has zero length.
  */
 template <std::floating_point T>
 T CosBetweenVectors(const Eigen::Vector3<T>& vectorA, const Eigen::Vector3<T>& vectorB)
@@ -140,29 +160,29 @@ T CosBetweenVectors(const Eigen::Vector3<T>& vectorA, const Eigen::Vector3<T>& v
 }
 
 /**
- * @brief Function for determining new ImageGeom Spacing between points for scaling
- * @param spacing
- * @param axisNew
- * @return spacing for a given axis.
+ * @brief Selects source spacing nearest to a transformed axis.
+ * @param spacing Provides source axis spacing.
+ * @param axisNew Provides the transformed axis direction.
+ * @return Spacing of the source axis with the largest absolute cosine.
  */
 SIMPLNX_EXPORT float32 DetermineSpacing(const FloatVec3& spacing, const Eigen::Vector3f& axisNew);
 
 /**
- * @brief Determines parameters for image rotation
- * @param imageGeom
- * @param transformationMatrix
- * @return New RotateArgs object
+ * @brief Calculates transformed image dimensions and spatial metadata.
+ * @param imageGeom Provides source dimensions and spatial metadata.
+ * @param transformationMatrix Specifies rotation, scale, and translation.
+ * @return Rotation arguments for source and output geometry.
  */
 SIMPLNX_EXPORT ImageRotationUtilities::RotateArgs CreateRotationArgs(const ImageGeom& imageGeom, const Matrix4fR& transformationMatrix);
 
 /**
- * @brief
- * @tparam T
- * @param params
- * @param xyzIndex
- * @param sourceArray
- * @param compIndex
- * @return
+ * @brief Reads one source component after clamping XYZ indexes.
+ * @tparam T Specifies the array scalar type.
+ * @param params Provides source dimensions.
+ * @param xyzIndex Specifies a possibly exterior source index.
+ * @param sourceArray Provides source tuples.
+ * @param compIndex Specifies the component.
+ * @return Clamped source value.
  */
 template <typename T>
 T inline GetSourceArrayValue(const RotateArgs& params, Vector3i64 xyzIndex, const DataArray<T>& sourceArray, usize compIndex)
@@ -194,17 +214,16 @@ T inline GetSourceArrayValue(const RotateArgs& params, Vector3i64 xyzIndex, cons
     xyzIndex[2] = params.zp - 1;
   }
 
-  // Now just compute the proper index
   const usize index = (xyzIndex[2] * params.xp * params.yp) + (xyzIndex[1] * params.xp) + xyzIndex[0];
   return sourceArray[index * sourceArray.getNumberOfComponents() + compIndex];
 }
 
 /**
- * @brief
- * @param params
- * @param centerPoint
- * @param coord
- * @return
+ * @brief Finds the source voxel octant nearest to a coordinate.
+ * @param params Provides source spacing.
+ * @param centerPoint Specifies the source voxel center.
+ * @param coord Specifies the inverse-transformed coordinate.
+ * @return Octant index from 0 through 7.
  */
 SIMPLNX_EXPORT usize FindOctant(const RotateArgs& params, const Point3Df& centerPoint, const Eigen::Array4f& coord);
 
@@ -232,20 +251,25 @@ static const std::array<OctantOffsetArrayType, 8> k_AllOctantOffsets{k_IndexOffs
 
 /* clang-format on */
 
+/**
+ * @typedef AccumulationValueType
+ * @brief Uses Float64 accumulation for floating-point input and Int64 otherwise.
+ * @tparam T Specifies the source scalar type.
+ */
 template <class T>
 using AccumulationValueType = std::conditional_t<std::is_floating_point_v<T>, float64, int64>;
 
 /**
- * @brief FindInterpolationValues
- * @tparam T
- * @param params
- * @param octant
- * @param oldIndicesU
- * @param oldCoords
- * @param sourceArray
- * @param pValues
- * @param uvw
- * @param hitVoxelCenterPoint
+ * @brief Collects trilinear corner values and normalized interpolation weights.
+ * @tparam T Specifies the source scalar type.
+ * @param params Provides source dimensions and spatial metadata.
+ * @param octant Selects eight corner offsets.
+ * @param oldIndicesU Specifies the source voxel index.
+ * @param oldCoords Specifies the inverse-transformed physical coordinate.
+ * @param sourceArray Provides source tuples.
+ * @param pValues Receives eight corner values for each component.
+ * @param uvw Receives normalized XYZ interpolation weights.
+ * @param hitVoxelCenterPoint Is retained but not used.
  */
 template <typename T>
 inline void FindInterpolationValues(const RotateArgs& params, usize octant, SizeVec3 oldIndicesU, Eigen::Array4f& oldCoords, const DataArray<T>& sourceArray,
@@ -274,7 +298,7 @@ inline void FindInterpolationValues(const RotateArgs& params, usize octant, Size
     }
   }
 
-  // NEED TO CALCULATE NEW UVW VALUES BASED ON coordsOld (which is the actual xyz point coord that we need to interpolate).
+  // Calculate weights from the inverse-transformed coordinate and corner bounds.
   auto c000_Index = oldIndices + indexOffset[0];
   auto c111_Index = oldIndices + indexOffset[6];
   Eigen::Vector3f c000_Coord = {static_cast<float32>(c000_Index[0]) * params.xRes + (0.5F * params.xRes) + params.OriginalOrigin[0],
@@ -293,23 +317,31 @@ inline void FindInterpolationValues(const RotateArgs& params, usize octant, Size
 }
 
 /**
- * @brief Synchronizes progress reporting, cancellation access, and worker
- * Result aggregation for parallel image transformations.
+ * @class FilterProgressCallback
+ * @brief Provides throttled progress, cancellation access, and worker-result aggregation.
  *
- * It borrows the filter callbacks and is owned by the calling transformation
- * until all tasks have joined.
+ * The object borrows filter callbacks until all tasks join. Result aggregation
+ * uses one object mutex. Progress overloads use separate static mutexes.
  */
 class FilterProgressCallback
 {
 public:
-  /** @brief Captures non-owning filter callbacks for the transformation lifetime. */
+  /**
+   * @brief Creates a callback from borrowed filter state.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Provides cancellation state.
+   */
   FilterProgressCallback(const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel)
   : m_MessageHandler(mesgHandler)
   , m_ShouldCancel(shouldCancel)
   {
   }
 
-  /** @brief Adds completed nodes and emits a throttled aggregate progress message. */
+  /**
+   * @brief Adds completed nodes and emits throttled aggregate progress.
+   * @param counter Specifies newly completed nodes.
+   * @warning The counter update occurs outside the throttle mutex.
+   */
   void sendThreadSafeProgressMessage(int64 counter)
   {
     static std::mutex mutex;
@@ -323,7 +355,10 @@ public:
     }
   }
 
-  /** @brief Emits a caller-formatted progress message under the shared throttle lock. */
+  /**
+   * @brief Emits one caller-formatted throttled progress message.
+   * @param progressMessage Specifies message text.
+   */
   void sendThreadSafeProgressMessage(const std::string& progressMessage)
   {
     static std::mutex mutex;
@@ -336,16 +371,14 @@ public:
     }
   }
 
-  /** @brief Returns the borrowed cancellation flag for worker polling. */
   const std::atomic_bool& getCancel() const
   {
     return m_ShouldCancel;
   }
 
   /**
-   * @brief Thread-safe accumulation of a Result (errors and/or warnings) reported by a worker task.
-   * Worker tasks run on separate threads with no way to return a Result directly, so they merge
-   * into this shared sink; the owning algorithm reads it after the tasks have joined.
+   * @brief Merges one worker Result under the result mutex.
+   * @param result Provides worker warnings and errors.
    */
   void mergeResult(Result<>&& result)
   {
@@ -354,7 +387,9 @@ public:
   }
 
   /**
-   * @brief Returns and clears the accumulated Result. Call after the parallel tasks have joined.
+   * @brief Moves out the accumulated worker Result.
+   * @return Accumulated warnings and errors.
+   * @pre All worker tasks have joined.
    */
   Result<> takeResult()
   {
@@ -373,18 +408,23 @@ private:
 };
 
 /**
+ * @class BoundedDataStorePageCache
  * @brief Fixed-memory LRU cache for arbitrary source-array element reads.
+ * @tparam T Specifies the source scalar type.
  *
  * Rotations that map one output slice across most of the source Z range cannot
  * use a Z-slab without allocating nearly the entire source array. This cache
- * retains at most eight one-mebibyte flat pages and fills them through bulk
+ * retains at most eight 1 MiB flat pages and fills them through bulk
  * DataStore reads. It is intentionally used serially by the OOC transform path.
  */
 template <typename T>
 class BoundedDataStorePageCache
 {
 public:
-  /** @brief Borrows the source store and derives a one-mebibyte page size. */
+  /**
+   * @brief Creates a bounded cache for one borrowed source store.
+   * @param store Provides source values for the cache lifetime.
+   */
   explicit BoundedDataStorePageCache(const AbstractDataStore<T>& store)
   : m_Store(store)
   , m_PageElements(std::max<usize>(1, (1024 * 1024) / sizeof(T)))
@@ -393,8 +433,12 @@ public:
   }
 
   /**
-   * @brief Copies an arbitrary flat element range, joining data from as many
-   * cached pages as needed while retaining no more than eight pages.
+   * @brief Copies one flat element range through cached pages.
+   * @param elementOffset Specifies the first source value.
+   * @param destination Receives source values.
+   * @return Range, allocation, or source-read error, or success.
+   *
+   * The method joins any required pages while retaining no more than eight.
    */
   Result<> copyElements(usize elementOffset, nonstd::span<T> destination)
   {
@@ -423,7 +467,10 @@ public:
   }
 
 private:
-  /** @brief One flat source page plus its LRU sequence and valid element count. */
+  /**
+   * @struct Page
+   * @brief Stores one flat source page and its LRU state.
+   */
   struct Page
   {
     usize index = std::numeric_limits<usize>::max();
@@ -432,7 +479,11 @@ private:
     usize size = 0;
   };
 
-  /** @brief Returns a cached page or bulk-loads it into a free/LRU slot. */
+  /**
+   * @brief Returns or loads one source page.
+   * @param pageIndex Specifies the flat page index.
+   * @return Page pointer or allocation/source-read error.
+   */
   Result<Page*> page(usize pageIndex)
   {
     for(auto& page : m_Pages)
@@ -493,18 +544,22 @@ private:
 };
 
 /**
- * @brief Update a Z-slice slab cache to cover [newZMin, newZMax].
+ * @brief Updates a contiguous Z-slice slab cache.
+ * @tparam T Specifies the source scalar type.
+ * @param srcStore Provides source values.
+ * @param slabBuf Provides and receives slab storage.
+ * @param slabBufSize Provides and receives allocated element capacity.
+ * @param cachedZMin Provides and receives the first cached Z index.
+ * @param cachedZMax Provides and receives the last cached Z index.
+ * @param newZMin Specifies the first required Z index.
+ * @param newZMax Specifies the last required Z index.
+ * @param sliceTuples Specifies tuples per Z slice.
+ * @param numComps Specifies components per tuple.
+ * @return Source bulk-read error, or success.
+ * @pre The new range is ordered and inside the source Z range.
  *
- * The slab cache holds a contiguous range of source Z-slices in a pre-allocated buffer.
- * When the caller asks for a new range that overlaps the cached range, this helper shifts
- * the surviving slices to their new position via memmove and issues bulk reads only for
- * the delta slices (below or above the overlap). When there is no overlap (or the buffer
- * had to grow), the entire new range is re-read.
- *
- * The caller owns \a slabBuf and \a slabBufSize; this function may grow the buffer but
- * will not shrink it. \a cachedZMin and \a cachedZMax are updated in place.
- *
- * Preconditions: \a newZMin <= \a newZMax, both within the source dataset's Z range.
+ * An overlapping request retains common slices and reads only its new edges.
+ * Growth or no overlap causes a complete range read. Capacity does not shrink.
  */
 template <typename T>
 inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::unique_ptr<T[]>& slabBuf, usize& slabBufSize, int64& cachedZMin, int64& cachedZMax, int64 newZMin, int64 newZMax,
@@ -515,7 +570,7 @@ inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::uniqu
 
   bool validCache = (cachedZMin >= 0 && cachedZMax >= cachedZMin);
 
-  // Grow buffer if needed. Growth discards the old contents, so the cache must be re-read in full.
+  // Growth discards cached contents and requires a complete range read.
   if(needElems > slabBufSize)
   {
     slabBuf = std::make_unique<T[]>(needElems);
@@ -529,7 +584,7 @@ inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::uniqu
 
   if(hasOverlap)
   {
-    // Shift the surviving slices to their new position (memmove handles overlap in either direction).
+    // memmove preserves overlapping cached slices in either shift direction.
     const usize srcOff = static_cast<usize>(overlapMin - cachedZMin) * sliceElems;
     const usize dstOff = static_cast<usize>(overlapMin - newZMin) * sliceElems;
     const usize moveCount = static_cast<usize>(overlapMax - overlapMin + 1) * sliceElems;
@@ -537,7 +592,7 @@ inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::uniqu
     {
       std::memmove(slabBuf.get() + dstOff, slabBuf.get() + srcOff, moveCount * sizeof(T));
     }
-    // Read slices below the overlap (the new range extends further back).
+    // Read a new lower edge before the retained overlap.
     if(newZMin < overlapMin)
     {
       const usize readElems = static_cast<usize>(overlapMin - newZMin) * sliceElems;
@@ -546,7 +601,7 @@ inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::uniqu
         return readResult;
       }
     }
-    // Read slices above the overlap (the new range extends further forward — typical case).
+    // Read a new upper edge after the retained overlap.
     if(newZMax > overlapMax)
     {
       const usize readElems = static_cast<usize>(newZMax - overlapMax) * sliceElems;
@@ -572,12 +627,25 @@ inline Result<> updateSlabCache(const AbstractDataStore<T>& srcStore, std::uniqu
 }
 
 /**
- * @brief The RotateImageGeometryWithTrilinearInterpolation class
+ * @class RotateImageGeometryWithTrilinearInterpolation
+ * @brief Resamples one image array through trilinear interpolation.
+ * @tparam T Specifies the array scalar type.
+ *
+ * Resident execution uses a sliding source Z slab. OOC execution uses eight
+ * fixed pages so a wide source-Z mapping cannot materialize the complete source.
  */
 template <typename T>
 class RotateImageGeometryWithTrilinearInterpolation
 {
 public:
+  /**
+   * @brief Creates one borrowed trilinear transformation task.
+   * @param sourceArray Provides source tuples.
+   * @param targetArray Receives transformed tuples.
+   * @param rotateArgs Provides source and output spatial metadata.
+   * @param transformationMatrix Maps source coordinates to output coordinates.
+   * @param filterCallback Receives progress, cancellation, and worker errors.
+   */
   RotateImageGeometryWithTrilinearInterpolation(const IDataArray* sourceArray, IDataArray* targetArray, const RotateArgs& rotateArgs, const Matrix4fR& transformationMatrix,
                                                 FilterProgressCallback* filterCallback)
   : m_SourceArray(sourceArray)
@@ -588,6 +656,9 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the borrowed transformation task.
+   */
   ~RotateImageGeometryWithTrilinearInterpolation() = default;
 
   RotateImageGeometryWithTrilinearInterpolation(const RotateImageGeometryWithTrilinearInterpolation&) = default;
@@ -599,19 +670,16 @@ public:
   RotateImageGeometryWithTrilinearInterpolation& operator=(RotateImageGeometryWithTrilinearInterpolation&&) noexcept = delete;
 
   /**
-   * @brief calculateInterpolatedValue
+   * @brief Interpolates one component from eight corner values.
+   * @param pValues Provides eight corner values for each component.
+   * @param uvw Provides normalized XYZ weights.
+   * @param numComps Specifies components per tuple.
+   * @param compIndex Specifies the output component.
+   * @return Trilinear value converted to T.
+   * @see https://en.wikipedia.org/wiki/Trilinear_interpolation
    *
-   * This comes from https://en.wikipedia.org/wiki/Trilinear_interpolation
-   *
-   * Note in the codes below the equations have been changed to do all of the additions first, then
-   * the subtractions. This should hopefully alleviate issue with trying to subtract unsigned integers
-   * and ending up with what should have been a negative number but since it is unsigned the value
-   * that the compiler will compute would be vastly different.
-   *
-   * @param sourceArray
-   * @param oldIndex
-   * @param indices
-   * @return
+   * Integer input accumulates in signed Int64. This prevents unsigned underflow
+   * during weighted intermediate calculations.
    */
   T calculateInterpolatedValue(const std::vector<AccumulationValueType<T>>& pValues, const Eigen::Vector3f& uvw, usize numComps, usize compIndex) const
   {
@@ -652,14 +720,10 @@ public:
   }
 
   /**
-   * @brief This is the main algorithm to perform the interpolation and get a final value that is placed into the transformed
-   * voxel. This uses Trilinear interpolation which will devolve into Bilinear and Linear interpolation depending on the
-   * values of U, V and W.
+   * @brief Transforms all output slices through trilinear interpolation.
    *
-   * Direct execution uses a sliding source Z-slab. OOC execution uses a fixed
-   * eight-page LRU cache so rotations whose source-Z span covers most of the
-   * volume cannot materialize a full-volume slab. Each output Z-slice is
-   * accumulated locally and flushed through one bulk write.
+   * Each output slice uses one local buffer and one checked write. Cancellation
+   * stops before a later slice. Errors are merged into filterCallback.
    */
   void operator()() const
   {
@@ -699,7 +763,7 @@ public:
 
     Matrix4fR inverseTransform = m_TransformationMatrix.inverse();
 
-    // Output slice buffer (one Z-slice of the output geometry)
+    // Keep one output Z slice in local memory.
     auto outSliceBuf = std::make_unique<T[]>(outSliceSize * numComps);
     std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
 
@@ -722,9 +786,8 @@ public:
       }
       m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Interpolating values for slice '{}/{}'", m_SourceArray->getName(), k, m_Params.outputDims[2]));
 
-      // Determine source Z range needed for this output slice analytically using the 4 corners
-      // of the output slice's XY bounding box (same idea as RotateImageGeometryWithNearestNeighbor)
-      // and then pad by +/- 1 on each side to cover the 8-corner trilinear neighbors.
+      // Source Z is linear across one output slice. Its four XY corners bound
+      // the required source range before trilinear padding.
       int64 neededZMin = srcDimZ;
       int64 neededZMax = -1;
       for(int cj = 0; cj <= 1; cj++)
@@ -745,13 +808,13 @@ public:
           neededZMax = std::max(neededZMax, srcZIdx);
         }
       }
-      // +/- 1 margin for trilinear corner neighbors, plus +1 extra slop for floor/ceil ambiguity
+      // Two-slice padding covers corner neighbors and floor or ceiling ambiguity.
       neededZMin = std::max(static_cast<int64>(0), neededZMin - 2);
       neededZMax = std::min(srcDimZ - 1, neededZMax + 2);
 
       if(neededZMin > neededZMax || neededZMin >= srcDimZ || neededZMax < 0)
       {
-        // No valid source mapping for this slice — fill with zeros
+        // An exterior slice remains zero-filled.
         std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
         if(auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps)); writeResult.invalid())
         {
@@ -762,10 +825,7 @@ public:
         continue;
       }
 
-      // Slide the slab cache to cover [neededZMin, neededZMax]. When the new range overlaps the
-      // cached range (typical case, where consecutive output slices shift the source window by a
-      // small amount), only the delta slices are read from disk; the surviving slices are moved
-      // to their new position in the buffer via memmove.
+      // A resident slab retains overlapping slices and reads only new range edges.
       if(!useBoundedPageCache)
       {
         if(auto readResult = updateSlabCache<T>(oldDataStore, srcSlabBuf, srcSlabBufSize, cachedSrcZMin, cachedSrcZMax, neededZMin, neededZMax, srcSliceSize, numComps); readResult.invalid())
@@ -776,8 +836,7 @@ public:
         }
       }
 
-      // Process output slice into local buffer. Zero-fill first so that destination voxels whose
-      // inverse-transformed coordinate falls outside the source grid remain zero.
+      // Zero-fill destinations that map outside the source grid.
       std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
 
       // Direct executes rows in parallel over the read-only slab. OOC executes
@@ -801,7 +860,7 @@ public:
       dataAlg.setRange(0, static_cast<usize>(outDimY));
       Result<> boundedReadResult;
       dataAlg.execute([&](const Range& range) {
-        // Per-thread scratch. pValues holds the 8 corner voxel values for one destination voxel.
+        // Each worker reuses scratch for eight corner tuples.
         std::vector<AccumulationValueType<T>> pValues(8 * numComps);
         std::vector<T> sourceTuple(numComps);
 
@@ -824,7 +883,6 @@ public:
 
             if(errorResult != ImageGeom::ErrorType::NoError)
             {
-              // Already zero-filled above; leave as zero.
               continue;
             }
 
@@ -832,8 +890,7 @@ public:
             auto oldVoxelCenterPoint = origImageGeomPtr->getCoordsf(oldIndex);
             int octant = FindOctant(m_Params, oldVoxelCenterPoint, coordsOld);
 
-            // Inlined slab-aware version of FindInterpolationValues: read 8 corner voxels from the
-            // cached slab instead of issuing per-element virtual dispatches against sourceArray.
+            // Read eight corner tuples from the active slab or bounded page cache.
             const std::array<Vector3i64, 8>& indexOffset = k_AllOctantOffsets[octant];
             const Vector3i64 oldIndicesV(static_cast<int64>(oldGeomIndices[0]), static_cast<int64>(oldGeomIndices[1]), static_cast<int64>(oldGeomIndices[2]));
             Eigen::Vector3f p1Coord;
@@ -871,8 +928,7 @@ public:
                            static_cast<float32>(pIndices[2]) * m_Params.zRes + (0.5F * m_Params.zRes) + m_Params.OriginalOrigin[2]};
               }
             }
-            // Compute uvw (normalized interpolation weights) from the coordinate of the coordsOld
-            // relative to the P1 corner. Matches the computation in FindInterpolationValues().
+            // Normalize the inverse coordinate relative to the first corner.
             Eigen::Vector3f uvw;
             for(usize axis = 0; axis < 3; axis++)
             {
@@ -903,7 +959,7 @@ public:
         return;
       }
 
-      // Flush output slice with a single bulk write
+      // Write one completed output slice.
       if(auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps)); writeResult.invalid())
       {
         m_FilterCallback->mergeResult(
@@ -922,11 +978,27 @@ private:
   FilterProgressCallback* m_FilterCallback = nullptr;
 };
 
-//------------------------------------------------------------------------------
+/**
+ * @class RotateImageGeometryWithNearestNeighbor
+ * @brief Resamples one image array through nearest-neighbor selection.
+ * @tparam T Specifies the array scalar type.
+ *
+ * Resident execution uses a sliding source Z slab. OOC execution uses eight
+ * fixed pages. Slice-by-slice mode locks source Z to destination Z.
+ */
 template <typename T>
 class RotateImageGeometryWithNearestNeighbor
 {
 public:
+  /**
+   * @brief Creates one borrowed nearest-neighbor transformation task.
+   * @param sourceArray Provides source tuples.
+   * @param targetArray Receives transformed tuples.
+   * @param args Provides source and output spatial metadata.
+   * @param transformationMatrix Maps source coordinates to output coordinates.
+   * @param sliceBySlice Preserves the destination Z index when true.
+   * @param filterCallback Receives progress, cancellation, and worker errors.
+   */
   RotateImageGeometryWithNearestNeighbor(const IDataArray* sourceArray, IDataArray* targetArray, const RotateArgs& args, const Matrix4fR& transformationMatrix, bool sliceBySlice,
                                          FilterProgressCallback* filterCallback)
   : m_SourceArray(sourceArray)
@@ -938,6 +1010,9 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the borrowed transformation task.
+   */
   ~RotateImageGeometryWithNearestNeighbor() = default;
 
   RotateImageGeometryWithNearestNeighbor(const RotateImageGeometryWithNearestNeighbor&) = default;
@@ -948,6 +1023,12 @@ public:
 
   RotateImageGeometryWithNearestNeighbor& operator=(RotateImageGeometryWithNearestNeighbor&&) noexcept = delete;
 
+  /**
+   * @brief Transforms all output slices through nearest-neighbor selection.
+   *
+   * Each output slice uses one local buffer and one checked write. Cancellation
+   * stops before a later slice. Errors are merged into filterCallback.
+   */
   void convert() const
   {
     DataStructure tempDataStructure;
@@ -974,7 +1055,7 @@ public:
 
     Matrix4fR inverseTransform = m_TransformationMatrix.inverse();
 
-    // Allocate output slice buffer (bounded: one Z-slice of the output geometry)
+    // Keep one output Z slice in local memory.
     auto outSliceBuf = std::make_unique<T[]>(outSliceSize * numComps);
     std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
 
@@ -997,10 +1078,8 @@ public:
       }
       m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Interpolating values for slice '{}/{}'", m_SourceArray->getName(), k, m_Params.outputDims[2]));
 
-      // Determine source Z range needed for this output slice analytically.
-      // The inverse transform maps output physical coords to source physical coords.
-      // Source Z is a linear function of output (X, Y) for a fixed output Z, so
-      // extrema occur at the corners of the output slice's XY bounding box.
+      // Source Z is linear across one output slice. Its four XY corners bound
+      // the required source range.
       int64 neededZMin = srcDimZ;
       int64 neededZMax = -1;
 
@@ -1011,7 +1090,7 @@ public:
       }
       else
       {
-        // Probe all 4 corners — compute source Z regardless of whether the point is in-bounds
+        // Evaluate all four corners before clamping the source range.
         for(int cj = 0; cj <= 1; cj++)
         {
           for(int ci = 0; ci <= 1; ci++)
@@ -1022,7 +1101,7 @@ public:
             Point3Df cornerPt = destImageGeomPtr->getCoordsf(cornerFlatIdx);
             Eigen::Vector4f cornerNew(cornerPt.getX(), cornerPt.getY(), cornerPt.getZ(), 1.0f);
             Eigen::Array4f cornerOld = inverseTransform * cornerNew;
-            // Convert source physical Z to cell index (floor division)
+            // Convert physical Z to its containing source cell.
             float srcPhysZ = cornerOld[2];
             float srcOriginZ = m_Params.OriginalOrigin[2];
             float srcSpacingZ = m_Params.OriginalSpacing[2];
@@ -1031,14 +1110,14 @@ public:
             neededZMax = std::max(neededZMax, srcZIdx);
           }
         }
-        // Clamp to valid source range with margin
+        // One-slice padding covers mapped cell boundaries.
         neededZMin = std::max(static_cast<int64>(0), neededZMin - 1);
         neededZMax = std::min(srcDimZ - 1, neededZMax + 1);
       }
 
       if(neededZMin > neededZMax || neededZMin >= srcDimZ || neededZMax < 0)
       {
-        // No valid source mapping for this slice — fill with zeros
+        // An exterior slice remains zero-filled.
         std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
         auto writeResult = newDataStore.copyFromBuffer(static_cast<usize>(k) * outSliceSize * numComps, nonstd::span<const T>(outSliceBuf.get(), outSliceSize * numComps));
         if(writeResult.invalid())
@@ -1052,8 +1131,7 @@ public:
       neededZMin = std::max(neededZMin, static_cast<int64>(0));
       neededZMax = std::min(neededZMax, srcDimZ - 1);
 
-      // Slide the slab cache to cover [neededZMin, neededZMax]. Only the delta slices are
-      // re-read when the new range overlaps the cached range.
+      // A resident slab retains overlapping slices and reads only new range edges.
       if(!useBoundedPageCache)
       {
         if(auto readResult = updateSlabCache<T>(oldDataStore, srcSlabBuf, srcSlabBufSize, cachedSrcZMin, cachedSrcZMax, neededZMin, neededZMax, srcSliceSize, numComps); readResult.invalid())
@@ -1064,8 +1142,7 @@ public:
         }
       }
 
-      // Process output slice. Zero-fill first so destination voxels with no valid source mapping
-      // remain zero.
+      // Zero-fill destinations that map outside the source grid.
       std::fill(outSliceBuf.get(), outSliceBuf.get() + outSliceSize * numComps, static_cast<T>(0));
 
       // Direct executes rows in parallel over the read-only slab. OOC executes
@@ -1146,6 +1223,9 @@ public:
     m_FilterCallback->sendThreadSafeProgressMessage(fmt::format("{}: Transform Ending", m_SourceArray->getName()));
   }
 
+  /**
+   * @brief Runs nearest-neighbor conversion for a task wrapper.
+   */
   void operator()() const
   {
     convert();
@@ -1161,11 +1241,21 @@ private:
 };
 
 /**
- * @brief The ApplyTransformationToNodeGeometry class will apply a transformation to a node based geometry.
+ * @class ApplyTransformationToNodeGeometry
+ * @brief Applies a transformation matrix to node-geometry vertices.
+ *
+ * Each 16,384-vertex chunk uses checked bulk reads and writes. Errors merge
+ * into the shared callback because parallel tasks cannot return Result values.
  */
 class ApplyTransformationToNodeGeometry
 {
 public:
+  /**
+   * @brief Creates one borrowed node-transformation worker.
+   * @param verticesPtr Provides and receives vertex coordinates.
+   * @param transformationMatrix Specifies the homogeneous transformation.
+   * @param filterCallback Receives progress, cancellation, and worker errors.
+   */
   ApplyTransformationToNodeGeometry(IGeometry::SharedVertexList& verticesPtr, const Matrix4fR& transformationMatrix, FilterProgressCallback* filterCallback)
   : m_TransformationMatrix(transformationMatrix)
   , m_Vertices(verticesPtr)
@@ -1173,14 +1263,15 @@ public:
   {
   }
 
+  /**
+   * @brief Transforms one vertex range through bounded buffers.
+   * @param start Specifies the first vertex.
+   * @param end Specifies the exclusive last vertex.
+   */
   void convert(usize start, usize end) const
   {
-    // OOC optimization: process vertices in fixed-size chunks using bulk I/O. Each chunk reads
-    // a contiguous range of vertex components into a local buffer, performs the transform in
-    // memory, then writes the whole chunk back with a single copyFromBuffer. This replaces
-    // per-element at()/setValue() virtual dispatches that force chunk load/evict thrashing in
-    // OOC-backed SharedVertexList stores.
-    constexpr usize k_ChunkVertices = 16384; // 16K vertices * 3 components * 4 bytes = 192 KB per chunk
+    // Bulk transfer avoids per-component access to disk-backed vertex stores.
+    constexpr usize k_ChunkVertices = 16384;
     auto& vertexStore = m_Vertices.getDataStoreRef();
     auto chunkBuf = std::make_unique<float32[]>(k_ChunkVertices * 3);
 
@@ -1231,8 +1322,8 @@ public:
   }
 
   /**
-   * @brief operator () This is called from the TBB stye of code
-   * @param range The range to compute the values
+   * @brief Transforms one scheduler range.
+   * @param range Specifies the vertex range.
    */
   void operator()(const Range& range) const
   {

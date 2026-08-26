@@ -35,11 +35,19 @@ template <class T>
 concept ArithmeticNotBool = std::is_arithmetic_v<T> && !std::is_same_v<T, bool>;
 /* clang-format on */
 
+/**
+ * @brief Converts one stored physical bounding box to half-open voxel indices.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param targetBoundsIndex Selects the bounding box.
+ * @param image Supplies the origin, spacing, and dimensions.
+ * @return Clipped minimum and maximum voxel indices in X-Y-Z order.
+ * @pre Preflight has verified nonzero image spacing.
+ */
 std::array<usize, 6> GetVoxelIndices(const Float32AbstractDataStore& unifiedBounds, usize targetBoundsIndex, const ImageGeom& image)
 {
   std::array<usize, 6> voxelIndices = {};
 
-  // Preflight handles checking that we don't divide by 0 by validating spacing, cutting extra checks here
+  // Preflight verifies nonzero spacing, so this function does not repeat that check.
   FloatVec3 spacing = image.getSpacing();
   FloatVec3 origin = image.getOrigin();
   SizeVec3 dims = image.getDimensions();
@@ -86,6 +94,14 @@ std::array<usize, 6> GetVoxelIndices(const Float32AbstractDataStore& unifiedBoun
   return voxelIndices;
 }
 
+/**
+ * @brief Converts one buffered physical bounding box to half-open voxel indices.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param targetBoundsIndex Selects the bounding box.
+ * @param image Supplies the origin, spacing, and dimensions.
+ * @return Clipped minimum and maximum voxel indices in X-Y-Z order.
+ * @pre Preflight has verified nonzero image spacing.
+ */
 std::array<usize, 6> GetVoxelIndices(nonstd::span<const float32> unifiedBounds, usize targetBoundsIndex, const ImageGeom& image)
 {
   std::array<usize, 6> voxelIndices = {};
@@ -133,14 +149,14 @@ std::array<usize, 6> GetVoxelIndices(nonstd::span<const float32> unifiedBounds, 
   return voxelIndices;
 }
 
-/** Mode and Std dev are left out of cache intentionally, every other stat can be derived from these.
- * Reasoning:
- * 1. In order to calculate mode you must create a data container to keep track of instances of a value,
- * this would massively bloat memory cost if mode is not selected, thus it cannot be included. Due to
- * the nature mode can be found in the first pass so a specialized function will handle it.
- * 2. The std-deviation requires a second pass, so there is no need to store it a separate function will
- * be run after this cache is calculated upon user request.
- **/
+/**
+ * @struct StatsCache
+ * @brief Stores statistics that one input pass can collect.
+ * @tparam T Input value type.
+ *
+ * Mode storage exists only when mode is requested. Standard deviation uses a
+ * second pass, so this cache does not reserve storage for either result.
+ */
 template <typename T>
 struct StatsCache
 {
@@ -151,6 +167,11 @@ struct StatsCache
   T summationValue = static_cast<T>(0);
 };
 
+/**
+ * @struct CompleteStatsCache
+ * @brief Extends the base cache with frequency-derived statistics.
+ * @tparam T Input value type.
+ */
 template <typename T>
 struct CompleteStatsCache : StatsCache<T>
 {
@@ -158,6 +179,15 @@ struct CompleteStatsCache : StatsCache<T>
   usize uniqueValCount = 0;
 };
 
+/**
+ * @class TempDirectory
+ * @brief Owns the UUID-named temporary directory used by one execution.
+ *
+ * Destruction makes a best-effort recursive removal. Cleanup errors are not
+ * reported because the main result has already been determined.
+ * @warning Destruction removes the exact supplied path even when directory
+ *          creation fails. The caller must supply a disposable path.
+ */
 class TempDirectory
 {
 public:
@@ -186,6 +216,14 @@ private:
   std::filesystem::path m_Path;
 };
 
+/**
+ * @class BinaryRunReader
+ * @brief Reads a bounded slice of one temporary sorted-run file.
+ * @tparam T Stored value type.
+ *
+ * The reader uses a fixed 65,536-value buffer. Callers must inspect failed()
+ * after hasValue() becomes false to distinguish end of range from I/O failure.
+ */
 template <typename T>
 class BinaryRunReader
 {
@@ -260,6 +298,15 @@ bool WriteBuffer(std::ofstream& stream, const T* buffer, usize count)
   return stream.good();
 }
 
+/**
+ * @brief Compares values with the ordering used by the frequency algorithms.
+ * @tparam T Input value type.
+ * @param lhs First value.
+ * @param rhs Second value.
+ * @return True when neither value orders before the other.
+ * @note Unordered floating-point pairs compare as equivalent. This preserves
+ *       the direct implementation's behavior.
+ */
 template <typename T>
 bool Equivalent(const T& lhs, const T& rhs)
 {
@@ -268,8 +315,18 @@ bool Equivalent(const T& lhs, const T& rhs)
 
 /**
  * @brief Streams one clipped box in the original Z-Y-X order using bounded contiguous reads.
- * Splitting long rows into fixed-size reads keeps RAM independent of box volume while preserving
- * the direct implementation's floating-point accumulation order exactly.
+ * @tparam T Input value type.
+ * @tparam FunctionT Callback type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputStore Supplies the input values.
+ * @param voxelIndices Contains half-open voxel bounds.
+ * @param buffer Supplies fixed-size read scratch.
+ * @param shouldCancel Signals cancellation between rows.
+ * @param function Receives each value in Z-Y-X order.
+ * @return Success, or a bulk-read error.
+ *
+ * Fixed-size row reads keep RAM independent of box volume. Cancellation can
+ * leave callback side effects from earlier rows, and it returns success.
  */
 template <typename T, class FunctionT>
 Result<> ForEachBoxValue(const ImageGeom& imageGeom, const AbstractDataStore<T>& inputStore, const std::array<usize, 6>& voxelIndices, T* buffer, const std::atomic_bool& shouldCancel,
@@ -316,6 +373,19 @@ Result<> ForEachBoxValue(const ImageGeom& imageGeom, const AbstractDataStore<T>&
   return {};
 }
 
+/**
+ * @brief Applies a callback to each frequency group in a sorted file.
+ * @tparam T Stored value type.
+ * @tparam FunctionT Callback type.
+ * @param path Identifies the sorted temporary file.
+ * @param count Gives the number of stored values to scan.
+ * @param shouldCancel Signals cancellation between fixed-size batches.
+ * @param function Receives each value and its frequency.
+ * @return Success, or a temporary-file read error.
+ *
+ * Cancellation returns success and can leave callback side effects from
+ * earlier groups.
+ */
 template <typename T, class FunctionT>
 Result<> ScanSortedGroups(const std::filesystem::path& path, usize count, const std::atomic_bool& shouldCancel, FunctionT&& function)
 {
@@ -358,6 +428,18 @@ Result<> ScanSortedGroups(const std::filesystem::path& path, usize count, const 
   return {};
 }
 
+/**
+ * @brief Merges fixed-size sorted runs until one sorted run remains.
+ * @tparam T Stored value type.
+ * @param sourcePath Identifies the initial runs file.
+ * @param destinationPath Identifies alternating merge output.
+ * @param valueCount Gives the number of values.
+ * @param shouldCancel Signals cancellation between bounded writes.
+ * @return The path that contains the current complete run, or an I/O error.
+ *
+ * Cancellation can leave an incomplete destination file. The caller observes
+ * the cancellation flag and does not consume that file.
+ */
 template <typename T>
 Result<std::filesystem::path> MergeSortedRuns(const std::filesystem::path& sourcePath, const std::filesystem::path& destinationPath, usize valueCount, const std::atomic_bool& shouldCancel)
 {
@@ -441,6 +523,19 @@ Result<std::filesystem::path> MergeSortedRuns(const std::filesystem::path& sourc
   return {currentSource};
 }
 
+/**
+ * @brief Streams base statistics for one bounding box.
+ * @tparam T Input value type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputStore Supplies the input values.
+ * @param voxelIndices Contains half-open voxel bounds.
+ * @param inputBuffer Supplies fixed-size read scratch.
+ * @param shouldCancel Signals cancellation.
+ * @param stats Receives the complete result after the scan.
+ * @return Success, or a bulk-read error.
+ *
+ * Cancellation returns success and does not publish a partial cache entry.
+ */
 template <typename T>
 Result<> StreamBaseStats(const ImageGeom& imageGeom, const AbstractDataStore<T>& inputStore, const std::array<usize, 6>& voxelIndices, T* inputBuffer, const std::atomic_bool& shouldCancel,
                          StatsCache<T>& stats)
@@ -472,6 +567,23 @@ Result<> StreamBaseStats(const ImageGeom& imageGeom, const AbstractDataStore<T>&
   return {};
 }
 
+/**
+ * @brief Streams base statistics and writes sorted runs for one bounding box.
+ * @tparam T Input value type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputStore Supplies the input values.
+ * @param voxelIndices Contains half-open voxel bounds.
+ * @param inputBuffer Supplies fixed-size read scratch.
+ * @param runBuffer Supplies fixed-size sorting scratch.
+ * @param sourcePath Identifies the initial runs file.
+ * @param destinationPath Identifies alternating merge output.
+ * @param shouldCancel Signals cancellation.
+ * @param stats Receives base statistics after the complete input scan.
+ * @return The sorted-file path, or a storage or temporary-file error.
+ *
+ * Cancellation returns the source path as a successful value. The caller
+ * observes the cancellation flag before it consumes that value.
+ */
 template <typename T>
 Result<std::filesystem::path> StreamStatsAndSortedRuns(const ImageGeom& imageGeom, const AbstractDataStore<T>& inputStore, const std::array<usize, 6>& voxelIndices, T* inputBuffer, T* runBuffer,
                                                        const std::filesystem::path& sourcePath, const std::filesystem::path& destinationPath, const std::atomic_bool& shouldCancel,
@@ -538,6 +650,19 @@ Result<std::filesystem::path> StreamStatsAndSortedRuns(const ImageGeom& imageGeo
   return MergeSortedRuns<T>(sourcePath, destinationPath, count, shouldCancel);
 }
 
+/**
+ * @brief Derives median, unique count, and optional modes from sorted values.
+ * @tparam T Stored value type.
+ * @param sortedPath Identifies the sorted temporary file.
+ * @param stats Supplies the value count and receives frequency statistics.
+ * @param modesList Receives tied modes, or is null when mode is not requested.
+ * @param targetBoundsIndex Selects the mode output list.
+ * @param shouldCancel Signals cancellation.
+ * @return Success, or a temporary-file read error.
+ *
+ * This path narrows the maximum mode frequency to int before it compares
+ * frequencies. A count above INT_MAX can produce an incorrect or empty list.
+ */
 template <typename T>
 Result<> CalculateFrequencyStats(const std::filesystem::path& sortedPath, CompleteStatsCache<T>& stats, NeighborList<T>* modesList, usize targetBoundsIndex, const std::atomic_bool& shouldCancel)
 {
@@ -579,6 +704,22 @@ Result<> CalculateFrequencyStats(const std::filesystem::path& sortedPath, Comple
   });
 }
 
+/**
+ * @brief Streams population standard deviation for all nonempty boxes.
+ * @tparam T Input value type.
+ * @tparam CacheT Base-statistics cache type.
+ * @param imageGeom Supplies the image dimensions.
+ * @param inputStore Supplies the input values.
+ * @param unifiedBounds Contains six values for each bounding box.
+ * @param inputBuffer Supplies fixed-size read scratch.
+ * @param statsVector Supplies counts and sums.
+ * @param stdDevStore Receives completed standard deviations immediately.
+ * @param shouldCancel Signals cancellation.
+ * @return Success, or a bulk-read error.
+ *
+ * Cancellation returns success. Values written for earlier boxes remain in
+ * the output store.
+ */
 template <typename T, class CacheT>
 Result<> StreamStdDeviation(const ImageGeom& imageGeom, const AbstractDataStore<T>& inputStore, nonstd::span<const float32> unifiedBounds, T* inputBuffer, const std::vector<CacheT>& statsVector,
                             Float32AbstractDataStore& stdDevStore, const std::atomic_bool& shouldCancel)
@@ -610,6 +751,17 @@ Result<> StreamStdDeviation(const ImageGeom& imageGeom, const AbstractDataStore<
 template <class Cache>
 concept CacheType = std::is_base_of_v<StatsCache<typename Cache::value_type>, Cache>;
 
+/**
+ * @brief Writes completed cache values to the selected framework outputs.
+ * @tparam T Input value type.
+ * @tparam StatsCacheT Statistics cache type.
+ * @param statsVector Supplies completed values for all boxes.
+ * @param dataStructure Contains output arrays.
+ * @param inputValues Selects outputs and identifies their paths.
+ * @return Success, or an output-store error.
+ *
+ * Serial writes avoid relying on generic DataStore thread safety.
+ */
 template <typename T, CacheType StatsCacheT>
 Result<> FillStatsArrays(const std::vector<StatsCacheT>& statsVector, DataStructure& dataStructure, const ComputeBoundingBoxStatsInputValues* inputValues)
 {
@@ -732,11 +884,14 @@ Result<> FillStatsArrays(const std::vector<StatsCacheT>& statsVector, DataStruct
 }
 
 /**
+ * @struct ExecuteBoundsStatsCalculationsScanline
  * @brief OOC execution path for bounding-box statistics.
+ * @tparam UseModeV Enables type-dispatched NeighborList mode output.
  *
- * Boxes are processed independently with contiguous row reads. Frequency statistics use
- * external merge sorting so exact median, unique-value, and tied-mode outputs do not require
- * RAM proportional to a box's volume or distinct-value count.
+ * Boxes are processed serially with contiguous row reads. Frequency statistics
+ * use external merge sorting, so frequency scratch does not scale with the box
+ * volume in RAM. A UUID-named directory isolates the temporary files. The
+ * directory is removed on scope exit when possible.
  */
 template <bool UseModeV = false>
 struct ExecuteBoundsStatsCalculationsScanline

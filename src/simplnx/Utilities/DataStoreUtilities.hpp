@@ -10,38 +10,49 @@
 
 #include <fmt/format.h>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 class DataStructure;
 
+/**
+ * @namespace nx::core::ArrayCreationUtilities
+ * @brief Contains storage-aware array creation utilities.
+ */
 namespace ArrayCreationUtilities
 {
-/**
- * @brief Resolves the storage format for an array/list about to be created.
- *
- * Forward-declared here (the definition lives in ArrayCreationUtilities) so the store-creation
- * templates below can route their format decision through the single shared resolver without
- * pulling in ArrayCreationUtilities.hpp, which would create an include cycle (ArrayCreationUtilities.hpp
- * already includes this header).
- */
+// This declaration avoids an include cycle with ArrayCreationUtilities.hpp, which owns the API documentation.
 SIMPLNX_EXPORT std::string ResolveStorageFormat(const DataStructure& dataStructure, const DataPath& path, DataType numericType, uint64 dataSizeBytes, const std::string& requestedFormat);
 } // namespace ArrayCreationUtilities
 } // namespace nx::core
 
+/**
+ * @namespace nx::core::DataStoreUtilities
+ * @brief Contains storage-neutral DataStore and ListStore utilities.
+ */
 namespace nx::core::DataStoreUtilities
 {
 /**
  * @brief Returns a non-owning reference to the application's DataIOCollection.
  *
- * The DataIOCollection is owned by the Application singleton and lives for the
- * entire process lifetime. Callers receive a reference, not a shared_ptr, to
- * make the non-ownership relationship explicit and prevent accidental lifetime
- * extension.
+ * The Application owns the collection. The reference remains valid while that
+ * process Application exists and does not extend its lifetime.
  *
  * @return Reference to the Application's DataIOCollection.
  */
 SIMPLNX_EXPORT DataIOCollection& GetIOCollection();
 
+/**
+ * @brief Calculates logical array size in bytes.
+ * @tparam T Specifies the element type.
+ * @param tupleShape Specifies tuple dimensions.
+ * @param componentShape Specifies component dimensions.
+ * @return Product of tuple count, component count, and sizeof(T).
+ * @pre The complete product fits in uint64.
+ */
 template <class T>
 uint64 CalculateDataSize(const ShapeType& tupleShape, const ShapeType& componentShape)
 {
@@ -51,36 +62,25 @@ uint64 CalculateDataSize(const ShapeType& tupleShape, const ShapeType& component
 }
 
 /**
- * @brief Creates a DataStore whose format is resolved through the IOCollection's
- * registered format resolver.
+ * @brief Creates storage for a DataArray.
  *
- * This is the standard way to allocate a DataStore that will live inside a
- * DataStructure. The format is resolved through
- * ArrayCreationUtilities::ResolveStorageFormat: the unstructured-geometry gate
- * first (topology arrays of unstructured/poly geometries stay in-core), then any
- * explicit format, then the DataStructure's format resolver (which, in an
- * out-of-core build, maps the DataStorageMode preference --
- * Adaptive/ForceInCore/ForceOutOfCore -- and the array's size onto a concrete
- * format). Callers get out-of-core-backed storage when an out-of-core resolver
- * routes the array to that format.
+ * Execute mode applies the unstructured-geometry gate and then the DataStructure
+ * format resolver. A registered I/O manager creates the selected format.
  *
- * In Preflight mode, returns an EmptyDataStore that records shape metadata
- * without allocating any storage. In Execute mode, calls the resolver and
- * forwards to createDataStoreWithType() to allocate the real backing store.
+ * Preflight mode returns an EmptyDataStore with shape metadata. It does not
+ * consult the resolver or allocate backing storage.
  *
- * For DataStores that are NOT going to live inside a DataStructure (e.g.,
- * scratch buffers, raw HDF5 reader output), construct the in-memory
- * DataStore class directly via std::make_shared<DataStore<T>>(...) — the
- * resolver has nothing meaningful to resolve against without a DataStructure
- * and a DataPath.
+ * Construct an in-memory DataStore directly for scratch that has no owning
+ * DataStructure and DataPath. Those objects do not provide resolution context.
  *
- * @tparam T Primitive type (int8, float32, uint64, etc.)
- * @param dataStructure The DataStructure the array will live in (needed for format resolution)
- * @param arrayPath The DataPath where the array will be inserted (needed for parent-walk resolution)
- * @param tupleShape The tuple dimensions (e.g., {100, 200, 300} for a 3D volume)
- * @param componentShape The component dimensions (e.g., {3} for a 3-component vector)
- * @param mode PREFLIGHT returns an EmptyDataStore; EXECUTE allocates real storage
- * @return Shared pointer to the created AbstractDataStore
+ * @tparam T Specifies the element type.
+ * @param dataStructure Contains the future array and supplies resolution context.
+ * @param arrayPath Identifies the future array and its geometry ancestors.
+ * @param tupleShape Specifies tuple dimensions.
+ * @param componentShape Specifies component dimensions.
+ * @param mode Selects metadata-only preflight or backing-store execution.
+ * @return Created store, or null if no manager supports the resolved format and type.
+ * @throws std::runtime_error If mode is not valid.
  */
 template <class T>
 std::shared_ptr<AbstractDataStore<T>> CreateDataStore(const DataStructure& dataStructure, const DataPath& arrayPath, const ShapeType& tupleShape, const ShapeType& componentShape,
@@ -92,13 +92,10 @@ std::shared_ptr<AbstractDataStore<T>> CreateDataStore(const DataStructure& dataS
     return std::make_unique<EmptyDataStore<T>>(tupleShape, componentShape, std::string{});
   }
   case IDataAction::Mode::Execute: {
-    // Resolve the backing format through the single shared decision helper (unstructured
-    // geometry forces in-core "", else the DataStructure's resolver decides). No per-filter
-    // override is available at this call site, so an empty requestedFormat is passed.
+    // An empty explicit format delegates to the DataStructure resolver after the geometry gate.
     const uint64 requiredBytes = CalculateDataSize<T>(tupleShape, componentShape);
     const std::string resolvedFormat = ArrayCreationUtilities::ResolveStorageFormat(dataStructure, arrayPath, GetDataType<T>(), requiredBytes, "");
-    // Route through the registered IO managers: the built-in core manager serves the in-memory
-    // default (""), any other registered format is served by its manager when that plugin is loaded.
+    // The manager registered for the resolved format creates the concrete store.
     return GetIOCollection().createDataStoreWithType<T>(resolvedFormat, tupleShape, componentShape);
   }
   default: {
@@ -108,42 +105,29 @@ std::shared_ptr<AbstractDataStore<T>> CreateDataStore(const DataStructure& dataS
 }
 
 /**
- * @brief Creates a ListStore whose format is resolved through the IOCollection's
- * registered format resolver.
+ * @brief Creates storage for a NeighborList.
  *
- * This is the standard way to allocate a ListStore (the backing store for
- * NeighborList) that will live inside a DataStructure. Like CreateDataStore,
- * the format is resolved through ArrayCreationUtilities::ResolveStorageFormat:
- * the unstructured-geometry gate first, then any explicit format, then the
- * DataStructure's format resolver (which, in an out-of-core build, maps the
- * DataStorageMode preference -- Adaptive/ForceInCore/ForceOutOfCore -- and the
- * array's size onto a concrete format). Callers get out-of-core-backed storage
- * when an out-of-core resolver routes the array to that format.
+ * Execute mode applies the geometry gate, an explicit format, and then the
+ * DataStructure resolver in that priority order. The geometry gate can force
+ * in-memory storage before an explicit format is considered.
  *
- * In Preflight mode, returns an EmptyListStore that records shape metadata
- * without allocating any storage. In Execute mode, calls the resolver and
- * forwards to createListStoreWithType() to allocate the real backing store.
+ * Preflight mode returns an EmptyListStore with shape metadata. It does not
+ * consult the resolver or allocate backing storage.
  *
- * Sizing note: NeighborList is variable-length (each tuple is a list whose
- * size isn't known at creation time). We pass numTuples * sizeof(T) as a
- * lower-bound estimate to the resolver. The unstructured-geometry gate and the
- * storage-mode choice dominate the decision for NeighborLists in practice; the
- * size threshold only matters in Adaptive mode, where a NeighborList below the
- * cutoff stays in-core.
+ * NeighborList tuple lengths are unknown at creation. The resolver receives
+ * tupleCount * sizeof(T) as a lower-bound size estimate.
  *
- * For ListStores that are NOT going to live inside a DataStructure (e.g.,
- * raw HDF5 reader output), construct the in-memory ListStore class directly
- * via std::make_shared<ListStore<T>>(tupleShape).
+ * Construct an in-memory ListStore directly for scratch that has no owning
+ * DataStructure and DataPath.
  *
- * @tparam T Primitive type of the list elements
- * @param dataStructure The DataStructure the list will live in (needed for format resolution)
- * @param arrayPath The DataPath where the list will be inserted (needed for parent-walk resolution)
- * @param tupleShape The tuple dimensions
- * @param mode PREFLIGHT returns an EmptyListStore; EXECUTE allocates real storage
- * @param dataFormat An explicit per-filter format override, or "" to defer to the format resolver.
- *                   Threaded through from CreateNeighborListAction so a filter can force a specific
- *                   store format; empty means "Automatic" (let the resolver decide).
- * @return Shared pointer to the created AbstractListStore
+ * @tparam T Specifies the list element type.
+ * @param dataStructure Contains the future list and supplies resolution context.
+ * @param arrayPath Identifies the future list and its geometry ancestors.
+ * @param tupleShape Specifies tuple dimensions.
+ * @param mode Selects metadata-only preflight or backing-store execution.
+ * @param dataFormat Explicit format, or an empty name to use the resolver.
+ * @return Created store, or null if no manager supports the resolved format and type.
+ * @throws std::runtime_error If mode is not valid.
  */
 template <class T>
 std::shared_ptr<AbstractListStore<T>> CreateListStore(const DataStructure& dataStructure, const DataPath& arrayPath, const ShapeType& tupleShape, IDataAction::Mode mode = IDataAction::Mode::Execute,
@@ -155,14 +139,11 @@ std::shared_ptr<AbstractListStore<T>> CreateListStore(const DataStructure& dataS
     return std::make_unique<EmptyListStore<T>>(tupleShape);
   }
   case IDataAction::Mode::Execute: {
-    // Resolve the backing format through the single shared decision helper. NeighborList is
-    // variable-length, so we pass numTuples * sizeof(T) as a lower-bound size estimate; the
-    // geometry-walk and user-preference checks dominate the resolver's decision for NeighborLists
-    // in practice. An explicit per-filter override (dataFormat) wins over the resolver.
+    // Tuple count gives a lower-bound size because list lengths are not known yet.
     const uint64 numTuples = std::accumulate(tupleShape.begin(), tupleShape.end(), 1ULL, std::multiplies<>());
     const uint64 estimatedBytes = numTuples * sizeof(T);
     const std::string resolvedFormat = ArrayCreationUtilities::ResolveStorageFormat(dataStructure, arrayPath, GetDataType<T>(), estimatedBytes, dataFormat);
-    // Route through the registered IO managers (see CreateDataStore for rationale).
+    // The manager registered for the resolved format creates the concrete list store.
     return GetIOCollection().createListStoreWithType<T>(resolvedFormat, tupleShape);
   }
   default: {
@@ -171,6 +152,13 @@ std::shared_ptr<AbstractListStore<T>> CreateListStore(const DataStructure& dataS
   }
 }
 
+/**
+ * @brief Copies a store into a different explicit format.
+ * @tparam T Specifies the element type.
+ * @param dataStore Source store.
+ * @param dataFormat Explicit target format name.
+ * @return Converted store. Returns null for an unchanged or unsupported format.
+ */
 template <typename T>
 std::shared_ptr<AbstractDataStore<T>> ConvertDataStore(const AbstractDataStore<T>& dataStore, const std::string& dataFormat)
 {
@@ -179,9 +167,7 @@ std::shared_ptr<AbstractDataStore<T>> ConvertDataStore(const AbstractDataStore<T
     return nullptr;
   }
 
-  // The caller supplies the explicit target format directly (there is no DataStructure/DataPath
-  // here to resolve against). Route through the registered IO managers; the manager owning
-  // @p dataFormat builds the store.
+  // Conversion has no DataStructure or DataPath, so the caller supplies the target format.
   std::shared_ptr<AbstractDataStore<T>> newStore = GetIOCollection().createDataStoreWithType<T>(dataFormat, dataStore.getTupleShape(), dataStore.getComponentShape());
   if(newStore == nullptr)
   {

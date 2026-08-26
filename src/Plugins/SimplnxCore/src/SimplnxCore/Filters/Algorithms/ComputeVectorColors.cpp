@@ -19,9 +19,22 @@ namespace
 {
 using VectorMapType = Eigen::Map<Eigen::Vector3f>;
 
+// Each I/O batch caps the vector and color buffers at 65,536 tuples.
 constexpr usize k_ChunkTuples = 65536;
 constexpr usize k_VectorComponents = 3;
 
+/**
+ * @brief Converts vector chunks to RGB chunks.
+ * @tparam MaskType Specifies the mask value type.
+ * @param vectors Provides three-component vector tuples.
+ * @param cellVectorColors Receives three-component RGB tuples.
+ * @param mask Provides optional tuple mask values.
+ * @param shouldCancel Stops before the next chunk when true.
+ * @return Error from bulk I/O, or success after cancellation.
+ *
+ * Completed chunks remain written after cancellation. Bulk I/O avoids per-tuple
+ * disk access.
+ */
 template <typename MaskType>
 Result<> ComputeVectorColorsInChunks(const AbstractDataStore<float32>& vectors, AbstractDataStore<uint8>& cellVectorColors, const AbstractDataStore<MaskType>* mask,
                                      const std::atomic_bool& shouldCancel)
@@ -79,7 +92,7 @@ Result<> ComputeVectorColorsInChunks(const AbstractDataStore<float32>& vectors, 
 
         if(dir[2] < 0)
         {
-          // *= is not a valid operator in this case
+          // Fold antipodal directions into the upper hemisphere before coloring.
           array = array * -1.0f;
         }
 
@@ -90,6 +103,7 @@ Result<> ComputeVectorColorsInChunks(const AbstractDataStore<float32>& vectors, 
           trend += 360.0f;
         }
 
+        // Trend selects the RGB hue. Plunge blends that hue toward white.
         float32 r = 0, g = 0, b = 0;
         if(trend <= 120.0f)
         {
@@ -148,7 +162,6 @@ Result<> ComputeVectorColorsInChunks(const AbstractDataStore<float32>& vectors, 
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeVectorColors::ComputeVectorColors(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeVectorColorsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -157,16 +170,13 @@ ComputeVectorColors::ComputeVectorColors(DataStructure& dataStructure, const IFi
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeVectorColors::~ComputeVectorColors() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeVectorColors::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeVectorColors::operator()()
 {
   if(m_ShouldCancel)
@@ -200,6 +210,6 @@ Result<> ComputeVectorColors::operator()()
     }
   }
 
-  // Parameter validation normally guarantees this path and type; retain the algorithm-level guard for direct callers.
+  // Filter validation rejects this state. Direct algorithm callers can still reach it.
   return MakeErrorResult(-54700, fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString()));
 }

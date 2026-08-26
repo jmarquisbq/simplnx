@@ -22,12 +22,12 @@ namespace nx::core::UnitTest
 {
 
 /**
- * @brief Creates an ImageGeom with a CellData AttributeMatrix.
- * @param ds DataStructure to create objects in.
+ * @brief Creates an ImageGeom and its CellData AttributeMatrix.
+ * @param ds Receives the created objects.
  * @param dims Voxel dimensions {X, Y, Z}.
- * @param geomName Name for the ImageGeom.
- * @param cellDataName Name for the CellData AttributeMatrix.
- * @return Pointer to the created AttributeMatrix.
+ * @param geomName ImageGeom name.
+ * @param cellDataName CellData AttributeMatrix name.
+ * @return The created CellData AttributeMatrix.
  */
 inline AttributeMatrix* BuildSegmentFeaturesTestGeometry(DataStructure& ds, const std::array<usize, 3>& dims, const std::string& geomName, const std::string& cellDataName)
 {
@@ -43,12 +43,13 @@ inline AttributeMatrix* BuildSegmentFeaturesTestGeometry(DataStructure& ds, cons
 }
 
 /**
- * @brief Creates block-patterned int32 scalar data for ScalarSegmentFeatures testing.
- * @param ds DataStructure to create the array in.
+ * @brief Creates block-patterned int32 scalar data for ScalarSegmentFeatures tests.
+ * @param ds Receives the scalar array.
  * @param cellShape Tuple shape {Z, Y, X}.
- * @param amId Parent AttributeMatrix ID.
- * @param blockSize Voxel count per block edge.
- * @param arrayName Name for the scalar array.
+ * @param amId Parent AttributeMatrix identifier.
+ * @param blockSize Number of voxels on each block edge.
+ * @param arrayName Scalar array name.
+ * @param wrapBoundary True to give opposite boundary blocks the same value.
  */
 inline void BuildScalarTestData(DataStructure& ds, const ShapeType& cellShape, DataObject::IdType amId, usize blockSize, const std::string& arrayName = "ScalarData", bool wrapBoundary = false)
 {
@@ -80,8 +81,8 @@ inline void BuildScalarTestData(DataStructure& ds, const ShapeType& cellShape, D
 
         if(wrapBoundary)
         {
-          // Last block in each axis maps to the same value as the first block,
-          // so periodic wrapping merges them into one feature.
+          // The last block on each axis gets the first block value. Periodic
+          // segmentation therefore merges the two boundary blocks.
           const usize wbx = (bx == blocksPerX - 1) ? 0 : bx;
           const usize wby = (by == blocksPerY - 1) ? 0 : by;
           const usize wbz = (bz == blocksPerZ - 1) ? 0 : bz;
@@ -100,18 +101,19 @@ inline void BuildScalarTestData(DataStructure& ds, const ShapeType& cellShape, D
 }
 
 /**
- * @brief Creates quaternion, phase, and crystal structure arrays for EBSD/CAxis testing.
+ * @brief Creates quaternion, phase, and crystal-structure arrays for EBSD and C-axis tests.
  *
- * Quaternions are block-patterned with distinct orientations per block.
- * All voxels are assigned phase 1. CrystalStructures has phase 0 = 999 (Unknown)
- * and phase 1 = the provided crystal structure value.
+ * Each Z layer has one block-patterned orientation. All voxels use phase 1.
+ * CrystalStructures uses 999 for unknown phase 0 and the selected value for
+ * phase 1.
  *
- * @param ds DataStructure to create arrays in.
+ * @param ds Receives the test arrays.
  * @param cellShape Tuple shape {Z, Y, X}.
- * @param geomId Parent geometry ID (for ensemble AM).
- * @param amId Parent CellData AttributeMatrix ID.
+ * @param geomId Parent geometry identifier for the ensemble AttributeMatrix.
+ * @param amId Parent CellData AttributeMatrix identifier.
  * @param crystalStructure Crystal structure for phase 1 (1 = Cubic_High, 0 = Hexagonal_High).
- * @param blockSize Voxel count per block edge.
+ * @param blockSize Number of voxels on each block edge.
+ * @param wrapBoundary True to give opposite boundary blocks the same orientation.
  */
 inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellShape, DataObject::IdType geomId, DataObject::IdType amId, uint32 crystalStructure, usize blockSize,
                                      bool wrapBoundary = false)
@@ -138,7 +140,7 @@ inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellSha
   const usize blocksPerZ = (dimZ + blockSize - 1) / blockSize;
   const usize numBlocks = blocksPerX * blocksPerY * blocksPerZ;
 
-  // Quaternion Hamilton product: result = a * b, where q = (w, x, y, z)
+  // The Hamilton product treats each input quaternion as (w, x, y, z).
   auto quatMul = [](const std::array<float32, 4>& a, const std::array<float32, 4>& b) -> std::array<float32, 4> {
     return {a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2], a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
             a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]};
@@ -146,32 +148,23 @@ inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellSha
 
   std::vector<std::array<float32, 4>> blockQuats(numBlocks);
 
-  // Z-layer orientation scheme (shared by EBSD and CAxis):
-  // All blocks in the same Z-layer share a single X-axis rotation angle.
-  // This produces 3 horizontal layers of identical orientations:
-  //   z=0: 0° rotation   → q = [1, 0, 0, 0]      c-axis = [0, 0, 1]
-  //   z=1: 30° rotation  → q = [0.966, 0.259, 0, 0] c-axis = [0, 0.5, 0.866]
-  //   z=2: 60° rotation  → q = [0.866, 0.5, 0, 0]   c-axis = [0, 0.866, 0.5]
+  // Each Z layer uses one X-axis rotation, so all blocks in that layer merge.
+  // The layers cycle through 0, 30, and 60 degrees. Their vector-scalar
+  // quaternions are [0,0,0,1], [0.259,0,0,0.966], and [0.5,0,0,0.866].
+  // The related C axes are [0,0,1], [0,0.5,0.866], and [0,0.866,0.5].
+  // Adjacent layers remain separate because 30 degrees exceeds the 5-degree tolerance.
   //
-  // Adjacent layers differ by 30°, well above the 5° tolerance → no merge.
-  // Within each layer, all blocks share the same angle → they merge.
-  //
-  // Merge pair override (non-periodic only):
-  //   Block (1,1,1) at center of z=1 is set to 0° instead of 30°.
-  //   It merges with its z=0 neighbor (1,1,0) while staying separate
-  //   from the other z=1 blocks (30° difference → no merge).
-  //
-  // Expected features (3x3x3 grid):
-  //   Base (3 blocks/axis): 3 features (z=0 + center pillar, z=1 minus pillar, z=2)
-  //   Base (8 blocks/axis): 3 features (repeating 0°/30°/60° stripes)
-  //   Periodic: layers sharing the same angle merge across the boundary
+  // For nonperiodic tests, block (1,1,1) uses 0 degrees instead of 30 degrees.
+  // The block merges with its Z=0 face neighbor but not with other Z=1 blocks.
+  // This pattern produces three features for three or eight blocks per axis.
+  // Periodic layers with matching angles merge across the volume boundary.
   constexpr std::array<float32, 3> k_LayerAngles = {0.0f, 30.0f, 60.0f};
 
   for(usize bz = 0; bz < blocksPerZ; bz++)
   {
     const usize layerIdx = bz % 3;
     const float32 halfAngle = k_LayerAngles[layerIdx] * k_DegToRad * 0.5f;
-    // EBSDlib quaternion layout: (x, y, z, w) — Vector-Scalar order
+    // EBSDLib stores quaternions in vector-scalar order (x, y, z, w).
     const std::array<float32, 4> layerQuat = {std::sin(halfAngle), 0.0f, 0.0f, std::cos(halfAngle)};
 
     for(usize by = 0; by < blocksPerY; by++)
@@ -184,8 +177,8 @@ inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellSha
     }
   }
 
-  // Merge pair: block (1,1,1) gets z=0 angle (0°) instead of z=1 angle (30°).
-  // It merges downward into the z=0 layer through face neighbor (1,1,0).
+  // The selected center block uses the Z=0 angle. It therefore merges through
+  // face neighbor (1,1,0) into the Z=0 layer.
   if(!wrapBoundary && blocksPerX >= 3 && blocksPerY >= 3 && blocksPerZ >= 3)
   {
     const usize idx_111 = 1 * blocksPerY * blocksPerX + 1 * blocksPerX + 1;
@@ -224,7 +217,7 @@ inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellSha
     phasesStore.copyFromBuffer(z * sliceSize, nonstd::span<const int32>(phasesSliceBuffer.data(), sliceSize));
   }
 
-  // Create CellEnsembleData with CrystalStructures
+  // The ensemble arrays provide the crystal structure for phase 1.
   const ShapeType ensembleTupleShape = {2};
   auto* ensembleAM = AttributeMatrix::Create(ds, "CellEnsembleData", ensembleTupleShape, geomId);
   const DataPath crystalStructsPath = ds.getDataPathsForId(geomId)[0].createChildPath("CellEnsembleData").createChildPath("CrystalStructures");
@@ -236,16 +229,15 @@ inline void BuildOrientationTestData(DataStructure& ds, const ShapeType& cellSha
 }
 
 /**
- * @brief Creates a spherical mask array where voxels inside the sphere are 1 (good)
- * and voxels outside are 0 (masked out).
+ * @brief Creates a mask with value 1 inside a centered sphere and 0 outside.
  *
- * The sphere is centered in the volume with radius = 80% of half the smallest dimension.
- * For a 200x200x200 volume, that gives a radius of 80 voxels.
+ * The radius is 80 percent of half the smallest dimension. A 200 by 200 by
+ * 200 volume therefore has an 80-voxel radius.
  *
- * @param ds DataStructure to create the array in.
+ * @param ds Receives the mask array.
  * @param cellShape Tuple shape {Z, Y, X}.
- * @param amId Parent AttributeMatrix ID.
- * @param maskName Name for the mask array.
+ * @param amId Parent AttributeMatrix identifier.
+ * @param maskName Mask array name.
  */
 inline void BuildSphericalMask(DataStructure& ds, const ShapeType& cellShape, DataObject::IdType amId, const std::string& maskName = "Mask")
 {
@@ -283,15 +275,13 @@ inline void BuildSphericalMask(DataStructure& ds, const ShapeType& cellShape, Da
 }
 
 /**
- * @brief Verifies segmentation results when a mask is applied.
+ * @brief Verifies masked segmentation output.
  *
- * Checks that:
- * 1. Masked voxels (mask=0) have FeatureId=0
- * 2. Unmasked voxels (mask=1) have FeatureId > 0
- * 3. At least one feature was created
- * 4. Both masked and unmasked regions exist
+ * The check requires feature identifier 0 for masked voxels and a positive
+ * identifier for unmasked voxels. It also requires both regions and at least
+ * one output feature.
  *
- * @param ds DataStructure containing the results.
+ * @param ds Contains the segmentation results.
  * @param dims Voxel dimensions {X, Y, Z}.
  * @param featureIdsPath Path to the generated FeatureIds array.
  * @param activePath Path to the generated Active array.
@@ -334,16 +324,14 @@ inline void VerifyMaskedSegmentation(const DataStructure& ds, const std::array<u
 }
 
 /**
- * @brief Verifies that block-patterned segmentation produced the expected results.
+ * @brief Verifies block-patterned segmentation output.
  *
- * Checks that:
- * 1. The feature count matches the expected number of blocks
- * 2. All voxels within a block share the same FeatureId
- * 3. Different blocks have different FeatureIds
+ * The check requires one feature for each block. All voxels in one block must
+ * share an identifier, and different blocks must have different identifiers.
  *
- * @param ds DataStructure containing the results.
+ * @param ds Contains the segmentation results.
  * @param dims Voxel dimensions {X, Y, Z}.
- * @param blockSize Voxel count per block edge.
+ * @param blockSize Number of voxels on each block edge.
  * @param featureIdsPath Path to the generated FeatureIds array.
  * @param activePath Path to the generated Active array.
  */
@@ -357,19 +345,19 @@ inline void VerifyBlockSegmentation(const DataStructure& ds, const std::array<us
   const usize blocksPerZ = (dimZ + blockSize - 1) / blockSize;
   const usize expectedFeatures = blocksPerX * blocksPerY * blocksPerZ;
 
-  // Check feature count (Active array includes Feature 0)
+  // The Active array includes reserved feature 0.
   REQUIRE_NOTHROW(ds.getDataRefAs<UInt8Array>(activePath));
   const auto& actives = ds.getDataRefAs<UInt8Array>(activePath);
   REQUIRE(actives.getNumberOfTuples() == expectedFeatures + 1);
 
-  // Check FeatureIds consistency
+  // Each block must use one positive feature identifier.
   REQUIRE_NOTHROW(ds.getDataRefAs<Int32Array>(featureIdsPath));
   const auto& featureIds = ds.getDataRefAs<Int32Array>(featureIdsPath);
   const auto& featureStore = featureIds.getDataStoreRef();
 
-  // Map from block index to the FeatureId assigned to that block
+  // The map records the first feature identifier found in each block.
   std::unordered_map<usize, int32> blockToFeature;
-  // Track all assigned FeatureIds to verify uniqueness
+  // The set verifies that different blocks have different identifiers.
   std::set<int32> usedFeatureIds;
 
   for(usize z = 0; z < dimZ; z++)
@@ -382,7 +370,7 @@ inline void VerifyBlockSegmentation(const DataStructure& ds, const std::array<us
         const usize blockIdx = (z / blockSize) * blocksPerY * blocksPerX + (y / blockSize) * blocksPerX + (x / blockSize);
         const int32 featureId = featureStore.getValue(voxelIdx);
 
-        REQUIRE(featureId > 0); // No voxel should be unassigned
+        REQUIRE(featureId > 0); // Each voxel must belong to a feature.
 
         auto it = blockToFeature.find(blockIdx);
         if(it == blockToFeature.end())
@@ -392,26 +380,25 @@ inline void VerifyBlockSegmentation(const DataStructure& ds, const std::array<us
         }
         else
         {
-          REQUIRE(it->second == featureId); // All voxels in a block share the same FeatureId
+          REQUIRE(it->second == featureId); // All voxels in a block must use the same identifier.
         }
       }
     }
   }
 
-  // Each block should have a unique FeatureId
+  // Each block must have a unique feature identifier.
   REQUIRE(usedFeatureIds.size() == expectedFeatures);
 }
 
 /**
- * @brief Verifies segmentation results when periodic BCs are enabled and boundary
- * blocks have matching data (wrapBoundary=true).
+ * @brief Verifies periodic segmentation when opposite boundary blocks have matching data.
  *
- * With periodic wrapping, the last block in each axis merges with the first block.
- * Expected feature count: (blocksPerX-1) * (blocksPerY-1) * (blocksPerZ-1).
+ * Periodic wrapping merges the first and last block on each axis. The expected
+ * feature count is `(blocksPerX - 1) * (blocksPerY - 1) * (blocksPerZ - 1)`.
  *
- * @param ds DataStructure containing the results.
+ * @param ds Contains the segmentation results.
  * @param dims Voxel dimensions {X, Y, Z}.
- * @param blockSize Voxel count per block edge.
+ * @param blockSize Number of voxels on each block edge.
  * @param featureIdsPath Path to the generated FeatureIds array.
  * @param activePath Path to the generated Active array.
  */
@@ -428,17 +415,17 @@ inline void VerifyPeriodicBlockSegmentation(const DataStructure& ds, const std::
   const usize periodicBlocksZ = blocksPerZ - 1;
   const usize expectedFeatures = periodicBlocksX * periodicBlocksY * periodicBlocksZ;
 
-  // Check feature count (Active array includes Feature 0)
+  // The Active array includes reserved feature 0.
   REQUIRE_NOTHROW(ds.getDataRefAs<UInt8Array>(activePath));
   const auto& actives = ds.getDataRefAs<UInt8Array>(activePath);
   REQUIRE(actives.getNumberOfTuples() == expectedFeatures + 1);
 
-  // Check FeatureIds consistency
+  // Each periodic block group must use one positive feature identifier.
   REQUIRE_NOTHROW(ds.getDataRefAs<Int32Array>(featureIdsPath));
   const auto& featureIds = ds.getDataRefAs<Int32Array>(featureIdsPath);
   const auto& featureStore = featureIds.getDataStoreRef();
 
-  // Map from periodic block index to the FeatureId assigned to that block
+  // The map records the first feature identifier found in each periodic group.
   std::unordered_map<usize, int32> blockToFeature;
   std::set<int32> usedFeatureIds;
 
@@ -453,14 +440,14 @@ inline void VerifyPeriodicBlockSegmentation(const DataStructure& ds, const std::
         const usize by = y / blockSize;
         const usize bz = z / blockSize;
 
-        // Effective periodic block index: last block wraps to first
+        // The last block on each axis maps to the first periodic block.
         const usize pbx = bx % periodicBlocksX;
         const usize pby = by % periodicBlocksY;
         const usize pbz = bz % periodicBlocksZ;
         const usize periodicBlockIdx = pbz * periodicBlocksY * periodicBlocksX + pby * periodicBlocksX + pbx;
 
         const int32 featureId = featureStore.getValue(voxelIdx);
-        REQUIRE(featureId > 0); // No voxel should be unassigned
+        REQUIRE(featureId > 0); // Each voxel must belong to a feature.
 
         auto it = blockToFeature.find(periodicBlockIdx);
         if(it == blockToFeature.end())
@@ -470,25 +457,24 @@ inline void VerifyPeriodicBlockSegmentation(const DataStructure& ds, const std::
         }
         else
         {
-          REQUIRE(it->second == featureId); // All voxels in matching periodic blocks share the same FeatureId
+          REQUIRE(it->second == featureId); // Matching periodic blocks must use one identifier.
         }
       }
     }
   }
 
-  // Each periodic block group should have a unique FeatureId
+  // Each periodic block group must have a unique feature identifier.
   REQUIRE(usedFeatureIds.size() == expectedFeatures);
 }
 
 /**
- * @brief Runs the "no valid voxels returns error -87000" test for any SegmentFeatures filter.
+ * @brief Verifies that a SegmentFeatures filter returns error -87000 for an empty mask.
  *
- * Creates a 3x3x3 grid with all voxels masked out, runs the filter, and asserts
- * that execution returns error -87000.
+ * The test creates a 3 by 3 by 3 grid and masks all voxels.
  *
- * @tparam FilterT The filter class (e.g., ScalarSegmentFeaturesFilter).
- * @param setupArgs Lambda that receives (Arguments&, DataPath geomPath, DataPath cellDataPath, DataPath maskPath)
- *                  and inserts filter-specific arguments.
+ * @tparam FilterT Specifies the SegmentFeatures filter type.
+ * @tparam SetupArgsFn Specifies the argument-setup callable type.
+ * @param setupArgs Adds filter-specific arguments for the test paths.
  */
 template <typename FilterT, typename SetupArgsFn>
 void RunNoValidVoxelsErrorTest(SetupArgsFn setupArgs)
@@ -523,20 +509,18 @@ void RunNoValidVoxelsErrorTest(SetupArgsFn setupArgs)
 }
 
 /**
- * @brief Tests that FaceEdgeVertex (26-neighbor) connectivity correctly merges
- * regions connected through shared vertices and edges, not just faces.
+ * @brief Verifies FaceEdgeVertex connectivity for vertex-connected and edge-connected regions.
  *
- * Creates a 3x3x3 geometry with 4 isolated single-voxel regions:
- *   - Regions A,B (same data): voxels (0,0,0) and (1,1,1) — vertex-connected only
- *   - Regions C,D (same data): voxels (2,0,0) and (2,1,1) — edge-connected only
+ * The 3 by 3 by 3 geometry contains one vertex-connected pair and one
+ * edge-connected pair. Face connectivity produces five features, including
+ * the background. FaceEdgeVertex connectivity produces three features by
+ * merging both pairs.
  *
- * With Face (6-neighbor): 5 features (1 background + 4 isolated regions)
- * With FaceEdgeVertex (26-neighbor): 3 features (1 background + A&B merged + C&D merged)
- *
- * @tparam FilterT The filter class (e.g., ScalarSegmentFeaturesFilter).
- * @param setupFaceArgs Lambda (Arguments&, DataStructure&, DataPath geomPath, DataPath cellDataPath)
- *        that inserts filter-specific arguments with neighborScheme=0 (Face).
- * @param setupFevArgs Lambda with same signature but neighborScheme=1 (FaceEdgeVertex).
+ * @tparam FilterT Specifies the SegmentFeatures filter type.
+ * @tparam SetupFaceFn Specifies the face-connectivity setup callable type.
+ * @tparam SetupFevFn Specifies the FaceEdgeVertex setup callable type.
+ * @param setupFaceArgs Adds filter arguments with face connectivity.
+ * @param setupFevArgs Adds filter arguments with FaceEdgeVertex connectivity.
  */
 template <typename FilterT, typename SetupFaceFn, typename SetupFevFn>
 void RunFaceEdgeVertexConnectivityTest(SetupFaceFn setupFaceArgs, SetupFevFn setupFevArgs)
@@ -550,7 +534,7 @@ void RunFaceEdgeVertexConnectivityTest(SetupFaceFn setupFaceArgs, SetupFevFn set
   const DataPath featureIdsPath({"Geom", "CellData", "FeatureIds"});
   const DataPath activePath({"Geom", "CellFeatureData", "Active"});
 
-  // Face scheme: A, B, C, D are all isolated → 5 features + index 0
+  // Face connectivity leaves regions A, B, C, and D separate from the background.
   {
     DataStructure ds;
     BuildSegmentFeaturesTestGeometry(ds, dims, "Geom", "CellData");
@@ -565,7 +549,7 @@ void RunFaceEdgeVertexConnectivityTest(SetupFaceFn setupFaceArgs, SetupFevFn set
     REQUIRE(actives.getNumberOfTuples() == 6);
   }
 
-  // FaceEdgeVertex scheme: A+B merge (vertex), C+D merge (edge) → 3 features + index 0
+  // FaceEdgeVertex connectivity merges A with B and C with D.
   DataStructure ds;
   BuildSegmentFeaturesTestGeometry(ds, dims, "Geom", "CellData");
   {
@@ -580,7 +564,7 @@ void RunFaceEdgeVertexConnectivityTest(SetupFaceFn setupFaceArgs, SetupFevFn set
     REQUIRE(actives.getNumberOfTuples() == 4);
   }
 
-  // Verify the vertex-connected pair shares a FeatureId
+  // Each connected pair must share one identifier, and the two pairs must differ.
   const auto& fids = ds.getDataRefAs<Int32Array>(featureIdsPath);
   const auto& fidsStore = fids.getDataStoreRef();
   REQUIRE(fidsStore.getValue(0 * 9 + 0 * 3 + 0) == fidsStore.getValue(1 * 9 + 1 * 3 + 1)); // A == B (vertex merge)
@@ -589,21 +573,20 @@ void RunFaceEdgeVertexConnectivityTest(SetupFaceFn setupFaceArgs, SetupFevFn set
 }
 
 /**
- * @brief Runs a SegmentFeatures filter against exemplar data and verifies results.
+ * @brief Executes a SegmentFeatures filter and verifies its exemplar output.
  *
- * Executes the filter, optionally checks the feature count, compares computed
- * FeatureIds against embedded exemplar arrays, and validates tuple dimension
- * inheritance. Used by Scalar, EBSD, and CAxis neighbor scheme tests.
+ * The test can check the feature count. It also compares feature identifiers
+ * and verifies tuple-dimension inheritance for all applicable arrays.
  *
- * @tparam FilterT The filter class (e.g., ScalarSegmentFeaturesFilter).
- * @tparam SetupArgsFn Lambda (Arguments&) that inserts all filter-specific arguments.
- * @param dataStructure DataStructure loaded from an exemplar .dream3d file.
- * @param computedFeatureIdsPath Path where the filter writes its FeatureIds array.
- * @param activesPath Path where the filter writes its Active array.
- * @param exemplarFeatureIdsPath Path to the pre-computed exemplar FeatureIds.
- * @param expectedFeatureCount Expected Active tuple count (0 to skip this check).
- * @param setupArgs Lambda to populate filter Arguments.
- * @param tupleCheckIgnoredPaths Paths to exclude from CheckArraysInheritTupleDims.
+ * @tparam FilterT Specifies the SegmentFeatures filter type.
+ * @tparam SetupArgsFn Specifies the argument-setup callable type.
+ * @param dataStructure Contains the exemplar input and receives computed output.
+ * @param computedFeatureIdsPath Computed FeatureIds array path.
+ * @param activesPath Computed Active array path.
+ * @param exemplarFeatureIdsPath Exemplar FeatureIds array path.
+ * @param expectedFeatureCount Expected Active tuple count, or 0 to omit this check.
+ * @param setupArgs Adds the filter-specific arguments.
+ * @param tupleCheckIgnoredPaths Paths omitted from the tuple-dimension check.
  */
 template <typename FilterT, typename SetupArgsFn>
 void RunNeighborSchemeExemplarTest(DataStructure& dataStructure, const DataPath& computedFeatureIdsPath, const DataPath& activesPath, const DataPath& exemplarFeatureIdsPath,

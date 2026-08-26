@@ -11,10 +11,19 @@ namespace
 {
 
 /**
- * @brief Copies one EbsdLib-owned OINA channel into its destination array in bounded tuple batches.
+ * @brief Copies one EbsdLib-owned OINA channel in bounded tuple pages.
+ * @tparam T Channel value type.
+ * @param inputValues Identifies the destination attribute matrix.
+ * @param tupleCount Number of tuples in the loaded scan.
+ * @param dataStructure Contains the destination array.
+ * @param reader Owns the loaded source channel.
+ * @param name Channel and destination-array name.
+ * @param tupleOffset First destination tuple for this scan.
+ * @param shouldCancel Signals cancellation between pages.
+ * @return Source or destination errors. Cancellation returns success after completed pages.
+ * @pre The source and destination contain tupleCount times their component count.
  *
- * EbsdLib still owns one scan in memory, but simplnx performs no per-value
- * writes and creates no additional scan-sized array.
+ * EbsdLib owns one scan in memory. simplnx creates no second scan-sized array.
  */
 template <typename T>
 Result<> copyRawData(const ReadH5DataInputValues* inputValues, usize tupleCount, DataStructure& dataStructure, ebsdlib::H5OINAReader& reader, const std::string& name, usize tupleOffset,
@@ -38,10 +47,18 @@ Result<> copyRawData(const ReadH5DataInputValues* inputValues, usize tupleCount,
 }
 
 /**
- * @brief Applies the EDAX 30-degree hexagonal Euler correction through bounded phase/Euler pages.
+ * @brief Applies the configured 30-degree hexagonal Euler correction in bounded pages.
+ * @tparam T Cell phase value type.
+ * @param inputValues Identifies the correction option and arrays.
+ * @param tupleCount Number of tuples in this scan.
+ * @param tupleOffset First volume tuple for this scan.
+ * @param dataStructure Contains phase, Euler, and crystal-structure arrays.
+ * @param shouldCancel Signals cancellation between pages.
+ * @return Source or destination transfer errors. Cancellation returns success after completed pages.
  *
  * The ensemble crystal table is cached because it is small and reused for every
- * cell; cell phases and Euler triples remain chunked.
+ * cell. Cell phases and Euler triples remain bounded. Phase IDs outside the
+ * ensemble range do not receive the correction.
  */
 template <typename T>
 Result<> convertHexEulerAngle(const ReadH5DataInputValues* inputValues, usize tupleCount, usize tupleOffset, DataStructure& dataStructure, const std::atomic_bool& shouldCancel)
@@ -89,22 +106,18 @@ Result<> convertHexEulerAngle(const ReadH5DataInputValues* inputValues, usize tu
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 ReadH5OinaData::ReadH5OinaData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ReadH5DataInputValues* inputValues)
 : IEbsdOemReader<ebsdlib::H5OINAReader>(dataStructure, mesgHandler, shouldCancel, inputValues)
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadH5OinaData::~ReadH5OinaData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ReadH5OinaData::operator()()
 {
   return execute();
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadH5OinaData::copyRawEbsdData(int index)
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);

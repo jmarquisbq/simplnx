@@ -6,12 +6,19 @@
 #include <algorithm>
 #include <vector>
 
+/**
+ * @namespace nx::core::HDF5
+ * @brief Contains HDF5 parsing and I/O utilities.
+ */
 namespace nx::core::HDF5
 {
 
 /**
- * @brief Given a flat index and a shape, returns the N-dimensional position.
- * Uses row-major (C) ordering: the last dimension varies fastest.
+ * @brief Converts a flat index to a multidimensional position.
+ * @param flatIndex Zero-based flat index.
+ * @param shape Array dimensions.
+ * @return Position in row-major order, with the last dimension fastest.
+ * @pre All dimensions are nonzero. For a nonempty shape, flatIndex is in range.
  */
 inline std::vector<uint64> flatToNd(uint64 flatIndex, const std::vector<uint64>& shape)
 {
@@ -26,8 +33,11 @@ inline std::vector<uint64> flatToNd(uint64 flatIndex, const std::vector<uint64>&
 }
 
 /**
- * @brief Given an N-dimensional position and a shape, returns the flat index.
- * Uses row-major (C) ordering: the last dimension varies fastest.
+ * @brief Converts a multidimensional position to a flat index.
+ * @param position Zero-based coordinate in each dimension.
+ * @param shape Array dimensions.
+ * @return Flat index in row-major order, with the last dimension fastest.
+ * @pre position and shape have equal size. Coordinates are in range and arithmetic fits uint64.
  */
 inline uint64 ndToFlat(const std::vector<uint64>& position, const std::vector<uint64>& shape)
 {
@@ -43,7 +53,11 @@ inline uint64 ndToFlat(const std::vector<uint64>& position, const std::vector<ui
 }
 
 /**
- * @brief Given a tuple position, returns which chunk it belongs to (N-dimensional chunk index).
+ * @brief Converts a tuple position to its multidimensional chunk index.
+ * @param position Zero-based tuple coordinate.
+ * @param chunkShape Chunk dimensions.
+ * @return Zero-based chunk coordinate.
+ * @pre position and chunkShape have equal size, and all chunk dimensions are nonzero.
  */
 inline std::vector<uint64> positionToChunkNd(const std::vector<uint64>& position, const std::vector<uint64>& chunkShape)
 {
@@ -56,7 +70,11 @@ inline std::vector<uint64> positionToChunkNd(const std::vector<uint64>& position
 }
 
 /**
- * @brief Given N-dimensional chunk indices and chunks-per-dimension, returns the flat chunk index.
+ * @brief Converts a multidimensional chunk index to a flat chunk index.
+ * @param chunkNd Zero-based chunk coordinate.
+ * @param chunksPerDim Chunk counts in each dimension.
+ * @return Row-major flat chunk index.
+ * @pre Inputs satisfy ndToFlat() preconditions.
  */
 inline uint64 chunkNdToFlat(const std::vector<uint64>& chunkNd, const std::vector<uint64>& chunksPerDim)
 {
@@ -64,8 +82,11 @@ inline uint64 chunkNdToFlat(const std::vector<uint64>& chunkNd, const std::vecto
 }
 
 /**
- * @brief Returns the number of chunks along each dimension.
- * Computed as ceil(tupleShape[d] / chunkShape[d]) for each dimension.
+ * @brief Calculates the chunk count in each dimension.
+ * @param tupleShape Array tuple dimensions.
+ * @param chunkShape Chunk dimensions.
+ * @return Ceiling of tupleShape divided by chunkShape in each dimension.
+ * @pre Inputs have equal size, chunk dimensions are nonzero, and additions fit uint64.
  */
 inline std::vector<uint64> getChunksPerDimension(const std::vector<uint64>& tupleShape, const std::vector<uint64>& chunkShape)
 {
@@ -78,7 +99,11 @@ inline std::vector<uint64> getChunksPerDimension(const std::vector<uint64>& tupl
 }
 
 /**
- * @brief Returns the total number of chunks for the given tuple shape and chunk shape.
+ * @brief Calculates the total chunk count.
+ * @param tupleShape Array tuple dimensions.
+ * @param chunkShape Chunk dimensions.
+ * @return Product of per-dimension chunk counts. Empty shapes return one.
+ * @pre Inputs satisfy getChunksPerDimension() preconditions, and the product fits uint64.
  */
 inline uint64 getNumberOfChunks(const std::vector<uint64>& tupleShape, const std::vector<uint64>& chunkShape)
 {
@@ -92,8 +117,12 @@ inline uint64 getNumberOfChunks(const std::vector<uint64>& tupleShape, const std
 }
 
 /**
- * @brief Returns the extent (bounds) of a specific chunk.
- * Edge chunks are clamped to the array bounds (may be smaller than chunkShape).
+ * @brief Calculates one chunk's inclusive tuple extent.
+ * @param flatChunkIndex Zero-based flat chunk index.
+ * @param tupleShape Nonzero array tuple dimensions.
+ * @param chunkShape Nonzero chunk dimensions.
+ * @return Inclusive extent clamped to array bounds for an edge chunk.
+ * @pre Shapes have equal size and all nonempty dimensions are nonzero. The index is in range, and arithmetic fits uint64.
  */
 inline Extent getChunkBounds(uint64 flatChunkIndex, const std::vector<uint64>& tupleShape, const std::vector<uint64>& chunkShape)
 {

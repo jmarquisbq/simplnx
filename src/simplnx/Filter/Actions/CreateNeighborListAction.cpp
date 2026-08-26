@@ -21,9 +21,8 @@ CreateNeighborListAction::~CreateNeighborListAction() noexcept = default;
 
 Result<> CreateNeighborListAction::apply(DataStructure& dataStructure, Mode mode) const
 {
-  // The explicit per-filter format override (m_DataFormat) is threaded through to CreateNeighbors,
-  // where the shared resolver applies the standard decision order (geometry gate, then override,
-  // then resolver). Empty means "Automatic" -- defer entirely to the resolver.
+  // CreateNeighbors applies the geometry gate before the requested format and
+  // resolver. An empty format selects automatic resolution.
   switch(m_Type)
   {
   case DataType::int8: {

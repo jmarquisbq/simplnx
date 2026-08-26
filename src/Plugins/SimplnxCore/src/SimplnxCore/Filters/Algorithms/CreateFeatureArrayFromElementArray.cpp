@@ -13,10 +13,15 @@ using namespace nx::core;
 
 namespace
 {
-/// Cell tuples transferred per bulk I/O operation. The buffers remain fixed-size
-/// regardless of the total element-array size.
+// Cell buffers stay fixed regardless of the total element count.
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Finds the largest nonnegative feature ID with bounded reads.
+ * @param featureIdsStore Supplies feature IDs.
+ * @param shouldCancel Signals cancellation between chunks.
+ * @return Maximum ID, zero after cancellation, or an input or read error.
+ */
 Result<int32> findMaximumFeatureId(const Int32AbstractDataStore& featureIdsStore, const std::atomic_bool& shouldCancel)
 {
   const usize totalTuples = featureIdsStore.getNumberOfTuples();
@@ -51,8 +56,24 @@ Result<int32> findMaximumFeatureId(const Int32AbstractDataStore& featureIdsStore
   return {maximumFeatureId};
 }
 
+/**
+ * @struct CopyCellDataFunctor
+ * @brief Dispatches element-to-feature copying by runtime value type.
+ */
 struct CopyCellDataFunctor
 {
+  /**
+   * @brief Copies element values through bounded bulk transfers.
+   * @tparam T Element and feature value type.
+   * @param selectedCellArray Supplies element values.
+   * @param featureIdsStore Maps elements to feature tuples.
+   * @param createdArray Receives final feature values.
+   * @param shouldCancel Signals cancellation between chunks.
+   * @return Success with an optional inconsistency warning, or a transfer error.
+   *
+   * The output write occurs only after all chunks complete. Cancellation does
+   * not publish the partially assembled feature buffer.
+   */
   template <typename T>
   Result<> operator()(const IDataArray* selectedCellArray, const Int32AbstractDataStore& featureIdsStore, IDataArray* createdArray, const std::atomic_bool& shouldCancel) const
   {

@@ -34,7 +34,6 @@ constexpr usize k_BlockSize = 10;
 constexpr usize k_BlocksPerAxis = k_LargeDim / k_BlockSize;
 constexpr usize k_NumBlockFeatures = k_BlocksPerAxis * k_BlocksPerAxis * k_BlocksPerAxis;
 
-// -----------------------------------------------------------------------------
 DataStructure CreateTestData()
 {
   DataStructure dataStructure;
@@ -113,7 +112,6 @@ DataStructure CreateTestData()
   return dataStructure;
 }
 
-// -----------------------------------------------------------------------------
 Int32Array* CreateLargeBlockTestData(DataStructure& dataStructure)
 {
   auto* imageGeom = ImageGeom::Create(dataStructure, k_ImageGeometryName);
@@ -151,7 +149,6 @@ Int32Array* CreateLargeBlockTestData(DataStructure& dataStructure)
   return featureIds;
 }
 
-// -----------------------------------------------------------------------------
 void RequireFeatureCorners(const UInt32Array& corners, usize featureId, const std::array<uint32, 6>& expected)
 {
   const auto& cornersStore = corners.getDataStoreRef();
@@ -167,7 +164,7 @@ TEST_CASE("SimplnxCore::ComputeFeatureRectFilter: Valid filter execution", "[Sim
 {
   UnitTest::LoadPlugins();
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeFeatureRectFilter filter;
   DataStructure dataStructure = CreateTestData();
   Arguments args;
@@ -176,11 +173,9 @@ TEST_CASE("SimplnxCore::ComputeFeatureRectFilter: Valid filter execution", "[Sim
   args.insertOrAssign(ComputeFeatureRectFilter::k_FeatureDataAttributeMatrixPath_Key, std::make_any<DataPath>(DataPath{{k_ImageGeometryName, k_FeatureAttrMatrixName}}));
   args.insertOrAssign(ComputeFeatureRectFilter::k_FeatureRectArrayName_Key, std::make_any<std::string>(k_RectCoordsArrayName));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 

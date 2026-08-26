@@ -17,9 +17,18 @@ using namespace nx::core;
 
 namespace Detail
 {
-/// Bounds each input and output buffer independently of the array size.
+// Each bulk input and output buffer contains at most 65,536 values.
 constexpr usize k_ConvertChunkSize = 65'536;
 
+/**
+ * @class ConvertDataDirectValues
+ * @brief Converts values in one direct parallel range.
+ * @tparam InputType Specifies the source scalar type.
+ * @tparam OutputType Specifies the destination scalar type.
+ *
+ * This worker accesses DataStore instances in parallel. In-memory residency does
+ * not give generic DataStore thread-safety guarantees.
+ */
 template <typename InputType, typename OutputType>
 class ConvertDataDirectValues
 {
@@ -34,6 +43,11 @@ public:
   {
   }
 
+  /**
+   * @brief Converts a half-open value range.
+   * @param start Specifies the first value index.
+   * @param end Specifies the exclusive value index.
+   */
   void convert(usize start, usize end) const
   {
     for(usize index = start; index < end; index++)
@@ -57,6 +71,12 @@ public:
     }
   }
 
+  /**
+   * @brief Converts one parallel range.
+   * @param range Specifies the half-open value range.
+   *
+   * The worker checks cancellation before, but not during, its range.
+   */
   void operator()(const Range& range) const
   {
     if(m_ShouldCancel)
@@ -72,6 +92,12 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ConvertDataDirect
+ * @brief Dispatches direct parallel value conversion.
+ * @tparam InputType Specifies the source scalar type.
+ * @tparam OutputType Specifies the destination scalar type.
+ */
 template <typename InputType, typename OutputType>
 class ConvertDataDirect
 {
@@ -83,6 +109,10 @@ public:
   {
   }
 
+  /**
+   * @brief Converts all values through in-memory arrays.
+   * @return Success after conversion or cancellation.
+   */
   Result<> operator()() const
   {
     if(m_ShouldCancel)
@@ -107,6 +137,14 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class ConvertDataBulk
+ * @brief Converts values through bounded bulk buffers.
+ * @tparam InputType Specifies the source scalar type.
+ * @tparam OutputType Specifies the destination scalar type.
+ *
+ * Each completed chunk remains written after cancellation.
+ */
 template <typename InputType, typename OutputType>
 class ConvertDataBulk
 {
@@ -118,6 +156,10 @@ public:
   {
   }
 
+  /**
+   * @brief Converts all values through bulk I/O.
+   * @return Error from bulk I/O, or success after cancellation.
+   */
   Result<> operator()() const
   {
     const auto& inputStore = m_InputArray.getDataStoreRef();
@@ -176,6 +218,15 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Selects direct or bulk conversion for a source and target type.
+ * @tparam InputType Specifies the source scalar type.
+ * @tparam OutputType Specifies the destination scalar type.
+ * @param dataStructure Provides selected arrays.
+ * @param inputValues Specifies validated conversion settings.
+ * @param shouldCancel Stops later work when true.
+ * @return Error from the selected implementation.
+ */
 template <typename InputType, typename OutputType>
 Result<> ConvertData(DataStructure& dataStructure, const ConvertDataInputValues* inputValues, const std::atomic_bool& shouldCancel)
 {
@@ -184,6 +235,14 @@ Result<> ConvertData(DataStructure& dataStructure, const ConvertDataInputValues*
   return DispatchAlgorithm<ConvertDataDirect<InputType, OutputType>, ConvertDataBulk<InputType, OutputType>>({&inputArray, &outputArray}, inputArray, outputArray, shouldCancel);
 }
 
+/**
+ * @brief Selects the target scalar conversion for a source type.
+ * @tparam InputType Specifies the source scalar type.
+ * @param dataStructure Provides selected arrays.
+ * @param inputValues Specifies validated conversion settings.
+ * @param shouldCancel Stops later work when true.
+ * @return Error for an unsupported target type, or the selected conversion result.
+ */
 template <typename InputType>
 Result<> ConvertData(DataStructure& dataStructure, const ConvertDataInputValues* inputValues, const std::atomic_bool& shouldCancel)
 {
@@ -218,6 +277,10 @@ Result<> ConvertData(DataStructure& dataStructure, const ConvertDataInputValues*
   }
 }
 
+/**
+ * @struct ConvertDataFunctor
+ * @brief Adapts runtime source types to typed conversion.
+ */
 struct ConvertDataFunctor
 {
   template <typename InputType>
@@ -228,7 +291,6 @@ struct ConvertDataFunctor
 };
 } // namespace Detail
 
-// -----------------------------------------------------------------------------
 ConvertData::ConvertData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ConvertDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -237,16 +299,13 @@ ConvertData::ConvertData(DataStructure& dataStructure, const IFilter::MessageHan
 {
 }
 
-// -----------------------------------------------------------------------------
 ConvertData::~ConvertData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ConvertData::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ConvertData::operator()()
 {
   const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedArrayPath);

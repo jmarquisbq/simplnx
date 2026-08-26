@@ -11,31 +11,28 @@ struct MultiThresholdObjectsInputValues;
 
 /**
  * @class MultiThresholdObjectsDirect
- * @brief In-core algorithm for multi-threshold filtering using direct per-element array access.
+ * @brief Evaluates a threshold tree through direct array access.
  *
- * For each threshold condition, reads the input array via getComponentValue() and writes
- * TRUE/FALSE into a temporary O(n) result vector. After evaluating a condition, the
- * temporary results are merged into the output mask array using AND/OR logic.
+ * Each active tree level owns one cell-count result vector. This storage avoids
+ * disk I/O overhead when all participating arrays are resident.
  *
- * This is optimal when all arrays reside in memory, where getComponentValue() and
- * operator[] are essentially pointer dereferences.
- *
- * Selected by DispatchAlgorithm when all input arrays are backed by in-memory DataStore.
- *
- * @see MultiThresholdObjectsScanline for the out-of-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * @see MultiThresholdObjectsScanline
  */
 class SIMPLNXCORE_EXPORT MultiThresholdObjectsDirect
 {
 public:
   /**
-   * @brief Constructs the in-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Creates a direct threshold evaluator.
+   * @param dataStructure Provides threshold inputs and the output mask.
+   * @param mesgHandler Is unused by direct evaluation.
+   * @param shouldCancel Stops later evaluation or output values when true.
+   * @param inputValues Specifies validated threshold settings. The caller must keep
+   * this object alive for the evaluator lifetime.
    */
   MultiThresholdObjectsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const MultiThresholdObjectsInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning evaluator.
+   */
   ~MultiThresholdObjectsDirect() noexcept;
 
   MultiThresholdObjectsDirect(const MultiThresholdObjectsDirect&) = delete;
@@ -44,15 +41,18 @@ public:
   MultiThresholdObjectsDirect& operator=(MultiThresholdObjectsDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core multi-threshold filtering.
-   * @return Result<> with any errors encountered during execution
+   * @brief Evaluates the complete tree and writes the resident mask.
+   * @return Success after completion or cancellation.
+   *
+   * Cancellation during tree evaluation leaves the output unchanged. Cancellation
+   * during final value writes can retain a partially written output.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                  ///< Reference to the DataStructure containing all arrays
-  const MultiThresholdObjectsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                          ///< User cancellation flag
+  DataStructure& m_DataStructure;
+  const MultiThresholdObjectsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
 };
 
 } // namespace nx::core

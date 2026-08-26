@@ -10,40 +10,44 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeCAxisLocations algorithm.
+ * @struct ComputeCAxisLocationsInputValues
+ * @brief Identifies c-axis location inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeCAxisLocationsInputValues
 {
-  DataPath QuatsArrayPath;             ///< Cell-level Float32 quaternions (4 components)
-  DataPath CellPhasesArrayPath;        ///< Cell-level Int32 phase index per voxel
-  DataPath CrystalStructuresArrayPath; ///< Ensemble-level UInt32 crystal structure Laue classes
-  DataPath CAxisLocationsArrayName;    ///< Output: Cell-level Float32 c-axis direction (3 components)
+  DataPath QuatsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath CAxisLocationsArrayName;
 };
 
 /**
  * @class ComputeCAxisLocations
- * @brief Converts each voxel's quaternion to a c-axis direction vector in the
- *        sample reference frame.
+ * @brief Converts each cell quaternion to a sample-frame c axis.
  *
- * For each Element, the quaternion is converted to an orientation matrix,
- * transposed (passive to active), and multiplied by the <001> c-axis direction.
- * The result is normalized and oriented so the Z component is positive.
+ * The executor maps crystal [001] through the transposed orientation matrix.
+ * It normalizes the result and makes its Z component positive.
  *
- * Only Hexagonal-High (6/mmm) and Hexagonal-Low (6/m) Laue classes are
- * supported; non-hexagonal phases produce NaN output values.
- *
- * ## OOC Optimization
- *
- * Cell-level arrays (quaternions, phases) are read in chunks of 65536 tuples
- * via `copyIntoBuffer()`, and the output (c-axis locations) is written back
- * in matching chunks via `copyFromBuffer()`. Ensemble-level crystal structures
- * are cached in a local vector. This replaces per-element `operator[]` access
- * that would trigger chunk load/evict cycles with OOC storage.
+ * Hexagonal phases produce c axes. Other phases produce NaN values. The
+ * executor reads and writes 65,536-tuple pages to bound OOC memory.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeCAxisLocations
 {
 public:
+  /**
+   * @brief Initializes c-axis location computation.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeCAxisLocations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeCAxisLocationsInputValues* inputValues);
+
+  /**
+   * @brief Destroys the c-axis location executor.
+   */
   ~ComputeCAxisLocations() noexcept;
 
   ComputeCAxisLocations(const ComputeCAxisLocations&) = delete;
@@ -52,11 +56,19 @@ public:
   ComputeCAxisLocations& operator=(ComputeCAxisLocations&&) noexcept = delete;
 
   /**
-   * @brief Executes the c-axis location computation using chunked bulk I/O.
-   * @return Result<> with any errors or warnings encountered.
+   * @brief Computes c-axis locations.
+   * @return An error if no hexagonal phase exists, or a warning for skipped
+   *         non-hexagonal phases.
+   *
+   * Cancellation returns success with completed pages preserved. Current bulk-
+   * I/O Result values are not inspected.
    */
   Result<> operator()();
 
+  /**
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 private:

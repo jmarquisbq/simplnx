@@ -44,19 +44,13 @@ struct AxialLengths
 };
 
 /**
- * @brief Buckets every triangle face by the feature id(s) referenced by its two face labels.
+ * @brief Buckets triangle faces by referenced feature IDs.
+ * @param faceLabels Provides two feature IDs for each face.
+ * @param numFeatures Specifies feature buckets, including zero.
+ * @return One ascending face-index list for each feature.
  *
- * ComputeShapesTriangleGeomImpl::convert() and FindIntersections() both need, for a given feature,
- * only the faces that touch that feature. Scanning the full face list once per feature (as a naive
- * implementation would) is O(numFeatures * numFaces). Instead this builds every feature's face-index
- * list in a single O(numFaces) pass before the per-feature parallel loop begins, so each feature only
- * ever visits its own faces afterward. Total memory is O(numFaces) since a face is recorded in at most
- * two buckets (one per side of the face) - acceptable because triangle mesh geometries are always held
- * in-core. Faces are appended in ascending face-index order (buckets are filled by scanning faces
- * 0..numFaces-1), which preserves the original per-feature accumulation order.
- * @param faceLabels The two-component (owner/neighbor) feature id label for each triangle face
- * @param numFeatures The number of features (including the invalid id 0), used to size and validate against
- * @return One face-index bucket per feature id
+ * One face scan avoids a full mesh scan for every feature. A face enters at
+ * most two buckets.
  */
 std::vector<std::vector<usize>> BuildFacesByFeature(const AbstractDataStore<int32>& faceLabels, usize numFeatures)
 {
@@ -80,20 +74,16 @@ std::vector<std::vector<usize>> BuildFacesByFeature(const AbstractDataStore<int3
 }
 
 /**
- * @brief Computes the maximum ray-intersection distance along each principal axis for one feature.
- *
- * Casts Moller-Trumbore rays from the feature's centroid, along each of the feature's principal axes,
- * against only the triangle faces belonging to this feature. The candidate faces are supplied as a
- * pre-bucketed index list (see BuildFacesByFeature()) instead of being found by rescanning every face
- * in the mesh, which keeps this to O(faces belonging to the feature) rather than O(total mesh faces).
- * @param orientationMatrix The feature's principal-axis reference frame
- * @param featureFaces Face indices belonging to this feature, in ascending order
- * @param triStore Shared triangle vertex-index list for the mesh
- * @param vertexStore Shared vertex coordinate list for the mesh
- * @param centroidsStore Per-feature centroid coordinates
- * @param featureId The feature currently being processed
- * @param shouldCancel Cancellation flag, checked once per candidate face
- * @return The maximum intersection distance found along each principal axis
+ * @brief Computes principal-axis ray lengths for one feature.
+ * @tparam T Specifies the vertex coordinate type.
+ * @param orientationMatrix Provides the principal-axis frame.
+ * @param featureFaces Provides feature face indices.
+ * @param triStore Provides mesh triangle indices.
+ * @param vertexStore Provides mesh vertices.
+ * @param centroidsStore Provides feature centroids.
+ * @param featureId Identifies the feature.
+ * @param shouldCancel Signals cancellation.
+ * @return Maximum intersection distances along the principal axes.
  */
 template <typename T = IGeometry::SharedVertexList::value_type>
 AxialLengths FindIntersections(const Eigen::Matrix<T, 3, 3, Eigen::RowMajor>& orientationMatrix, const std::vector<usize>& featureFaces, const AbstractDataStore<IGeometry::MeshIndexType>& triStore,
@@ -180,8 +170,11 @@ AxialLengths FindIntersections(const Eigen::Matrix<T, 3, 3, Eigen::RowMajor>& or
 }
 
 /**
- * @brief This will extract the 3 vertices from aVal given triangle face of aVal triangle geometry. This is MUCH faster
- * than calling the function in the Triangle Geometry because of the dynamic_cast<> that goes on in that function.
+ * @brief Extracts three coordinates for one triangle face.
+ * @param triangleId Identifies the triangle face.
+ * @param verts Provides shared vertex coordinates.
+ * @param triangleList Provides triangle vertex indices.
+ * @return The three face coordinates.
  */
 inline std::array<nx::core::Point3Df, 3> GetFaceCoordinates(usize triangleId, const VertsStore& verts, const TriStore& triangleList)
 {
@@ -193,11 +186,13 @@ inline std::array<nx::core::Point3Df, 3> GetFaceCoordinates(usize triangleId, co
 }
 
 /**
- * @brief Sorts the 3 values
- * @param aVal First Value
- * @param bVal Second Value
- * @param cVal Third Value
- * @return The indices in their sorted order
+ * @brief Sorts three values by index.
+ * @tparam T Specifies the comparable value type.
+ * @param aVal Identifies the first value.
+ * @param bVal Identifies the second value.
+ * @param cVal Identifies the third value.
+ * @param lowToHigh Selects ascending order.
+ * @return Indices in the selected order.
  */
 template <typename T>
 std::array<size_t, 3> TripletSort(T aVal, T bVal, T cVal, bool lowToHigh)
@@ -374,14 +369,7 @@ public:
       auto sols = cPrime * eVec;
       currentResult.omega3 = static_cast<float32>(((Vol * Vol) / sols.prod()) / k_Sphere);
 
-      /**
-       * This next section finds the principle axis via eigenvalues.
-       * Paper/Lecture Notes (Page 5): https://ocw.mit.edu/courses/16-07-dynamics-fall-2009/dd277ec654440f4c2b5b07d6c286c3fd_MIT16_07F09_Lec26.pdf
-       * Video Walkthrough [0:00-10:45]: https://www.youtube.com/watch?v=IEDniK9kmaw
-       *
-       * The main goal is to derive the eigenvalues from the moment of inertia tensor therein finding the eigenvectors,
-       * which are the angular velocity vectors.
-       */
+      // Inertia-tensor eigenvectors define the principal axes.
       const Eigen::EigenSolver<Matrix3x3> eigenSolver(Cinertia);
 
       // The primary axis is the largest eigenvalue
@@ -428,8 +416,7 @@ public:
       // The smallest into the 1rst column
       auto col1 = eigenvectors.col(idxs[2]);
 
-      // insert principal unit vectors into rotation matrix representing Feature reference frame within the sample reference frame
-      //(Note that the 3 directions are actually the long axis and the 1 direction is actually the short axis)
+      // Principal vectors define the feature reference frame.
       Matrix3x3 orientationMatrix = {};
       orientationMatrix.row(0) = col1.real();
       orientationMatrix.row(1) = col2.real();
@@ -539,8 +526,7 @@ Result<> ComputeShapesTriangleGeom::operator()()
   const auto& faceLabels = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FaceLabelsArrayPath).getDataStoreRef();
   const auto& centroids = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->CentroidsArrayPath).getDataStoreRef();
 
-  // the assumption here is face labels contains information on region ids, that it is contiguous in the values, and that 0 is an invalid id
-  // (i.e., the max function means that if the values in the array are [1,2,4,5] it will assume there are 5 regions)
+  // Face labels must use contiguous positive feature IDs.
   {
     std::vector<int32> eulerCharacteristics =
         nx::core::GeometryHelpers::Connectivity::FindEulerCharacteristicValues(triangleGeom, m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FaceLabelsArrayPath));
@@ -563,8 +549,7 @@ Result<> ComputeShapesTriangleGeom::operator()()
   }
   m_FeatureUpdateCount = 0;
 
-  // Bucket every triangle face by the feature id(s) it touches in a single O(numFaces) pass, up front,
-  // so the per-feature parallel loop below never has to rescan the whole mesh (see BuildFacesByFeature()).
+  // One face pass prevents repeated full-mesh scans in the feature loop.
   const std::vector<std::vector<usize>> facesByFeature = ::BuildFacesByFeature(faceLabels, m_NumFeatures);
 
   ParallelDataAlgorithm dataAlg;

@@ -83,13 +83,13 @@ void BuildFillBadDataTestData(DataStructure& ds, usize dimX, usize dimY, usize d
     phasesStore.copyFromBuffer(z * sliceSize, nonstd::span<const int32>(phasesSliceBuffer.data(), sliceSize));
   }
 }
-// Exemplar archive
+// These paths select the FillBadData exemplar archive.
 const std::string k_ArchiveName = "fill_bad_data_exemplars.tar.gz";
 const std::string k_DataDirName = "fill_bad_data_exemplars";
 const fs::path k_DataDir = fs::path(unit_test::k_TestFilesDir.view()) / k_DataDirName;
 const fs::path k_ExemplarFile = k_DataDir / "fill_bad_data.dream3d";
 
-// Test dimensions for 200^3 tests
+// These dimensions define the large generated fixtures.
 constexpr usize k_Dim = 200;
 constexpr usize k_BlockSize = 25;
 constexpr int32 k_MinDefectSize = 50;
@@ -97,27 +97,26 @@ constexpr int32 k_MinDefectSize = 50;
 
 TEST_CASE("SimplnxCore::FillBadData_SmallIN100", "[Core][FillBadDataFilter]")
 {
-  // Load the Simplnx Application instance and load the plugins
+  // Load the application and plugins.
   UnitTest::LoadPlugins();
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
   const UnitTest::TestFileSentinel testDataSentinel(unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
-  // Read Exemplar DREAM3D File Filter
+  // Load the exemplar output.
   auto exemplarFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/6_5_exemplar.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 input.
   auto baseDataFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/6_5_input.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
 
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
+    // Configure the filter arguments.
     FillBadDataFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(FillBadDataFilter::k_MinAllowedDefectSize_Key, std::make_any<int32>(1000));
     args.insertOrAssign(FillBadDataFilter::k_StoreAsNewPhase_Key, std::make_any<bool>(false));
     args.insertOrAssign(FillBadDataFilter::k_CellFeatureIdsArrayPath_Key, std::make_any<DataPath>(Constants::k_FeatureIdsArrayPath));
@@ -130,14 +129,13 @@ TEST_CASE("SimplnxCore::FillBadData_SmallIN100", "[Core][FillBadDataFilter]")
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
   }
 
   UnitTest::CompareExemplarToGeneratedData(dataStructure, exemplarDataStructure, Constants::k_CellAttributeMatrix, Constants::k_DataContainer);
 
-// Write the DataStructure out to the file system
+// The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   UnitTest::WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/7_0_fill_bad_data.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
@@ -148,25 +146,25 @@ TEST_CASE("SimplnxCore::FillBadData_SmallIN100", "[Core][FillBadDataFilter]")
 TEST_CASE("SimplnxCore::FillBadData::Test01_SingleSmallDefect", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
-  // Read input data
+  // Load the input data.
   auto inputFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_01_input.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(inputFilePath);
 
-  // Read the expected output
+  // Load the expected output.
   auto expectedFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_01_expected.dream3d", unit_test::k_TestFilesDir));
   DataStructure expectedDataStructure = UnitTest::LoadDataStructure(expectedFilePath);
 
   scope.requireExpectedStore(dataStructure.getDataRefAs<Int32Array>(DataPath({"DataContainer", "CellData", "FeatureIds"})));
 
-  // Run filter
+  // Execute the filter.
   FillBadDataFilter filter;
   Arguments args;
   args.insertOrAssign(FillBadDataFilter::k_MinAllowedDefectSize_Key, std::make_any<int32>(20));
@@ -182,7 +180,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test01_SingleSmallDefect", "[Core][FillBadD
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare results
+  // Compare the generated results.
   UnitTest::CompareExemplarToGeneratedData(dataStructure, expectedDataStructure, DataPath({"DataContainer", "CellData"}), "DataContainer");
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
@@ -191,26 +189,26 @@ TEST_CASE("SimplnxCore::FillBadData::Test01_SingleSmallDefect", "[Core][FillBadD
 TEST_CASE("SimplnxCore::FillBadData::Test02_SingleLargeDefect", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
-  // Read input data
+  // Load the input data.
   auto inputFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_02_input.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(inputFilePath);
 
-  // Read the expected output
+  // Load the expected output.
   auto expectedFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_02_expected.dream3d", unit_test::k_TestFilesDir));
   DataStructure expectedDataStructure = UnitTest::LoadDataStructure(expectedFilePath);
 
   scope.requireExpectedStore(dataStructure.getDataRefAs<Int32Array>(DataPath({"DataContainer", "CellData", "FeatureIds"})));
 
-  // Run filter
+  // Execute the filter.
   FillBadDataFilter filter;
   Arguments args;
   args.insertOrAssign(FillBadDataFilter::k_MinAllowedDefectSize_Key, std::make_any<int32>(20));
@@ -226,7 +224,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test02_SingleLargeDefect", "[Core][FillBadD
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare results
+  // Compare the generated results.
   UnitTest::CompareExemplarToGeneratedData(dataStructure, expectedDataStructure, DataPath({"DataContainer", "CellData"}), "DataContainer");
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
@@ -235,12 +233,12 @@ TEST_CASE("SimplnxCore::FillBadData::Test02_SingleLargeDefect", "[Core][FillBadD
 TEST_CASE("SimplnxCore::FillBadData::Test03_ThresholdBoundary", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -274,12 +272,12 @@ TEST_CASE("SimplnxCore::FillBadData::Test03_ThresholdBoundary", "[Core][FillBadD
 TEST_CASE("SimplnxCore::FillBadData::Test04_MultipleSmallDefects", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -313,12 +311,12 @@ TEST_CASE("SimplnxCore::FillBadData::Test04_MultipleSmallDefects", "[Core][FillB
 TEST_CASE("SimplnxCore::FillBadData::Test05_MixedSmallAndLarge", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -352,12 +350,12 @@ TEST_CASE("SimplnxCore::FillBadData::Test05_MixedSmallAndLarge", "[Core][FillBad
 TEST_CASE("SimplnxCore::FillBadData::Test06_SingleVoxelDefects", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -391,12 +389,12 @@ TEST_CASE("SimplnxCore::FillBadData::Test06_SingleVoxelDefects", "[Core][FillBad
 TEST_CASE("SimplnxCore::FillBadData::Test07_DefectsAtBoundaries", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
@@ -428,24 +426,24 @@ TEST_CASE("SimplnxCore::FillBadData::Test07_DefectsAtBoundaries", "[Core][FillBa
 TEST_CASE("SimplnxCore::FillBadData::Test11_NeighborTieBreaking", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
-  // Read input data
+  // Load the input data.
   auto inputFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_11_input.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(inputFilePath);
 
-  // Read the expected output
+  // Load the expected output.
   auto expectedFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_11_expected.dream3d", unit_test::k_TestFilesDir));
   DataStructure expectedDataStructure = UnitTest::LoadDataStructure(expectedFilePath);
 
-  // Run filter
+  // Execute the filter.
   FillBadDataFilter filter;
   Arguments args;
   args.insertOrAssign(FillBadDataFilter::k_MinAllowedDefectSize_Key, std::make_any<int32>(10));
@@ -461,7 +459,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test11_NeighborTieBreaking", "[Core][FillBa
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare results
+  // Compare the generated results.
   UnitTest::CompareExemplarToGeneratedData(dataStructure, expectedDataStructure, DataPath({"DataContainer", "CellData"}), "DataContainer");
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
@@ -470,24 +468,24 @@ TEST_CASE("SimplnxCore::FillBadData::Test11_NeighborTieBreaking", "[Core][FillBa
 TEST_CASE("SimplnxCore::FillBadData::Test13_StoreAsNewPhase", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Configure out-of-core settings (automatically restored on scope exit)
+  // Configure OOC settings for this scenario.
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_5_fill_bad_data.tar.gz", "6_5_fill_bad_data");
 
-  // Read input data
+  // Load the input data.
   auto inputFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_13_input.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(inputFilePath);
 
-  // Read the expected output
+  // Load the expected output.
   auto expectedFilePath = fs::path(fmt::format("{}/6_5_fill_bad_data/test_13_expected.dream3d", unit_test::k_TestFilesDir));
   DataStructure expectedDataStructure = UnitTest::LoadDataStructure(expectedFilePath);
 
-  // Run filter
+  // Execute the filter.
   FillBadDataFilter filter;
   Arguments args;
   args.insertOrAssign(FillBadDataFilter::k_MinAllowedDefectSize_Key, std::make_any<int32>(20));
@@ -503,7 +501,7 @@ TEST_CASE("SimplnxCore::FillBadData::Test13_StoreAsNewPhase", "[Core][FillBadDat
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare results
+  // Compare the generated results.
   UnitTest::CompareExemplarToGeneratedData(dataStructure, expectedDataStructure, DataPath({"DataContainer", "CellData"}), "DataContainer");
 
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
@@ -535,10 +533,8 @@ TEST_CASE("SimplnxCore::FillBadDataFilter:: Invalid Preflight Min Defect Size", 
   REQUIRE(preflightResult.outputActions.errors()[0].code == -16500);
 }
 
-// Termination guard: a volume containing bad-data voxels (featureId < 0) with NO adjacent good-data
-// voxel cannot be filled. Before the no-progress guard was added, the iterative fill looped forever
-// (count could never reach 0). This test builds an all-bad-data slab and asserts the filter simply
-// returns (does not hang) and leaves the unfillable voxels untouched.
+// A volume with no good neighbor cannot be filled.
+// The no-progress guard must return and leave those voxels unchanged.
 TEST_CASE("SimplnxCore::FillBadData::AllBadData_TerminatesWithoutHang", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
@@ -574,7 +570,7 @@ TEST_CASE("SimplnxCore::FillBadData::AllBadData_TerminatesWithoutHang", "[Core][
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // The key assertion is simply that this call returns (the no-progress guard breaks the fill loop).
+  // The call must return because the no-progress guard stops the fill loop.
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -620,7 +616,7 @@ TEST_CASE("SimplnxCore::FillBadDataFilter: SIMPL Backwards Compatibility", "[Sim
       CHECK(args.value<DataPath>(FillBadDataFilter::k_SelectedCellDataGroup_Key) == DataPath({"DataContainer", "CellData"}));
       CHECK(args.value<DataPath>(FillBadDataFilter::k_CellFeatureIdsArrayPath_Key) == DataPath({"DataContainer", "CellData", "TestArray"}));
       CHECK(args.value<DataPath>(FillBadDataFilter::k_CellPhasesArrayPath_Key) == DataPath({"DataContainer", "CellData", "TestArray"}));
-      // Complex type (MultiDataArraySelectionFilterParameterConverter) - verified by successful pipeline loading
+      // Successful pipeline loading verifies the MultiDataArraySelectionFilterParameterConverter value.
     }
   }
 }
@@ -628,7 +624,7 @@ TEST_CASE("SimplnxCore::FillBadDataFilter: SIMPL Backwards Compatibility", "[Sim
 TEST_CASE("SimplnxCore::FillBadData: 200x200x200 Correctness", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
@@ -681,7 +677,7 @@ TEST_CASE("SimplnxCore::FillBadData: 200x200x200 Correctness", "[Core][FillBadDa
 TEST_CASE("SimplnxCore::FillBadData: 200x200x200 Ignored Arrays", "[Core][FillBadDataFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);

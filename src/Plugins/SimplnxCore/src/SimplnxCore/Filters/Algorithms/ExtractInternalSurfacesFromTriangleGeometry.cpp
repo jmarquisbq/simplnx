@@ -17,26 +17,13 @@ using namespace nx::core;
 namespace
 {
 
-// -----------------------------------------------------------------------------
-// Compact bookkeeping for the "which elements survive" question:
-//   - vertNewIndex: dense per-vertex map (8 B * numVerts). New indices are assigned
-//     in triangle-traversal order to preserve the contiguous-per-triangle invariant
-//     relied on by downstream filters (triangle 0's three vertices land at new
-//     indices 0..2 when all are newly-seen, etc.).
-//   - triMask + triPrefixSum: 1-bit-per-triangle keep mask plus a sparse prefix-sum popcount
-//     table sampled every k_PrefixSumGranularity bits. This replaces the legacy 8 B per
-//     triangle dense map and delivers O(1)+small-popcount lookup of each kept triangle's
-//     compact new index.
-// The triangle-side savings compared to the legacy dense map are ~6.4x at the bit level
-// plus the tiny prefix-sum table; vertex-side memory is unchanged vs legacy because the
-// triangle-traversal ordering can't be recovered from a bitmap alone.
-// -----------------------------------------------------------------------------
+// Vertex remapping stays dense to preserve first triangle-encounter order.
+// Triangle remapping uses a bitmap and a sparse popcount prefix table.
 constexpr uint64 k_PrefixSumGranularity = 4096;
 static_assert(k_PrefixSumGranularity % 64 == 0, "k_PrefixSumGranularity must be a multiple of 64");
 constexpr uint64 k_WordsPerPrefixSum = k_PrefixSumGranularity / 64;
 
-// Chunk size (in tuples) for streaming reads/writes. 65536 tuples keeps transient buffers
-// under ~1 MB for typical element sizes while amortizing HDF5 chunk-op overhead.
+// Fixed tuple chunks amortize store calls without volume-sized transfer buffers.
 constexpr usize k_ChunkTuples = 65536;
 
 inline void bitmapSet(std::vector<uint64>& bitmap, uint64 bit)
@@ -49,8 +36,7 @@ inline bool bitmapTest(const std::vector<uint64>& bitmap, uint64 bit)
   return (bitmap[bit >> 6] & (1ULL << (bit & 63))) != 0;
 }
 
-// Return popcount(bitmap[0..bit-1]), i.e. the new compact index assigned to the kept
-// element at position `bit`.
+// Count set bits before bit to find its compact output index.
 inline uint64 remapIndex(uint64 bit, const std::vector<uint64>& bitmap, const std::vector<uint64>& prefixSum)
 {
   const uint64 prefixSumIndex = bit / k_PrefixSumGranularity;
@@ -70,8 +56,7 @@ inline uint64 remapIndex(uint64 bit, const std::vector<uint64>& bitmap, const st
   return result;
 }
 
-// Build the prefix-sum popcount table for a completed bitmap. Returns total kept count
-// (equivalent to popcount of the whole bitmap).
+// Build sparse cumulative popcounts and return the total set-bit count.
 uint64 buildPrefixSumTable(const std::vector<uint64>& bitmap, std::vector<uint64>& prefixSum, uint64 numBits)
 {
   const uint64 numPrefixSumEntries = (numBits + k_PrefixSumGranularity - 1) / k_PrefixSumGranularity;
@@ -90,7 +75,7 @@ uint64 buildPrefixSumTable(const std::vector<uint64>& bitmap, std::vector<uint64
   return running;
 }
 
-// Pass 1a: stream NodeTypes and mark vertices whose type is in [minType, maxType].
+// Mark vertices whose node type is in the inclusive range.
 void buildVertOkMask(const Int8AbstractDataStore& nodeTypesStore, std::vector<uint64>& vertOkMask, int8 minType, int8 maxType, const std::atomic_bool& shouldCancel)
 {
   const usize numVerts = nodeTypesStore.getNumberOfTuples();
@@ -114,11 +99,8 @@ void buildVertOkMask(const Int8AbstractDataStore& nodeTypesStore, std::vector<ui
   }
 }
 
-// Pass 1b: stream triangles, for each "all three vertices pass criterion" triangle:
-//   - set its bit in triMask
-//   - assign NEW-INDEX to any unseen vertex in vertNewIndex using triangle-traversal order
-// The latter preserves the legacy behavior where triangle 0's freshly-seen vertices get
-// new indices 0, 1, 2 in the order they're encountered within the triangle.
+// Keep triangles with three accepted vertices. Assign new vertex indices at
+// their first encounter to preserve triangle-traversal order.
 void scanTrianglesAndAssignVertexIndices(const UInt64AbstractDataStore& triangleStore, const std::vector<uint64>& vertOkMask, std::vector<uint64>& triMask,
                                          std::vector<IGeometry::MeshIndexType>& vertNewIndex, IGeometry::MeshIndexType& outNumKeptVerts, usize numTris, const std::atomic_bool& shouldCancel)
 {
@@ -162,11 +144,13 @@ void scanTrianglesAndAssignVertexIndices(const UInt64AbstractDataStore& triangle
   outNumKeptVerts = currentNewVertIndex;
 }
 
-// Pass 3 / Pass 5 body: vertex-level array copy using the dense vertNewIndex map.
-// Sources are bulk-read a chunk at a time; destinations are written one tuple at a
-// time because the triangle-traversal new-index ordering is not monotonic in source
-// order. This is still a strict improvement over the legacy operator[] loop, which
-// issued one chunk read AND one chunk write per element.
+/**
+ * @struct VertexRemapCopyFunctor
+ * @brief Copies vertex tuples through the dense source-to-output map.
+ *
+ * Source reads use fixed chunks. Output writes use one tuple because output
+ * encounter order is not monotonic in source order. Transfer results are ignored.
+ */
 struct VertexRemapCopyFunctor
 {
   template <class T>
@@ -193,8 +177,7 @@ struct VertexRemapCopyFunctor
         const MeshIndexType newIdx = vertNewIndex[offset + i];
         if(newIdx != notSeen)
         {
-          // Per-tuple random write — one OOC chunk-op per kept vertex. Matches legacy cost
-          // profile on the write side, but saves ~50% by bulk-reading the source.
+          // Output order requires one possibly random store write per kept vertex.
           dstStore.copyFromBuffer(newIdx * numComps, nonstd::span<const T>(srcBuf.get() + i * numComps, numComps));
         }
       }
@@ -202,9 +185,7 @@ struct VertexRemapCopyFunctor
   }
 };
 
-// Pass 4 body: copy kept triangles with their vertex indices rewritten to the new
-// compact numbering. Because triMask+triPrefixSum assign new triangle indices sequentially
-// in source order, both reads AND writes are bulk-chunked here.
+// Copy triangles in source order and replace vertex indices with compact values.
 void copyTrianglesRemapped(const UInt64AbstractDataStore& srcStore, UInt64AbstractDataStore& dstStore, const std::vector<uint64>& triMask, const std::vector<uint64>& triPrefixSum,
                            const std::vector<IGeometry::MeshIndexType>& vertNewIndex, usize numInputTris, const std::atomic_bool& shouldCancel)
 {
@@ -239,8 +220,12 @@ void copyTrianglesRemapped(const UInt64AbstractDataStore& srcStore, UInt64Abstra
   }
 }
 
-// Pass 6 body: triangle-level attached-array copy. New triangle indices are monotonic
-// in source order (via triMask+triPrefixSum) so both reads and writes are bulk-chunked.
+/**
+ * @struct TriangleAttachedCopyFunctor
+ * @brief Copies selected triangle tuples in monotonic compact order.
+ *
+ * Source and output transfers use fixed chunks. Transfer results are ignored.
+ */
 struct TriangleAttachedCopyFunctor
 {
   template <class T>
@@ -334,9 +319,7 @@ Result<> ExtractInternalSurfacesFromTriangleGeometry::operator()()
     return {};
   }
 
-  // Pass 1b — stream triangles: for each "all three vertices ok" triangle set its triMask
-  // bit AND assign new indices to its unseen vertices in triangle-traversal order. This
-  // matches the legacy filter's ordering invariant.
+  // Keep accepted triangles and assign vertices in first-encounter order.
   std::vector<uint64> triMask((numTris + 63) / 64, 0ULL);
   std::vector<MeshIndexType> vertNewIndex(numVerts, notSeen);
   MeshIndexType numKeptVerts = 0;
@@ -346,7 +329,7 @@ Result<> ExtractInternalSurfacesFromTriangleGeometry::operator()()
     return {};
   }
 
-  // vertOkMask only needed during Pass 1b — release its RAM.
+  // Request release of the vertex bitmap after triangle selection.
   vertOkMask.clear();
   vertOkMask.shrink_to_fit();
 

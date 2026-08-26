@@ -1,37 +1,6 @@
 /**
  * @file ErodeDilateBadData.cpp
- * @brief Iterative morphological erosion/dilation of bad (FeatureId == 0) voxels,
- *        optimized for out-of-core (OOC) data stores via Z-slice buffered I/O.
- *
- * ## High-Level Flow (per iteration)
- *
- * 1. **Initialize rolling window** -- Load FeatureId Z-slices 0 and 1 into
- *    slots 1 (current) and 2 (next) of the three-element window.
- *
- * 2. **Scan every voxel** (Z-major, then Y, then X):
- *    - For each bad voxel (featureId == 0), examine its 6 face neighbors using
- *      the in-memory rolling-window buffers.
- *    - **Dilate**: If a neighbor is good (featureId > 0), mark that good
- *      neighbor to be overwritten with the bad voxel's data.
- *    - **Erode**: Tally the good neighbors and record the most common one;
- *      mark the bad voxel to be overwritten with that neighbor's data.
- *    - Marks are stored in three O(sliceSize) arrays (one per rolling-window
- *      slot) rather than a single O(totalPoints) array.
- *
- * 3. **Deferred transfer** -- After processing each Z-slice, the marks for
- *    slice z-1 are complete (because only voxels at z-2, z-1, and z can
- *    affect z-1). Commit those marks via SliceBufferedTransferOneZ, which
- *    reads the source and destination slices in bulk, applies the copies
- *    in-memory, and writes back.
- *
- * 4. **Rotate windows** -- Swap mark arrays and FeatureId slices forward by
- *    one position. Clear the newly vacated slot for the next Z-layer.
- *
- * 5. **Flush final slice** -- After the Z-loop exits, the last slice's marks
- *    are still pending; commit them.
- *
- * Each iteration must re-read FeatureIds from the store because the preceding
- * iteration's SliceBufferedTransferOneZ calls may have changed values.
+ * @brief Applies Feature ID morphology with three-slice rolling windows.
  */
 
 #include "ErodeDilateBadData.hpp"
@@ -119,12 +88,8 @@ Result<> ErodeDilateBadData::operator()()
   // -Z is in slot 0 (prev), -Y/-X/+X/+Y are in slot 1 (current), +Z is in slot 2 (next).
   constexpr std::array<usize, 6> k_NeighborSlot = {0, 1, 1, 1, 1, 2};
 
-  // ---- Per-slice mark arrays (3 x sliceSize) ----
-  // Each entry is -1 (no transfer needed) or the global flat index of the
-  // source voxel whose data should be copied to this position.
-  // marks[0] corresponds to Z-1, marks[1] to Z, marks[2] to Z+1.
-  // This replaces a full-volume O(totalPoints) neighbor array with
-  // O(3 * sliceSize) memory, which is critical for large datasets.
+  // Three slice-local mark arrays replace a volume-sized mapping.
+  // Each entry is -1 or the global source index for one destination.
   std::array<std::vector<int64>, 3> marks;
   for(auto& m : marks)
   {
@@ -280,27 +245,20 @@ Result<> ErodeDilateBadData::operator()()
         }
       }
 
-      // ---- Deferred transfer for slice z-1 ----
-      // At this point all voxels that could write marks into slice z-1 have
-      // been processed (only voxels in slices z-2, z-1, and z can affect z-1
-      // via face-neighbor relationships). It is now safe to commit z-1.
+      // Slices z-2 through z contain all voxels that can affect z-1.
+      // Commit z-1 after those marks are complete.
       if(zIdx > 0)
       {
         transferSlice(static_cast<usize>(zIdx - 1), marks[0]);
       }
 
-      // ---- Rotate mark arrays forward ----
-      // marks[0] <- old marks[1] (becomes the "previous" for next iteration)
-      // marks[1] <- old marks[2] (becomes the "current")
-      // marks[2] <- cleared (ready for the next Z+1 layer)
+      // Rotate current and next marks into the previous and current slots.
       std::swap(marks[0], marks[1]);
       std::swap(marks[1], marks[2]);
       std::fill(marks[2].begin(), marks[2].end(), -1);
     }
 
-    // ---- Flush final Z-slice ----
-    // After the Z-loop exits, the last slice's marks are in marks[0] (due to
-    // the rotation) and have not yet been committed.
+    // The last slice remains in the previous slot after rotation.
     if(dims[2] > 0)
     {
       transferSlice(static_cast<usize>(dims[2] - 1), marks[0]);

@@ -21,11 +21,23 @@ using namespace nx::core;
 
 namespace
 {
+// The filter supports boundary, triple-line, and quad-point maps.
 constexpr usize k_MapCount = 3;
 
+/**
+ * @brief Defines output-store pointers indexed by map type.
+ * @tparam T Specifies the distance element type.
+ */
 template <typename T>
 using DistanceStoreArray = std::array<AbstractDataStore<T>*, k_MapCount>;
 
+/**
+ * @brief Collects enabled distance-map stores.
+ * @tparam T Specifies the distance element type.
+ * @param dataStructure Contains selected output arrays.
+ * @param inputValues Selects map types and output paths.
+ * @return Store pointers indexed by ComputeEuclideanDistMap::MapType.
+ */
 template <typename T>
 DistanceStoreArray<T> GetDistanceStores(DataStructure& dataStructure, const ComputeEuclideanDistMapInputValues& inputValues)
 {
@@ -45,6 +57,7 @@ DistanceStoreArray<T> GetDistanceStores(DataStructure& dataStructure, const Comp
   return stores;
 }
 
+// Seed classification counts each distinct neighboring Feature ID once.
 void AddUniqueNeighbor(std::array<int32, 6>& coordination, usize& coordinationCount, int32 feature, int32 neighbor)
 {
   if(neighbor < 0 || neighbor == feature)
@@ -62,6 +75,19 @@ void AddUniqueNeighbor(std::array<int32, 6>& coordination, usize& coordinationCo
   coordination[coordinationCount++] = neighbor;
 }
 
+/**
+ * @brief Initializes requested map seeds from Feature IDs.
+ * @tparam T Specifies the distance element type.
+ * @param featureIds Supplies cell Feature IDs.
+ * @param distanceStores Receives selected seed maps.
+ * @param dims Supplies image dimensions.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @param hasBlockedCells Receives whether a non-positive Feature ID exists.
+ * @return True after all seed slices are written. Returns false after cancellation.
+ *
+ * Three Feature ID slices bound resident source memory. Current bulk-I/O Result
+ * values are not inspected. Completed seed slices remain after cancellation.
+ */
 template <typename T>
 bool InitializeSeeds(const Int32AbstractDataStore& featureIds, const DistanceStoreArray<T>& distanceStores, const SizeVec3& dims, const std::atomic_bool& shouldCancel, bool& hasBlockedCells)
 {
@@ -178,6 +204,12 @@ bool InitializeSeeds(const Int32AbstractDataStore& featureIds, const DistanceSto
   return true;
 }
 
+/**
+ * @brief Propagates one lower distance into a current value.
+ * @tparam T Specifies the distance element type.
+ * @param neighborDistance Supplies the adjacent distance.
+ * @param currentDistance Receives the lower reachable distance.
+ */
 template <typename T>
 void ConsiderDistance(T neighborDistance, T& currentDistance)
 {
@@ -193,6 +225,16 @@ void ConsiderDistance(T neighborDistance, T& currentDistance)
   }
 }
 
+/**
+ * @brief Runs forward and backward city-block sweeps without blocked cells.
+ * @tparam T Specifies the distance element type.
+ * @param distances Stores the map to transform.
+ * @param dims Supplies image dimensions.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @return True after both sweeps. Returns false after cancellation.
+ *
+ * The sweeps retain two slices. Current bulk-I/O Result values are not inspected.
+ */
 template <typename T>
 bool TransformDistanceWithoutObstacles(AbstractDataStore<T>& distances, const SizeVec3& dims, const std::atomic_bool& shouldCancel)
 {
@@ -278,6 +320,16 @@ bool TransformDistanceWithoutObstacles(AbstractDataStore<T>& distances, const Si
   return true;
 }
 
+/**
+ * @brief Propagates a labeled distance into a current value.
+ * @tparam T Specifies the distance element type.
+ * @param neighborDistance Supplies the adjacent distance.
+ * @param neighborSeed Identifies the adjacent nearest seed.
+ * @param currentDistance Receives the selected distance.
+ * @param currentSeed Receives the selected nearest seed.
+ *
+ * Equal distances select the larger seed index.
+ */
 template <typename T>
 void ConsiderLabeledDistance(T neighborDistance, int64 neighborSeed, T& currentDistance, int64& currentSeed)
 {
@@ -294,6 +346,18 @@ void ConsiderLabeledDistance(T neighborDistance, int64 neighborSeed, T& currentD
   }
 }
 
+/**
+ * @brief Creates one nearest-seed entry for each zero-distance value.
+ * @tparam T Specifies the distance element type.
+ * @param distances Supplies initialized distance values.
+ * @param nearestSeeds Receives nearest-seed indices.
+ * @param totalVoxels Identifies the number of map values.
+ * @param sliceSize Limits resident buffer size.
+ * @param shouldCancel Signals cancellation between buffers.
+ * @return True after initialization. Returns false after cancellation.
+ *
+ * Current bulk-I/O Result values are not inspected.
+ */
 template <typename T>
 bool InitializeNearestSeeds(const AbstractDataStore<T>& distances, AbstractDataStore<int64>& nearestSeeds, usize totalVoxels, usize sliceSize, const std::atomic_bool& shouldCancel)
 {
@@ -316,6 +380,17 @@ bool InitializeNearestSeeds(const AbstractDataStore<T>& distances, AbstractDataS
   return true;
 }
 
+/**
+ * @brief Runs labeled city-block sweeps without blocked cells.
+ * @tparam T Specifies the distance element type.
+ * @param distances Stores the map to transform.
+ * @param nearestSeeds Stores nearest-seed indices.
+ * @param dims Supplies image dimensions.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @return True after both sweeps. Returns false after cancellation.
+ *
+ * Current bulk-I/O Result values are not inspected.
+ */
 template <typename T>
 bool TransformLabeledDistanceWithoutObstacles(AbstractDataStore<T>& distances, AbstractDataStore<int64>& nearestSeeds, const SizeVec3& dims, const std::atomic_bool& shouldCancel)
 {
@@ -412,6 +487,19 @@ bool TransformLabeledDistanceWithoutObstacles(AbstractDataStore<T>& distances, A
   return true;
 }
 
+/**
+ * @brief Propagates distances around non-positive Feature IDs.
+ * @tparam T Specifies the distance element type.
+ * @param distances Stores the map to transform.
+ * @param nearestSeeds Stores optional nearest-seed indices.
+ * @param featureIds Supplies blocked-cell markers.
+ * @param dims Supplies image dimensions.
+ * @param shouldCancel Signals cancellation between layers or slices.
+ * @return True after propagation reaches a fixed point. Returns false after cancellation.
+ *
+ * Layer-synchronous propagation prevents distances from crossing blocked cells.
+ * Current bulk-I/O Result values are not inspected.
+ */
 template <typename T>
 bool PropagateAroundBlockedCells(AbstractDataStore<T>& distances, AbstractDataStore<int64>* nearestSeeds, const Int32AbstractDataStore& featureIds, const SizeVec3& dims,
                                  const std::atomic_bool& shouldCancel)
@@ -557,6 +645,17 @@ bool PropagateAroundBlockedCells(AbstractDataStore<T>& distances, AbstractDataSt
   }
 }
 
+/**
+ * @brief Converts labeled city-block results to Euclidean distances.
+ * @param distances Stores the float32 map to convert.
+ * @param nearestSeeds Supplies nearest-seed indices.
+ * @param dims Supplies image dimensions.
+ * @param spacing Supplies image spacing.
+ * @param shouldCancel Signals cancellation between Z slices.
+ * @return True after conversion. Returns false after cancellation.
+ *
+ * Current bulk-I/O Result values are not inspected.
+ */
 bool ConvertToEuclideanDistances(Float32AbstractDataStore& distances, const AbstractDataStore<int64>& nearestSeeds, const SizeVec3& dims, const FloatVec3& spacing,
                                  const std::atomic_bool& shouldCancel)
 {
@@ -608,6 +707,17 @@ bool ConvertToEuclideanDistances(Float32AbstractDataStore& distances, const Abst
   return true;
 }
 
+/**
+ * @brief Executes the selected scanline distance-map operations.
+ * @tparam T Specifies the distance element type.
+ * @param dataStructure Contains the ImageGeom, Feature IDs, and output maps.
+ * @param inputValues Selects map types and required paths.
+ * @param shouldCancel Signals cancellation at phase checkpoints.
+ * @return Success.
+ *
+ * Float32 maps use a temporary nearest-seed DataStore selected by the active storage policy.
+ * Current bulk-I/O Result values are not inspected. Cancellation leaves completed map ranges.
+ */
 template <typename T>
 Result<> ExecuteScanline(DataStructure& dataStructure, const ComputeEuclideanDistMapInputValues& inputValues, const std::atomic_bool& shouldCancel)
 {
@@ -681,7 +791,6 @@ Result<> ExecuteScanline(DataStructure& dataStructure, const ComputeEuclideanDis
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeEuclideanDistMapScanline::ComputeEuclideanDistMapScanline(DataStructure& dataStructure, const IFilter::MessageHandler&, const std::atomic_bool& shouldCancel,
                                                                  const ComputeEuclideanDistMapInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -690,10 +799,8 @@ ComputeEuclideanDistMapScanline::ComputeEuclideanDistMapScanline(DataStructure& 
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeEuclideanDistMapScanline::~ComputeEuclideanDistMapScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeEuclideanDistMapScanline::operator()()
 {
   if(m_InputValues->CalcManhattanDist)

@@ -30,13 +30,31 @@ using namespace nx::core;
 
 namespace
 {
-/// Number of Feature Id tuples read per bulk I/O call. This bounds cell-level
-/// working memory at 256 KiB while amortizing out-of-core store access.
+// Each bulk read contains 65,536 Feature IDs. This caps cell-level storage at 256 KiB.
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @concept GeometryType
+ * @brief Restricts feature-bound helpers to geometry types.
+ * @tparam T Specifies the candidate geometry type.
+ */
 template <typename T>
 concept GeometryType = std::is_base_of_v<IGeometry, T>;
 
+/**
+ * @brief Expands one feature's six bounds with one cell or geometry element.
+ * @param bounds Stores six values for each feature.
+ * @param featureId Identifies the feature to update.
+ * @param xMin Supplies the x lower bound.
+ * @param yMin Supplies the y lower bound.
+ * @param zMin Supplies the z lower bound.
+ * @param xMax Supplies the x upper bound.
+ * @param yMax Supplies the y upper bound.
+ * @param zMax Supplies the z upper bound.
+ * @pre bounds has six values for featureId.
+ *
+ * NaN values identify a feature with no earlier geometry element.
+ */
 void UpdateBounds(std::vector<float32>& bounds, int32 featureId, float32 xMin, float32 yMin, float32 zMin, float32 xMax, float32 yMax, float32 zMax)
 {
   const usize activeIndex = static_cast<usize>(featureId) * 6;
@@ -49,6 +67,19 @@ void UpdateBounds(std::vector<float32>& bounds, int32 featureId, float32 xMin, f
   bounds[activeIndex + 5] = std::isnan(bounds[activeIndex + 5]) ? zMax : std::max(bounds[activeIndex + 5], zMax);
 }
 
+/**
+ * @brief Computes bounds with bounded Feature ID reads.
+ * @tparam GeomT Specifies the geometry type.
+ * @param geom Supplies geometry cells and coordinates.
+ * @param featureIds Supplies cell Feature IDs.
+ * @param bounds Receives six values per feature.
+ * @param featureIdBuffer Supplies the fixed Feature ID staging buffer.
+ * @param shouldCancel Signals cancellation between read batches.
+ * @return Success, or a Feature ID bulk-I/O error.
+ *
+ * Cancellation returns success before bounds are published to output arrays. Vertex and
+ * connectivity reads remain direct element access.
+ */
 template <GeometryType GeomT>
 Result<> ComputeBounds(const GeomT& geom, const Int32AbstractDataStore& featureIds, std::vector<float32>& bounds, int32* featureIdBuffer, const std::atomic_bool& shouldCancel)
 {
@@ -219,6 +250,13 @@ Result<> ComputeBounds(const GeomT& geom, const Int32AbstractDataStore& featureI
   return {};
 }
 
+/**
+ * @brief Selects a bounded Feature ID reader for a geometry type.
+ * @tparam ArgsT Specifies forwarded helper argument types.
+ * @param geom Supplies the input geometry.
+ * @param args Forwards arguments to the selected helper.
+ * @return Success, or a Feature ID bulk-I/O or unsupported-geometry error.
+ */
 template <class... ArgsT>
 Result<> ExecuteComputeBounds(const IGeometry& geom, ArgsT&&... args)
 {
@@ -246,7 +284,6 @@ Result<> ExecuteComputeBounds(const IGeometry& geom, ArgsT&&... args)
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBoundsScanline::ComputeFeatureBoundsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                            const ComputeFeatureBoundsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -256,10 +293,8 @@ ComputeFeatureBoundsScanline::ComputeFeatureBoundsScanline(DataStructure& dataSt
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBoundsScanline::~ComputeFeatureBoundsScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureBoundsScanline::operator()()
 {
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
@@ -350,25 +385,13 @@ Result<> ComputeFeatureBoundsScanline::operator()()
 
   if(m_InputValues->CreateEdgeGeometry)
   {
-    // define all 12 cube edges as pairs of vertex indices
-    static constexpr std::array<std::pair<int, int>, 12> cubeEdges = {{// bottom face
-                                                                       {0, 1},
-                                                                       {1, 2},
-                                                                       {2, 3},
-                                                                       {3, 0},
-                                                                       // top face
-                                                                       {4, 5},
-                                                                       {5, 6},
-                                                                       {6, 7},
-                                                                       {7, 4},
-                                                                       // vertical sides
-                                                                       {0, 4},
-                                                                       {1, 5},
-                                                                       {2, 6},
-                                                                       {3, 7}}};
+    /**
+     * @brief Connects the eight bounding-box vertices into twelve edges.
+     */
+    static constexpr std::array<std::pair<int, int>, 12> cubeEdges = {{{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}};
     std::array<usize, 2> vertPair = {0, 0};
 
-    // Compute the number of features which will tell use the number of vertices and edges
+    // Allocate maximum edge storage before omitting features without valid bounds.
     usize numVerts = numFeatures * 8;
     usize numEdges = numFeatures * 12;
 
@@ -385,7 +408,7 @@ Result<> ComputeFeatureBoundsScanline::operator()()
     for(usize idx = 0; idx < numFeatures; ++idx)
     {
       usize activeIndex = idx * 6;
-      // NaN values mean that there was something wrong with the bounding min/max points.
+      // NaN bounds identify a feature with no supported geometry element.
       bool foundNAN = false;
       for(usize i = 0; i < 6; i++)
       {
@@ -400,7 +423,6 @@ Result<> ComputeFeatureBoundsScanline::operator()()
         continue;
       }
 
-      // Create the 8 Vertices
       edgeGeom.setVertexCoordinate(currentOffset * 8 + 0, {bounds[activeIndex + 0], bounds[activeIndex + 1], bounds[activeIndex + 2]});
       edgeGeom.setVertexCoordinate(currentOffset * 8 + 1, {bounds[activeIndex + 3], bounds[activeIndex + 1], bounds[activeIndex + 2]});
       edgeGeom.setVertexCoordinate(currentOffset * 8 + 2, {bounds[activeIndex + 3], bounds[activeIndex + 4], bounds[activeIndex + 2]});
@@ -410,7 +432,6 @@ Result<> ComputeFeatureBoundsScanline::operator()()
       edgeGeom.setVertexCoordinate(currentOffset * 8 + 6, {bounds[activeIndex + 3], bounds[activeIndex + 4], bounds[activeIndex + 5]});
       edgeGeom.setVertexCoordinate(currentOffset * 8 + 7, {bounds[activeIndex + 0], bounds[activeIndex + 4], bounds[activeIndex + 5]});
 
-      // Create the 12 Edges
       for(usize edgeIdx = 0; edgeIdx < cubeEdges.size(); ++edgeIdx)
       {
         vertPair[0] = currentOffset * 8 + (cubeEdges[edgeIdx].first);
@@ -423,7 +444,6 @@ Result<> ComputeFeatureBoundsScanline::operator()()
     }
 
     currentOffset--;
-    // Update the Edge Geometry sizes
     edgeGeom.resizeVertexList(currentOffset * 8);
     edgeGeom.getVertexAttributeMatrix()->resizeTuples({currentOffset * 8});
     edgeGeom.resizeEdgeList(currentOffset * 12);

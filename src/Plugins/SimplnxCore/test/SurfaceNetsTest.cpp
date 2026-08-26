@@ -461,7 +461,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Default", "[SimplnxCore][SurfaceNetsF
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "SurfaceNetsTest_v3.tar.gz", "SurfaceNetsTest_v3");
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 input.
   auto baseDataFilePath = fs::path(fmt::format("{}/SurfaceNetsTest_v3/SurfaceNetsTest_v3.dream3d", nx::core::unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   DataPath smallIn100Group({nx::core::Constants::k_DataContainer});
@@ -504,8 +504,6 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Default", "[SimplnxCore][SurfaceNetsF
       selectedFeatureArrayPaths.push_back(featureDataPath.createChildPath(child.second->getName()));
     }
 
-    // Create default Parameters for the filter.
-
     args.insertOrAssign(SurfaceNetsFilter::k_RepairTriangleWinding_Key, std::make_any<bool>(false));
     args.insertOrAssign(SurfaceNetsFilter::k_ApplySmoothing_Key, std::make_any<bool>(false));
     args.insertOrAssign(SurfaceNetsFilter::k_MaxDistanceFromVoxelCenter_Key, std::make_any<float32>(1.0f));
@@ -523,23 +521,21 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Default", "[SimplnxCore][SurfaceNetsF
     args.insertOrAssign(SurfaceNetsFilter::k_FaceDataGroupName_Key, std::make_any<std::string>(k_FaceDataGroupName));
     args.insertOrAssign(SurfaceNetsFilter::k_FaceLabelsArrayName_Key, std::make_any<std::string>(k_Face_Labels));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(TriangleGeom::k_SharedFacesListName)));
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(INodeGeometry0D::k_SharedVertexListName)));
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(faceLabelsDataPath));
 
-    // Write the DataStructure out to the file system
+    // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
     WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/SurfaceNetsFilterTest_default.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
   }
-  // Check a few things about the generated data.
+  // Verify the generated data.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
@@ -548,7 +544,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Default", "[SimplnxCore][SurfaceNetsF
   REQUIRE(triangle->getNumberOfTuples() == 668786);
   REQUIRE(vertices->getNumberOfTuples() == 319447);
 
-  // Compare the shared vertex list and shared triangle list
+  // Compare the shared vertex and triangle lists.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath));
   auto& exemplarDataArray = dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(TriangleGeom::k_SharedFacesListName)));
@@ -574,7 +570,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Smoothing", "[SimplnxCore][SurfaceNet
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "SurfaceNetsTest_v3.tar.gz", "SurfaceNetsTest_v3");
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 input.
   auto baseDataFilePath = fs::path(fmt::format("{}/SurfaceNetsTest_v3/SurfaceNetsTest_v3.dream3d", nx::core::unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   DataPath smallIn100Group({nx::core::Constants::k_DataContainer});
@@ -615,8 +611,6 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Smoothing", "[SimplnxCore][SurfaceNet
       selectedFeatureArrayPaths.push_back(featureDataPath.createChildPath(child.second->getName()));
     }
 
-    // Create default Parameters for the filter.
-
     args.insertOrAssign(SurfaceNetsFilter::k_RepairTriangleWinding_Key, std::make_any<bool>(false));
     args.insertOrAssign(SurfaceNetsFilter::k_ApplySmoothing_Key, std::make_any<bool>(true));
     args.insertOrAssign(SurfaceNetsFilter::k_MaxDistanceFromVoxelCenter_Key, std::make_any<float32>(1.0f));
@@ -634,11 +628,9 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Smoothing", "[SimplnxCore][SurfaceNet
     args.insertOrAssign(SurfaceNetsFilter::k_FaceDataGroupName_Key, std::make_any<std::string>(k_FaceDataGroupName));
     args.insertOrAssign(SurfaceNetsFilter::k_FaceLabelsArrayName_Key, std::make_any<std::string>(k_Face_Labels));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -646,12 +638,12 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Smoothing", "[SimplnxCore][SurfaceNet
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(INodeGeometry0D::k_SharedVertexListName)));
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(faceLabelsDataPath));
 
-    // Write the DataStructure out to the file system
+    // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
     WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/SurfaceNetsFilterTest_Smoothing.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
   }
-  // Check a few things about the generated data.
+  // Verify the generated data.
   {
     REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
     TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
@@ -661,7 +653,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Smoothing", "[SimplnxCore][SurfaceNet
     REQUIRE(vertices->getNumberOfTuples() == 319447);
   }
 
-  // Compare the shared vertex list and shared triangle list
+  // Compare the shared vertex and triangle lists.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath));
   auto& exemplarDataArray = dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(TriangleGeom::k_SharedFacesListName)));
@@ -687,7 +679,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding", "[SimplnxCore][SurfaceNetsF
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "SurfaceNetsTest_v3.tar.gz", "SurfaceNetsTest_v3");
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 input.
   auto baseDataFilePath = fs::path(fmt::format("{}/SurfaceNetsTest_v3/SurfaceNetsTest_v3.dream3d", nx::core::unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   DataPath smallIn100Group({nx::core::Constants::k_DataContainer});
@@ -728,8 +720,6 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding", "[SimplnxCore][SurfaceNetsF
       selectedFeatureArrayPaths.push_back(featureDataPath.createChildPath(child.second->getName()));
     }
 
-    // Create default Parameters for the filter.
-
     args.insertOrAssign(SurfaceNetsFilter::k_RepairTriangleWinding_Key, std::make_any<bool>(true));
     args.insertOrAssign(SurfaceNetsFilter::k_ApplySmoothing_Key, std::make_any<bool>(false));
     args.insertOrAssign(SurfaceNetsFilter::k_MaxDistanceFromVoxelCenter_Key, std::make_any<float32>(1.0f));
@@ -747,11 +737,9 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding", "[SimplnxCore][SurfaceNetsF
     args.insertOrAssign(SurfaceNetsFilter::k_FaceDataGroupName_Key, std::make_any<std::string>(k_FaceDataGroupName));
     args.insertOrAssign(SurfaceNetsFilter::k_FaceLabelsArrayName_Key, std::make_any<std::string>(k_Face_Labels));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -759,12 +747,12 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding", "[SimplnxCore][SurfaceNetsF
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(INodeGeometry0D::k_SharedVertexListName)));
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(faceLabelsDataPath));
 
-    // Write the DataStructure out to the file system
+    // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
     WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/SurfaceNetsFilterTest_winding.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
   }
-  // Check a few things about the generated data.
+  // Verify the generated data.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
@@ -773,7 +761,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding", "[SimplnxCore][SurfaceNetsF
   REQUIRE(triangle->getNumberOfTuples() == 668786);
   REQUIRE(vertices->getNumberOfTuples() == 319447);
 
-  // Compare the shared vertex list and shared triangle list
+  // Compare the shared vertex and triangle lists.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath));
   auto& exemplarDataArray = dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(TriangleGeom::k_SharedFacesListName)));
@@ -799,7 +787,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding Smoothing", "[SimplnxCore][Su
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "SurfaceNetsTest_v3.tar.gz", "SurfaceNetsTest_v3");
 
-  // Read the Small IN100 Data set
+  // Load the Small IN100 input.
   auto baseDataFilePath = fs::path(fmt::format("{}/SurfaceNetsTest_v3/SurfaceNetsTest_v3.dream3d", nx::core::unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   DataPath smallIn100Group({nx::core::Constants::k_DataContainer});
@@ -840,8 +828,6 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding Smoothing", "[SimplnxCore][Su
       selectedFeatureArrayPaths.push_back(featureDataPath.createChildPath(child.second->getName()));
     }
 
-    // Create default Parameters for the filter.
-
     args.insertOrAssign(SurfaceNetsFilter::k_RepairTriangleWinding_Key, std::make_any<bool>(true));
     args.insertOrAssign(SurfaceNetsFilter::k_ApplySmoothing_Key, std::make_any<bool>(true));
     args.insertOrAssign(SurfaceNetsFilter::k_MaxDistanceFromVoxelCenter_Key, std::make_any<float32>(1.0f));
@@ -859,11 +845,9 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding Smoothing", "[SimplnxCore][Su
     args.insertOrAssign(SurfaceNetsFilter::k_FaceDataGroupName_Key, std::make_any<std::string>(k_FaceDataGroupName));
     args.insertOrAssign(SurfaceNetsFilter::k_FaceLabelsArrayName_Key, std::make_any<std::string>(k_Face_Labels));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -871,12 +855,12 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding Smoothing", "[SimplnxCore][Su
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(INodeGeometry0D::k_SharedVertexListName)));
     scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(faceLabelsDataPath));
 
-    // Write the DataStructure out to the file system
+    // The optional output supports manual inspection.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
     WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/SurfaceNetsFilterTest_winding_smoothing.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
   }
-  // Check a few things about the generated data.
+  // Verify the generated data.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath));
   TriangleGeom& triangleGeom = dataStructure.getDataRefAs<TriangleGeom>(computedTriangleGeomPath);
   IGeometry::SharedTriList* triangle = triangleGeom.getFaces();
@@ -885,7 +869,7 @@ TEST_CASE("SimplnxCore::SurfaceNetsFilter: Winding Smoothing", "[SimplnxCore][Su
   REQUIRE(triangle->getNumberOfTuples() == 668786);
   REQUIRE(vertices->getNumberOfTuples() == 319447);
 
-  // Compare the shared vertex list and shared triangle list
+  // Compare the shared vertex and triangle lists.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath));
   auto& exemplarDataArray = dataStructure.getDataRefAs<IDataArray>(exemplarSharedTriPath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(computedTriangleGeomPath.createChildPath(TriangleGeom::k_SharedFacesListName)));

@@ -26,6 +26,12 @@ namespace
 {
 constexpr usize k_ChunkSize = 65536;
 
+/**
+ * @class TempDirectory
+ * @brief Removes one unique modal-sort directory at scope exit.
+ *
+ * Cleanup uses the error-code overload and does not report removal failures.
+ */
 class TempDirectory
 {
 public:
@@ -54,6 +60,11 @@ private:
   std::filesystem::path m_Path;
 };
 
+/**
+ * @class BinaryRunReader
+ * @brief Reads one sorted binary run through a bounded value buffer.
+ * @tparam T Stored value type.
+ */
 template <typename T>
 class BinaryRunReader
 {
@@ -134,6 +145,16 @@ bool Equivalent(const T& lhs, const T& rhs)
   return !(lhs < rhs) && !(rhs < lhs);
 }
 
+/**
+ * @brief Maps one modal value to a legacy uniform range calculation.
+ * @tparam T Histogram value type.
+ * @param binRanges Stored histogram range values.
+ * @param mode Modal value.
+ * @return Calculated lower and upper values, or two default values when outside the range.
+ *
+ * This calculation treats binRanges as one edge sequence. Histogram output
+ * stores lower/upper pairs, so the result can differ from an actual stored bin.
+ */
 template <typename T>
 std::pair<T, T> FindModalBinRange(nonstd::span<const T> binRanges, const T& mode)
 {
@@ -165,6 +186,13 @@ std::pair<T, T> FindModalBinRange(nonstd::span<const T> binRanges, const T& mode
   return {};
 }
 
+/**
+ * @class BufferedValueReader
+ * @brief Visits selected input values through bounded source and mask pages.
+ * @tparam T Input value type.
+ *
+ * The optional mask must be Bool or UInt8 and must match the input tuple count.
+ */
 template <typename T>
 class BufferedValueReader
 {
@@ -243,6 +271,14 @@ private:
   std::unique_ptr<uint8[]> m_UInt8MaskBuffer;
 };
 
+/**
+ * @class CalculateModalRangesDirect
+ * @brief Computes exact modes from resident storage.
+ * @tparam T Input value type.
+ *
+ * A masked calculation retains every selected value before reduction. Memory
+ * can scale with the full selected value count.
+ */
 template <typename T>
 class CalculateModalRangesDirect
 {
@@ -333,6 +369,20 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Computes exact modes with a bounded external merge sort.
+ * @tparam T Input value type.
+ * @param inputStore Supplies scalar values.
+ * @param maskArray Optional Bool or UInt8 tuple mask.
+ * @param numValues Number of values to inspect.
+ * @param binRangesStore Supplies stored histogram range pairs.
+ * @param modalBinRanges Receives two values for each exact mode.
+ * @param shouldCancel Signals cancellation between pages and merge passes.
+ * @return Bulk-I/O, temporary-directory, temporary-file, or merge errors.
+ *
+ * Two alternating binary files can coexist during merge. Each file scales with
+ * the selected value count. The temporary directory is removed at function exit.
+ */
 template <typename T>
 Result<> CalculateModalRangesScanlineImpl(const AbstractDataStore<T>& inputStore, const IDataArray* maskArray, usize numValues, const AbstractDataStore<T>& binRangesStore,
                                           NeighborList<T>& modalBinRanges, const std::atomic_bool& shouldCancel)
@@ -555,6 +605,11 @@ Result<> CalculateModalRangesScanlineImpl(const AbstractDataStore<T>& inputStore
   return outputResult;
 }
 
+/**
+ * @class CalculateModalRangesScanline
+ * @brief Adapts external modal sorting to algorithm dispatch.
+ * @tparam T Input value type.
+ */
 template <typename T>
 class CalculateModalRangesScanline
 {
@@ -584,6 +639,10 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @struct ComputeHistogramFunctor
+ * @brief Computes one typed histogram through bounded passes.
+ */
 struct ComputeHistogramFunctor
 {
   template <typename T>
@@ -666,7 +725,8 @@ struct ComputeHistogramFunctor
 
     if(modalBinRanges != nullptr)
     {
-      // The legacy modal-range dispatch intentionally excluded boolean arrays because NeighborList<bool> is not a supported exported type.
+      // NeighborList<bool> is not an exported supported type, so Boolean modal
+      // ranges remain empty.
       if constexpr(!std::is_same_v<T, bool>)
       {
         auto& typedModalRanges = dynamic_cast<NeighborList<T>&>(*modalBinRanges);
@@ -684,7 +744,6 @@ struct ComputeHistogramFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeArrayHistogram::ComputeArrayHistogram(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel,
                                              ComputeArrayHistogramInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -694,10 +753,8 @@ ComputeArrayHistogram::ComputeArrayHistogram(DataStructure& dataStructure, const
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeArrayHistogram::~ComputeArrayHistogram() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeArrayHistogram::operator()()
 {
   const IDataArray* maskArray = nullptr;

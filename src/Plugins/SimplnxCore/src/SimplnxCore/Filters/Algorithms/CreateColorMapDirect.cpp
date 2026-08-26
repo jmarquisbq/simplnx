@@ -15,9 +15,18 @@ using namespace nx::core;
 
 namespace
 {
+// A control point stores scalar position and RGB components.
 constexpr usize k_ControlPointCompSize = 4;
 constexpr usize k_ColorComponentCount = 3;
 
+/**
+ * @class AbstractStoreAccess
+ * @brief Accesses scalar, mask, and RGB values through DataStore methods.
+ * @tparam T Specifies the scalar input type.
+ *
+ * This direct fallback accesses DataStore instances in parallel and has no
+ * general thread-safety guarantee.
+ */
 template <typename T>
 class AbstractStoreAccess
 {
@@ -78,6 +87,13 @@ private:
   const AbstractDataStore<uint8>* m_UInt8MaskStore = nullptr;
 };
 
+/**
+ * @class ContiguousStoreAccess
+ * @brief Accesses scalar, mask, and RGB values through raw pointers.
+ * @tparam T Specifies the scalar input type.
+ *
+ * Raw pointers avoid DataStore access during parallel mapping.
+ */
 template <typename T>
 class ContiguousStoreAccess
 {
@@ -131,7 +147,13 @@ private:
 };
 
 /**
+ * @class CreateColorMapImpl
  * @brief Computes RGB values in parallel using either contiguous or abstract data access.
+ * @tparam T Specifies the scalar input type.
+ * @tparam DataAccess Specifies scalar, mask, and RGB access operations.
+ *
+ * The constructor finds the scalar range before parallel mapping. Unsupported
+ * mask types do not invoke a conversion.
  */
 template <typename T, typename DataAccess>
 class CreateColorMapImpl
@@ -168,7 +190,6 @@ public:
 
     for(usize i = start; i < end; i++)
     {
-      // Make sure we are using a valid voxel based on the "goodVoxels" arrays
       if(maskArray != nullptr && !m_DataAccess.template maskValue<K>(i))
       {
         m_DataAccess.setColor(i, m_InvalidColor[0], m_InvalidColor[1], m_InvalidColor[2]);
@@ -211,12 +232,24 @@ private:
   const std::vector<uint8>& m_InvalidColor;
 };
 
+/**
+ * @struct GenerateColorArrayFunctor
+ * @brief Adapts runtime scalar types to direct RGB generation.
+ */
 struct GenerateColorArrayFunctor
 {
+  /**
+   * @brief Generates RGB values for one scalar type.
+   * @tparam ScalarType Specifies the scalar input type.
+   * @param dataStructure Provides selected arrays.
+   * @param inputValues Specifies validated color-map settings.
+   * @param controlPoints Provides flattened scalar-RGB control points.
+   * @return Error for an empty input array, or success after mapping.
+   */
   template <typename ScalarType>
   Result<> operator()(DataStructure& dataStructure, const CreateColorMapInputValues* inputValues, const std::vector<float32>& controlPoints)
   {
-    // Control Points is a flattened 2D array with an unknown tuple count and a component size of 4
+    // Control points store scalar position followed by RGB components.
     const usize numControlColors = controlPoints.size() / k_ControlPointCompSize;
 
     std::vector<float32> binPoints = ColorTableUtilities::NormalizeBinPoints(controlPoints);
@@ -272,7 +305,6 @@ struct GenerateColorArrayFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 CreateColorMapDirect::CreateColorMapDirect(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, const CreateColorMapInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -281,10 +313,8 @@ CreateColorMapDirect::CreateColorMapDirect(DataStructure& dataStructure, const I
 {
 }
 
-// -----------------------------------------------------------------------------
 CreateColorMapDirect::~CreateColorMapDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> CreateColorMapDirect::operator()()
 {
   const IDataArray& selectedIDataArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedDataArrayPath);
@@ -305,6 +335,7 @@ Result<> CreateColorMapDirect::operator()()
     return MakeErrorResult(-34382, fmt::format("Preset '{}' must define at least 2 control colors", m_InputValues->PresetName));
   }
 
+  // Current direct behavior does not propagate the typed generator Result.
   ExecuteDataFunction(GenerateColorArrayFunctor{}, selectedIDataArray.getDataType(), m_DataStructure, m_InputValues, controlPoints);
   return {};
 }

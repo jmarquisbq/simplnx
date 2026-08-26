@@ -4,7 +4,6 @@
 
 using namespace nx::core;
 
-//-----------------------------------------------------------------------------
 DataIOCollection& DataStoreUtilities::GetIOCollection()
 {
   return Application::GetOrCreateInstance()->getIOCollection();

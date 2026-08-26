@@ -1,26 +1,3 @@
-// -----------------------------------------------------------------------------
-// FillBadDataBFS.cpp -- In-core BFS flood-fill algorithm for filling bad data
-// -----------------------------------------------------------------------------
-//
-// This file implements the BFS (breadth-first search) variant of the FillBadData
-// algorithm, optimized for in-core (contiguous memory) data access. The algorithm
-// identifies connected regions of bad data (FeatureId == 0), classifies them by
-// size, and fills small regions by copying cell data from neighboring good features.
-//
-// The BFS approach uses O(N) temporary buffers and relies on random access to
-// both the FeatureIds array and the temporary vectors. This is efficient when all
-// data fits in RAM but causes catastrophic chunk thrashing when data is stored
-// out-of-core in compressed HDF5 chunks. For OOC data, FillBadDataCCL should be
-// used instead (selected automatically by the FillBadData dispatcher).
-//
-// Algorithm Steps:
-//   Step 1: Linear scan to find max FeatureId (and optionally max Phase)
-//   Step 2: BFS flood-fill to discover and classify connected bad-data regions
-//   Step 3: Iterative morphological dilation to fill small regions via neighbor voting
-//
-// See FillBadDataBFS.hpp for detailed algorithm documentation.
-// -----------------------------------------------------------------------------
-
 #include "FillBadDataBFS.hpp"
 
 #include "FillBadData.hpp"
@@ -36,31 +13,12 @@ using namespace nx::core;
 
 namespace
 {
-// -----------------------------------------------------------------------------
-// FillBadDataUpdateTuples
-// -----------------------------------------------------------------------------
-// Copies cell data array values from a good neighbor voxel to each bad data
-// voxel. The `neighbors` vector maps each voxel index to the index of its best
-// source neighbor (determined by majority vote in the iterative fill loop).
-//
-// Only voxels satisfying ALL of the following conditions are updated:
-//   - featureId < 0  (marked as small bad-data region needing fill)
-//   - neighbor != -1 (a valid source neighbor was found)
-//   - featureIds[neighbor] > 0 (the source is a real feature, not bad data)
-//
-// All components of the tuple are copied (e.g., 3-component RGB, 6-component
-// tensor, etc.), preserving multi-component array semantics.
-//
-// WHY featureIds are checked during copy:
-// The iterative fill processes one dilation layer at a time. Within a single
-// iteration, a voxel that was just filled (featureId changed from -1 to a
-// positive value) must NOT serve as a copy source for other voxels in the same
-// iteration, because its non-featureId arrays have not yet been updated. The
-// check `featureIds[neighbor] > 0` combined with updating featureIds LAST
-// (after all other arrays) ensures this ordering is maintained.
-// -----------------------------------------------------------------------------
 /**
  * @brief Copies all components from each selected good neighbor into a bad tuple on resident stores.
+ * @tparam T Cell-array value type.
+ * @param featureIds Supplies the current iteration's Feature ID snapshot.
+ * @param outputDataStore Receives copied tuples.
+ * @param neighbors Maps each destination to its selected source, or -1.
  *
  * Feature IDs are updated after companion arrays so a newly filled tuple cannot
  * become a source before its complete tuple state has been copied.
@@ -87,10 +45,12 @@ void FillBadDataUpdateTuples(const Int32AbstractDataStore& featureIds, AbstractD
   }
 }
 
-/** @brief Dispatches a runtime cell-array type to the resident tuple-copy helper. */
+/**
+ * @struct FillBadDataUpdateTuplesFunctor
+ * @brief Dispatches resident tuple copying by runtime array type.
+ */
 struct FillBadDataUpdateTuplesFunctor
 {
-  /** @brief Applies the typed resident tuple copies to one companion cell array. */
   template <typename T>
   void operator()(const Int32AbstractDataStore& featureIds, IDataArray* outputIDataArray, const std::vector<int64>& neighbors)
   {
@@ -112,31 +72,6 @@ FillBadDataBFS::FillBadDataBFS(DataStructure& dataStructure, const IFilter::Mess
 // -----------------------------------------------------------------------------
 FillBadDataBFS::~FillBadDataBFS() noexcept = default;
 
-// -----------------------------------------------------------------------------
-// FillBadDataBFS::operator()
-// -----------------------------------------------------------------------------
-// BFS-based flood-fill algorithm for replacing bad data voxels with values
-// from neighboring good features. The algorithm has three main steps:
-//
-// Step 1: Find the maximum feature ID (and optionally maximum phase).
-//
-// Step 2: BFS flood-fill to discover connected regions of bad data
-//   (featureId == 0). Each region is classified by size:
-//   - Large regions (>= minAllowedDefectSize): kept as voids (featureId
-//     stays 0, optionally assigned a new phase).
-//   - Small regions (< threshold): marked with featureId = -1 for filling.
-//
-// Step 3: Iterative morphological dilation. Each iteration scans all -1
-//   voxels, finds the neighboring good feature with the most face-adjacent
-//   votes (majority vote), and records the best neighbor. Then copies all
-//   cell data components from that neighbor to the -1 voxel. Repeats until
-//   no -1 voxels remain. FeatureIds are updated LAST to avoid changing the
-//   vote source mid-iteration.
-//
-// NOTE: This algorithm uses O(N) memory (neighbors + alreadyChecked +
-// featureNumber vectors), making it unsuitable for very large OOC datasets.
-// Use FillBadDataCCL for out-of-core compatible processing.
-// -----------------------------------------------------------------------------
 Result<> FillBadDataBFS::operator()()
 {
   auto& featureIdsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->featureIdsArrayPath)->getDataStoreRef();

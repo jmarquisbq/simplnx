@@ -65,33 +65,30 @@ void BuildOctantFeatureIds(DataStructure& ds)
 TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Valid filter execution", "[ComputeBoundaryCellsFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_find_boundary_cells.tar.gz", "6_6_FindBoundaryCellsExemplar.dream3d");
 
-  // Read Exemplar DREAM3D File Filter
+  // Load the exemplar output.
   auto exemplarFilePath = fs::path(fmt::format("{}/6_6_FindBoundaryCellsExemplar.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeBoundaryCellsFilter filter;
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_IgnoreFeatureZero_Key, std::make_any<bool>(true));
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_IncludeVolumeBoundary_Key, std::make_any<bool>(true));
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_GeometryPath_Key, std::make_any<DataPath>(k_GeometryPath));
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(k_FeatureIdsPath));
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_BoundaryCellsArrayName_Key, std::make_any<std::string>(k_ComputedBoundaryCellsName));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -105,7 +102,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Invalid filter execution", "
   UnitTest::LoadPlugins();
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_find_boundary_cells.tar.gz", "6_6_FindBoundaryCellsExemplar.dream3d");
-  // Read Exemplar DREAM3D File Filter
+  // Load the exemplar output.
   auto exemplarFilePath = fs::path(fmt::format("{}/6_6_FindBoundaryCellsExemplar.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
@@ -116,7 +113,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Invalid filter execution", "
 
   const DataPath k_WrongGeometryPath({Constants::k_ImageGeometry});
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeBoundaryCellsFilter filter;
   Arguments args;
 
@@ -127,11 +124,9 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Invalid filter execution", "
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(k_FeatureIdsPath));
   args.insertOrAssign(ComputeBoundaryCellsFilter::k_BoundaryCellsArrayName_Key, std::make_any<std::string>(k_ComputedBoundaryCellsName));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
 
@@ -154,7 +149,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: Generate Large Test Dataset"
 TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: 200x200x200 octant features", "[SimplnxCore][ComputeBoundaryCellsFilter]")
 {
   UnitTest::LoadPlugins();
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // SIMPLNX_TEST_ALGORITHM_PATH selects the algorithm scenarios.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
@@ -181,7 +176,7 @@ TEST_CASE("SimplnxCore::ComputeBoundaryCellsFilter: 200x200x200 octant features"
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  // Verify output: BoundaryCells should have varied values
+  // BoundaryCells must contain varied values.
   const DataPath boundaryCellsPath = benchGeomPath.createChildPath(Constants::k_CellData).createChildPath("BoundaryCells");
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<DataArray<int8>>(boundaryCellsPath));
   const auto& boundaryCells = dataStructure.getDataRefAs<DataArray<int8>>(boundaryCellsPath).getDataStoreRef();

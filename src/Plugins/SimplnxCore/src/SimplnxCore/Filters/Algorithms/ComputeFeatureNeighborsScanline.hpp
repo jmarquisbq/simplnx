@@ -7,38 +7,45 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
 struct ComputeFeatureNeighborsInputValues;
 
 /**
  * @class ComputeFeatureNeighborsScanline
- * @brief Out-of-core algorithm for ComputeFeatureNeighbors using Z-slice bulk I/O
- * with per-face surface area accumulation.
+ * @brief Computes feature neighbors with a rolling Feature ID window.
  *
- * Reads FeatureIds one Z-slice at a time via copyIntoBuffer using a 3-slice rolling
- * window (prev/cur/next) to resolve all 6 face neighbors with sequential disk access.
- * BoundaryCells output is written per-slice via copyFromBuffer.
+ * Three Feature ID slices resolve all face neighbors with sequential bulk reads. BoundaryCells uses
+ * one matching output slice. This requires 12 bytes per XY cell, plus 1 byte when BoundaryCells is
+ * selected. Feature-neighbor maps retain all observed relationships in memory. Per-face physical
+ * areas preserve anisotropic ImageGeom surface area.
  *
- * Uses map-based per-feature surface area accumulation with per-face area values,
- * matching Nathan Young's bug fix for correct surface area computation across
- * faces of different sizes.
+ * Dispatch uses Feature IDs only. Optional surface flags use direct feature-level writes. Current
+ * bulk-I/O Result values are not inspected. A storage failure can leave partial BoundaryCells output
+ * while the method returns success.
  *
- * Selected by DispatchAlgorithm when any input array is backed by ZarrStore.
- *
- * @see ComputeFeatureNeighborsDirect for the in-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * @see ComputeFeatureNeighborsDirect.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureNeighborsScanline
 {
 public:
   /**
-   * @brief Constructs the out-of-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes the scanline feature-neighbor algorithm.
+   * @param dataStructure Contains the ImageGeom, Feature IDs, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation between Z slices.
+   * @param inputValues Selects outputs and identifies required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   ComputeFeatureNeighborsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                   const ComputeFeatureNeighborsInputValues* inputValues);
+  /**
+   * @brief Destroys the scanline feature-neighbor algorithm.
+   */
   ~ComputeFeatureNeighborsScanline() noexcept;
 
   ComputeFeatureNeighborsScanline(const ComputeFeatureNeighborsScanline&) = delete;
@@ -47,26 +54,22 @@ public:
   ComputeFeatureNeighborsScanline& operator=(ComputeFeatureNeighborsScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the OOC-optimized feature neighbor computation.
+   * @brief Computes feature-neighbor output with rolling slices.
+   * @return Success, or a Feature ID range error.
    *
-   * Uses a 3-slice rolling window (prev/cur/next Z-slices) with bulk I/O:
-   *   - copyIntoBuffer() reads one Z-slice of FeatureIds at a time
-   *   - All 6 face-neighbor lookups are resolved from in-memory slice buffers
-   *   - copyFromBuffer() writes the BoundaryCells output one Z-slice at a time
+   * When a Z-slice checkpoint observes cancellation, the method returns success. Completed
+   * BoundaryCells slices remain written. Later slices and neighbor-list output are not written.
    *
-   * The rolling window ensures only 3 slices of FeatureIds plus 1 slice of
-   * BoundaryCells are in memory at any time, regardless of volume size.
-   * Surface area accumulation uses per-face area values matching the Direct variant.
-   *
-   * @return Result<> with any errors encountered during execution
+   * The maximum Feature ID check occurs after slice processing. A range error can therefore leave
+   * BoundaryCells slices and surface flags changed while neighbor-list output is not written.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                    ///< Reference to the DataStructure containing all arrays
-  const ComputeFeatureNeighborsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                            ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;                   ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const ComputeFeatureNeighborsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

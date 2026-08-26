@@ -13,10 +13,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Constructs ReadAngData with the given DataStructure, message handler, cancel flag, and input values.
- */
 ReadAngData::ReadAngData(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ReadAngDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_MessageHandler(msgHandler)
@@ -25,18 +21,8 @@ ReadAngData::ReadAngData(DataStructure& dataStructure, const IFilter::MessageHan
 {
 }
 
-// -----------------------------------------------------------------------------
 ReadAngData::~ReadAngData() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Reads a .ang EBSD data file and populates the DataStructure with the parsed arrays.
- *
- * Delegates to EbsdLib's AngReader for file parsing, then calls loadMaterialInfo()
- * to populate ensemble-level arrays and copyRawEbsdData() to populate cell-level arrays.
- *
- * @return Result<> indicating success or an error from the EbsdLib reader.
- */
 Result<> ReadAngData::operator()()
 {
   m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Reading .ang file '{}'", m_InputValues->InputFile.string()));
@@ -61,7 +47,6 @@ Result<> ReadAngData::operator()()
   return copyRawEbsdData(&reader);
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadAngData::loadMaterialInfo(ebsdlib::AngReader* reader) const
 {
   const std::vector<ebsdlib::AngPhase::Pointer> phases = reader->getPhaseVector();
@@ -81,10 +66,7 @@ Result<> ReadAngData::loadMaterialInfo(ebsdlib::AngReader* reader) const
   const std::string k_InvalidPhase = "Invalid Phase";
   const usize numTuples = crystalStructures.getNumberOfTuples();
 
-  // Initialize EVERY slot to the "Invalid Phase" defaults first. Slot 0 is always the
-  // invalid phase, and any slot not covered by a phase section in the file (possible when
-  // the file's phase indices are not contiguous) keeps these defaults instead of
-  // zero-initialized garbage.
+  // Defaults preserve invalid and omitted phase slots.
   for(usize tupleIndex = 0; tupleIndex < numTuples; tupleIndex++)
   {
     crystalStructures[tupleIndex] = ebsdlib::CrystalStructure::UnknownCrystalStructure;
@@ -98,16 +80,12 @@ Result<> ReadAngData::loadMaterialInfo(ebsdlib::AngReader* reader) const
   for(const ebsdlib::AngPhase::Pointer& phase : phases)
   {
     const int32_t phaseID = phase->getPhaseIndex();
-    // .ang phase numbering starts at 1. A phase index < 1 (Phase 0 or negative) is rejected: DREAM3D
-    // 6.5.171 tolerated a Phase 0 section (it skipped only negative indices and wrote Phase 0 into
-    // ensemble slot 0), so this is a documented behavior change vs legacy — see deviation
-    // ReadAngDataFilter-D5. A static "# Phase 0" fixture trips this deterministically.
+    // .ang phase numbering starts at one. Phase zero remains invalid.
     if(phaseID < 1)
     {
       return MakeErrorResult(-19502, fmt::format("The .ang file declares phase index {}, but .ang phase numbering starts at 1 (Phase 0 and negative phases are not supported).", phaseID));
     }
-    // The ensemble arrays were sized in preflight from the same file's largest phase index, so an index
-    // at or above the array count can only mean the file changed between preflight and execute.
+    // An out-of-range phase indicates a file change after preflight.
     if(static_cast<usize>(phaseID) >= numTuples)
     {
       return MakeErrorResult(
@@ -128,28 +106,6 @@ Result<> ReadAngData::loadMaterialInfo(ebsdlib::AngReader* reader) const
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Copies raw EBSD data from the EbsdLib AngReader buffers into the DataStructure arrays.
- *
- * @section ooc_strategy OOC Strategy
- * The EbsdLib reader holds the parsed data in contiguous in-memory buffers. We need to
- * transfer this data into DataStore-backed arrays that may be out-of-core. Rather than
- * using per-element operator[] (which would trigger a chunk load/evict per write on OOC
- * stores), we use copyFromBuffer() to write entire contiguous ranges in single bulk
- * operations.
- *
- * For single-component arrays (ImageQuality, ConfidenceIndex, etc.), a single
- * copyFromBuffer() call writes all values at once since the reader buffer is already
- * contiguous.
- *
- * For the Euler angles (3 separate source arrays that must be interleaved into a
- * 3-component destination), we use a chunked approach: interleave k_ChunkSize tuples
- * into a local buffer, then copyFromBuffer() the chunk. This bounds memory usage to
- * ~768 KB (65536 * 3 * sizeof(float32)) while still achieving bulk I/O efficiency.
- *
- * @param reader Pointer to the EbsdLib AngReader that has already parsed the file.
- */
 Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
 {
   const DataPath cellAttributeMatrixPath = m_InputValues->DataContainerName.createChildPath(m_InputValues->CellAttributeMatrixName);
@@ -157,11 +113,8 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->DataContainerName);
   const usize totalCells = imageGeom.getNumberOfCells();
 
-  // The Image Geometry was sized in preflight from the file's column/row header (NumEvenCols x NumRows),
-  // but the reader allocates its data buffers from NumOddCols x NumRows. Every copy below reads
-  // totalCells elements out of those buffers, so if the reader actually read fewer elements (a file that
-  // changed between preflight and execute, or a malformed header where NCOLS_EVEN > NCOLS_ODD) the copies
-  // would read past the end of the reader's heap buffers. Guard against that out-of-bounds read.
+  // The geometry and reader can disagree after a file change. Guard reader
+  // buffers before copy operations.
   if(reader->getNumberOfElements() < totalCells)
   {
     return MakeErrorResult(-19503,
@@ -170,8 +123,7 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
                                        reader->getNumberOfElements(), totalCells));
   }
 
-  // Adjust the values of the 'phase' data to correct for invalid values, then bulk-write
-  // via copyFromBuffer (OOC-safe: single I/O call for the entire array)
+  // .ang phase zero and negative values map to the first valid phase.
   {
     if(m_ShouldCancel)
     {
@@ -179,7 +131,6 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
     }
     auto& targetArray = m_DataStructure.getDataRefAs<Int32Array>(cellAttributeMatrixPath.createChildPath(ebsdlib::AngFile::Phases));
     auto* phasePtr = reinterpret_cast<int32*>(reader->getPointerByName(ebsdlib::Ang::PhaseData));
-    // Validate phases in-place in the reader's buffer before bulk-writing
     for(usize i = 0; i < totalCells; i++)
     {
       if(phasePtr[i] < 1)
@@ -187,7 +138,6 @@ Result<> ReadAngData::copyRawEbsdData(ebsdlib::AngReader* reader) const
         phasePtr[i] = 1;
       }
     }
-    // OOC-safe: single bulk write of the entire phase array
     targetArray.getDataStoreRef().copyFromBuffer(0, nonstd::span<const int32>(phasePtr, totalCells));
   }
 

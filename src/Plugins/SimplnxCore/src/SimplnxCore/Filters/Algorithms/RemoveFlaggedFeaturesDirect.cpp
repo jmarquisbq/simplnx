@@ -18,7 +18,16 @@ using namespace nx::core;
 
 namespace
 {
-/** @brief Selects each removed resident voxel's majority face-neighbor source for the next fill iteration. */
+/**
+ * @brief Selects one majority face-neighbor source for each nonpositive voxel.
+ * @param imageGeom Defines voxel dimensions.
+ * @param featureIds Provides current Feature IDs.
+ * @param storageArray Receives flat source-voxel indexes.
+ * @param shouldCancel Stops before later Z slices when true.
+ * @param messageHelper Creates a throttled progress messenger.
+ * @return True if any nonpositive Feature ID exists; false after cancellation or none.
+ * @pre Flat voxel indexes fit in int32.
+ */
 bool IdentifyNeighbors(ImageGeom& imageGeom, Int32AbstractDataStore& featureIds, std::vector<int32>& storageArray, const std::atomic_bool& shouldCancel, MessageHelper& messageHelper)
 {
   ThrottledMessenger throttledMessenger = messageHelper.createThrottledMessenger();
@@ -73,7 +82,7 @@ bool IdentifyNeighbors(ImageGeom& imageGeom, Int32AbstractDataStore& featureIds,
         std::vector<int32> numHits(6, 0);
         std::vector<int32> discoveredFeatures = {};
         discoveredFeatures.reserve(6);
-        // Loop over the 6 face neighbors of the voxel
+        // Check six face neighbors in the shared NeighborUtilities order.
         const std::array<bool, k_NumFaceNeighbors> isValidFaceNeighbor = computeValidFaceNeighbors(xIdx, yIdx, zIdx, dims);
         for(const auto& faceIndex : faceNeighborInternalIdx)
         {
@@ -114,7 +123,14 @@ bool IdentifyNeighbors(ImageGeom& imageGeom, Int32AbstractDataStore& featureIds,
   return shouldLoop;
 }
 
-/** @brief Builds feature-scale active flags and directly marks resident cells belonging to removed features. */
+/**
+ * @brief Marks cells that belong to flagged features.
+ * @param featureIds Provides and receives cell Feature IDs.
+ * @param flaggedFeatures Identifies features selected for removal.
+ * @param fillRemovedFeatures Uses -1 marks for later filling when true.
+ * @return Active-feature flags, or an empty vector if removal selects all features.
+ * @pre Feature IDs are nonnegative and less than the feature-flag tuple count.
+ */
 std::vector<bool> FlagFeatures(Int32AbstractDataStore& featureIds, std::unique_ptr<MaskCompareUtilities::MaskCompare>& flaggedFeatures, const bool fillRemovedFeatures)
 {
   bool good = false;
@@ -155,7 +171,13 @@ std::vector<bool> FlagFeatures(Int32AbstractDataStore& featureIds, std::unique_p
   return activeObjects;
 }
 
-/** @brief Copies every companion cell tuple from the previously selected resident source neighbors. */
+/**
+ * @brief Copies companion tuples from selected resident source neighbors.
+ * @param featureIds Provides current Feature IDs.
+ * @param neighbors Provides one flat source index per destination cell.
+ * @param voxelArrays Receives source tuples for negative Feature IDs.
+ * @param shouldCancel Stops before later destination cells when true.
+ */
 void FindVoxelArrays(const Int32AbstractDataStore& featureIds, const std::vector<int32>& neighbors, std::vector<std::shared_ptr<IDataArray>>& voxelArrays, const std::atomic_bool& shouldCancel)
 {
   const usize totalPoints = featureIds.getNumberOfTuples();
@@ -183,11 +205,25 @@ void FindVoxelArrays(const Int32AbstractDataStore& featureIds, const std::vector
   }
 }
 
-/** @brief Runs one independent CropImageGeometryFilter task when extracting flagged features. */
+/**
+ * @class RunCropImageGeometryImpl
+ * @brief Runs one CropImageGeometryFilter task for a flagged feature.
+ *
+ * The caller executes each task synchronously. This protects DataStructure mutation
+ * and keeps borrowed loop-local paths and bounds alive.
+ */
 class RunCropImageGeometryImpl
 {
 public:
-  /** @brief Captures the borrowed crop paths, bounds, data structure, and cancellation state. */
+  /**
+   * @brief Creates one borrowed crop task.
+   * @param dataStructure Receives the cropped geometry.
+   * @param shouldCancel Stops before delegated execution when true.
+   * @param imageGeometryPath Identifies the source ImageGeom.
+   * @param minVoxelVector Specifies inclusive minimum voxel indexes.
+   * @param maxVoxelVector Specifies inclusive maximum voxel indexes.
+   * @param createdImgGeomPath Identifies the cropped ImageGeom.
+   */
   RunCropImageGeometryImpl(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const DataPath& imageGeometryPath, const std::vector<uint64>& minVoxelVector,
                            const std::vector<uint64>& maxVoxelVector, const DataPath& createdImgGeomPath)
   : m_DataStructure(dataStructure)
@@ -199,9 +235,17 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the borrowed crop task.
+   */
   ~RunCropImageGeometryImpl() = default;
 
-  /** @brief Preflights and executes the delegated crop using the captured bounds. */
+  /**
+   * @brief Preflights and executes the delegated crop.
+   *
+   * The task throws after a preflight failure. The implementation does not inspect
+   * the execute result and can therefore ignore an execution failure.
+   */
   void operator()() const
   {
     CropImageGeometryFilter filter;
@@ -245,7 +289,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 RemoveFlaggedFeaturesDirect::RemoveFlaggedFeaturesDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          const RemoveFlaggedFeaturesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -255,10 +298,8 @@ RemoveFlaggedFeaturesDirect::RemoveFlaggedFeaturesDirect(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 RemoveFlaggedFeaturesDirect::~RemoveFlaggedFeaturesDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> RemoveFlaggedFeaturesDirect::operator()()
 {
   auto& featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath)->getDataStoreRef();
@@ -271,8 +312,8 @@ Result<> RemoveFlaggedFeaturesDirect::operator()()
     flaggedFeatures = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->FlaggedFeaturesArrayPath);
   } catch(const std::out_of_range& exception)
   {
-    // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-    // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+    // Normal filter execution validates this path. Direct algorithm callers can
+    // still supply a missing or unsupported mask.
     std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->FlaggedFeaturesArrayPath.toString());
     return MakeErrorResult(-53900, message);
   }
@@ -284,7 +325,7 @@ Result<> RemoveFlaggedFeaturesDirect::operator()()
 
   MessageHelper messageHelper(m_MessageHandler);
 
-  // Valid values Functionality::Extract and Functionality::ExtractThenRemove
+  // Extract and ExtractThenRemove create one cropped geometry per flagged feature.
   if(function != Functionality::Remove)
   {
     m_MessageHandler(IFilter::ProgressMessage{IFilter::Message::Type::Info, fmt::format("Beginning Feature Extraction")});
@@ -309,6 +350,7 @@ Result<> RemoveFlaggedFeaturesDirect::operator()()
       }
 
       auto executeResult = filter.execute(m_DataStructure, args);
+      // Only preflight status controls this path. The delegated execute result is not inspected.
       if(preflightResult.outputActions.invalid())
       {
         throw std::runtime_error("Execute failed when cropping the geometry in extract flagged features!");
@@ -323,7 +365,8 @@ Result<> RemoveFlaggedFeaturesDirect::operator()()
     }
 
     ParallelTaskAlgorithm taskRunner;
-    // This has to be run in serial for the time being because adding to the dataStructure is not thread-safe
+    // Crop tasks mutate DataStructure and borrow loop-local bounds. Synchronous
+    // execution satisfies both thread-safety and lifetime requirements.
     taskRunner.setParallelizationEnabled(false);
 
     usize maxTuple = flaggedFeatures->getNumberOfTuples();
@@ -359,7 +402,7 @@ Result<> RemoveFlaggedFeaturesDirect::operator()()
     return {};
   }
 
-  // Valid values Functionality::Remove and Functionality::ExtractThenRemove
+  // Remove and ExtractThenRemove modify the source feature data.
   if(function != Functionality::Extract)
   {
     m_MessageHandler(IFilter::ProgressMessage{IFilter::Message::Type::Info, fmt::format("Beginning Feature Removal")});

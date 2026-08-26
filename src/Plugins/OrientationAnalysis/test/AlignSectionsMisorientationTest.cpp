@@ -99,25 +99,19 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation: small direct and fo
     CreateSmallFixture(oocData);
     UnitTest::AlgorithmTestScope oocScope(UnitTest::AlgorithmTestScenario::OutOfCoreAlgorithmOnInMemoryStore);
     SIMPLNX_RESULT_REQUIRE_VALID(oocScope.executeFilter(filter, oocData, SmallArguments(useMask)).result);
+    // Alignment transfers every cell-array type. Compare numeric and Boolean
+    // siblings after forced out-of-core dispatch.
     UnitTest::CompareDataArrays<float32>(directData.getDataRefAs<IDataArray>(k_SmallNumericPath), oocData.getDataRefAs<IDataArray>(k_SmallNumericPath));
     UnitTest::CompareDataArrays<bool>(directData.getDataRefAs<IDataArray>(k_SmallBoolPath), oocData.getDataRefAs<IDataArray>(k_SmallBoolPath));
   }
 }
 
-/**
- * Read H5Ebsd File
- * MultiThreshold Objects
- * Convert Orientation Representation (Euler->Quats)
- * Align Sections Misorientation
- *
- * Compare all the data arrays from the "Exemplar Data / CellData"
- */
-
 TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation Small IN100 Pipeline", "[OrientationAnalysis][AlignSectionsMisorientation]")
 {
   UnitTest::LoadPlugins();
 
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // AlgorithmTestScope forces the selected path and records its target-call
+  // witness.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
@@ -132,27 +126,21 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation Small IN100 Pipeline
 
   auto* filterList = Application::Instance()->getFilterList();
 
-  // Read Exemplar DREAM3D File Filter
   auto exemplarFilePath = fs::path(fmt::format("{}/align_sections_misorientation/6_6_align_sections_misorientation.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
-  // Read the Small IN100 Data set
   auto baseDataFilePath = fs::path(fmt::format("{}/Small_IN100.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(Constants::k_PhasesArrayPath));
   scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(Constants::k_PhasesArrayPath));
 
-  // MultiThreshold Objects Filter (From SimplnxCore Plugins)
   SmallIn100::ExecuteMultiThresholdObjects(dataStructure, *filterList);
 
-  // Convert Orientations Filter (From OrientationAnalysis Plugin)
   SmallIn100::ExecuteConvertOrientations(dataStructure, *filterList);
 
-  // Align Sections Misorientation Filter (From OrientationAnalysis Plugin)
   {
     Arguments args;
     AlignSectionsMisorientationFilter filter;
-    // Create default Parameters for the filter.
 
     args.insertOrAssign(AlignSectionsMisorientationFilter::k_MisorientationTolerance_Key, std::make_any<float32>(5.0F));
 
@@ -166,11 +154,9 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientation Small IN100 Pipeline
 
     args.insertOrAssign(AlignSectionsMisorientationFilter::k_SelectedImageGeometryPath_Key, std::make_any<DataPath>(Constants::k_DataContainerPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
   }
@@ -188,7 +174,8 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientationFilter: output test",
 {
   UnitTest::LoadPlugins();
 
-  // Test both algorithm paths (in-core + OOC) by default; controlled by CMake SIMPLNX_TEST_ALGORITHM_PATH
+  // AlgorithmTestScope forces the selected path and records its target-call
+  // witness.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
@@ -199,23 +186,18 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientationFilter: output test",
 
   auto* filterList = Application::Instance()->getFilterList();
 
-  // Read the Small IN100 Data set
   auto baseDataFilePath = fs::path(fmt::format("{}/Small_IN100.dream3d", unit_test::k_TestFilesDir));
   DataStructure dataStructure = UnitTest::LoadDataStructure(baseDataFilePath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(Constants::k_PhasesArrayPath));
   scope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(Constants::k_PhasesArrayPath));
 
-  // MultiThreshold Objects Filter (From SimplnxCore Plugins)
   SmallIn100::ExecuteMultiThresholdObjects(dataStructure, *filterList);
 
-  // Convert Orientations Filter (From OrientationAnalysis Plugin)
   SmallIn100::ExecuteConvertOrientations(dataStructure, *filterList);
 
-  // Align Sections Misorientation Filter (From OrientationAnalysis Plugin)
   {
     Arguments args;
     AlignSectionsMisorientationFilter filter;
-    // Create default Parameters for the filter.
 
     args.insertOrAssign(AlignSectionsMisorientationFilter::k_MisorientationTolerance_Key, std::make_any<float32>(5.0F));
 
@@ -235,16 +217,13 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientationFilter: output test",
     args.insertOrAssign(AlignSectionsMisorientationFilter::k_RelativeShiftsArrayName_Key, std::make_any<std::string>(Constants::k_RelativeShiftsArrayName));
     args.insertOrAssign(AlignSectionsMisorientationFilter::k_CumulativeShiftsArrayName_Key, std::make_any<std::string>(Constants::k_CumulativeShiftsArrayName));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
   }
 
-  // Read Exemplar data structure
   auto exemplarFilePath = fs::path(fmt::format("{}/align_sections_misorientation/output_align_sections_misorientation.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
@@ -265,7 +244,6 @@ TEST_CASE("OrientationAnalysis::AlignSectionsMisorientationFilter: output test",
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<IDataArray>(cumulativeShiftsPath));
   UnitTest::CompareDataArrays<int64>(exemplarDataStructure.getDataRefAs<IDataArray>(cumulativeShiftsPath), dataStructure.getDataRefAs<IDataArray>(cumulativeShiftsPath));
 
-// Write out the .dream3d file now
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   UnitTest::WriteTestDataStructure(dataStructure, fmt::format("{}/output_align_sections_misorientation.dream3d", unit_test::k_BinaryTestOutputDir));
 #endif

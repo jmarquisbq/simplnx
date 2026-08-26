@@ -16,64 +16,44 @@ namespace nx::core
 
 /**
  * @struct MultiThresholdObjectsInputValues
- * @brief Input parameter bundle for the MultiThresholdObjects algorithm.
- *
- * Aggregates the threshold configuration, output mask settings, and custom
- * true/false values needed by both the in-core (Direct) and out-of-core
- * (Scanline) variants of multi-threshold filtering.
+ * @brief Stores threshold tree, mask type, and output values.
  */
 struct SIMPLNXCORE_EXPORT MultiThresholdObjectsInputValues
 {
-  ArrayThresholdsParameter::ValueType ArrayThresholdsObject; ///< Tree of threshold comparisons (sets and individual conditions)
-  DataTypeParameter::ValueType CreatedMaskType;              ///< DataType for the output mask array (e.g., uint8, bool)
-  Float64Parameter::ValueType CustomFalseValue = 0.0;        ///< Custom value to write for FALSE elements (default: 0.0)
-  Float64Parameter::ValueType CustomTrueValue = 1.0;         ///< Custom value to write for TRUE elements (default: 1.0)
-  DataObjectNameParameter::ValueType OutputDataArrayName;    ///< Name of the output mask array
-  BoolParameter::ValueType UseCustomFalseValue = false;      ///< Whether to use CustomFalseValue instead of 0
-  BoolParameter::ValueType UseCustomTrueValue = false;       ///< Whether to use CustomTrueValue instead of 1
+  ArrayThresholdsParameter::ValueType ArrayThresholdsObject;
+  DataTypeParameter::ValueType CreatedMaskType;
+  Float64Parameter::ValueType CustomFalseValue = 0.0;
+  Float64Parameter::ValueType CustomTrueValue = 1.0;
+  DataObjectNameParameter::ValueType OutputDataArrayName;
+  BoolParameter::ValueType UseCustomFalseValue = false;
+  BoolParameter::ValueType UseCustomTrueValue = false;
 };
 
 /**
  * @class MultiThresholdObjects
- * @brief Dispatcher algorithm for applying multiple threshold conditions to arrays
- * and producing a boolean mask.
+ * @brief Evaluates a threshold tree into a mask array.
  *
- * This class acts as a thin dispatcher that selects between two concrete algorithm
- * implementations at runtime:
- *
- * - **MultiThresholdObjectsDirect** (in-core): Uses per-element operator[] / getComponentValue()
- *   access with an O(n) tempResultVector for intermediate results. Optimal when all
- *   arrays reside in memory.
- *
- * - **MultiThresholdObjectsScanline** (out-of-core / OOC): Evaluates the complete
- *   threshold tree one bounded chunk at a time using copyIntoBuffer()/copyFromBuffer()
- *   bulk I/O, then writes the completed mask chunk once.
- *
- * The dispatch decision is made by DispatchAlgorithm<Direct, Scanline>() in
- * AlgorithmDispatch.hpp, which checks every threshold input and the output mask.
- *
- * **Why two variants exist**: Each threshold condition requires reading an input array
- * and comparing every element. When input arrays are stored out-of-core, per-element
- * getComponentValue() calls trigger chunk load/evict cycles. The Scanline variant reads
- * input data in 64K-tuple chunks, performs all comparisons for that chunk in memory,
- * then writes the completed result once — converting random accesses into bounded
- * sequential bulk reads.
+ * The dispatcher checks each threshold input and the output mask. Resident arrays use
+ * direct access. Disk-backed arrays use bounded bulk I/O to avoid repeated chunk loads.
  *
  * @see MultiThresholdObjectsDirect
  * @see MultiThresholdObjectsScanline
- * @see AlgorithmDispatch.hpp
  */
 class SIMPLNXCORE_EXPORT MultiThresholdObjects
 {
 public:
   /**
-   * @brief Constructs the dispatcher with all resources needed by either algorithm variant.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Creates a threshold dispatcher.
+   * @param dataStructure Provides threshold inputs and the output mask.
+   * @param mesgHandler Receives progress messages from the selected algorithm.
+   * @param shouldCancel Stops later evaluation work when true.
+   * @param inputValues Specifies validated threshold settings. The caller must keep
+   * this object alive for the dispatcher lifetime.
    */
   MultiThresholdObjects(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, MultiThresholdObjectsInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning dispatcher.
+   */
   ~MultiThresholdObjects() noexcept;
 
   MultiThresholdObjects(const MultiThresholdObjects&) = delete;
@@ -82,16 +62,19 @@ public:
   MultiThresholdObjects& operator=(MultiThresholdObjects&&) noexcept = delete;
 
   /**
-   * @brief Dispatches to the Direct or Scanline algorithm based on storage type.
-   * @return Result<> with any errors encountered during execution
+   * @brief Selects direct or scanline evaluation from participating storage.
+   * @return Bulk-I/O error from scanline evaluation, or success after cancellation.
+   *
+   * Direct cancellation can retain a partially written mask. Scanline cancellation
+   * can retain complete output chunks written before the current chunk.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                  ///< Reference to the DataStructure containing all arrays
-  const MultiThresholdObjectsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                          ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;                 ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const MultiThresholdObjectsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

@@ -15,31 +15,20 @@ using namespace nx::core;
 namespace
 {
 const std::string k_TempGeometryName = ".cropped_image_geometry";
-// Number of source Z-slices to read per bulk I/O call. Trades memory footprint for
-// I/O call count. At 32 slices with a 1139x1174 uint16 volume the source slab is
-// roughly 86 MB; the paired destination slab is smaller. Empirically dropping the
-// Z-slice-batched I/O call count by this factor removes essentially all of the
-// HDF5 chunk-op overhead that dominated the previous row-at-a-time implementation.
+// A larger source slab reduces HDF5 calls but increases scratch for each array task.
 constexpr uint64 k_ZSliceBatch = 32;
 
 /**
- * @brief Copy a single cell-level data array from the source image geometry into the
- * cropped destination geometry using Z-slice-batched bulk I/O.
+ * @class CropImageGeomDataArray
+ * @brief Copies one cell array through Z-slice slab transfers.
+ * @tparam T Cell-array value type.
  *
- * The cropping operation is conceptually a 3D subarray copy: for every destination
- * voxel (x, y, z), the value is read from source voxel (x + xMin, y + yMin, z + zMin).
+ * Per-task scratch is at most 32 source slices plus 32 cropped destination
+ * slices. ParallelTaskAlgorithm can run several array tasks at the same time,
+ * so total scratch is the sum of active tasks.
  *
- * A naive per-voxel implementation issues one DataStore access per component per
- * voxel, which thrashes HDF5 chunk caches on out-of-core arrays. This class instead
- * reads a batch of k_ZSliceBatch full source Z-slices into a contiguous RAM slab,
- * extracts the cropped (xMin..xMax, yMin..yMax) region via per-row std::memcpy,
- * and writes the corresponding destination slab back in a single bulk call.
- *
- * Peak working-set memory is bounded by the slab size
- * (k_ZSliceBatch * srcDimX * srcDimY + k_ZSliceBatch * cropX * cropY) * numComps * sizeof(T),
- * independent of the total dataset size.
- *
- * @tparam T The element type of the cell-level array (uint8, int32, float32, ...).
+ * Bulk-transfer Result values are ignored because the worker interface returns
+ * void. Cancellation leaves the destination fill value and completed slabs.
  */
 template <typename T>
 class CropImageGeomDataArray
@@ -78,7 +67,7 @@ protected:
     const uint64 srcDimY = srcDims[1];
     const uint64 srcDimZ = srcDims[2];
 
-    // Crop region (in tuples)
+    // Read the half-open copy bounds prepared by the outer executor.
     const uint64 xMin = m_Bounds[0];
     const uint64 xMax = m_Bounds[1];
     const uint64 yMin = m_Bounds[2];
@@ -89,20 +78,14 @@ protected:
     const uint64 cropY = yMax - yMin;
     const uint64 cropZ = zMax - zMin;
 
-    // OOC optimization: batch K source Z-slices per bulk I/O call. For each batch,
-    // read all K full source Z-slices in a single copyIntoBuffer, extract the crop
-    // region into a destination slab via in-memory memcpy-per-row, then flush the
-    // destination slab with a single copyFromBuffer. Replaces the previous
-    // row-at-a-time implementation which issued one I/O pair per (z, y) pair — for
-    // a 1489x1139 output that is ~1.7M I/O pairs per data array.
+    // Read full source slices and extract cropped rows before one slab write.
     const uint64 srcSliceTuples = srcDimX * srcDimY;
     const uint64 dstSliceTuples = cropX * cropY;
     const uint64 rowTuples = cropX;
     const uint64 rowElements = rowTuples * numComps;
     const usize rowBytes = rowElements * sizeof(T);
 
-    // Cap the batch at the number of cropped Z-slices so we do not over-allocate
-    // for small crops. K may be smaller than k_ZSliceBatch on the last iteration.
+    // Do not allocate a full batch for a shallow crop.
     const uint64 initialBatch = std::min<uint64>(k_ZSliceBatch, cropZ);
     auto srcSlab = std::make_unique<T[]>(initialBatch * srcSliceTuples * numComps);
     auto dstSlab = std::make_unique<T[]>(initialBatch * dstSliceTuples * numComps);
@@ -116,8 +99,7 @@ protected:
       }
       const uint64 batch = std::min<uint64>(k_ZSliceBatch, zMax - zStart);
 
-      // Grow the slab buffers only if the caller's bounds do not divide evenly;
-      // shrinking below the current allocation is a no-op — the buffers are reused.
+      // Reuse slab buffers. Grow only when a later batch is larger.
       if(batch > allocatedBatch)
       {
         srcSlab = std::make_unique<T[]>(batch * srcSliceTuples * numComps);
@@ -128,11 +110,11 @@ protected:
       const usize srcSlabElements = batch * srcSliceTuples * numComps;
       const usize dstSlabElements = batch * dstSliceTuples * numComps;
 
-      // Bulk read K consecutive source Z-slices in a single I/O call.
+      // Read consecutive source slices in one transfer.
       const uint64 srcStartTuple = zStart * srcSliceTuples;
       m_OldCellStore.copyIntoBuffer(srcStartTuple * numComps, nonstd::span<T>(srcSlab.get(), srcSlabElements));
 
-      // Extract the crop rows from each in-memory source slice into the destination slab.
+      // Extract cropped rows from the resident source slab.
       for(uint64 dz = 0; dz < batch; dz++)
       {
         const T* const srcSliceBase = srcSlab.get() + dz * srcSliceTuples * numComps;
@@ -145,12 +127,12 @@ protected:
         }
       }
 
-      // Bulk write the K destination Z-slices in a single I/O call.
+      // Write consecutive destination slices in one transfer.
       const uint64 dstStartTuple = (zStart - zMin) * dstSliceTuples;
       m_NewCellStore.copyFromBuffer(dstStartTuple * numComps, nonstd::span<const T>(dstSlab.get(), dstSlabElements));
     }
 
-    // Avoid unused-variable warning when built without assertions.
+    // Copy bounds already constrain Z. Suppress the unused dimension value.
     (void)srcDimZ;
   }
 
@@ -194,7 +176,7 @@ Result<> CropImageGeometry::operator()()
 
   auto& srcImageGeom = m_DataStructure.getDataRefAs<ImageGeom>(srcImagePath);
 
-  // No matter where the AM is (same DC or new DC), we have the correct DC and AM pointers...now it's time to crop
+  // Source and destination paths are resolved before array tasks start.
   SizeVec3 udims = srcImageGeom.getDimensions();
 
   int64 dims[3] = {
@@ -245,8 +227,7 @@ Result<> CropImageGeometry::operator()()
 
   std::array<uint64, 6> bounds = {xMin, xMax + 1, yMin, yMax + 1, zMin, zMax + 1};
 
-  // The actual cropping of the dataStructure arrays is done in parallel where parallel here
-  // refers to the cropping of each DataArray being done on a separate thread.
+  // Each task owns one source and destination array. Arrays can copy in parallel.
   ParallelTaskAlgorithm taskRunner;
   const auto& srcCellDataAM = srcImageGeom.getCellDataRef();
   auto& destCellDataAM = destImageGeom.getCellDataRef();
@@ -265,17 +246,14 @@ Result<> CropImageGeometry::operator()()
     m_MessageHandler(fmt::format("Cropping Volume || Copying Data Array {}", srcName));
     ExecuteParallelFunction<CropImageGeomDataArray>(oldDataArray.getDataType(), taskRunner, oldDataArray, newDataArray, srcImageGeom, bounds, m_ShouldCancel);
   }
-  taskRunner.wait(); // This will spill over if the number of DataArrays to process does not divide evenly by the number of threads.
+  taskRunner.wait();
 
   if(m_ShouldCancel)
   {
     return {};
   }
 
-  // Careful with this next section. We purposefully copy in the original dataStructure arrays
-  // into the destination feature attribute matrix so that we have somewhere to start.
-  // During the renumbering phase is when those copied arrays will get potentially resized
-  // to their proper number of tuples.
+  // Copy feature arrays before renumbering so each tuple supplies initial data.
   if(shouldRenumberFeatures)
   {
     const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(featureIdsArrayPath);
@@ -299,10 +277,7 @@ Result<> CropImageGeometry::operator()()
       dataPath = destCellFeatureAMPath.createChildPath(dataPath.getTargetName());
     }
 
-    // Loop over all the DataPaths and do a deep copy on each DataArray|StringArray
-    // so that the updating of the Feature level data can happen. We do a bit of
-    // under-the-covers where we actually remove the existing array that preflight
-    // created, so we can use the convenience of the DataArray.deepCopy() function.
+    // DeepCopy replaces preflight outputs before renumbering resizes feature data.
     for(usize index = 0; index < sourceFeatureDataPaths.size(); index++)
     {
       DataObject* dataObject = m_DataStructure.getData(sourceFeatureDataPaths[index]);
@@ -324,7 +299,7 @@ Result<> CropImageGeometry::operator()()
       }
     }
 
-    // NOW DO THE ACTUAL RENUMBERING and updating.
+    // Renumber copied feature data and cropped cell Feature IDs together.
     DataPath destFeatureIdsPath = destImagePath.createChildPath(srcCellDataAM.getName()).createChildPath(featureIdsArrayPath.getTargetName());
     return Sampling::RenumberFeatures(m_DataStructure, destImagePath, destCellFeatureAMPath, featureIdsArrayPath, destFeatureIdsPath, m_MessageHandler, m_ShouldCancel);
   }

@@ -11,71 +11,70 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
 struct QuickSurfaceMeshInputValues;
 
 /**
  * @class QuickSurfaceMeshScanline
- * @brief Out-of-core (OOC) optimized algorithm for QuickSurfaceMesh.
+ * @brief Generates QuickSurfaceMesh output with bounded scanline storage.
  *
- * Selected by DispatchAlgorithm when any input array is backed by chunked
- * (OOC) storage. Produces identical output to QuickSurfaceMeshDirect but
- * avoids random-access element reads that would cause chunk thrashing on
- * disk-backed DataStores.
+ * DispatchAlgorithm normally selects this implementation when any target uses
+ * out-of-core (OOC) storage. Tests can force the path with in-memory targets.
+ * Random element access can repeatedly load and evict disk-backed chunks. The
+ * scanline reads Feature IDs in bulk.
  *
- * ## OOC Strategy
+ * Each cell compares +X, +Y, and +Z neighbors. Two Feature ID Z slices therefore
+ * suffice. Two rolling node planes replace a volume-sized node-ID map. In OOC
+ * execution, temporary records retain mesh-sized node ownership. A fixed page cache
+ * bounds resident record memory. Triangle connectivity, face labels, and transfers
+ * flush per Z slice.
  *
- * The key insight is that the QuickSurfaceMesh algorithm only compares each
- * voxel with its +X, +Y, and +Z neighbors. This means at most two adjacent
- * Z-slices of FeatureIds are needed at any time. The scanline variant
- * exploits this by:
+ * The implementation preserves QuickSurfaceMeshDirect correction choices, label
+ * order, and topology. Winding repair uses external sorting and temporary records.
+ * The in-memory fallback uses transient adjacency only after all targets are in memory.
  *
- *   - **Bulk I/O**: Reading FeatureIds one Z-slice at a time via
- *     copyIntoBuffer() instead of per-element operator[]. This converts
- *     O(volume) random reads into O(zP) sequential bulk reads.
+ * @warning Concurrent instances are not safe. Construction and correction use
+ * shared translation-unit random-number state.
  *
- *   - **Rolling node-plane buffers**: Instead of the O((xP+1)*(yP+1)*(zP+1))
- *     nodeIds array used by the Direct variant, this algorithm maintains two
- *     node-plane buffers of size O((xP+1)*(yP+1)) that roll forward as each
- *     Z-slice is processed. This reduces memory from O(volume) to O(slice).
- *
- *   - **Buffered output writes**: Triangle connectivity, face labels, and
- *     transfer arguments are accumulated per slice. Vertex coordinates and
- *     node ownership are retained in bounded pages over temporary fixed
- *     records and streamed to the final arrays in contiguous batches.
- *
- * ## Phases
- *
- *   1. **correctProblemVoxels** -- Same diagonal-voxel fix as the Direct
- *      variant, but reads/writes Z-slice pairs via copyIntoBuffer/copyFromBuffer.
- *      Uses dirty flags to skip write-back for unmodified slices.
- *
- *   2. **countActiveNodesAndTriangles** -- Counting pass using rolling
- *      node-plane buffers and double-buffered FeatureId slices.
- *
- *   3. **createNodesAndTriangles** -- Generation pass that writes mesh data.
- *      Mesh-sized node state is disk-backed; triangle connectivity and face
- *      labels are flushed per slice.
- *
- * Memory: O((xP+1)*(yP+1)) for node planes, O(xP*yP) for FeatureId/output
- * slices, and a fixed number of temporary-record pages.
- *
- * @see QuickSurfaceMeshDirect for the in-core reference implementation
+ * @see QuickSurfaceMeshDirect for the in-memory reference implementation.
  */
 class SIMPLNXCORE_EXPORT QuickSurfaceMeshScanline
 {
 public:
+  /**
+   * @brief Names the scalar store for mesh vertex coordinates.
+   */
   using VertexStore = AbstractDataStore<IGeometry::SharedVertexList::value_type>;
+
+  /**
+   * @brief Names the scalar store for mesh triangle connectivity.
+   */
   using TriStore = AbstractDataStore<IGeometry::SharedTriList::value_type>;
+
+  /**
+   * @brief Names the integer type used for mesh indices.
+   */
   using MeshIndexType = IGeometry::MeshIndexType;
 
   /**
-   * @brief Constructs the OOC-optimized algorithm. Seeds the RNG for problem-voxel correction.
-   * @param dataStructure The DataStructure containing all input/output objects
-   * @param mesgHandler Callback for progress and status messages
-   * @param shouldCancel Atomic flag checked periodically for user cancellation
-   * @param inputValues Pointer to the parameter struct (must outlive this object)
+   * @brief Constructs the scanline meshing algorithm.
+   * @param dataStructure DataStructure that must outlive the algorithm.
+   * @param mesgHandler Message callback that must outlive the algorithm.
+   * @param shouldCancel Atomic cancellation flag that must outlive the algorithm.
+   * @param inputValues Non-null algorithm inputs that must outlive the algorithm.
+   * @pre inputValues is not null.
+   *
+   * The object borrows all arguments. It reseeds the problem-voxel random-number generator.
    */
   QuickSurfaceMeshScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const QuickSurfaceMeshInputValues* inputValues);
+
+  /**
+   * @brief Destroys the scanline meshing algorithm.
+   */
   ~QuickSurfaceMeshScanline() noexcept;
 
   QuickSurfaceMeshScanline(const QuickSurfaceMeshScanline&) = delete;
@@ -84,50 +83,53 @@ public:
   QuickSurfaceMeshScanline& operator=(QuickSurfaceMeshScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the full OOC meshing pipeline: problem voxel correction,
-   * node/triangle counting, mesh generation, and optional winding repair.
-   * @return Result<> indicating success or an error from winding repair
+   * @brief Runs correction, counting, meshing, and optional winding repair.
+   * @return Valid result on completion or cancellation. Returns an error from bulk I/O,
+   * record storage, tuple transfer, or winding repair otherwise.
+   *
+   * Cancellation can leave corrected Feature IDs or resized, partially written mesh output.
    */
   Result<> operator()();
 
 private:
   /**
-   * @brief OOC problem-voxel correction using double-buffered Z-slice pairs.
+   * @brief Resolves diagonal voxel conflicts in two buffered Z slices.
+   * @return Valid result on completion or cancellation. Returns a Feature ID bulk-I/O error otherwise.
    *
-   * Reads two adjacent Z-slices at a time via copyIntoBuffer(), applies the
-   * same 2x2x2 diagonal-conflict resolution as the Direct variant, then
-   * writes back only the slices that were actually modified (dirty flags).
-   * This avoids per-element read/write through the OOC DataStore.
+   * QuickSurfaceMeshDirect-compatible random choices preserve mesh topology.
+   * Dirty flags write only changed Feature ID slices.
    */
   Result<> correctProblemVoxels();
 
   /**
-   * @brief Counting pass: determines total node and triangle counts using
-   * rolling 2-plane node buffers and double-buffered FeatureId Z-slices.
-   * @param[out] nodeCount Total number of unique mesh vertices
-   * @param[out] triangleCount Total number of triangles to generate
-   * @param[out] numFeatures Maximum FeatureId value found (used for feature array sizing)
+   * @brief Counts mesh vertices and triangles with rolling node planes.
+   * @param[out] nodeCount Receives the number of unique mesh vertices.
+   * @param[out] triangleCount Receives the number of generated triangles.
+   * @param[out] numFeatures Receives the greatest observed Feature ID.
+   * @return Valid result on completion or cancellation. Returns a Feature ID bulk-I/O error otherwise.
+   *
+   * Later cells cannot reference a retired Z plane. The rolling planes avoid a
+   * volume-sized node-ID map.
    */
   Result<> countActiveNodesAndTriangles(MeshIndexType& nodeCount, MeshIndexType& triangleCount, usize& numFeatures);
 
   /**
-   * @brief Generation pass: creates vertices, triangles, face labels, node types,
-   * and runs TupleTransfer for cell/feature data arrays.
+   * @brief Generates mesh output with external node records and per-slice buffers.
+   * @param nodeCount Exact vertex count from the counting pass.
+   * @param triangleCount Exact triangle count from the counting pass.
+   * @param numFeatures Greatest Feature ID from the counting pass.
+   * @return Valid result on completion or cancellation. Returns a temporary-record,
+   * bulk-I/O, or tuple-transfer error otherwise.
    *
-   * Uses rolling node-plane buffers to assign vertex IDs, bounded external
-   * node records, and per-slice buffers for triangle connectivity and face
-   * labels flushed via copyFromBuffer().
-   *
-   * @param nodeCount Number of vertices from counting pass (for buffer allocation)
-   * @param triangleCount Number of triangles from counting pass (for resizing)
-   * @param numFeatures Maximum FeatureId (for feature array sizing)
+   * OOC execution keeps mesh-sized node ownership in temporary records. Per-slice
+   * output buffers avoid per-triangle storage I/O.
    */
   Result<> createNodesAndTriangles(MeshIndexType nodeCount, MeshIndexType triangleCount, usize numFeatures);
 
-  DataStructure& m_DataStructure;                             ///< Reference to the active DataStructure
-  const QuickSurfaceMeshInputValues* m_InputValues = nullptr; ///< User parameters and created array paths
-  const std::atomic_bool& m_ShouldCancel;                     ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;            ///< Progress message callback
+  DataStructure& m_DataStructure;
+  const QuickSurfaceMeshInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

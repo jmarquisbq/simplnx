@@ -164,6 +164,8 @@ bool WriteSyntheticChannel5Files(const fs::path& cprPath, const fs::path& crcPat
     return false;
   }
 
+  // Write fixed-size blocks so the large fixture does not require a full CRC
+  // buffer.
   std::vector<uint8> block(k_FileWriteBlockCells * k_CrcRecordBytes);
   for(usize blockStart = 0; blockStart < k_LargeCellCount; blockStart += k_FileWriteBlockCells)
   {
@@ -204,6 +206,7 @@ template <typename T>
 float64 SumDataArray(const DataArray<T>& array)
 {
   const auto& store = array.getDataStoreRef();
+  // Read fixed pages so validation uses bulk I/O without full materialization.
   auto buffer = std::make_unique<T[]>(k_ValidationChunkCells);
   float64 sum = 0.0;
   for(usize offset = 0; offset < array.getSize(); offset += k_ValidationChunkCells)
@@ -222,6 +225,7 @@ float64 SumDataArray(const DataArray<T>& array)
 std::array<float64, 3> SumEulerComponents(const Float32Array& eulerAngles)
 {
   const auto& store = eulerAngles.getDataStoreRef();
+  // Read fixed pages so validation uses bulk I/O without full materialization.
   auto buffer = std::make_unique<float32[]>(k_ValidationChunkCells * 3);
   std::array<float64, 3> sums = {0.0, 0.0, 0.0};
   for(usize tupleOffset = 0; tupleOffset < eulerAngles.getNumberOfTuples(); tupleOffset += k_ValidationChunkCells)
@@ -246,18 +250,15 @@ TEST_CASE("OrientationAnalysis::ReadChannel5Data:Native_Data", "[OrientationAnal
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "7_ReadChannel5_Test.tar.gz", "7_ReadChannel5_Test");
 
-  // Read Exemplar DREAM3D File
   auto exemplarFilePath = fs::path(fmt::format("{}/7_ReadChannel5_Test/7_ReadChannel5_Test.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = LoadDataStructure(exemplarFilePath);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   ReadChannel5DataFilter filter;
   DataStructure dataStructure;
   Arguments args;
 
   const fs::path inputCtfFile(fmt::format("{}/7_ReadChannel5_Test/17NZ42_Dauphinetwinnedsample_ plaglens.cpr", unit_test::k_TestFilesDir));
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ReadChannel5DataFilter::k_InputFile_Key, std::make_any<FileSystemPathParameter::ValueType>(inputCtfFile));
   args.insertOrAssign(ReadChannel5DataFilter::k_CreateCompatibleArrays_Key, std::make_any<bool>(false));
   args.insertOrAssign(ReadChannel5DataFilter::k_EdaxHexagonalAlignment_Key, std::make_any<bool>(false));
@@ -265,27 +266,22 @@ TEST_CASE("OrientationAnalysis::ReadChannel5Data:Native_Data", "[OrientationAnal
   args.insertOrAssign(ReadChannel5DataFilter::k_CellAttributeMatrixName_Key, std::make_any<std::string>(k_Cell_Data));
   args.insertOrAssign(ReadChannel5DataFilter::k_CellEnsembleAttributeMatrixName_Key, std::make_any<std::string>(k_EnsembleAttributeMatrix));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare Cell Data
   {
     DataPath exemplarAttributeMatrixPath({"Exemplar-No-Options", "Cell Data"});
     DataPath computedAttributeNatrixPath = k_DataContainerPath.createChildPath(k_Cell_Data);
     CompareExemplarToGenerateAttributeMatrix(exemplarDataStructure, exemplarAttributeMatrixPath, dataStructure, computedAttributeNatrixPath);
   }
-  // Compare Ensemble Data
   {
     DataPath exemplarAttributeMatrixPath({"Exemplar-No-Options", "Cell Ensemble Data"});
     DataPath computedAttributeNatrixPath = k_DataContainerPath.createChildPath("Cell Ensemble Data");
     CompareExemplarToGenerateAttributeMatrix(exemplarDataStructure, exemplarAttributeMatrixPath, dataStructure, computedAttributeNatrixPath);
   }
-  // Compare Geometries
   {
     auto* exemplarPtr = exemplarDataStructure.getDataAs<ImageGeom>(DataPath({"Exemplar-All-Options"}));
     auto* computedPtr = dataStructure.getDataAs<ImageGeom>(k_DataContainerPath);
@@ -302,18 +298,15 @@ TEST_CASE("OrientationAnalysis::ReadChannel5Data:SIMPLNX_Data", "[OrientationAna
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "7_ReadChannel5_Test.tar.gz", "7_ReadChannel5_Test");
 
-  // Read Exemplar DREAM3D File
   auto exemplarFilePath = fs::path(fmt::format("{}/7_ReadChannel5_Test/7_ReadChannel5_Test.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = LoadDataStructure(exemplarFilePath);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   ReadChannel5DataFilter filter;
   DataStructure dataStructure;
   Arguments args;
 
   const fs::path inputCtfFile(fmt::format("{}/7_ReadChannel5_Test/17NZ42_Dauphinetwinnedsample_ plaglens.cpr", unit_test::k_TestFilesDir));
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ReadChannel5DataFilter::k_InputFile_Key, std::make_any<FileSystemPathParameter::ValueType>(inputCtfFile));
   args.insertOrAssign(ReadChannel5DataFilter::k_CreateCompatibleArrays_Key, std::make_any<bool>(false));
   args.insertOrAssign(ReadChannel5DataFilter::k_EdaxHexagonalAlignment_Key, std::make_any<bool>(false));
@@ -321,28 +314,23 @@ TEST_CASE("OrientationAnalysis::ReadChannel5Data:SIMPLNX_Data", "[OrientationAna
   args.insertOrAssign(ReadChannel5DataFilter::k_CellAttributeMatrixName_Key, std::make_any<std::string>(k_Cell_Data));
   args.insertOrAssign(ReadChannel5DataFilter::k_CellEnsembleAttributeMatrixName_Key, std::make_any<std::string>(k_EnsembleAttributeMatrix));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
-  // Compare Cell Data
   {
     DataPath exemplarAttributeMatrixPath({"Exemplar-All-Options", "Cell Data"});
     DataPath computedAttributeNatrixPath = k_DataContainerPath.createChildPath(k_Cell_Data);
     CompareExemplarToGenerateAttributeMatrix(exemplarDataStructure, exemplarAttributeMatrixPath, dataStructure, computedAttributeNatrixPath);
   }
-  // Compare Ensemble Data
   {
     DataPath exemplarAttributeMatrixPath({"Exemplar-All-Options", "Cell Ensemble Data"});
     DataPath computedAttributeNatrixPath = k_DataContainerPath.createChildPath("Cell Ensemble Data");
     CompareExemplarToGenerateAttributeMatrix(exemplarDataStructure, exemplarAttributeMatrixPath, dataStructure, computedAttributeNatrixPath);
   }
 
-  // Compare Geometries
   {
     auto* exemplarPtr = exemplarDataStructure.getDataAs<ImageGeom>(DataPath({"Exemplar-All-Options"}));
     auto* computedPtr = dataStructure.getDataAs<ImageGeom>(k_DataContainerPath);

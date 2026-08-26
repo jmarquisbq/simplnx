@@ -6,6 +6,10 @@ namespace
 {
 using Path = nx::core::UnitTest::AlgorithmDispatchPath;
 
+/**
+ * @class DirectPathProbe
+ * @brief Records selection of the direct plugin path.
+ */
 class DirectPathProbe
 {
 public:
@@ -24,6 +28,10 @@ private:
   Path& m_SelectedPath;
 };
 
+/**
+ * @class ScanlinePathProbe
+ * @brief Records selection of the scanline plugin path.
+ */
 class ScanlinePathProbe
 {
 public:

@@ -10,32 +10,41 @@
 #include <string>
 #include <vector>
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 /**
  * @class EmptyDataStore
- * @brief The EmptyDataStore class serves as a placeholder IDataStore for use
- * in preflight where data is not available but the number and getSize of tuples
- * is known.
- * @tparam T
+ * @brief Preserves data-store metadata without allocating values.
+ * @tparam T Planned value type.
  */
 template <typename T>
 class EmptyDataStore : public AbstractDataStore<T>
 {
 public:
+  /**
+   * @brief Names the planned value type.
+   */
   using value_type = typename AbstractDataStore<T>::value_type;
+
+  /**
+   * @brief Names the mutable value-proxy type.
+   */
   using reference = typename AbstractDataStore<T>::reference;
 
   /**
-   * @brief Constructs an empty data store with a tuple getSize and count of 0.
+   * @brief Creates an empty metadata store.
    */
   EmptyDataStore() = default;
 
   /**
-   * @brief Constructs an empty data store with the specified tupleSize and tupleCount.
-   * @param tupleSize
-   * @param tupleCount
-   * @param inMemory Stores whether or not the created data will be kept in memory or handled out of core
+   * @brief Creates a metadata store with planned shapes and format.
+   * @param tupleShape Planned tuple dimensions in slowest-to-fastest order.
+   * @param componentShape Planned component dimensions in slowest-to-fastest order.
+   * @param dataFormat Planned out-of-core format, or empty for in-memory storage.
    */
   EmptyDataStore(const ShapeType& tupleShape, const ShapeType& componentShape, std::string dataFormat = "")
   : m_ComponentShape(componentShape)
@@ -47,8 +56,8 @@ public:
   }
 
   /**
-   * @brief Copy constructor
-   * @param other
+   * @brief Copies metadata-store state.
+   * @param other Source metadata store.
    */
   EmptyDataStore(const EmptyDataStore& other)
   : m_ComponentShape(other.m_ComponentShape)
@@ -60,8 +69,8 @@ public:
   }
 
   /**
-   * @brief Move constructor
-   * @param other
+   * @brief Moves metadata-store state.
+   * @param other Source metadata store.
    */
   EmptyDataStore(EmptyDataStore&& other) noexcept
   : m_ComponentShape(std::move(other.m_ComponentShape))
@@ -72,68 +81,42 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the metadata store.
+   */
   ~EmptyDataStore() override = default;
 
-  /**
-   * @brief Returns the number of tuples that should be in the data store.
-   * @return usize
-   */
   usize getNumberOfTuples() const override
   {
     return m_NumTuples;
   }
 
-  /**
-   * @brief Returns the target tuple getSize.
-   * @return usize
-   */
   usize getNumberOfComponents() const override
   {
     return m_NumComponents;
   }
 
-  /**
-   * @brief Returns the dimensions of the Tuples
-   * @return
-   */
   const ShapeType& getTupleShape() const override
   {
     return m_TupleShape;
   }
 
-  /**
-   * @brief Returns the dimensions of the Components
-   * @return
-   */
   const ShapeType& getComponentShape() const override
   {
     return m_ComponentShape;
   }
 
-  /**
-   * @brief Returns StoreType::Empty because this store is a metadata-only
-   * placeholder. The dataFormat() string records the intended storage
-   * strategy (e.g., "" for in-memory, or a named OOC format) so the
-   * framework knows what real store to create when execution begins.
-   * @return StoreType::Empty
-   */
   IDataStore::StoreType getStoreType() const override
   {
     return IDataStore::StoreType::Empty;
   }
 
   /**
-   * @brief Returns the store type this placeholder will be replaced with once
-   * execution materializes the array.
+   * @brief Returns the store type that materializes after preflight.
    *
-   * The dataFormat() recorded at construction encodes the intended storage
-   * strategy: an empty string means the array will be kept in-memory, and a
-   * non-empty string names an out-of-core format. CreateArray stamps a
-   * non-empty format only for disk-backed arrays, so an empty m_DataFormat
-   * reliably means in-core. Callers use this to reflect the eventual backing
-   * of a preflight-only array without dispatching on the element type T.
-   * @return StoreType::InMemory when the array is destined for in-memory
-   * storage, otherwise StoreType::OutOfCore.
+   * An empty planned format selects in-memory storage. A non-empty format
+   * selects out-of-core storage without allocating values.
+   * @return Planned in-memory or out-of-core store type.
    */
   IDataStore::StoreType getPlannedStoreType() const override
   {
@@ -141,17 +124,9 @@ public:
   }
 
   /**
-   * @brief Throws — EmptyDataStore is a metadata-only placeholder.
-   *
-   * EmptyDataStore holds no data and no backing file, so it has no
-   * recovery metadata to report. Calling getRecoveryMetadata() on an
-   * EmptyDataStore is a programming error: the caller is treating a
-   * placeholder as if it were a real store. The real store that
-   * replaces this placeholder during execution is the one responsible
-   * for providing recovery metadata.
-   *
-   * Throws std::runtime_error to fail fast, matching the behavior of
-   * the other data-access methods on this class.
+   * @brief Rejects recovery metadata access.
+   * @return Does not return.
+   * @throws std::runtime_error Always, because this store has no backing data.
    */
   std::map<std::string, std::string> getRecoveryMetadata() const override
   {
@@ -159,17 +134,11 @@ public:
   }
 
   /**
-   * @brief Returns the data format string that was specified at construction.
+   * @brief Returns the planned storage format.
+   * @return Empty string for in-memory storage, or an out-of-core format name.
    *
-   * This string indicates the intended storage strategy for the real data
-   * store that will replace this EmptyDataStore after preflight:
-   * - An empty string ("") means the data will be stored in-memory (DataStore).
-   * - A non-empty string names an out-of-core format (e.g., an OOC store
-   *   implementation) that should be used for execution.
-   *
-   * @return std::string The data format identifier
-   * @note The virtual getDataFormat() (from the base store) intentionally returns "" for an
-   *       EmptyDataStore — do NOT override it here. See memoryUsage() for the rationale.
+   * getDataFormat() remains empty. Output actions use it to select execution
+   * storage, while this method exposes preflight planning without changing that selection.
    */
   std::string dataFormat() const
   {
@@ -177,14 +146,11 @@ public:
   }
 
   /**
-   * @brief Returns the in-core RAM this placeholder represents: the logical byte size for an
-   * in-core array, or 0 for a disk-backed array (whose primary storage lives on disk, so it
-   * consumes no in-core RAM). CreateArray stamps a non-empty format only for disk-backed arrays,
-   * so an empty m_DataFormat means in-core.
+   * @brief Returns planned in-memory usage in bytes.
+   * @return Logical byte size for in-memory storage, or zero for out-of-core storage.
    *
-   * NOTE: do NOT add a getDataFormat() override here — it would change which store ~12 filters
-   * request for their outputs in execute (they propagate inputArray.getDataFormat() into a
-   * CreateArrayAction during preflight, and the base getDataFormat() intentionally returns "").
+   * getDataFormat() intentionally stays empty so preflight output actions keep
+   * their execution storage selection. dataFormat() exposes the planned format.
    */
   uint64 memoryUsage() const override
   {
@@ -192,9 +158,9 @@ public:
   }
 
   /**
-   * @brief Throws an exception because this should never be called. The
-   * EmptyDataStore class contains no data other than its target size.
-   * @param tupleShape
+   * @brief Rejects tuple-shape changes.
+   * @param tupleShape Requested tuple shape.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void resizeTuples(const ShapeType& tupleShape) override
   {
@@ -202,10 +168,10 @@ public:
   }
 
   /**
-   * @brief Throws an exception because this should never be called. The
-   * EmptyDataStore class contains no data other than its target getSize.
-   * @param index
-   * @return value_type
+   * @brief Rejects value access.
+   * @param index Flat value index.
+   * @return Does not return.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   value_type getValue(usize index) const override
   {
@@ -213,10 +179,10 @@ public:
   }
 
   /**
-   * @brief Throws an exception because this should never be called. The
-   * EmptyDataStore class contains no data other than its target getSize.
-   * @param index
-   * @param value
+   * @brief Rejects value writes.
+   * @param index Flat value index.
+   * @param value Value to store.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void setValue(usize index, value_type value) override
   {
@@ -224,13 +190,10 @@ public:
   }
 
   /**
-   * @brief Always returns an invalid Result because EmptyDataStore holds no
-   * data. EmptyDataStore is a metadata-only placeholder used during preflight;
-   * bulk data access is not supported. The store must be replaced with a real
-   * DataStore or OOC store before any data I/O is attempted.
-   * @param startIndex Unused
-   * @param buffer Unused
-   * @return Invalid Result<> — always.
+   * @brief Rejects bulk reads.
+   * @param startIndex First requested flat value index.
+   * @param buffer Destination buffer.
+   * @return Error because this store has no values.
    */
   Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
   {
@@ -239,13 +202,10 @@ public:
   }
 
   /**
-   * @brief Always returns an invalid Result because EmptyDataStore holds no
-   * data. EmptyDataStore is a metadata-only placeholder used during preflight;
-   * bulk data access is not supported. The store must be replaced with a real
-   * DataStore or OOC store before any data I/O is attempted.
-   * @param startIndex Unused
-   * @param buffer Unused
-   * @return Invalid Result<> — always.
+   * @brief Rejects bulk writes.
+   * @param startIndex First requested flat value index.
+   * @param buffer Source buffer.
+   * @return Error because this store has no values.
    */
   Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
   {
@@ -254,12 +214,9 @@ public:
   }
 
   /**
-   * @brief Returns an empty vector because EmptyDataStore holds no data.
-   * EmptyDataStore is a metadata-only placeholder used during preflight and
-   * bulk data access is not supported — the store must be replaced with a
-   * real DataStore or out-of-core store before extent reads are attempted.
-   * @param extent Unused
-   * @return Empty std::vector<T>
+   * @brief Returns no extent values.
+   * @param extent Requested tuple-space extent.
+   * @return Empty value vector because this store has no values.
    */
   std::vector<T> readExtent(const Extent& extent) const override
   {
@@ -267,10 +224,10 @@ public:
   }
 
   /**
-   * @brief Rejects caller-buffer extent reads because this metadata-only store has no data.
-   * @param extent Unused tuple-space extent.
-   * @param destination Unused destination span.
-   * @throws std::runtime_error Always.
+   * @brief Rejects caller-buffer extent reads.
+   * @param extent Requested tuple-space extent.
+   * @param destination Destination buffer.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
   {
@@ -280,23 +237,23 @@ public:
   }
 
   /**
-   * @brief No-op because EmptyDataStore holds no data. Extent writes against
-   * an EmptyDataStore are silently dropped; the store must be replaced with
-   * a real DataStore or out-of-core store before meaningful writes are
-   * attempted.
-   * @param extent Unused
-   * @param data Unused
+   * @brief Ignores extent writes.
+   * @param extent Requested tuple-space extent.
+   * @param data Source values.
+   *
+   * Preflight writes have no values to modify. Execution replaces this store
+   * before meaningful data access.
    */
   void writeExtent(const Extent& extent, nonstd::span<const T> data) override
   {
-    // No-op: EmptyDataStore is a metadata-only placeholder.
+    // Preflight metadata stores do not retain values.
   }
 
   /**
-   * @brief Throws an exception because this should never be called. The
-   * EmptyDataStore class contains no data other than its target getSize.
-   * @param index
-   * @return value_type
+   * @brief Rejects bounds-checked value access.
+   * @param index Flat value index.
+   * @return Does not return.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   value_type at(usize index) const override
   {
@@ -304,9 +261,10 @@ public:
   }
 
   /**
-   * @brief Adds value to value at index (equivalent to +=)
-   * @param index
-   * @param value
+   * @brief Rejects value addition.
+   * @param index Flat value index.
+   * @param value Value to add.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void add(usize index, value_type value) override
   {
@@ -314,9 +272,10 @@ public:
   }
 
   /**
-   * @brief Subtracts value to value at index (equivalent to -=)
-   * @param index
-   * @param value
+   * @brief Rejects value subtraction.
+   * @param index Flat value index.
+   * @param value Value to subtract.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void sub(usize index, value_type value) override
   {
@@ -324,9 +283,10 @@ public:
   }
 
   /**
-   * @brief Multiplies value at index by value (equivalent to *=)
-   * @param index
-   * @param value
+   * @brief Rejects value multiplication.
+   * @param index Flat value index.
+   * @param value Multiplier.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void mul(usize index, value_type value) override
   {
@@ -334,9 +294,10 @@ public:
   }
 
   /**
-   * @brief Divides value at index by value (equivalent to /=)
-   * @param index
-   * @param value
+   * @brief Rejects value division.
+   * @param index Flat value index.
+   * @param value Divisor.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void div(usize index, value_type value) override
   {
@@ -344,9 +305,10 @@ public:
   }
 
   /**
-   * @brief Takes remainder of value at index divided by value (equivalent to %=)
-   * @param index
-   * @param value
+   * @brief Rejects remainder operations.
+   * @param index Flat value index.
+   * @param value Divisor.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void rem(usize index, value_type value) override
   {
@@ -354,9 +316,10 @@ public:
   }
 
   /**
-   * @brief Bitwise AND of value at index with value (equivalent to &=)
-   * @param index
-   * @param value
+   * @brief Rejects bitwise AND operations.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void bitwiseAND(usize index, value_type value) override
   {
@@ -364,9 +327,10 @@ public:
   }
 
   /**
-   * @brief Bitwise OR of value at index with value (equivalent to |=)
-   * @param index
-   * @param value
+   * @brief Rejects bitwise OR operations.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void bitwiseOR(usize index, value_type value) override
   {
@@ -374,9 +338,10 @@ public:
   }
 
   /**
-   * @brief Bitwise XOR of value at index with value (equivalent to ^=)
-   * @param index
-   * @param value
+   * @brief Rejects bitwise XOR operations.
+   * @param index Flat value index.
+   * @param value Operand.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void bitwiseXOR(usize index, value_type value) override
   {
@@ -384,9 +349,10 @@ public:
   }
 
   /**
-   * @brief Bitwise left shift of value at index with value (equivalent to <<=)
-   * @param index
-   * @param value
+   * @brief Rejects left-shift operations.
+   * @param index Flat value index.
+   * @param value Shift count.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void bitwiseLShift(usize index, value_type value) override
   {
@@ -394,9 +360,10 @@ public:
   }
 
   /**
-   * @brief Bitwise right shift of value at index with value (equivalent to >>=)
-   * @param index
-   * @param value
+   * @brief Rejects right-shift operations.
+   * @param index Flat value index.
+   * @param value Shift count.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void bitwiseRShift(usize index, value_type value) override
   {
@@ -404,9 +371,9 @@ public:
   }
 
   /**
-   * @brief Swaps bytes of value at index
-   * @param index
-   * @param value
+   * @brief Rejects byte-order changes.
+   * @param index Flat value index.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void byteSwap(usize index) override
   {
@@ -414,9 +381,10 @@ public:
   }
 
   /**
-   * @brief Swaps values at index1 and index2
-   * @param index1
-   * @param index2
+   * @brief Rejects value swaps.
+   * @param index1 First flat value index.
+   * @param index2 Second flat value index.
+   * @throws std::runtime_error Always, because this store has no values.
    */
   void swap(usize index1, usize index2) override
   {
@@ -424,8 +392,8 @@ public:
   }
 
   /**
-   * @brief Returns a deep copy of the data store and all its data.
-   * @return std::unique_ptr<IDataStore>
+   * @brief Makes an independent metadata-store copy.
+   * @return Owning copy of this metadata store.
    */
   std::unique_ptr<IDataStore> deepCopy() const override
   {
@@ -433,8 +401,8 @@ public:
   }
 
   /**
-   * @brief Returns a data store of the same type as this but with default initialized data.
-   * @return std::unique_ptr<IDataStore>
+   * @brief Creates a metadata store with the same shapes.
+   * @return Owning metadata store.
    */
   std::unique_ptr<IDataStore> createNewInstance() const override
   {
@@ -442,9 +410,9 @@ public:
   }
 
   /**
-   * @brief Returns an error because EmptyDataStore cannot write binary files.
-   * @param absoluteFilePath The file path (unused)
-   * @return std::pair<int32, std::string> Error code and message
+   * @brief Rejects binary-file writes.
+   * @param absoluteFilePath Destination file path.
+   * @return Error code and message because this store has no values.
    */
   std::pair<int32, std::string> writeBinaryFile(const std::string& absoluteFilePath) const override
   {
@@ -452,9 +420,9 @@ public:
   }
 
   /**
-   * @brief Returns an error because EmptyDataStore cannot write binary files.
-   * @param outputStream The output stream (unused)
-   * @return std::pair<int32, std::string> Error code and message
+   * @brief Rejects binary-stream writes.
+   * @param outputStream Destination stream.
+   * @return Error code and message because this store has no values.
    */
   std::pair<int32, std::string> writeBinaryFile(std::ostream& outputStream) const override
   {
@@ -462,9 +430,9 @@ public:
   }
 
   /**
-   * @brief Returns an error because EmptyDataStore cannot read HDF5 data.
-   * @param dataset The HDF5 dataset (unused)
-   * @return Result<> Error result
+   * @brief Rejects HDF5 reads.
+   * @param dataset HDF5 dataset to read.
+   * @return Error because this store has no values.
    */
   Result<> readHdf5(const HDF5::DatasetIO& dataset) override
   {
@@ -472,9 +440,9 @@ public:
   }
 
   /**
-   * @brief Returns an error because EmptyDataStore cannot write HDF5 data.
-   * @param dataset The HDF5 dataset (unused)
-   * @return Result<> Error result
+   * @brief Rejects HDF5 writes.
+   * @param dataset HDF5 dataset to write.
+   * @return Error because this store has no values.
    */
   Result<> writeHdf5(HDF5::DatasetIO& dataset) const override
   {

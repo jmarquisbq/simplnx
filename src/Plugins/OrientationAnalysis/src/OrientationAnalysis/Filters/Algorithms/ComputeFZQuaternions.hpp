@@ -13,7 +13,8 @@ namespace nx::core
 {
 
 /**
- * @brief Input paths and options consumed by ComputeFZQuaternions.
+ * @struct ComputeFZQuaternionsInputValues
+ * @brief Identifies fundamental-zone quaternion inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternionsInputValues
 {
@@ -27,16 +28,29 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternionsInputValues
 
 /**
  * @class ComputeFZQuaternions
- * @brief Computes a symmetry-equivalent fundamental-zone quaternion for each input tuple.
+ * @brief Computes a fundamental-zone quaternion for each input tuple.
  *
- * The algorithm dispatches between a parallel contiguous-store path for in-memory arrays and
- * a bounded streaming path for OOC arrays. This removes datastore abstraction from the direct
- * hot loop while preventing per-cell access from loading and evicting disk-backed chunks.
+ * The direct path uses contiguous in-memory buffers when available. The
+ * scanline path uses 65,536-tuple bulk buffers for OOC arrays. This avoids
+ * per-cell OOC reads and bounds local memory.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeFZQuaternions
 {
 public:
+  /**
+   * @brief Initializes fundamental-zone quaternion computation.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and mask use.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeFZQuaternions(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFZQuaternionsInputValues* inputValues);
+
+  /**
+   * @brief Destroys the fundamental-zone quaternion executor.
+   */
   ~ComputeFZQuaternions() noexcept;
 
   ComputeFZQuaternions(const ComputeFZQuaternions&) = delete;
@@ -45,8 +59,11 @@ public:
   ComputeFZQuaternions& operator=(ComputeFZQuaternions&&) noexcept = delete;
 
   /**
-   * @brief Executes the direct or streaming implementation based on the participating datastores.
-   * @return A valid result on success or cancellation, or an error for invalid phase references or bulk I/O failures.
+   * @brief Executes the storage-appropriate implementation.
+   * @pre Cell phase IDs are nonnegative.
+   * @return Success, or an out-of-range phase or bulk-I/O error.
+   *
+   * Cancellation returns success with completed tuple ranges preserved.
    */
   Result<> operator()();
 

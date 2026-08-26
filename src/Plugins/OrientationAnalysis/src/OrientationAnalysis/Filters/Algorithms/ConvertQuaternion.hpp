@@ -29,57 +29,46 @@ struct ORIENTATIONANALYSIS_EXPORT ConvertQuaternionInputValues
 
 /**
  * @class ConvertQuaternion
- * @brief Dispatches quaternion component-order conversion by storage type.
+ * @brief Dispatches quaternion component-order conversion.
  *
- * Contiguous in-memory arrays use a parallel pointer-based implementation. Chunked arrays use
- * fixed-size bulk read/convert/write batches, keeping memory independent of tuple count.
+ * Contiguous arrays use raw pointers. OOC arrays use 65,536-tuple bulk
+ * buffers, keeping local memory independent of tuple count.
  */
 class ORIENTATIONANALYSIS_EXPORT ConvertQuaternion
 {
 public:
   /**
-   * @brief Constructs the quaternion conversion algorithm.
-   * @param dataStructure Data structure containing the input and output arrays.
-   * @param messageHandler Handler used for progress messages.
-   * @param shouldCancel Cancellation flag checked between bounded work blocks.
-   * @param inputValues Conversion parameters that must outlive this object.
+   * @brief Initializes quaternion component-order conversion.
+   * @param dataStructure Provides selected arrays.
+   * @param messageHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and component order.
+   * @pre dataStructure, messageHandler, shouldCancel, and inputValues outlive
+   *      this executor.
    */
   ConvertQuaternion(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, ConvertQuaternionInputValues* inputValues);
 
   /**
-   * @brief Destroys the algorithm object.
+   * @brief Destroys the quaternion conversion executor.
    */
   ~ConvertQuaternion() noexcept;
 
-  /**
-   * @brief Copy construction is disabled because the object stores borrowed references.
-   */
   ConvertQuaternion(const ConvertQuaternion&) = delete;
-
-  /**
-   * @brief Move construction is disabled because the object stores borrowed references.
-   */
   ConvertQuaternion(ConvertQuaternion&&) noexcept = delete;
-
-  /**
-   * @brief Copy assignment is disabled because the object stores borrowed references.
-   */
   ConvertQuaternion& operator=(const ConvertQuaternion&) = delete;
-
-  /**
-   * @brief Move assignment is disabled because the object stores borrowed references.
-   */
   ConvertQuaternion& operator=(ConvertQuaternion&&) noexcept = delete;
 
   /**
-   * @brief Converts every quaternion to the requested component order.
-   * @return A valid result on success or a datastore/type error.
+   * @brief Converts every quaternion to the selected component order.
+   * @return Success, or a type or bulk-I/O error.
+   *
+   * Cancellation returns success with completed blocks preserved.
    */
   Result<> operator()();
 
   /**
-   * @brief Returns the shared cancellation flag.
-   * @return Reference to the cancellation flag supplied by the filter.
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
    */
   const std::atomic_bool& getCancel();
 

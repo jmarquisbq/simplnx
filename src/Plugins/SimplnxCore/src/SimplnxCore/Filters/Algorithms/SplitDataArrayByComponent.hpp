@@ -14,7 +14,7 @@ namespace nx::core
 {
 /**
  * @struct SplitDataArrayByComponentInputValues
- * @brief Defines the source array, output suffix, and ordered components extracted by the algorithm.
+ * @brief Stores the source, output suffix, and ordered component indexes.
  */
 struct SIMPLNXCORE_EXPORT SplitDataArrayByComponentInputValues
 {
@@ -27,23 +27,32 @@ struct SIMPLNXCORE_EXPORT SplitDataArrayByComponentInputValues
  * @class SplitDataArrayByComponent
  * @brief Splits selected components from a multi-component array into scalar arrays.
  *
- * Contiguous in-memory arrays use a parallel direct path. Out-of-core arrays use bounded
- * bulk transfers that read each interleaved input chunk once and stream scalar outputs.
+ * Each output name appends the suffix and source component index. Concrete
+ * in-memory stores use parallel raw pointers. Other stores read one interleaved
+ * input chunk and then write each selected scalar output. The transfer targets
+ * 65,536 input values but always retains one complete tuple. A tuple with more
+ * components can therefore exceed that target.
+ *
+ * Cancellation can stop between direct blocks, input chunks, or component
+ * writes. Outputs can contain different completed ranges. Bulk-I/O errors are
+ * checked, but prior output writes are not restored.
  */
 class SIMPLNXCORE_EXPORT SplitDataArrayByComponent
 {
 public:
   /**
-   * @brief Constructs the algorithm with its data structure, messaging, cancellation, and input values.
-   * @param dataStructure Data structure containing the input and preflight-created output arrays.
-   * @param messageHandler Handler used for progress messages.
-   * @param shouldCancel Cancellation flag checked during execution.
-   * @param inputValues Values defining the input array and components to extract.
+   * @brief Initializes the component-split algorithm.
+   * @param dataStructure Contains the input and output arrays.
+   * @param messageHandler Preserves the common constructor signature.
+   * @param shouldCancel Signals cancellation between work blocks.
+   * @param inputValues Selects input, suffix, and components.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   SplitDataArrayByComponent(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, SplitDataArrayByComponentInputValues* inputValues);
 
   /**
-   * @brief Destroys the algorithm.
+   * @brief Destroys the component-split algorithm.
    */
   ~SplitDataArrayByComponent() noexcept;
 
@@ -53,15 +62,15 @@ public:
   SplitDataArrayByComponent& operator=(SplitDataArrayByComponent&&) noexcept = delete;
 
   /**
-   * @brief Executes the storage-appropriate split implementation.
-   * @return A valid result on success or cancellation, or the first bulk-transfer error.
+   * @brief Copies selected components to scalar output arrays.
+   * @return Input or output bulk-I/O result.
+   * @pre Every selected component indexes the source component shape.
+   * @pre Each preflight-created output has the source tuple shape and value type.
+   *
+   * Cancellation returns success and does not roll back completed output ranges.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns the execution cancellation flag.
-   * @return The cancellation flag supplied at construction.
-   */
   const std::atomic_bool& getCancel();
 
 private:

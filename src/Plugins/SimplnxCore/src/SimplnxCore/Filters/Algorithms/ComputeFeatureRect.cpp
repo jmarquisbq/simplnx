@@ -13,11 +13,10 @@ using namespace nx::core;
 
 namespace
 {
-/// Keeps cell-level memory fixed while amortizing out-of-core datastore access.
+// Each bulk read contains 65,536 Feature IDs and keeps cell staging memory fixed.
 constexpr usize k_ChunkTuples = 65536;
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureRect::ComputeFeatureRect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeatureRectInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -26,16 +25,13 @@ ComputeFeatureRect::ComputeFeatureRect(DataStructure& dataStructure, const IFilt
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureRect::~ComputeFeatureRect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeFeatureRect::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureRect::operator()()
 {
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
@@ -59,10 +55,7 @@ Result<> ComputeFeatureRect::operator()()
 
   std::vector<usize> imageDims = featureIdsStore.getTupleShape();
 
-  /*
-   * Array dimension ordering is flipped compared to geometry dimension ordering.
-   * We want the geometry dimension ordering, so we are flipping the indices below.
-   */
+  // DataStore tuple shape uses reverse geometry dimension order. Bounds use X, Y, Z order.
   std::reverse(imageDims.rbegin(), imageDims.rend());
 
   const usize xDim = imageDims[0];
@@ -77,6 +70,7 @@ Result<> ComputeFeatureRect::operator()()
   {
     if(getCancel())
     {
+      // Cancellation publishes bounds accumulated before this checkpoint.
       return writeCorners();
     }
 
@@ -92,11 +86,13 @@ Result<> ComputeFeatureRect::operator()()
       const int32 featureId = featureIdsBuffer[chunkIndex];
       if(featureId == 0)
       {
+        // Feature zero is background and has no rectangle output.
         continue;
       }
 
       if(featureId < 0 || static_cast<usize>(featureId) >= numFeatures)
       {
+        // Publish completed bounds before reporting an invalid Feature ID.
         auto writeResult = writeCorners();
         if(writeResult.invalid())
         {

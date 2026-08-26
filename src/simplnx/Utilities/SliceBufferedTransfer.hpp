@@ -15,57 +15,34 @@ namespace nx::core
 {
 
 /**
- * @brief Type-dispatched functor that performs Z-slice buffered tuple transfer for a single DataArray.
+ * @struct SliceBufferedTransferFunctor
+ * @brief Copies neighbor tuples with a three-slice rolling source window.
  *
- * @section ooc_motivation OOC Motivation
- * Morphological fill algorithms (FillBadData, ErodeDilateCoordinationNumber, etc.) use a
- * "neighbors" mapping where each voxel stores the global index of the voxel it should copy
- * data from. When the underlying DataStore is out-of-core (OOC), accessing elements via
- * operator[] triggers chunk load/evict cycles -- one for the source read AND one for the
- * destination write -- for every single voxel. On large datasets this makes the algorithm
- * 100-1000x slower than in-memory.
+ * Face-neighbor morphology copies only from Z-1, Z, or Z+1. Three source
+ * buffers and one destination buffer replace per-element store access with
+ * sequential slice reads and conditional slice writes.
  *
- * @section approach Approach: 3-Slot Rolling Window
- * Because face-neighbor morphological algorithms only ever copy from a source voxel that
- * is within +/-1 Z-slice of the destination, we can exploit this locality:
+ * Buffer memory is four XY slices for each array component. A single-component
+ * 1024 by 1024 float32 array uses approximately 16 MiB. bool uses a raw array
+ * because std::vector<bool> cannot supply a contiguous bool span.
  *
- *   1. Maintain a rolling window of 3 source-slice buffers: slot 0 = z-1, slot 1 = z, slot 2 = z+1.
- *   2. For each Z-slice, bulk-read the destination slice into a local buffer.
- *   3. For each voxel in the slice that needs copying, look up the source from the
- *      appropriate slot (already in memory) and copy into the destination buffer.
- *   4. Bulk-write the modified destination slice back.
- *   5. Advance the rolling window: swap slots, read the next z+1 slice.
- *
- * This reduces OOC I/O from O(N) random element accesses to O(dimZ) sequential bulk reads/writes,
- * where each bulk operation transfers an entire slice in one copyIntoBuffer/copyFromBuffer call.
- *
- * @section memory Memory Footprint
- * 4 slices worth of element data: 3 source slots + 1 destination buffer.
- * For a 1024x1024 float32 array, that is approximately 16 MB -- trivial compared to
- * the full volume which could be many GB.
- *
- * @section bool_handling bool Specialization
- * std::vector<bool> is bit-packed and cannot provide a contiguous T* pointer, so
- * BufferType uses std::unique_ptr<bool[]> for bool and std::vector<T> for everything else.
+ * The transfer buffers are bounded, but the caller-owned neighbors vector has
+ * one entry per volume cell. This helper is mutable and not thread-safe.
+ * The rolling window preserves source values from before their destination slices change.
  */
 struct SliceBufferedTransferFunctor
 {
   /**
-   * @brief Buffer type alias that avoids std::vector<bool> bit-packing.
-   *
-   * std::vector<bool> is specialized to use 1 bit per element, which means
-   * data() returns a proxy, not a bool*. The copyIntoBuffer/copyFromBuffer
-   * API requires a contiguous T* span, so we use unique_ptr<bool[]> instead.
-   *
-   * @tparam T The element type of the DataArray being transferred.
+   * @brief Selects a contiguous buffer type, including bool.
+   * @tparam T Specifies the array value type.
    */
   template <typename T>
   using BufferType = std::conditional_t<std::is_same_v<T, bool>, std::unique_ptr<T[]>, std::vector<T>>;
 
   /**
-   * @brief Returns a raw pointer to the underlying buffer data (vector overload).
-   * @tparam T Element type.
-   * @param v The vector buffer.
+   * @brief Gets mutable vector storage.
+   * @tparam T Specifies the element type.
+   * @param v Supplies the vector.
    * @return Pointer to the first element.
    */
   template <typename T>
@@ -75,9 +52,9 @@ struct SliceBufferedTransferFunctor
   }
 
   /**
-   * @brief Returns a raw pointer to the underlying buffer data (unique_ptr overload).
-   * @tparam T Element type.
-   * @param p The unique_ptr buffer (used for bool specialization).
+   * @brief Gets mutable raw-array storage.
+   * @tparam T Specifies the element type.
+   * @param p Supplies the owned array.
    * @return Pointer to the first element.
    */
   template <typename T>
@@ -87,10 +64,10 @@ struct SliceBufferedTransferFunctor
   }
 
   /**
-   * @brief Returns a const raw pointer to the underlying buffer data (const vector overload).
-   * @tparam T Element type.
-   * @param v The vector buffer.
-   * @return Const pointer to the first element.
+   * @brief Gets immutable vector storage.
+   * @tparam T Specifies the element type.
+   * @param v Supplies the vector.
+   * @return Pointer to the first element.
    */
   template <typename T>
   static const T* bufPtr(const std::vector<T>& v)
@@ -99,10 +76,10 @@ struct SliceBufferedTransferFunctor
   }
 
   /**
-   * @brief Returns a const raw pointer to the underlying buffer data (const unique_ptr overload).
-   * @tparam T Element type.
-   * @param p The unique_ptr buffer (used for bool specialization).
-   * @return Const pointer to the first element.
+   * @brief Gets immutable raw-array storage.
+   * @tparam T Specifies the element type.
+   * @param p Supplies the owned array.
+   * @return Pointer to the first element.
    */
   template <typename T>
   static const T* bufPtr(const std::unique_ptr<T[]>& p)
@@ -111,14 +88,10 @@ struct SliceBufferedTransferFunctor
   }
 
   /**
-   * @brief Factory method to create a buffer of the appropriate type for T.
-   *
-   * For bool, allocates a unique_ptr<bool[]> to avoid std::vector<bool> bit-packing.
-   * For all other types, allocates a std::vector<T>.
-   *
-   * @tparam T Element type.
-   * @param size Number of elements to allocate.
-   * @return A BufferType<T> with the requested capacity.
+   * @brief Allocates a contiguous typed buffer.
+   * @tparam T Specifies the element type.
+   * @param size Specifies the element count.
+   * @return Buffer with size elements.
    */
   template <typename T>
   static BufferType<T> makeBuf(usize size)
@@ -134,33 +107,30 @@ struct SliceBufferedTransferFunctor
   }
 
   /**
-   * @brief Performs the Z-slice buffered transfer for a typed DataArray.
+   * @brief Transfers all selected tuples through rolling slice buffers.
+   * @tparam T Specifies the dispatched array value type.
+   * @param dataArray Supplies the array to modify in place.
+   * @param neighbors Maps each destination cell to a global source index, or -1.
+   * @param sliceSize Specifies cells in one XY slice.
+   * @param dimZ Specifies the Z-slice count.
+   * @param shouldCopy Selects mapped destinations to overwrite.
+   * @pre sliceSize and dimZ are nonzero. Their product equals the array tuple count.
+   * @pre neighbors contains at least sliceSize times dimZ entries.
+   * @pre Each nonnegative source is in range and is at most one Z slice from its destination.
+   * @pre shouldCopy contains a callable target and does not throw.
+   * @pre Component and slice-size products fit usize. All bulk store operations succeed.
    *
-   * Iterates through all Z-slices, maintaining a 3-slot rolling source window.
-   * For each destination voxel where neighbors[destIdx] >= 0 and shouldCopy(destIdx)
-   * is true, copies the full tuple (all components) from the source location into
-   * the destination buffer. Modified destination slices are written back via
-   * copyFromBuffer.
-   *
-   * @tparam T The element type of the DataArray (dispatched by ExecuteDataFunction).
-   * @param dataArray The DataArray to transfer data within (modified in place).
-   * @param neighbors Global neighbor mapping: neighbors[i] is the global linear index
-   *   of the source voxel for destination voxel i, or -1 if no copy is needed.
-   * @param sliceSize Number of voxels per Z-slice (dimX * dimY).
-   * @param dimZ Number of Z-slices in the volume.
-   * @param shouldCopy Predicate returning true if the voxel at the given global index
-   *   should be overwritten. Allows callers to skip voxels that are already valid.
+   * The function discards bulk-I/O Result values and cannot report a storage failure.
+   * Modified slices are written once. Unmodified slices remain unchanged.
    */
   template <typename T>
   void operator()(IDataArray& dataArray, const std::vector<int64>& neighbors, usize sliceSize, usize dimZ, const std::function<bool(usize)>& shouldCopy)
   {
     auto& store = dynamic_cast<DataArray<T>&>(dataArray).getDataStoreRef();
     const usize numComp = store.getNumberOfComponents();
-    // sliceValues = number of T elements per Z-slice (voxels * components)
     const usize sliceValues = sliceSize * numComp;
 
-    // Rolling source window: slot 0 = z-1, slot 1 = z, slot 2 = z+1
-    // These three buffers are reused across all Z iterations via std::swap
+    // Slots zero, one, and two contain Z-1, Z, and Z+1. Reuse them for all slices.
     std::array<BufferType<T>, 3> srcSlices;
     for(auto& s : srcSlices)
     {
@@ -168,10 +138,9 @@ struct SliceBufferedTransferFunctor
     }
     auto destSlice = makeBuf<T>(sliceValues);
 
-    // Lambda to bulk-read one Z-slice from the OOC store into a specific slot
     auto readSlice = [&](usize z, usize slot) { store.copyIntoBuffer(z * sliceValues, nonstd::span<T>(bufPtr(srcSlices[slot]), sliceValues)); };
 
-    // Prime the rolling window: read z=0 into slot 1 (current), z=1 into slot 2 (next)
+    // Prime the current and next slots.
     readSlice(0, 1);
     if(dimZ > 1)
     {
@@ -180,18 +149,17 @@ struct SliceBufferedTransferFunctor
 
     for(usize zIdx = 0; zIdx < dimZ; zIdx++)
     {
-      // Advance the rolling window by shifting slot contents down
       if(zIdx > 0)
       {
-        std::swap(srcSlices[0], srcSlices[1]); // Old "current" becomes "previous"
-        std::swap(srcSlices[1], srcSlices[2]); // Old "next" becomes "current"
+        std::swap(srcSlices[0], srcSlices[1]);
+        std::swap(srcSlices[1], srcSlices[2]);
         if(zIdx + 1 < dimZ)
         {
-          readSlice(zIdx + 1, 2); // Read the new "next" slice
+          readSlice(zIdx + 1, 2);
         }
       }
 
-      // Bulk-read the destination slice so we can modify it in memory
+      // Preserve tuples that have no selected source.
       store.copyIntoBuffer(zIdx * sliceValues, nonstd::span<T>(bufPtr(destSlice), sliceValues));
 
       bool modified = false;
@@ -201,20 +169,18 @@ struct SliceBufferedTransferFunctor
         const int64 srcIdx = neighbors[destIdx];
         if(srcIdx >= 0 && shouldCopy(destIdx))
         {
-          // Determine which rolling-window slot contains the source data
           const usize srcZ = static_cast<usize>(srcIdx) / sliceSize;
           const usize srcInSlice = static_cast<usize>(srcIdx) % sliceSize;
-          usize srcSlot = 1; // Same Z-slice (most common case)
+          usize srcSlot = 1;
           if(srcZ < zIdx)
           {
-            srcSlot = 0; // Source is in previous Z-slice
+            srcSlot = 0;
           }
           else if(srcZ > zIdx)
           {
-            srcSlot = 2; // Source is in next Z-slice
+            srcSlot = 2;
           }
 
-          // Copy all components of the source tuple into the destination buffer
           for(usize c = 0; c < numComp; c++)
           {
             bufPtr(destSlice)[inSlice * numComp + c] = bufPtr(srcSlices[srcSlot])[srcInSlice * numComp + c];
@@ -223,7 +189,7 @@ struct SliceBufferedTransferFunctor
         }
       }
 
-      // Only write back if at least one tuple was modified (avoids unnecessary OOC writes)
+      // Avoid a disk-backed write when the destination slice did not change.
       if(modified)
       {
         store.copyFromBuffer(zIdx * sliceValues, nonstd::span<const T>(bufPtr(destSlice), sliceValues));
@@ -233,17 +199,15 @@ struct SliceBufferedTransferFunctor
 };
 
 /**
- * @brief Convenience function to perform slice-buffered transfer on a single IDataArray.
+ * @brief Dispatches a full-volume mapping to bounded transfer buffers.
+ * @param dataArray Supplies the array to modify in place.
+ * @param neighbors Maps each destination cell to a global source index, or -1.
+ * @param sliceSize Specifies cells in one XY slice.
+ * @param dimZ Specifies the Z-slice count.
+ * @param shouldCopy Selects mapped destinations to overwrite.
  *
- * Dispatches on the array's DataType via ExecuteDataFunction to invoke the typed
- * SliceBufferedTransferFunctor::operator(). This is the primary entry point for
- * algorithms that have a full-volume neighbors mapping and want OOC-safe data transfer.
- *
- * @param dataArray The DataArray to transfer data within (modified in place).
- * @param neighbors Global neighbor mapping: neighbors[i] = source index for voxel i, or -1.
- * @param sliceSize Number of voxels per Z-slice (dimX * dimY).
- * @param dimZ Number of Z-slices.
- * @param shouldCopy Predicate: return true if the voxel at the given index should be overwritten.
+ * See SliceBufferedTransferFunctor for preconditions. The neighbor map remains
+ * proportional to the complete volume even though transfer buffers are slice-bounded.
  */
 inline void SliceBufferedTransfer(IDataArray& dataArray, const std::vector<int64>& neighbors, usize sliceSize, usize dimZ, const std::function<bool(usize)>& shouldCopy)
 {
@@ -251,37 +215,31 @@ inline void SliceBufferedTransfer(IDataArray& dataArray, const std::vector<int64
 }
 
 /**
- * @brief Type-dispatched functor that transfers a single Z-slice of a DataArray using per-slice marks.
+ * @struct SliceTransferOneZFunctor
+ * @brief Transfers one destination slice from lazily loaded source slices.
  *
- * @section ooc_motivation OOC Motivation
- * SliceBufferedTransferFunctor processes the entire volume in one call and requires
- * a full-volume neighbors array. Some algorithms instead process one Z-slice at a time
- * (e.g., iterative morphological passes), building a per-slice marks array of size
- * sliceSize rather than a global neighbors array of size totalVoxels. This functor
- * supports that per-slice approach while maintaining OOC-safe bulk I/O.
- *
- * @section approach Approach: On-Demand Lazy Loading
- * For each voxel in the destination Z-slice where sliceMarks[inSlice] >= 0:
- *   1. Compute which Z-slice the source voxel is on (must be within +/-1 of destZ).
- *   2. Lazily load that source Z-slice if not already in memory.
- *   3. Copy the tuple from the source buffer into the destination buffer.
- *   4. Bulk-write the destination slice back when done.
- *
- * @section memory Memory Footprint
- * At most 4 slices: 1 destination + up to 3 source (z-1, z, z+1), each loaded on demand.
+ * This variant accepts a slice-sized mark array for iterative algorithms. It
+ * loads only the required Z-1, Z, and Z+1 source slices. Working memory is one
+ * destination slice plus at most three source slices. The functor is not thread-safe.
+ * Source values reflect the store state at the start of this one-slice call.
  */
 struct SliceTransferOneZFunctor
 {
   /**
-   * @brief Transfers tuples for a single Z-slice based on per-slice marks.
+   * @brief Transfers marked tuples for one Z slice.
+   * @tparam T Specifies the dispatched array value type.
+   * @param dataArray Supplies the array to modify in place.
+   * @param sliceMarks Maps each destination position to a global source index, or -1.
+   * @param sliceSize Specifies cells in one XY slice.
+   * @param destZ Identifies the destination Z slice.
+   * @param dimZ Specifies the total Z-slice count.
+   * @pre sliceSize and dimZ are nonzero. destZ is less than dimZ.
+   * @pre sliceMarks contains sliceSize entries.
+   * @pre Each source is valid and is on destZ-1, destZ, or destZ+1.
+   * @pre The array contains at least sliceSize times dimZ tuples.
+   * @pre Component and slice-size products fit usize. All bulk store operations succeed.
    *
-   * @tparam T The element type of the DataArray (dispatched by ExecuteDataFunction).
-   * @param dataArray The DataArray to transfer data within (modified in place).
-   * @param sliceMarks Per-slice marks of size sliceSize. sliceMarks[inSlice] is the global
-   *   linear index of the source voxel, or -1 if no copy is needed for this position.
-   * @param sliceSize Number of voxels per Z-slice (dimX * dimY).
-   * @param destZ The Z-index of the destination slice being processed.
-   * @param dimZ Total number of Z-slices (used for bounds checking).
+   * The function discards bulk-I/O Result values and cannot report a storage failure.
    */
   template <typename T>
   void operator()(IDataArray& dataArray, const std::vector<int64>& sliceMarks, usize sliceSize, usize destZ, usize dimZ)
@@ -291,15 +249,15 @@ struct SliceTransferOneZFunctor
     const usize numComp = store.getNumberOfComponents();
     const usize sliceValues = sliceSize * numComp;
 
-    // Bulk-read the destination slice into a local buffer
+    // Preserve destination tuples that have no source mark.
     auto destBuf = SliceBufferedTransferFunctor::makeBuf<T>(sliceValues);
     store.copyIntoBuffer(destZ * sliceValues, nonstd::span<T>(SliceBufferedTransferFunctor::bufPtr(destBuf), sliceValues));
 
-    // Source slice buffers loaded lazily on demand: slot 0 = z-1, slot 1 = z, slot 2 = z+1
+    // Slots zero, one, and two contain Z-1, Z, and Z+1 when loaded.
     std::array<BufT, 3> srcBufs;
     std::array<bool, 3> srcLoaded = {false, false, false};
 
-    // Lazy-load helper: only reads a source Z-slice the first time it is needed
+    // Load each required source slice at most once.
     auto ensureSrcLoaded = [&](usize slot, usize srcZ) {
       if(!srcLoaded[slot] && srcZ < dimZ)
       {
@@ -315,14 +273,12 @@ struct SliceTransferOneZFunctor
       const int64 srcGlobalIdx = sliceMarks[inSlice];
       if(srcGlobalIdx < 0)
       {
-        continue; // No copy needed for this voxel
+        continue;
       }
 
-      // Determine which Z-slice the source voxel is on and its in-slice offset
       const usize srcZ = static_cast<usize>(srcGlobalIdx) / sliceSize;
       const usize srcInSlice = static_cast<usize>(srcGlobalIdx) % sliceSize;
 
-      // Map source Z to rolling-window slot: 0 = previous, 1 = same, 2 = next
       usize srcSlot = 1;
       if(srcZ < destZ)
       {
@@ -333,10 +289,8 @@ struct SliceTransferOneZFunctor
         srcSlot = 2;
       }
 
-      // Ensure the source slice is loaded before reading from it
       ensureSrcLoaded(srcSlot, srcZ);
 
-      // Copy all components of the source tuple into the destination buffer
       for(usize c = 0; c < numComp; c++)
       {
         SliceBufferedTransferFunctor::bufPtr(destBuf)[inSlice * numComp + c] = SliceBufferedTransferFunctor::bufPtr(srcBufs[srcSlot])[srcInSlice * numComp + c];
@@ -344,7 +298,7 @@ struct SliceTransferOneZFunctor
       modified = true;
     }
 
-    // Only write back if at least one tuple was modified
+    // Avoid a disk-backed write when the destination slice did not change.
     if(modified)
     {
       store.copyFromBuffer(destZ * sliceValues, nonstd::span<const T>(SliceBufferedTransferFunctor::bufPtr(destBuf), sliceValues));
@@ -353,17 +307,14 @@ struct SliceTransferOneZFunctor
 };
 
 /**
- * @brief Convenience function to transfer a single Z-slice of an IDataArray using per-slice marks.
+ * @brief Dispatches one slice-sized mapping to bounded transfer buffers.
+ * @param dataArray Supplies the array to modify in place.
+ * @param sliceMarks Maps destination positions to global source indices, or -1.
+ * @param sliceSize Specifies cells in one XY slice.
+ * @param destZ Identifies the destination Z slice.
+ * @param dimZ Specifies the total Z-slice count.
  *
- * Dispatches on the array's DataType via ExecuteDataFunction to invoke the typed
- * SliceTransferOneZFunctor::operator(). This is the entry point for algorithms that
- * process one Z-slice at a time and maintain a per-slice marks array.
- *
- * @param dataArray The DataArray to transfer data within (modified in place).
- * @param sliceMarks Per-slice marks: sliceMarks[inSlice] = global source index, or -1.
- * @param sliceSize Number of voxels per Z-slice (dimX * dimY).
- * @param destZ The Z-index of the destination slice being processed.
- * @param dimZ Total number of Z-slices (for bounds checking).
+ * See SliceTransferOneZFunctor for preconditions.
  */
 inline void SliceBufferedTransferOneZ(IDataArray& dataArray, const std::vector<int64>& sliceMarks, usize sliceSize, usize destZ, usize dimZ)
 {

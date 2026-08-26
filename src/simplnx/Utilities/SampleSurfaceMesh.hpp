@@ -13,66 +13,82 @@
 
 namespace nx::core
 {
+/**
+ * @struct SampleSurfaceMeshInputValues
+ * @brief Identifies the surface mesh, face labels, and output feature IDs.
+ */
 struct SIMPLNX_EXPORT SampleSurfaceMeshInputValues
 {
   DataPath TriangleGeometryPath;
   DataPath SurfaceMeshFaceLabelsArrayPath;
-  DataPath FeatureIdsArrayPath; // Make sure it's been initialized with zeroes
+  DataPath FeatureIdsArrayPath;
 };
 
 /**
  * @class SampleSurfaceMesh
- * @brief Determines, for every cell of a sampling grid, which enclosed feature
- * (if any) of a triangle surface mesh contains that cell's sample point, using
- * ray-cast point-in-polyhedron tests against each feature's bounding faces.
+ * @brief Assigns each sampling-grid cell to an enclosing surface-mesh feature.
  *
- * The full set of sample points is one point per grid cell, optionally
- * perturbed by a subclass-specific rule (e.g. random uncertainty offsets).
- * Rather than materializing every sample point up front -- an allocation
- * proportional to the total cell count of the sampling grid -- this class
- * streams the point-in-polyhedron test one Z-slice at a time: a subclass
- * reports the grid's dimensions and fills in exactly one slice's worth of
- * points per call, in increasing Z order. Peak memory therefore stays bounded
- * to a single slice regardless of the sampling grid's total size, and the
- * resulting FeatureIds are written back with one bulk copyFromBuffer call per
- * slice instead of one random-access write per cell.
+ * Each cell has one sample point that can include a subclass-specific offset.
+ * The algorithm tests points against feature polyhedra in increasing feature-ID
+ * order. The first enclosing feature wins.
+ *
+ * Point and output working memory is proportional to one XY slice. Face lists
+ * and bounding volumes remain proportional to the triangle mesh. Each completed
+ * slice uses one bulk output write. Slice generation is serial and follows
+ * increasing Z order so stateful generators keep a stable draw sequence.
+ * Mesh preprocessing reads face labels, vertices, and triangles before slice sampling.
+ *
+ * Parallel point tests write disjoint output slots. They also read triangle
+ * geometry concurrently. Generic DataStore access has no concurrent-read guarantee.
+ * Safe execution requires concrete geometry stores with a stronger read contract
+ * or serialized geometry access.
  */
 class SIMPLNX_EXPORT SampleSurfaceMesh
 {
 public:
+  /**
+   * @brief Creates a surface-mesh sampler.
+   * @param dataStructure Supplies input geometry and output arrays.
+   * @param shouldCancel Supplies the cancellation flag.
+   * @param mesgHandler Receives progress messages.
+   *
+   * All three objects must outlive this sampler.
+   */
   SampleSurfaceMesh(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
   virtual ~SampleSurfaceMesh() noexcept;
 
-  SampleSurfaceMesh(const SampleSurfaceMesh&) = delete;            // Copy Constructor Not Implemented
-  SampleSurfaceMesh(SampleSurfaceMesh&&) = delete;                 // Move Constructor Not Implemented
-  SampleSurfaceMesh& operator=(const SampleSurfaceMesh&) = delete; // Copy Assignment Not Implemented
-  SampleSurfaceMesh& operator=(SampleSurfaceMesh&&) = delete;      // Move Assignment Not Implemented
+  SampleSurfaceMesh(const SampleSurfaceMesh&) = delete;
+  SampleSurfaceMesh(SampleSurfaceMesh&&) = delete;
+  SampleSurfaceMesh& operator=(const SampleSurfaceMesh&) = delete;
+  SampleSurfaceMesh& operator=(SampleSurfaceMesh&&) = delete;
 
   /**
-   * @brief execute
-   * @param gridGeom
-   * @return
+   * @brief Samples the configured triangle features into the output array.
+   * @param inputValues Identifies input and output data objects.
+   * @return Valid result, bulk-write error, or feature-ID overflow error.
+   * @pre Face labels have an integer type and two components per triangle.
+   * @pre The output has an integer type and one tuple for each sampling-grid cell.
+   *
+   * Cancellation returns a valid result. The current and later slices remain
+   * unchanged when cancellation stops a slice before its bulk write.
    */
   Result<> execute(SampleSurfaceMeshInputValues& inputValues);
 
   /**
-   * @brief Returns the sampling grid's dimensions (X, Y, Z) in cells. The
-   * base class drives the streaming point-in-polyhedron loop entirely from
-   * this value, so it never needs the full point set in memory at once.
+   * @brief Gets sampling-grid cell dimensions in X, Y, Z order.
+   * @return Sampling-grid dimensions.
+   * @pre Dimension products fit usize.
    */
   virtual SizeVec3 getGridDimensions() const = 0;
 
   /**
-   * @brief Fills slicePoints with the sample point for every cell of Z-slice
-   * zSlice, in row-major (X fastest) order. slicePoints is pre-sized to
-   * getGridDimensions().getX() * getGridDimensions().getY() by the caller;
-   * implementations must fill it by index rather than resize it.
+   * @brief Generates sample points for one Z slice.
+   * @param zSlice Identifies the slice in increasing order.
+   * @param slicePoints Receives points in X-fastest row-major order.
+   * @pre zSlice is less than the grid Z dimension. slicePoints is pre-sized to X times Y.
    *
-   * Called once per slice, strictly in increasing zSlice order. Implementations
-   * that draw from a shared pseudo-random generator must continue that
-   * generator's draw sequence across calls so the overall draw order
-   * reproduces exactly the sequence of a single monolithic full-volume
-   * generation pass.
+   * Fill by index and do not resize the vector. A stateful random generator must
+   * continue its sequence across calls. This preserves the full-volume draw order.
    */
   virtual void generateSlicePoints(usize zSlice, std::vector<Point3Df>& slicePoints) = 0;
 

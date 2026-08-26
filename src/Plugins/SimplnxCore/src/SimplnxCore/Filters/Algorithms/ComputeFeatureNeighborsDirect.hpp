@@ -7,37 +7,41 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
+
 struct ComputeFeatureNeighborsInputValues;
 
 /**
  * @class ComputeFeatureNeighborsDirect
- * @brief In-core algorithm for ComputeFeatureNeighbors using compile-time dimension
- * specialization and per-face surface area accumulation.
+ * @brief Computes feature neighbors with direct resident-store access.
  *
- * Uses Nathan Young's rewritten algorithm with two-stage processing:
- *   Stage 1: Boundary cells (corners, edges, faces) with validity checks
- *   Stage 2: Internal cells (3D only) with all 6 neighbors guaranteed valid
+ * Boundary cells validate present faces. The 3D interior avoids that validity branch. Each face uses
+ * its physical area instead of a uniform area. Float64 map values accumulate shared area without
+ * Kahan compensators, which would add state for every neighbor relationship. The normal dispatcher
+ * selects this path for resident Feature IDs. A forced direct out-of-core run can perform per-element
+ * store access.
  *
- * Accumulates per-face surface areas using precomputed face dimensions rather
- * than a uniform area, fixing a surface area calculation bug from DREAM3D 6.5.
- * Handles 0D/1D/2D/3D geometries via constexpr template specialization.
- *
- * Selected by DispatchAlgorithm when all input arrays are backed by in-memory DataStore.
- *
- * @see ComputeFeatureNeighborsScanline for the out-of-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * @see ComputeFeatureNeighborsScanline.
  */
 class SIMPLNXCORE_EXPORT ComputeFeatureNeighborsDirect
 {
 public:
   /**
-   * @brief Constructs the in-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes the direct feature-neighbor algorithm.
+   * @param dataStructure Contains the ImageGeom, Feature IDs, and outputs.
+   * @param mesgHandler Supplies filter messages.
+   * @param shouldCancel Signals cancellation during the 3D interior sweep.
+   * @param inputValues Selects outputs and identifies required objects.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   ComputeFeatureNeighborsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeFeatureNeighborsInputValues* inputValues);
+  /**
+   * @brief Destroys the direct feature-neighbor algorithm.
+   */
   ~ComputeFeatureNeighborsDirect() noexcept;
 
   ComputeFeatureNeighborsDirect(const ComputeFeatureNeighborsDirect&) = delete;
@@ -46,24 +50,19 @@ public:
   ComputeFeatureNeighborsDirect& operator=(ComputeFeatureNeighborsDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core feature neighbor computation.
+   * @brief Computes direct feature-neighbor output.
+   * @return Success, or a Feature ID range or output-array error.
    *
-   * Uses Nathan Young's two-stage algorithm with compile-time dimension specialization:
-   *   - Stage 1: Process boundary cells (corners, edges, faces) with validity checks
-   *   - Stage 2: Process internal cells with all 6 neighbors guaranteed valid
-   *
-   * Per-face surface areas are computed using precomputed face dimensions rather
-   * than a uniform area, fixing a bug from DREAM3D 6.5.
-   *
-   * @return Result<> with any errors encountered during execution
+   * Cancellation is checked only during the 3D interior sweep. Boundary and output phases do not
+   * inspect cancellation. A cancellation return can preserve partial BoundaryCells output.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                    ///< Reference to the DataStructure containing all arrays
-  const ComputeFeatureNeighborsInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                            ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;                   ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const ComputeFeatureNeighborsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

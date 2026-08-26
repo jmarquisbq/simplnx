@@ -23,7 +23,7 @@ namespace fs = std::filesystem;
 
 namespace
 {
-// -----------------------------------------------------------------------------
+
 void fillDataArray(BoolArray* inputArray)
 {
   usize numComps = inputArray->getNumberOfComponents();
@@ -41,7 +41,6 @@ void fillDataArray(BoolArray* inputArray)
   }
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 void fillDataArray(DataArray<T>* inputArray)
 {
@@ -62,7 +61,6 @@ void fillDataArray(DataArray<T>* inputArray)
   }
 }
 
-// -----------------------------------------------------------------------------
 DataStructure createDataStructure()
 {
   DataStructure dataStructure;
@@ -104,7 +102,6 @@ DataStructure createDataStructure()
   return dataStructure;
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 void TestSplitByType(DataStructure& dataStructure, const std::string& dataType, const DynamicTableInfo::RowType& extractComps = {})
 {
@@ -114,7 +111,7 @@ void TestSplitByType(DataStructure& dataStructure, const std::string& dataType, 
   ShapeType compsToCheck;
 
   Arguments args;
-  // read in the exemplar shift data file
+  // Load the exemplar shift data file.
   args.insertOrAssign(SplitDataArrayByComponentFilter::k_MultiCompArrayPath_Key, std::make_any<DataPath>(arrayPath));
   args.insertOrAssign(SplitDataArrayByComponentFilter::k_Postfix_Key, std::make_any<std::string>("Component"));
   args.insertOrAssign(SplitDataArrayByComponentFilter::k_DeleteOriginal_Key, std::make_any<bool>(false));
@@ -163,7 +160,6 @@ void TestSplitByType(DataStructure& dataStructure, const std::string& dataType, 
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 TEST_CASE("SimplnxCore::SplitDataArrayByComponent", "[SimplnxCore][SplitDataArrayByComponentFilter]")
 {
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));

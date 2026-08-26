@@ -26,25 +26,21 @@ namespace fs = std::filesystem;
 
 namespace
 {
-
-// =============================================================================
-// Hand-built non-square 2D fixture (Nathan Young, PR #1590).
-//
-// Builds a 3x4 mask (shaped per the empty axis) with a 4-voxel top-left
-// connected component and a 2-voxel bottom-right connected component.
-// IdentifySample should keep the larger (4-voxel) region and drop the smaller
-// one. A wrong row-stride in the Empty2D dispatches would either merge the
-// two components or step outside the buffer.
-//
-// Mask (T = true = good, F = false = bad), oriented in the two non-empty axes:
-//   row 0: T T F
-//   row 1: T T F
-//   row 2: F F T
-//   row 3: F F T
-// =============================================================================
+/*
+ * The non-square fixture detects an incorrect row stride in each Empty2D dispatch.
+ * Its 3 by 4 mask has one four-voxel component and one two-voxel component.
+ * The filter must retain only the larger component.
+ * Rows 0 and 1 are `T T F`. Rows 2 and 3 are `F F T`.
+ */
 const DataPath k_NonSquareImagePath = DataPath({"Image"});
 const DataPath k_NonSquareMaskPath = k_NonSquareImagePath.createChildPath("CellData").createChildPath("Mask");
 
+/**
+ * @brief Builds a non-square two-dimensional mask for row-stride tests.
+ * @param dims Image dimensions with exactly one axis of size 1.
+ * @param useConfiguredStore True to create the mask with the configured store factory.
+ * @return A DataStructure with the 3 by 4 component mask.
+ */
 DataStructure CreateNonSquare2DMaskDataStructure(const SizeVec3& dims, bool useConfiguredStore = false)
 {
   DataStructure dataStructure = {};
@@ -68,12 +64,7 @@ DataStructure CreateNonSquare2DMaskDataStructure(const SizeVec3& dims, bool useC
   }
   BoolArray* mask = BoolArray::Create(dataStructure, "Mask", maskStore, cellData->getId());
 
-  const std::array<bool, 12> values = {
-      true,  true,  false, // row 0
-      true,  true,  false, // row 1
-      false, false, true,  // row 2
-      false, false, true   // row 3
-  };
+  const std::array<bool, 12> values = {true, true, false, true, true, false, false, false, true, false, false, true};
   REQUIRE(mask->getNumberOfTuples() == values.size());
   for(usize i = 0; i < values.size(); i++)
   {
@@ -82,6 +73,10 @@ DataStructure CreateNonSquare2DMaskDataStructure(const SizeVec3& dims, bool useC
   return dataStructure;
 }
 
+/**
+ * @brief Creates IdentifySample arguments for the non-square mask fixture.
+ * @return Configured whole-volume arguments without hole filling.
+ */
 Arguments CreateNonSquareArguments()
 {
   Arguments args;
@@ -93,6 +88,10 @@ Arguments CreateNonSquareArguments()
   return args;
 }
 
+/**
+ * @brief Executes IdentifySample and verifies that only the larger component remains.
+ * @param dataStructure Contains the non-square mask to update.
+ */
 void RunIdentifySampleAndCheck(DataStructure& dataStructure)
 {
   IdentifySampleFilter filter;
@@ -104,12 +103,7 @@ void RunIdentifySampleAndCheck(DataStructure& dataStructure)
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
-  const std::array<bool, 12> expected = {
-      true,  true,  false, //
-      true,  true,  false, //
-      false, false, false, //
-      false, false, false  //
-  };
+  const std::array<bool, 12> expected = {true, true, false, true, true, false, false, false, false, false, false, false};
   const DataPath maskPath = k_NonSquareImagePath.createChildPath("CellData").createChildPath("Mask");
   const auto& mask = dataStructure.getDataRefAs<BoolArray>(maskPath);
   REQUIRE(mask.getNumberOfTuples() == expected.size());
@@ -234,13 +228,8 @@ TEST_CASE("SimplnxCore::IdentifySampleFilter: SIMPL Backwards Compatibility", "[
   }
 }
 
-// -----------------------------------------------------------------------------
-// Non-square 2D regression tests (Nathan Young, PR #1590). Exercise each
-// EmptyX/Y/Z 2D dispatch with a 3x4 layout so any wrong row-stride in the
-// flood-fill would merge the two components or step off the end of the buffer.
-// See the comment at CreateNonSquare2DMaskDataStructure for the mask layout
-// and expected output.
-// -----------------------------------------------------------------------------
+// These cases rotate the 3 by 4 fixture through each Empty2D dispatch.
+// An incorrect flood-fill stride merges the components or accesses outside the mask.
 TEST_CASE("SimplnxCore::IdentifySampleFilter: 2D Empty Z Non-Square {3,4,1}", "[SimplnxCore][IdentifySampleFilter]")
 {
   UnitTest::LoadPlugins();

@@ -11,32 +11,22 @@ struct ComputeKMeansInputValues;
 
 /**
  * @class ComputeKMeansDirect
- * @brief In-core algorithm for K-Means clustering using direct per-element array access.
+ * @brief Computes K-Means clusters with direct element access.
  *
- * Uses operator[] for distance computation, cluster assignment, and centroid
- * accumulation. This is optimal when all arrays reside in memory, where operator[]
- * is essentially a pointer dereference.
- *
- * The algorithm iterates:
- *   1. Randomly select k initial centroids from masked data points
- *   2. Assign each point to the nearest centroid (findClusters)
- *   3. Recompute each centroid as the arithmetic mean of its assigned members (findMeans)
- *   4. Repeat steps 2-3 until the centroids stop moving (convergence)
- *
- * Selected by DispatchAlgorithm when all input arrays are backed by in-memory DataStore.
- *
- * @see ComputeKMeansScanline for the out-of-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * Direct access is efficient for resident arrays. A forced direct path uses the
+ * same element access for out-of-core arrays and can cause chunk thrashing.
+ * Centroid recomputation scans the input once for each component.
  */
 class SIMPLNXCORE_EXPORT ComputeKMeansDirect
 {
 public:
   /**
-   * @brief Constructs the in-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes direct K-Means clustering.
+   * @param dataStructure Contains input and output arrays.
+   * @param mesgHandler Receives iteration messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects settings and array paths.
+   * @pre All arguments and the inputValues object outlive this executor.
    */
   ComputeKMeansDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeKMeansInputValues* inputValues);
   ~ComputeKMeansDirect() noexcept;
@@ -47,28 +37,26 @@ public:
   ComputeKMeansDirect& operator=(ComputeKMeansDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core K-Means clustering.
-   * @return Result<> with any errors encountered during execution
+   * @brief Executes K-Means with direct element access.
+   * @return Success, or an invalid-mask or empty-mask error.
+   * @pre The input has at least one tuple. Its component count is positive and fits in Int32.
+   * @pre The cluster count is positive, fits in Int32, and output shapes are compatible.
+   *
+   * This path does not validate these shape preconditions. It does not check
+   * cancellation during centroid selection. Later cancellation returns success
+   * and can leave partial assignments or centroids.
    */
   Result<> operator()();
 
-  /**
-   * @brief Sends a progress message through the filter's message handler.
-   * @param message The progress message text
-   */
   void updateProgress(const std::string& message);
 
-  /**
-   * @brief Returns a reference to the cancellation flag for checking in inner loops.
-   * @return Reference to the atomic bool cancellation flag
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                          ///< Reference to the DataStructure containing all arrays
-  const ComputeKMeansInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;                  ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;         ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const ComputeKMeansInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

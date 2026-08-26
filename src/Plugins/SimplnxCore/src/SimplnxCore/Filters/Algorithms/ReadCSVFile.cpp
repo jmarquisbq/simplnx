@@ -6,12 +6,18 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @brief Sends progress after each additional five percent of rows.
+ * @param lineNumber Specifies the current input row.
+ * @param numberOfTuples Specifies expected rows.
+ * @param threshold Provides and receives the next progress threshold.
+ * @param msgHandler Receives the progress message.
+ */
 void notifyProgress(usize lineNumber, usize numberOfTuples, float32& threshold, const IFilter::MessageHandler& msgHandler)
 {
   const float32 percentCompleted = (static_cast<float32>(lineNumber) / static_cast<float32>(numberOfTuples)) * 100.0f;
   if(percentCompleted > threshold)
   {
-    // Print the status of the import
     msgHandler({IFilter::Message::Type::Info, fmt::format("Importing CSV Data || {:.{}f}% Complete", static_cast<double>(percentCompleted), 1)});
     threshold = threshold + 5.0f;
     if(threshold < percentCompleted)
@@ -57,7 +63,7 @@ Result<> ReadCSVFile::readFile(DataStructure& dataStructure, const std::string& 
     return MakeErrorResult(to_underlying(IssueCodes::FILE_NOT_OPEN), fmt::format("Could not open file for reading: {}", inputFilePath));
   }
 
-  // Skip to the first data line
+  // Position the stream at the first requested data row.
   if(!FileUtilities::CSV::SkipNumberOfLines(in, importStartingRow))
   {
     return MakeErrorResult(to_underlying(IssueCodes::CANNOT_SKIP_TO_LINE), fmt::format("Could not skip to the first line in the file to import ({}).", importStartingRow));

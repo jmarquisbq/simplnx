@@ -19,6 +19,10 @@ class IGridGeometry;
 template <typename T>
 class AbstractDataStore;
 
+/**
+ * @namespace segment_features
+ * @brief Defines neighbor-scheme parameter labels and indexes.
+ */
 namespace segment_features
 {
 inline constexpr StringLiteral k_6NeighborString = "Face Neighbors";
@@ -31,74 +35,88 @@ inline constexpr ChoicesParameter::ValueType k_26NeighborIndex = 1ULL;
 } // namespace segment_features
 
 /**
+ * @class SegmentFeatures
  * @brief Base class for grid segmentation algorithms that share a scanline
  * connected-component-labeling engine.
  *
  * Subclasses provide voxel validity, neighbor similarity, and optional slice
- * preloading. The base engine retains only neighboring label slices in RAM and
- * moves worst-case equivalence/final-label state to temporary record stores
- * when the participating inputs are out-of-core.
+ * preloading. The forward scan keeps two label slices in RAM. OOC input stores
+ * equivalence and final-label state in temporary record stores.
  */
 class SIMPLNX_EXPORT SegmentFeatures
 {
 
 public:
-  /** @brief Binds the shared CCL engine to filter-owned data, cancellation, and messaging. */
+  /**
+   * @brief Creates a shared connected-component-labeling engine.
+   * @param dataStructure Provides subclass input and output arrays.
+   * @param shouldCancel Stops before later slices or resolution chunks when true.
+   * @param mesgHandler Receives phase and periodic-boundary messages.
+   */
   SegmentFeatures(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
 
+  /**
+   * @brief Destroys the non-owning segmentation engine.
+   */
   virtual ~SegmentFeatures();
 
-  SegmentFeatures(const SegmentFeatures&) = delete;            // Copy Constructor Not Implemented
-  SegmentFeatures(SegmentFeatures&&) = delete;                 // Move Constructor Not Implemented
-  SegmentFeatures& operator=(const SegmentFeatures&) = delete; // Copy Assignment Not Implemented
-  SegmentFeatures& operator=(SegmentFeatures&&) = delete;      // Move Assignment Not Implemented
+  SegmentFeatures(const SegmentFeatures&) = delete;
+  SegmentFeatures(SegmentFeatures&&) = delete;
+  SegmentFeatures& operator=(const SegmentFeatures&) = delete;
+  SegmentFeatures& operator=(SegmentFeatures&&) = delete;
 
+  /**
+   * @enum NeighborScheme
+   * @brief Selects face-only or complete 26-neighbor connectivity.
+   */
   enum class NeighborScheme : ChoicesParameter::ValueType
   {
-    Face = 0,
-    FaceEdgeVertex = 1
+    Face = 0,          ///< Uses six face neighbors.
+    FaceEdgeVertex = 1 ///< Uses all face, edge, and vertex neighbors.
   };
 
   /**
    * @brief Segments the grid into features using connected-component labeling.
    *
-   * Processes voxels in Z-Y-X scanline order, streaming one Z-slice at a time so
-   * that memory use stays proportional to a single slice rather than the whole
-   * volume. Subclasses must override isValidVoxel() and areNeighborsSimilar().
+   * Voxels use Z-Y-X order and one rolling label-slice pair. External scratch
+   * stores worst-case equivalence and final-label state for genuine OOC input.
    *
-   * @param gridGeom The grid geometry providing dimensions and neighbor offsets.
-   * @param featureIdsStore The data store to write assigned feature IDs into.
-   * @param usesOutOfCoreInput Requires external equivalence scratch when true;
-   * false permits the explicit in-memory provider fallback for forced-path testing.
-   * @return Result indicating success or an error with a descriptive message.
+   * @param gridGeom Provides dimensions and coordinate topology.
+   * @param featureIdsStore Receives provisional and final Feature IDs.
+   * @param usesOutOfCoreInput Requires external scratch when true. False permits
+   * resident fallback for forced-path tests.
+   * @return Scratch, subclass, or Feature-ID I/O error, or success after cancellation.
+   *
+   * Cancellation can retain provisional or partially resolved Feature IDs.
    */
   Result<> executeCCL(IGridGeometry* gridGeom, AbstractDataStore<int32>& featureIdsStore, bool usesOutOfCoreInput = false);
 
   /**
    * @brief Applies a random permutation to positive feature IDs after segmentation.
-   * @param featureIds Output labels to rewrite; FeatureId zero remains background.
-   * @param totalFeatures Number of generated positive features.
+   * @param featureIds Provides and receives output labels. Feature ID 0 remains background.
+   * @param totalFeatures Specifies generated positive features.
+   *
+   * This method does not check cancellation or return DataStore errors.
    */
   void randomizeFeatureIds(Int32Array* featureIds, uint64 totalFeatures);
 
   /**
-   * @brief The CompareFunctor class is a functor superclass for type-specific
-   * scalar comparators. Subclasses override compare() to test whether the data
-   * values at two neighboring voxels are similar enough to belong to the same
-   * feature; the connected-component labeling algorithm invokes compare()
-   * through this interface during neighbor comparison.
+   * @class CompareFunctor
+   * @brief Defines a type-independent neighbor-comparison interface.
    */
   class CompareFunctor
   {
   public:
+    /**
+     * @brief Destroys the comparison interface.
+     */
     virtual ~CompareFunctor() = default;
 
     /**
-     * @brief Compares the data at two voxel indices to decide whether they
-     * belong to the same feature.
-     * @param index First voxel index
-     * @param neighIndex Second (neighbor) voxel index
-     * @return true if the two voxels should be in the same feature
+     * @brief Tests whether two voxels belong to the same feature.
+     * @param index Specifies the first voxel.
+     * @param neighIndex Specifies its neighbor.
+     * @return False by default.
      */
     virtual bool compare(int64 index, int64 neighIndex)
     {
@@ -107,32 +125,30 @@ public:
   };
 
   /**
-   * @brief Can this voxel be a feature member? (mask + phase check, NO featureId check)
-   * Default returns true (all voxels are valid).
-   * @param point Linear voxel index
-   * @return true if this voxel can participate in segmentation
+   * @brief Tests whether one voxel can belong to a feature.
+   * @param point Specifies the flat voxel index.
+   * @return True by default.
    */
   virtual bool isValidVoxel(int64 point) const;
 
   /**
-   * @brief Should these two adjacent voxels be in the same feature? (data comparison only)
-   * Default returns false (no voxels are similar).
-   * @param point1 First voxel index
-   * @param point2 Second voxel index
-   * @return true if the two voxels should be grouped together
+   * @brief Tests whether two adjacent voxels belong to the same feature.
+   * @param point1 Specifies the first flat voxel index.
+   * @param point2 Specifies the second flat voxel index.
+   * @return False by default.
    */
   virtual bool areNeighborsSimilar(int64 point1, int64 point2) const;
 
   /**
-   * @brief Called by executeCCL at the start of each Z-slice to allow subclasses
-   * to pre-load input data into local buffers, eliminating per-element OOC overhead
-   * during neighbor comparisons.
+   * @brief Prepares subclass data for one Z slice.
    *
-   * Default implementation does nothing.
-   * @param iz Current Z-slice index.
-   * @param dimX X dimension of the grid.
-   * @param dimY Y dimension of the grid.
-   * @param dimZ Z dimension of the grid.
+   * Subclasses can load bounded input buffers before neighbor comparisons. The
+   * default implementation performs no work.
+   * @param iz Specifies the current Z index.
+   * @param dimX Specifies X cells.
+   * @param dimY Specifies Y cells.
+   * @param dimZ Specifies Z cells.
+   * @return Subclass preparation error, or success.
    */
   virtual Result<> prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ);
 

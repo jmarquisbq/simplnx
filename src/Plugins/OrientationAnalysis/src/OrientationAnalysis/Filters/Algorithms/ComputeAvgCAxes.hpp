@@ -10,46 +10,47 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeAvgCAxes algorithm.
+ * @struct ComputeAvgCAxesInputValues
+ * @brief Identifies average c-axis inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeAvgCAxesInputValues
 {
-  DataPath QuatsArrayPath;             ///< Cell-level Float32 quaternions (4 components)
-  DataPath FeatureIdsArrayPath;        ///< Cell-level Int32 feature ID per voxel
-  DataPath CellPhasesArrayPath;        ///< Cell-level Int32 phase index per voxel
-  DataPath CellFeatureDataPath;        ///< Feature-level AttributeMatrix path
-  DataPath AvgCAxesArrayPath;          ///< Output: Feature-level Float32 average c-axis (3 components)
-  DataPath CrystalStructuresArrayPath; ///< Ensemble-level UInt32 crystal structure Laue classes
+  DataPath QuatsArrayPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath CellFeatureDataPath;
+  DataPath AvgCAxesArrayPath;
+  DataPath CrystalStructuresArrayPath;
 };
 
 /**
  * @class ComputeAvgCAxes
- * @brief Computes the average crystallographic c-axis direction for each Feature
- *        in the sample reference frame.
+ * @brief Computes one average crystallographic c axis for each feature.
  *
- * For each voxel belonging to a Feature, the quaternion is converted to an
- * orientation matrix, transposed (passive to active), and multiplied by the
- * <001> c-axis direction to obtain the c-axis in the sample frame. A running
- * average is maintained per Feature with sign flipping to keep the accumulated
- * directions in the same hemisphere.
+ * The executor rotates [001] from the crystal frame into the sample frame.
+ * It flips antiparallel vectors before adding each feature contribution.
  *
- * Only Hexagonal-High (6/mmm) and Hexagonal-Low (6/m) Laue classes are
- * supported; non-hexagonal phases produce NaN output values.
- *
- * ## OOC Optimization
- *
- * Cell-level arrays (featureIds, phases, quats) are read in chunks of 4096
- * tuples via `copyIntoBuffer()`. Ensemble-level crystal structures and
- * feature-level avgCAxes are cached entirely in local `std::vector`s.
- * The final averaged result is written back to the DataStore in a single
- * `copyFromBuffer()` call. This eliminates per-element virtual dispatch
- * overhead that causes severe performance degradation when data is stored
- * out-of-core in chunked format.
+ * Cell arrays are read in 4,096-tuple chunks. The feature output stays local
+ * because feature IDs access it in random order. This avoids OOC chunk
+ * thrashing. The executor writes the completed cache once.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeAvgCAxes
 {
 public:
+  /**
+   * @brief Initializes average c-axis computation.
+   * @param dataStructure Provides the selected arrays.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeAvgCAxes(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeAvgCAxesInputValues* inputValues);
+
+  /**
+   * @brief Destroys the average c-axis executor.
+   */
   ~ComputeAvgCAxes() noexcept;
 
   ComputeAvgCAxes(const ComputeAvgCAxes&) = delete;
@@ -58,8 +59,12 @@ public:
   ComputeAvgCAxes& operator=(ComputeAvgCAxes&&) noexcept = delete;
 
   /**
-   * @brief Executes the average c-axis computation using chunked bulk I/O.
-   * @return Result<> with any errors or warnings (e.g., non-hexagonal phases).
+   * @brief Computes feature-average c axes.
+   * @return An error if no hexagonal phase exists, or a warning for skipped
+   *         non-hexagonal phases.
+   *
+   * Cancellation returns the current result without writing the local output
+   * cache. Current bulk-I/O Result values are not inspected.
    */
   Result<> operator()();
 

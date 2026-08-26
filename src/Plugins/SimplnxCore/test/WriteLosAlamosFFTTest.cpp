@@ -107,16 +107,16 @@ std::vector<char> readIn(fs::path filePath)
 
   if(file)
   {
-    // get file size
+    // Read the output file size.
     file.seekg(0, std::ios::end);
     std::streampos length = file.tellg();
     file.seekg(0, std::ios::beg);
 
-    // read whole file into a vector
+    // Read the complete file into a byte vector.
     std::vector<char> contents(length); // act as a buffer
     file.read(contents.data(), length);
 
-    // build string from psuedo-buffer
+    // Build a string from the byte buffer.
     return contents;
   }
   return {};
@@ -152,15 +152,14 @@ TEST_CASE("SimplnxCore::WriteLosAlamosFFTFilter: Valid Filter Execution", "[Simp
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel1(nx::core::unit_test::k_TestFilesDir, "LosAlamosFFTExemplar.tar.gz", "LosAlamosFFTExemplar.txt");
 
-  // Utilize the 6.6 Binary Feature Phases test file to conserve space
+  // Reuse the compact binary feature-phases fixture.
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/bin_feature_phases/6_6_find_feature_phases_binary.dream3d", unit_test::k_TestFilesDir)));
 
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     WriteLosAlamosFFTFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(WriteLosAlamosFFTFilter::k_OutputFile_Key, std::make_any<FileSystemPathParameter::ValueType>(writtenFilePath));
 
     args.insertOrAssign(WriteLosAlamosFFTFilter::k_ImageGeomPath, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100})));
@@ -168,11 +167,9 @@ TEST_CASE("SimplnxCore::WriteLosAlamosFFTFilter: Valid Filter Execution", "[Simp
     args.insertOrAssign(WriteLosAlamosFFTFilter::k_CellEulerAnglesArrayPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100, Constants::k_EbsdScanData, Constants::k_EulerAngles})));
     args.insertOrAssign(WriteLosAlamosFFTFilter::k_CellPhasesArrayPath_Key, std::make_any<DataPath>(DataPath({Constants::k_SmallIN100, Constants::k_EbsdScanData, "BinaryPhases"})));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }

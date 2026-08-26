@@ -13,6 +13,10 @@
 namespace nx::core
 {
 
+/**
+ * @struct PartitionGeometryInputValues
+ * @brief Stores partition-grid settings, paths, IDs, and mask options.
+ */
 struct SIMPLNXCORE_EXPORT PartitionGeometryInputValues
 {
   ChoicesParameter::ValueType PartitioningMode;
@@ -37,19 +41,31 @@ struct SIMPLNXCORE_EXPORT PartitionGeometryInputValues
 
 /**
  * @class PartitionGeometry
- * @brief Dispatches geometry partitioning to an in-memory parallel implementation
- * or a bounded bulk-I/O implementation based on the participating array stores.
+ * @brief Dispatches geometry partitioning from selected array storage.
+ *
+ * Dispatch targets include output IDs, created partition-grid IDs, node vertices,
+ * and an optional vertex mask. RectGrid coordinate arrays are not dispatch targets.
  */
 class SIMPLNXCORE_EXPORT PartitionGeometry
 {
 public:
+  /**
+   * @brief Defines the scalar store used for node coordinates.
+   */
   using VertexStore = AbstractDataStore<IGeometry::SharedVertexList::value_type>;
 
   /**
-   * @brief Constructs the dispatcher with the shared inputs required by both
-   * storage-specific implementations.
+   * @brief Creates a geometry-partition dispatcher.
+   * @param dataStructure Provides input geometry and partition outputs.
+   * @param msgHandler Is retained for the dispatched interface.
+   * @param shouldCancel Stops later initialization or partition work when true.
+   * @param inputValues Specifies validated paths and partition settings. The caller
+   * must keep this object alive for the dispatcher lifetime.
    */
   PartitionGeometry(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, PartitionGeometryInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning dispatcher.
+   */
   ~PartitionGeometry() noexcept;
 
   PartitionGeometry(const PartitionGeometry&) = delete;
@@ -57,6 +73,10 @@ public:
   PartitionGeometry& operator=(const PartitionGeometry&) = delete;
   PartitionGeometry& operator=(PartitionGeometry&&) noexcept = delete;
 
+  /**
+   * @struct PSGeomInfo
+   * @brief Stores dimensions and spatial metadata for a partition grid.
+   */
   struct PSGeomInfo
   {
     USizeVec3 geometryDims;
@@ -66,8 +86,11 @@ public:
   };
 
   /**
-   * @brief Selects Direct for in-memory arrays and Scanline when any relevant
-   * input/output array is out-of-core or OOC execution is forced by a test.
+   * @brief Selects direct or scanline partitioning from dispatch-target storage.
+   * @return Error for an unknown geometry or bulk I/O, or success after cancellation.
+   *
+   * Cancellation or an I/O error can retain partial partition IDs. Created
+   * partition-grid Feature IDs can also remain partial.
    */
   Result<> operator()();
 

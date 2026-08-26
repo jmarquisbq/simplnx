@@ -14,62 +14,45 @@ namespace nx::core
 {
 /**
  * @struct DBSCANInputValues
- * @brief Input parameter bundle for the DBSCAN algorithm.
- *
- * Aggregates all DataPaths and configuration values needed by both the in-core
- * (Direct) and out-of-core (Scanline) variants of DBSCAN clustering.
+ * @brief Collects grid-based DBSCAN settings and DataStructure paths.
  */
 struct SIMPLNXCORE_EXPORT DBSCANInputValues
 {
-  DataPath ClusteringArrayPath;                    ///< Input array containing 2D or 3D coordinate data to cluster
-  DataPath MaskArrayPath;                          ///< Input Bool/UInt8 mask; false elements become outliers (cluster 0)
-  bool UseMask = false;                            ///< Whether MaskArrayPath participates in clustering
-  DataPath FeatureIdsArrayPath;                    ///< Output Int32 array storing per-element cluster assignments
-  float32 Epsilon;                                 ///< Maximum distance for density-connectivity; also determines grid cell size
-  int32 MinPoints;                                 ///< Minimum points in a grid cell for it to be a "core" cell
-  ClusterUtilities::DistanceMetric DistanceMetric; ///< Distance metric used for canMerge checks between grid cells
-  DataPath FeatureAM;                              ///< Output Attribute Matrix resized to (maxCluster + 1) after clustering
-  ChoicesParameter::ValueType ParseOrder;          ///< Order for processing core grids: LowDensityFirst, Random, or SeededRandom
-  std::mt19937_64::result_type Seed;               ///< Random seed for reproducible parse order (SeededRandom mode)
+  DataPath ClusteringArrayPath;
+  DataPath MaskArrayPath;
+  bool UseMask = false;
+  DataPath FeatureIdsArrayPath;
+  float32 Epsilon;
+  int32 MinPoints;
+  ClusterUtilities::DistanceMetric DistanceMetric;
+  DataPath FeatureAM;
+  ChoicesParameter::ValueType ParseOrder;
+  std::mt19937_64::result_type Seed;
 };
 
 /**
  * @class DBSCAN
- * @brief Dispatcher algorithm for grid-based DBSCAN density clustering.
+ * @brief Dispatches grid-based DBSCAN by array storage type.
  *
- * Implements a modified DBSCAN algorithm based on Grid-based DBSCAN (GDCF) from
- * Boonchoo et al. 2019. Data points are binned into a regular grid with cell side
- * length epsilon / sqrt(dims). Grid cells with >= minPoints are "core" cells that
- * form initial clusters. Adjacent grid cells are merged if any pair of points across
- * them has distance < epsilon.
+ * This modified GDCF algorithm follows Boonchoo et al. 2019. It bins 2D or 3D
+ * points into cells with side length epsilon divided by the square root of the
+ * component count. Cells with at least MinPoints seed clusters. Neighbor cells
+ * merge when one cross-cell point pair is closer than epsilon.
  *
- * This class acts as a thin dispatcher that selects between two concrete implementations:
- *
- * - **DBSCANDirect** (in-core): Uses per-element operator[] access for grid construction
- *   and direct random access for canMerge distance checks. Optimal when all arrays
- *   reside in memory.
- *
- * - **DBSCANScanline** (out-of-core / OOC): Uses bounded bulk I/O, external sorting,
- *   disk-backed fixed-width records, and bounded page/tile caches. The genuine OOC
- *   path avoids per-cell DataStore access and resident point/grid-sized allocations.
- *
- * The dispatch decision is made by DispatchAlgorithm<Direct, Scanline>() in
- * AlgorithmDispatch.hpp, which checks the selected coordinates, optional mask,
- * and created FeatureIds target for OOC storage.
- *
- * @see DBSCANDirect
- * @see DBSCANScanline
- * @see AlgorithmDispatch.hpp
+ * The direct path retains point and grid state in RAM. The OOC scanline path
+ * stores point and occupied-grid records in temporary files. Fixed caches and
+ * tiles bound its RAM use. Storage overrides can force either path.
  */
 class SIMPLNXCORE_EXPORT DBSCAN
 {
 public:
   /**
-   * @brief Constructs the dispatcher with all resources needed by either algorithm variant.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes the DBSCAN dispatcher.
+   * @param dataStructure Contains input and output arrays.
+   * @param mesgHandler Receives phase messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects settings and array paths.
+   * @pre All arguments and the inputValues object outlive this executor.
    */
   DBSCAN(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, DBSCANInputValues* inputValues);
   ~DBSCAN() noexcept;
@@ -81,26 +64,34 @@ public:
 
   /**
    * @enum ParseOrder
-   * @brief Controls the order in which core grid cells are processed during initial clustering.
+   * @brief Controls core-grid traversal and border-grid attachment.
+   *
+   * Both random modes shuffle with DBSCANInputValues::Seed. The caller supplies
+   * any policy difference between those modes.
    */
   enum ParseOrder
   {
-    LowDensityFirst, ///< Process lower-density core grids first (deterministic, typically fastest)
-    Random,          ///< Process in non-deterministic random order (time-based seed)
-    SeededRandom     ///< Process in deterministic random order (user-supplied seed)
+    LowDensityFirst, // Uses deterministic ascending grid population.
+    Random,          // Shuffles with the supplied seed.
+    SeededRandom     // Shuffles with the supplied seed.
   };
 
   /**
-   * @brief Dispatches to the Direct or Scanline algorithm based on storage type.
-   * @return Result<> with any errors encountered during execution
+   * @brief Executes the selected DBSCAN implementation.
+   * @return Success or a no-cluster warning, or a validation, mask, storage, or record-I/O error.
+   * @pre Epsilon and MinPoints are positive.
+   * @pre The coordinate array has two or three components.
+   *
+   * Cancellation returns success. Completed Feature ID writes remain, but the
+   * feature AttributeMatrix is not resized after an observed cancellation.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                   ///< Reference to the DataStructure containing all arrays
-  const DBSCANInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;           ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;  ///< Message handler for progress updates
+  DataStructure& m_DataStructure;
+  const DBSCANInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

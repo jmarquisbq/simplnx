@@ -25,6 +25,13 @@ using VertexStore = AbstractDataStore<IGeometry::SharedVertexList::value_type>;
 
 struct LimitBoundAtomicFileFactory;
 
+/**
+ * @struct LimitBoundAtomicFile
+ * @brief Owns one destination and its numbered overflow AtomicFiles.
+ *
+ * Each AtomicFile protects its destination until commit. The list does not
+ * provide one transaction across all overflow files.
+ */
 struct LimitBoundAtomicFile
 {
   friend LimitBoundAtomicFileFactory;
@@ -32,6 +39,10 @@ struct LimitBoundAtomicFile
 public:
   LimitBoundAtomicFile() = delete;
 
+  /**
+   * @brief Adds one numbered overflow destination.
+   * @return New list index or AtomicFile creation error.
+   */
   Result<usize> createOverflowFile()
   {
     const fs::path newPath = fs::path(fmt::format("{}/{}_overflow_{}{}", m_InputPath.parent_path().string(), m_InputPath.stem().string(), m_AtomicFilesList.size(), m_InputPath.extension().string()));
@@ -56,8 +67,17 @@ private:
   }
 };
 
+/**
+ * @struct LimitBoundAtomicFileFactory
+ * @brief Creates a validated first file for an overflow sequence.
+ */
 struct LimitBoundAtomicFileFactory
 {
+  /**
+   * @brief Creates one overflow-sequence owner.
+   * @param inputPath Specifies the first destination.
+   * @return Initialized owner or AtomicFile creation error.
+   */
   static Result<LimitBoundAtomicFile> Create(const fs::path& inputPath)
   {
     LimitBoundAtomicFile outClass(inputPath);
@@ -73,12 +93,27 @@ struct LimitBoundAtomicFileFactory
   }
 };
 
+/**
+ * @brief Writes one triangle range to a binary STL temporary file.
+ * @param filter Receives thread-safe worker warnings.
+ * @param path Identifies the temporary output.
+ * @param endValue Specifies the exclusive last triangle.
+ * @param header Specifies up to 80 header bytes.
+ * @param triangles Provides flat triangle connectivity.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param shouldCancel Stops before later triangles when true.
+ * @param startValue Specifies the first triangle.
+ * @return Header warning or success after completion or cancellation.
+ *
+ * Triangle write failures go to filter and can produce a truncated temporary file.
+ * Most header, seek, count, and close results are not inspected.
+ */
 Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGeometry::MeshIndexType endValue, std::string header, const TriStore& triangles, const VertexStore& vertices,
                            const std::atomic_bool& shouldCancel, const IGeometry::MeshIndexType startValue = 0)
 {
   Result<> result;
 
-  // Create output file writer in binary write out mode to ensure cross-compatibility
+  // Binary mode prevents platform newline conversion.
   FILE* filePtr = fopen(path.string().c_str(), "wb");
 
   if(filePtr == nullptr)
@@ -89,7 +124,7 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
 
   int32 triCount = 0;
 
-  { // Scope header output processing to keep overhead low and increase readability
+  {
     if(header.size() >= 80)
     {
       result = MakeWarningVoidResult(-27884,
@@ -107,12 +142,11 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
 
     // std::string c_str = header;
     memcpy(stlFileHeader.data(), header.data(), headLength);
-    // Return the number of bytes written - which should be 80
     fwrite(stlFileHeader.data(), 1, 80, filePtr);
   }
 
   fwrite(&triCount, 1, 4, filePtr);
-  triCount = 0; // Reset this to Zero. Increment for every triangle written
+  triCount = 0;
 
   size_t totalWritten = 0;
   FloatVec3 vecA = {0.0f, 0.0f, 0.0f};
@@ -126,7 +160,6 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
   nonstd::span<uint16> attrByteCountPtr(reinterpret_cast<uint16*>(data.data() + 48), 2);
   attrByteCountPtr[0] = 0;
 
-  // Loop over all the triangles for this spin
   for(IGeometry::MeshIndexType triangle = startValue; triangle < endValue; ++triangle)
   {
     if(shouldCancel)
@@ -137,7 +170,6 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
       return result;
     }
 
-    // Get the true indices of the 3 nodes
     IGeometry::MeshIndexType nId0 = triangles[triangle * 3];
     IGeometry::MeshIndexType nId1 = triangles[triangle * 3 + 1];
     IGeometry::MeshIndexType nId2 = triangles[triangle * 3 + 2];
@@ -154,7 +186,6 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
     vert3Ptr[1] = static_cast<float>(vertices[nId2 * 3 + 1]);
     vert3Ptr[2] = static_cast<float>(vertices[nId2 * 3 + 2]);
 
-    // Compute the normal
     vecA[0] = vert2Ptr[0] - vert1Ptr[0];
     vecA[1] = vert2Ptr[1] - vert1Ptr[1];
     vecA[2] = vert2Ptr[2] - vert1Ptr[2];
@@ -185,9 +216,24 @@ Result<> SingleWriteOutStl(WriteStlFile* filter, const fs::path& path, const IGe
   return result;
 }
 
+/**
+ * @class SingleOutWrapper
+ * @brief Adapts one single-file range to ParallelTaskAlgorithm.
+ */
 class SingleOutWrapper
 {
 public:
+  /**
+   * @brief Creates one borrowed range writer.
+   * @param filter Receives worker warnings.
+   * @param path Identifies the temporary output.
+   * @param endValue Specifies the exclusive last triangle.
+   * @param header Specifies the STL header.
+   * @param triangles Provides flat triangle connectivity.
+   * @param vertices Provides flat XYZ coordinates.
+   * @param startValue Specifies the first triangle.
+   * @param shouldCancel Stops before later triangles when true.
+   */
   SingleOutWrapper(WriteStlFile* filter, const fs::path& path, const IGeometry::MeshIndexType endValue, std::string header, const TriStore& triangles, const VertexStore& vertices,
                    const IGeometry::MeshIndexType startValue, const std::atomic_bool& shouldCancel)
   : m_Filter(filter)
@@ -200,8 +246,14 @@ public:
   , m_ShouldCancel(shouldCancel)
   {
   }
+  /**
+   * @brief Destroys the borrowed range writer.
+   */
   ~SingleOutWrapper() = default;
 
+  /**
+   * @brief Writes the captured triangle range.
+   */
   void operator()() const
   {
     SingleWriteOutStl(m_Filter, m_Path, m_EndValue, m_Header, m_Triangles, m_Vertices, m_ShouldCancel, m_StartValue);
@@ -219,21 +271,12 @@ private:
 };
 
 /**
- * @brief Buckets every triangle by the grouping label(s) referenced by a per-triangle Int32 array.
+ * @brief Buckets triangles by one or two per-triangle labels.
+ * @param labels Provides feature IDs or part numbers through direct value access.
+ * @return Each distinct label mapped to ascending triangle indexes.
  *
- * MultiWriteStlFileImpl::write() needs, for a given group (feature id or part number), only the
- * triangles that reference that label - and for labels stored with two components per triangle
- * (FeatureIds), which of the two components matched also decides whether the triangle's winding
- * must be reversed for that group. Re-testing every triangle against every unique label to find
- * this membership (as a per-label linear scan would) is O(numLabels * numTriangles). This instead
- * builds every label's triangle-index bucket in a single O(numTriangles) pass before the per-label
- * parallel writers start, so each writer only ever visits the triangles that belong to its own
- * group. Total bucket memory is O(numTriangles) (a triangle is recorded in at most two buckets, one
- * per label component) - acceptable because triangle mesh geometries are always held in-core.
- * Buckets are filled by scanning triangles in ascending index order, so each bucket lists its
- * triangles in the same ascending order each output STL file's facets need to appear in.
- * @param labels Per-triangle label array - FeatureIds (1 or 2 components) or PartNumber (1 component)
- * @return Every distinct label found in the array mapped to its triangle-index bucket
+ * One pass replaces a label-by-triangle search. A triangle enters at most two
+ * buckets, so resident bucket memory scales with triangle count.
  */
 std::unordered_map<int32, std::vector<usize>> BuildTrianglesByLabel(const Int32AbstractDataStore& labels)
 {
@@ -248,7 +291,7 @@ std::unordered_map<int32, std::vector<usize>> BuildTrianglesByLabel(const Int32A
     if(numComps > 1)
     {
       const int32 labelB = labels[triangle * numComps + 1];
-      // Skip labelB when it duplicates labelA so a triangle is never recorded twice in the same bucket
+      // Do not add one triangle twice when both label components match.
       if(labelB != labelA)
       {
         trianglesByLabel[labelB].push_back(triangle);
@@ -259,15 +302,28 @@ std::unordered_map<int32, std::vector<usize>> BuildTrianglesByLabel(const Int32A
 }
 
 /**
- * @brief This class provides an interface to write the STL Files in parallel
+ * @class MultiWriteStlFileImpl
+ * @brief Writes one label group and its overflow files.
  *
- * Each instance is handed exactly the triangle indices belonging to its group (pre-bucketed by the
- * caller via BuildTrianglesByLabel()), so write() only ever visits triangles known to belong to this
- * file's group instead of rescanning the entire mesh and filtering by label.
+ * The task visits only its pre-bucketed triangles. For a two-component label
+ * array, component selection also determines output winding.
  */
 class MultiWriteStlFileImpl
 {
 public:
+  /**
+   * @brief Creates one borrowed group writer.
+   * @param filter Receives thread-safe warnings.
+   * @param limitBoundAtomicFile Owns the destination sequence.
+   * @param header Specifies the STL header.
+   * @param triangles Provides flat triangle connectivity.
+   * @param vertices Provides flat XYZ coordinates.
+   * @param featureIds Provides one or two grouping labels per triangle.
+   * @param featureId Specifies this task's label.
+   * @param triangleIndices Specifies this task's ascending triangle indexes.
+   * @param maxTriangles Limits triangles in one file.
+   * @param shouldCancel Stops before later triangles when true.
+   */
   MultiWriteStlFileImpl(WriteStlFile* filter, LimitBoundAtomicFile& limitBoundAtomicFile, const std::string header, const TriStore& triangles, const VertexStore& vertices,
                         const Int32AbstractDataStore& featureIds, const int32 featureId, const std::vector<usize>& triangleIndices, const usize maxTriangles, const std::atomic_bool& shouldCancel)
   : m_Filter(filter)
@@ -282,17 +338,31 @@ public:
   , m_ShouldCancel(shouldCancel)
   {
   }
+  /**
+   * @brief Destroys the borrowed group writer.
+   */
   ~MultiWriteStlFileImpl() = default;
 
+  /**
+   * @brief Starts writing at the first temporary file.
+   */
   void operator()() const
   {
-    // Potentially recursive call - LimitBoundAtomicFile guarantees the first file to exist and be valid (see Factory struct for validation)
+    // The factory guarantees a valid first AtomicFile.
     write(m_LimitBoundAtomicFile.m_AtomicFilesList[0].tempFilePath(), 0);
   }
 
+  /**
+   * @brief Writes one file and recurses into an overflow file when necessary.
+   * @param activePath Identifies the active temporary file.
+   * @param startIndex Specifies the first index in this task's triangle bucket.
+   *
+   * Worker failures are sent to the parent result. Stdio seek, header, count,
+   * and close results are not inspected.
+   */
   void write(const fs::path& activePath, usize startIndex) const
   {
-    // Create output file writer in binary write out mode to ensure cross-compatibility
+    // Binary mode prevents platform newline conversion.
     FILE* filePtr = fopen(activePath.string().c_str(), "wb");
 
     if(filePtr == nullptr)
@@ -305,7 +375,7 @@ public:
 
     int32 triCount = 0;
 
-    { // Scope header output processing to keep overhead low and increase readability
+    {
       if(m_Header.size() >= 80)
       {
         m_Filter->sendThreadSafeProgressMessage(MakeWarningVoidResult(
@@ -323,12 +393,11 @@ public:
 
       // std::string c_str = header;
       memcpy(stlFileHeader.data(), m_Header.data(), headLength);
-      // Return the number of bytes written - which should be 80
       fwrite(stlFileHeader.data(), 1, 80, filePtr);
     }
 
     fwrite(&triCount, 1, 4, filePtr);
-    triCount = 0; // Reset this to Zero. Increment for every triangle written
+    triCount = 0;
 
     size_t totalWritten = 0;
     FloatVec3 vecA = {0.0f, 0.0f, 0.0f};
@@ -344,8 +413,6 @@ public:
 
     const usize numComps = m_FeatureIds.getNumberOfComponents();
     const usize numGroupTriangles = m_TriangleIndices.size();
-    // Loop over only the triangles that belong to this group (pre-bucketed once in
-    // WriteStlFile::operator() by BuildTrianglesByLabel()) instead of rescanning the whole mesh
     for(usize idx = startIndex; idx < numGroupTriangles; idx++)
     {
       if(m_ShouldCancel)
@@ -356,7 +423,7 @@ public:
         return;
       }
 
-      // recursive case check
+      // Start an overflow file when this file reaches its triangle limit.
       if(triCount == m_MaxTriangles)
       {
         fseek(filePtr, 80L, SEEK_SET);
@@ -380,20 +447,18 @@ public:
 
       const IGeometry::MeshIndexType triangle = m_TriangleIndices[idx];
 
-      // Get the true indices of the 3 nodes
       IGeometry::MeshIndexType nId0 = m_Triangles[triangle * 3];
       IGeometry::MeshIndexType nId1 = m_Triangles[triangle * 3 + 1];
       IGeometry::MeshIndexType nId2 = m_Triangles[triangle * 3 + 2];
 
-      // Every triangle in m_TriangleIndices was bucketed because one of its label components
-      // matches m_FeatureId (see BuildTrianglesByLabel()), so only the winding decision remains here.
+      // Put this feature on the first label side by reversing the opposite side.
       if(m_FeatureIds[triangle * numComps] == m_FeatureId)
       {
         // winding = 0; // 0 = Write it using forward spin
       }
       else
       {
-        // Switch the 2 node indices
+        // Reverse winding when the second component matches.
         IGeometry::MeshIndexType temp = nId1;
         nId1 = nId2;
         nId2 = temp;
@@ -411,7 +476,6 @@ public:
       vert3Ptr[1] = static_cast<float>(m_Vertices[nId2 * 3 + 1]);
       vert3Ptr[2] = static_cast<float>(m_Vertices[nId2 * 3 + 2]);
 
-      // Compute the normal
       vecA[0] = vert2Ptr[0] - vert1Ptr[0];
       vecA[1] = vert2Ptr[1] - vert1Ptr[1];
       vecA[2] = vert2Ptr[2] - vert1Ptr[2];
@@ -454,6 +518,21 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Writes one single-file sequence through parallel overflow tasks.
+ * @param filter Receives thread-safe worker warnings.
+ * @param nTriangles Specifies total triangles.
+ * @param header Specifies the STL header.
+ * @param firstFile Identifies the first destination.
+ * @param triangles Provides flat triangle connectivity.
+ * @param vertices Provides flat XYZ coordinates.
+ * @param maxTriangles Limits triangles in one file.
+ * @param shouldCancel Stops before later triangles or commits when true.
+ * @return AtomicFile creation error, or success after cancellation or commits.
+ *
+ * Commit failures are accumulated locally but not returned. Commits are sequential,
+ * so a later failure can leave earlier overflow files published.
+ */
 Result<> ExecuteSingleFileOverflow(WriteStlFile* filter, const IGeometry::MeshIndexType nTriangles, const std::string& header, const fs::path& firstFile, const TriStore& triangles,
                                    const VertexStore& vertices, const usize maxTriangles, const std::atomic_bool& shouldCancel)
 {
@@ -475,7 +554,7 @@ Result<> ExecuteSingleFileOverflow(WriteStlFile* filter, const IGeometry::MeshIn
     }
   }
 
-  // The writing of the files can happen in parallel as much as the Operating System will allow
+  // Each task writes a separate temporary file.
   ParallelTaskAlgorithm taskRunner;
   taskRunner.setParallelizationEnabled(true);
 
@@ -511,7 +590,6 @@ Result<> ExecuteSingleFileOverflow(WriteStlFile* filter, const IGeometry::MeshIn
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteStlFile::WriteStlFile(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WriteStlFileInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -520,16 +598,13 @@ WriteStlFile::WriteStlFile(DataStructure& dataStructure, const IFilter::MessageH
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteStlFile::~WriteStlFile() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteStlFile::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteStlFile::operator()()
 {
   const auto& triangleGeom = m_DataStructure.getDataRefAs<TriangleGeom>(m_InputValues->TriangleGeomPath);
@@ -541,9 +616,9 @@ Result<> WriteStlFile::operator()()
 
   if(groupingType == GroupingType::SingleFile)
   {
-    std::string header = "DREAM3D Generated For Triangle Geom"; // Char count: 35
+    std::string header = "DREAM3D Generated For Triangle Geom";
 
-    // validate name is less than 40 characters
+    // Keep the combined binary STL header below its 80-byte limit.
     if(triangleGeom.getName().size() < 41)
     {
       header += " " + triangleGeom.getName();
@@ -560,7 +635,7 @@ Result<> WriteStlFile::operator()()
       return ConvertResult(std::move(atomicFileResult));
     }
     AtomicFile atomicFile = std::move(atomicFileResult.value());
-    { // Scoped to ensure file lock is released
+    {
       auto result = ::SingleWriteOutStl(this, atomicFile.tempFilePath(), nTriangles, header, triangles, vertices, m_ShouldCancel);
       if(result.invalid())
       {
@@ -581,9 +656,8 @@ Result<> WriteStlFile::operator()()
   }
 
   const std::filesystem::path outputPath = m_InputValues->OutputStlDirectory;
-  { // Scope to cut overhead
-    // Make sure any directory path is also available as the user may have just typed
-    // in a path without actually creating the full path
+  {
+    // Create the output directory before creating grouped AtomicFiles.
     Result<> createDirectoriesResult = nx::core::CreateOutputDirectories(outputPath);
     if(createDirectoriesResult.invalid())
     {
@@ -591,19 +665,18 @@ Result<> WriteStlFile::operator()()
     }
   }
 
-  // The writing of the files can happen in parallel as much as the Operating System will allow
+  // Each group task writes a separate temporary file sequence.
   ParallelTaskAlgorithm taskRunner;
   taskRunner.setParallelizationEnabled(true);
 
-  // Store a list of Atomic Files, so we can clean up or finish depending on the outcome of all the writes
+  // Keep every AtomicFile alive until all group tasks finish.
   std::vector<LimitBoundAtomicFile> fileList;
 
   if(groupingType == GroupingType::Features)
   {
     const auto& featureIds = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsPath)->getDataStoreRef();
 
-    // Bucket every triangle by the feature id(s) it references in a single O(numTriangles) pass, up
-    // front, so the per-feature writers below never rescan the whole mesh (see BuildTrianglesByLabel()).
+    // Build all feature memberships once before per-feature writers start.
     const std::unordered_map<int32, std::vector<usize>> trianglesByFeature = ::BuildTrianglesByLabel(featureIds);
 
     fileList.reserve(trianglesByFeature.size());
@@ -611,7 +684,6 @@ Result<> WriteStlFile::operator()()
     usize fileIndex = 0;
     for(const auto& [featureId, featureTriangles] : trianglesByFeature)
     {
-      // Generate the output file
       fs::path firstFile = m_InputValues->OutputStlDirectory / fmt::format("{}Feature_{}.stl", m_InputValues->OutputStlPrefix, featureId);
       auto atomicFileResult = LimitBoundAtomicFileFactory::Create(firstFile);
       if(atomicFileResult.invalid())
@@ -645,15 +717,12 @@ Result<> WriteStlFile::operator()()
       uniqueGrainIdToPhase.emplace(featureIds[i * 2 + 1], featurePhases[i * 2 + 1]);
     }
 
-    // Bucket every triangle by the feature id(s) it references - same membership/winding rule as
-    // GroupingType::Features - in a single O(numTriangles) pass, up front (see BuildTrianglesByLabel()).
+    // Reuse the feature-group membership and winding rule for phase-qualified names.
     const std::unordered_map<int32, std::vector<usize>> trianglesByFeature = ::BuildTrianglesByLabel(featureIds);
 
-    // Loop over the unique feature Ids
     usize fileIndex = 0;
     for(const auto& [featureId, value] : uniqueGrainIdToPhase)
     {
-      // Generate the output file
       fs::path firstFile = m_InputValues->OutputStlDirectory / fmt::format("{}Ensemble_{}_Feature_{}.stl", m_InputValues->OutputStlPrefix, value, featureId);
       auto atomicFileResult = LimitBoundAtomicFileFactory::Create(firstFile);
       if(atomicFileResult.invalid())
@@ -674,21 +743,17 @@ Result<> WriteStlFile::operator()()
     taskRunner.wait();
   }
 
-  // Group Triangles by Part Number which is a single component Int32 Array
   if(groupingType == GroupingType::PartNumber)
   {
     const auto& partNumbers = m_DataStructure.getDataAs<Int32Array>(m_InputValues->PartNumberPath)->getDataStoreRef();
 
-    // Bucket every triangle by its part number in a single O(numTriangles) pass, up front, so the
-    // per-part writers below never rescan the whole mesh (see BuildTrianglesByLabel()).
+    // Build all part-number memberships once before per-part writers start.
     const std::unordered_map<int32, std::vector<usize>> trianglesByPartNumber = ::BuildTrianglesByLabel(partNumbers);
-    fileList.reserve(trianglesByPartNumber.size()); // Reserved enough file names
+    fileList.reserve(trianglesByPartNumber.size());
 
-    // Loop over each Part Number and write a file
     usize fileIndex = 0;
     for(const auto& [currentPartNumber, partTriangles] : trianglesByPartNumber)
     {
-      // Generate the output file
       fs::path firstFile = m_InputValues->OutputStlDirectory / fmt::format("{}{}.stl", m_InputValues->OutputStlPrefix, currentPartNumber);
       auto atomicFileResult = LimitBoundAtomicFileFactory::Create(firstFile);
       if(atomicFileResult.invalid())
@@ -714,7 +779,7 @@ Result<> WriteStlFile::operator()()
     return {};
   }
 
-  // Commit all the temp files
+  // Publish each temporary file after all workers finish successfully.
   for(auto& limitedAtomicFile : fileList)
   {
     for(auto& atomicFile : limitedAtomicFile.m_AtomicFilesList)
@@ -730,7 +795,6 @@ Result<> WriteStlFile::operator()()
   return m_Result;
 }
 
-// -----------------------------------------------------------------------------
 void WriteStlFile::sendThreadSafeProgressMessage(Result<>&& result)
 {
   std::lock_guard<std::mutex> guard(m_ProgressMessage_Mutex);

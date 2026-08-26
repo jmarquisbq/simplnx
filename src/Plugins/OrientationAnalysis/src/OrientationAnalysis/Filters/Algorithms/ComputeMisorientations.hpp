@@ -25,10 +25,11 @@ constexpr ChoicesParameter::ValueType k_UseReferenceAxesIndex = 1;
 } // namespace compute_misorientations_constants
 
 /**
- * @brief Input paths and computation settings consumed by ComputeMisorientations.
+ * @struct ComputeMisorientationsInputValues
+ * @brief Identifies misorientation inputs and settings.
  *
- * Keeping these values separate from the algorithm object allows the filter to pass
- * validated arguments without coupling the implementation to parameter extraction.
+ * ReferenceOrientation stores an axis and an angle in degrees when
+ * ComputationType selects the reference mode.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeMisorientationsInputValues
 {
@@ -42,17 +43,28 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeMisorientationsInputValues
 };
 
 /**
- * @brief Computes an axis-angle misorientation for every input orientation tuple.
+ * @class ComputeMisorientations
+ * @brief Computes one axis-angle misorientation for each input tuple.
  *
- * Cell-level arrays are processed through bounded bulk-I/O buffers so the same
- * implementation remains efficient for in-core stores and avoids per-cell datastore
- * access for out-of-core stores. Ensemble crystal structures are cached locally because
- * they are small and repeatedly referenced by the cell loop.
+ * Cell arrays use bounded bulk buffers. Crystal structures remain local for
+ * repeated phase lookup.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeMisorientations
 {
 public:
+  /**
+   * @brief Initializes misorientation computation.
+   * @param dataStructure Provides selected arrays.
+   * @param messageHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and computation mode.
+   * @pre dataStructure, messageHandler, shouldCancel, and inputValues outlive
+   *      this executor.
+   */
   ComputeMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, ComputeMisorientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the misorientation executor.
+   */
   ~ComputeMisorientations() noexcept;
 
   ComputeMisorientations(const ComputeMisorientations&) = delete;
@@ -60,6 +72,13 @@ public:
   ComputeMisorientations& operator=(const ComputeMisorientations&) = delete;
   ComputeMisorientations& operator=(ComputeMisorientations&&) noexcept = delete;
 
+  /**
+   * @brief Computes misorientations.
+   * @pre Positive phase IDs are within the crystal-structure array.
+   * @return Success, or a bulk-I/O error.
+   *
+   * Cancellation returns success with completed chunks preserved.
+   */
   Result<> operator()();
 
 private:

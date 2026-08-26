@@ -27,7 +27,6 @@ constexpr int32 k_ErrorUnsupportedDataType = -20004;
 constexpr int32 k_ErrorBufferSizeMismatch = -20005;
 } // namespace
 
-// -----------------------------------------------------------------------------
 Result<ImageMetadata> StbImageIO::readMetadata(const std::filesystem::path& filePath) const
 {
   std::string pathStr = filePath.string();
@@ -61,14 +60,13 @@ Result<ImageMetadata> StbImageIO::readMetadata(const std::filesystem::path& file
   }
 
   metadata.numPages = 1;
-  // stb does not provide origin or spacing metadata
+  // stb does not expose origin or spacing metadata.
   metadata.origin = std::nullopt;
   metadata.spacing = std::nullopt;
 
   return {std::move(metadata)};
 }
 
-// -----------------------------------------------------------------------------
 Result<> StbImageIO::readPixelData(const std::filesystem::path& filePath, std::span<uint8> buffer) const
 {
   Result<ImageMetadata> metaResult = readMetadata(filePath);
@@ -95,7 +93,6 @@ Result<> StbImageIO::readPixelData(const std::filesystem::path& filePath, std::s
   });
 }
 
-// -----------------------------------------------------------------------------
 Result<> StbImageIO::readPixelDataRows(const std::filesystem::path& filePath, const ReadRowCallback& callback) const
 {
   Result<ImageMetadata> metaResult = readMetadata(filePath);
@@ -146,7 +143,6 @@ Result<> StbImageIO::readPixelDataRows(const std::filesystem::path& filePath, co
   return result;
 }
 
-// -----------------------------------------------------------------------------
 Result<> StbImageIO::writePixelData(const std::filesystem::path& filePath, std::span<const uint8> buffer, const ImageMetadata& metadata) const
 {
   if(metadata.dataType != DataType::uint8)
@@ -191,22 +187,18 @@ Result<> StbImageIO::writePixelData(const std::filesystem::path& filePath, std::
   return {};
 }
 
-// -----------------------------------------------------------------------------
 std::set<DataType> StbImageIO::supportedWriteDataTypes() const
 {
   return {DataType::uint8};
 }
 
-// -----------------------------------------------------------------------------
 std::set<usize> StbImageIO::supportedWriteComponentCounts() const
 {
-  // The stb backend serves PNG, BMP and JPEG. Verified against the vendored stb_image_write.h:
-  //  - PNG:  stbi_write_png_to_mem() indexes ctype[comp] where ctype has 5 entries {-1,0,4,2,6};
-  //          comp>=5 is an out-of-bounds read. comp 1..4 are in range.
-  //  - JPEG: stbi_write_jpg_core() explicitly rejects (comp < 1 || comp > 4).
-  //  - BMP:  stbi_write_bmp_core() only produces conforming 24-bit RGB (comp 1,3) or 32-bit RGBA (comp 4).
-  // A 2-component array is not UB in any backend, but BMP and JPEG silently drop the second channel
-  // (treating it as grayscale + ignored alpha) so the write is not conforming across formats. The
-  // uniformly-supported, conforming intersection is therefore {1, 3, 4}.
+  // stbi_write_png_to_mem() indexes a five-entry table with the component count.
+  // Counts above four cause an out-of-bounds read. stbi_write_jpg_core() accepts
+  // only one through four. stbi_write_bmp_core() produces conforming output for
+  // one, three, or four components.
+  // BMP and JPEG discard the second channel of two-component input. Thus, the
+  // conforming component-count intersection for all three formats is {1, 3, 4}.
   return {1, 3, 4};
 }

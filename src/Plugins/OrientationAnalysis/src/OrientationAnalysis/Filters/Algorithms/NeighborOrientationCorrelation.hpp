@@ -12,62 +12,48 @@ namespace nx::core
 
 /**
  * @struct NeighborOrientationCorrelationInputValues
- * @brief Holds all user-supplied parameters for the NeighborOrientationCorrelation algorithm.
+ * @brief Identifies neighbor orientation-correlation inputs.
+ *
+ * MisorientationTolerance is in degrees.
  */
 struct ORIENTATIONANALYSIS_EXPORT NeighborOrientationCorrelationInputValues
 {
-  DataPath ImageGeomPath;                                        ///< Path to the ImageGeom that defines the voxel grid dimensions
-  float32 MinConfidence = 0.0f;                                  ///< Cells with confidence index below this value are candidates for replacement
-  float32 MisorientationTolerance = 0.0f;                        ///< Angular tolerance (degrees) for comparing neighbor orientations
-  int32 Level = 0;                                               ///< Minimum neighbor agreement count required to replace a cell (cleanup level)
-  DataPath ConfidenceIndexArrayPath;                             ///< Path to the float32 confidence index array
-  DataPath CellPhasesArrayPath;                                  ///< Path to the int32 cell phases array
-  DataPath QuatsArrayPath;                                       ///< Path to the float32 quaternion array (4 components per tuple)
-  DataPath CrystalStructuresArrayPath;                           ///< Path to the uint32 crystal structures ensemble array
-  MultiArraySelectionParameter::ValueType IgnoredDataArrayPaths; ///< Data arrays excluded from the neighbor-copy transfer step
+  DataPath ImageGeomPath;
+  float32 MinConfidence = 0.0f;
+  float32 MisorientationTolerance = 0.0f;
+  int32 Level = 0;
+  DataPath ConfidenceIndexArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath QuatsArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  MultiArraySelectionParameter::ValueType IgnoredDataArrayPaths;
 };
 
 /**
  * @class NeighborOrientationCorrelation
- * @brief Corrects low-confidence EBSD voxels by replacing their cell data with
- * data from the most orientation-correlated face neighbor.
+ * @brief Corrects low-confidence EBSD cells from correlated neighbors.
  *
- * The algorithm iterates through multiple "cleanup levels" (from 6 down to the
- * user-specified Level). At each level, every voxel whose confidence index is
- * below MinConfidence is examined. For that voxel, the 6 face neighbors are
- * compared pairwise: two neighbors "agree" if they share the same nonzero phase
- * and their misorientation is within MisorientationTolerance. Each neighbor
- * accumulates a similarity count (how many other neighbors agree with it). The
- * neighbor with the highest agreement is chosen as the replacement source.
- *
- * ## Z-Slice Buffering (Out-of-Core Optimization)
- *
- * To avoid random-access thrashing of out-of-core (OOC) compressed chunk stores,
- * the algorithm maintains a rolling window of 3 adjacent Z-slices for the
- * quaternion and phase arrays, plus 1 Z-slice for the confidence index. At each
- * Z-step, the window advances by swapping buffer slots and reading only the new
- * z+1 slice. All neighbor lookups then read from these local buffers instead of
- * the backing DataArray, eliminating repeated chunk decompressions.
- *
- * After identifying the best neighbor for every low-confidence voxel in a level,
- * all cell-level DataArrays (except ignored ones) are updated in parallel using
- * ParallelTaskAlgorithm, copying tuple data from each best neighbor.
+ * Cells below MinConfidence use the best agreeing face neighbor. The rolling
+ * window keeps quaternion, phase, and confidence reads local. The replacement
+ * transfer excludes selected arrays.
  */
 class ORIENTATIONANALYSIS_EXPORT NeighborOrientationCorrelation
 {
 public:
   /**
-   * @brief Constructs the algorithm with all required references and parameters.
-   * @param dataStructure The DataStructure containing all input/output arrays
-   * @param mesgHandler Handler for sending progress messages to the UI
-   * @param shouldCancel Atomic flag checked between iterations to support cancellation
-   * @param inputValues User-supplied parameters controlling the algorithm behavior
+   * @brief Initializes neighbor orientation correlation.
+   * @param dataStructure Provides selected arrays and the geometry.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies correction settings.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   NeighborOrientationCorrelation(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                  NeighborOrientationCorrelationInputValues* inputValues);
 
   /**
-   * @brief Default destructor.
+   * @brief Destroys the neighbor-correlation executor.
    */
   ~NeighborOrientationCorrelation() noexcept;
 
@@ -77,8 +63,8 @@ public:
   NeighborOrientationCorrelation& operator=(NeighborOrientationCorrelation&&) noexcept = delete;
 
   /**
-   * @brief Executes the neighbor orientation correlation algorithm.
-   * @return Result<> indicating success or any errors encountered during execution
+   * @brief Corrects low-confidence cells.
+   * @return Result from correlation and replacement transfers.
    */
   Result<> operator()();
 

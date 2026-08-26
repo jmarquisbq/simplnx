@@ -15,26 +15,14 @@ struct ComputeIPFColorsInputValues;
 
 /**
  * @class ComputeIPFColorsDirect
- * @brief In-core (Direct) algorithm for computing Inverse Pole Figure colors.
+ * @brief Computes IPF colors for the in-memory dispatch path.
  *
- * This algorithm is selected by the dispatcher when all relevant arrays reside
- * in contiguous in-memory DataStores. It uses ParallelDataAlgorithm to split
- * the voxel range across threads, with each thread computing IPF colors for its
- * assigned range by:
- *
- *   1. Reading Euler angles (phi1, Phi, phi2) for the voxel.
- *   2. Checking the phase ID against the crystal-structure ensemble array.
- *   3. Calling LaueOps::generateIPFColor() to transform the user-specified
- *      reference direction into the crystal frame and map it to an RGB color
- *      on the Laue-class-specific inverse pole figure triangle.
+ * The dispatcher normally selects this class for in-memory data.
+ * requireArraysInMemory() disables parallel scheduling when a listed array is
+ * not in-memory. The remaining direct parallel access has no generic DataArray
+ * or DataStore thread-safety guarantee.
  *
  * An optional mask array allows pre-indexed voxels to be skipped (colored black).
- *
- * **Thread safety**: The parallel worker (ComputeIPFColorsImpl) accesses
- * AbstractDataStore references, which requires ParallelDataAlgorithm's
- * requireArraysInMemory() to lock the arrays in RAM for the duration of
- * execution. This is safe for in-core DataStores but would be dangerous for
- * OOC-backed stores.
  *
  * @see ComputeIPFColorsScanline for the OOC-optimized variant.
  */
@@ -42,13 +30,19 @@ class ORIENTATIONANALYSIS_EXPORT ComputeIPFColorsDirect
 {
 public:
   /**
-   * @brief Constructs the in-core IPF color algorithm.
-   * @param dataStructure The DataStructure containing all input/output arrays.
-   * @param msgHandler Message handler for progress/warning messages.
-   * @param shouldCancel Atomic cancellation flag checked inside the parallel worker.
-   * @param inputValues Pointer to the shared parameter struct; must outlive this object.
+   * @brief Initializes direct IPF color computation.
+   * @param dataStructure Provides the selected arrays.
+   * @param msgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies the selected arrays and color settings.
+   * @pre dataStructure, msgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   ComputeIPFColorsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, const ComputeIPFColorsInputValues* inputValues);
+
+  /**
+   * @brief Destroys the direct IPF color executor.
+   */
   ~ComputeIPFColorsDirect() noexcept;
 
   ComputeIPFColorsDirect(const ComputeIPFColorsDirect&) = delete;
@@ -57,32 +51,37 @@ public:
   ComputeIPFColorsDirect& operator=(ComputeIPFColorsDirect&&) = delete;
 
   /**
-   * @brief Computes IPF colors for all voxels using multi-threaded random access.
-   * @return Result<> with an error if phase data is inconsistent.
+   * @brief Computes IPF colors through direct parallel access.
+   * @pre Cell phase IDs are nonnegative.
+   * @return Success, or error -48000 if a positive phase ID exceeds the crystal-
+   *         structure array.
+   *
+   * Cancellation stops each worker range before its next tuple. The method
+   * normally returns success with partial colors. It returns -48000 if completed
+   * work recorded an out-of-range positive phase ID.
    */
   Result<> operator()();
 
   /**
-   * @brief Thread-safe increment of the phase-mismatch warning counter.
+   * @brief Records a positive phase ID outside the crystal-structure array.
    *
-   * Called from parallel worker threads when a voxel's phase ID exceeds the
-   * number of entries in the crystal structures ensemble array. The count is
-   * atomic so the post-join error reports the exact number of affected voxels.
+   * The atomic counter lets parallel workers record affected tuples. operator()
+   * reads the final count after the parallel algorithm completes.
    */
   void incrementPhaseWarningCount();
 
   /**
    * @brief Returns the current cancellation state.
-   * @return true if the user has requested cancellation.
+   * @return True if cancellation has been requested.
    */
   bool shouldCancel() const;
 
 private:
-  DataStructure& m_DataStructure;                             ///< Reference to the live DataStructure.
-  const IFilter::MessageHandler& m_MessageHandler;            ///< Message handler for user-facing messages.
-  const std::atomic_bool& m_ShouldCancel;                     ///< Cancellation flag.
-  const ComputeIPFColorsInputValues* m_InputValues = nullptr; ///< Borrowed pointer to input parameters.
-  std::atomic_int32_t m_PhaseWarningCount = 0;                ///< Accumulates the number of voxels with out-of-range phase IDs.
+  DataStructure& m_DataStructure;
+  const IFilter::MessageHandler& m_MessageHandler;
+  const std::atomic_bool& m_ShouldCancel;
+  const ComputeIPFColorsInputValues* m_InputValues = nullptr;
+  std::atomic_int32_t m_PhaseWarningCount = 0;
 };
 
 } // namespace nx::core

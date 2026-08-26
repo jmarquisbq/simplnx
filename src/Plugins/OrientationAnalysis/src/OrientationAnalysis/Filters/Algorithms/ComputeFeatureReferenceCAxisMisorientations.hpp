@@ -12,68 +12,48 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeFeatureReferenceCAxisMisorientations algorithm.
+ * @struct ComputeFeatureReferenceCAxisMisorientationsInputValues
+ * @brief Identifies feature-reference c-axis misorientation inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeFeatureReferenceCAxisMisorientationsInputValues
 {
-  // Input Geometry
-  DataPath ImageGeometryPath; ///< ImageGeom providing the voxel grid dimensions
-
-  // Input Cell Data
-  DataPath FeatureIdsArrayPath; ///< Cell-level Int32 feature ID per voxel
-  DataPath CellPhasesArrayPath; ///< Cell-level Int32 phase index per voxel
-  DataPath QuatsArrayPath;      ///< Cell-level Float32 quaternions (4 components)
-
-  // Input Feature Data
-  DataPath AvgCAxesArrayPath; ///< Feature-level Float32 average c-axis (3 components)
-
-  // Input Ensemble Data
-  DataPath CrystalStructuresArrayPath; ///< Ensemble-level UInt32 crystal structure Laue classes
-
-  // Output Cell Data
-  DataPath FeatureReferenceCAxisMisorientationsArrayPath; ///< Output: Cell-level Float32 c-axis misorientation (degrees)
-
-  // Output Feature Data
-  DataPath FeatureAvgCAxisMisorientationsArrayPath;   ///< Output: Feature-level Float32 average c-axis misorientation
-  DataPath FeatureStdevCAxisMisorientationsArrayPath; ///< Output: Feature-level Float32 standard deviation
+  DataPath ImageGeometryPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellPhasesArrayPath;
+  DataPath QuatsArrayPath;
+  DataPath AvgCAxesArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath FeatureReferenceCAxisMisorientationsArrayPath;
+  DataPath FeatureAvgCAxisMisorientationsArrayPath;
+  DataPath FeatureStdevCAxisMisorientationsArrayPath;
 };
 
 /**
  * @class ComputeFeatureReferenceCAxisMisorientations
- * @brief Computes the misorientation angle between each voxel's c-axis and
- *        the average c-axis of its Feature, plus per-Feature mean and standard
- *        deviation of those angles.
+ * @brief Computes c-axis misorientation to each feature reference.
  *
- * Only Hexagonal-High (6/mmm) and Hexagonal-Low (6/m) Laue classes are
- * supported; non-hexagonal phases are skipped with zero output.
- *
- * ## OOC Optimization
- *
- * The algorithm processes one Z-slice at a time. For each slice:
- *   1. Cell-level arrays (featureIds, phases, quats) are bulk-read into
- *      local buffers via `copyIntoBuffer()`.
- *   2. Feature-level avgCAxes and ensemble-level crystal structures are
- *      cached in local vectors at algorithm start (small arrays).
- *   3. The per-cell output is accumulated in a local buffer and
- *      bulk-written via `copyFromBuffer()`.
- *   4. A second Z-slice pass re-reads the output to compute the
- *      per-Feature standard deviation.
- *
- * This Z-slice strategy gives predictable memory usage (one slice at a time)
- * and sequential I/O patterns that perform well with OOC chunked storage.
+ * Hexagonal cells compare their c axes to the feature-average c axis. The
+ * executor writes cell angles in degrees and calculates feature mean and
+ * population standard deviation. It uses local feature and ensemble data with
+ * one Z-slice of cell data.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeFeatureReferenceCAxisMisorientations
 {
 public:
   /**
-   * @brief Binds filter-owned inputs/outputs and execution controls.
-   * @param dataStructure Owns every array and must outlive this object.
-   * @param mesgHandler Receives progress from the feature-reduction passes.
-   * @param shouldCancel Checked between slices and feature batches.
-   * @param inputValues Non-owning parameter bundle that must outlive execution.
+   * @brief Initializes feature-reference c-axis misorientation computation.
+   * @param dataStructure Provides selected arrays and the geometry.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   ComputeFeatureReferenceCAxisMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                               ComputeFeatureReferenceCAxisMisorientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the feature-reference c-axis executor.
+   */
   ~ComputeFeatureReferenceCAxisMisorientations() noexcept;
 
   ComputeFeatureReferenceCAxisMisorientations(const ComputeFeatureReferenceCAxisMisorientations&) = delete;
@@ -82,8 +62,13 @@ public:
   ComputeFeatureReferenceCAxisMisorientations& operator=(ComputeFeatureReferenceCAxisMisorientations&&) noexcept = delete;
 
   /**
-   * @brief Executes the c-axis misorientation computation using Z-slice bulk I/O.
-   * @return Result<> with any errors or warnings encountered.
+   * @brief Computes feature-reference c-axis misorientations.
+   * @pre Positive cell feature and phase IDs are within their selected arrays.
+   * @return An error if no hexagonal phase exists, or a warning for skipped
+   *         non-hexagonal phases.
+   *
+   * Cancellation returns success with completed slices and feature outputs
+   * preserved.
    */
   Result<> operator()();
 

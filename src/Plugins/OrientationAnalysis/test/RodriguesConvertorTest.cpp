@@ -30,14 +30,14 @@ const std::string k_Exemplar0 = "Exemplar0";
 TEST_CASE("OrientationAnalysis::RodriguesConvertorFilter", "[OrientationAnalysis][RodriguesConvertorFilter]")
 {
   UnitTest::LoadPlugins();
+  // AlgorithmTestScope forces the selected path and records its target-call
+  // witness.
   const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
   UnitTest::AlgorithmTestScope scope(scenario);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   DataStructure dataStructure;
 
-  // Build up a simple Float32Array and place default data into the array
   Float32Array* quats = UnitTest::CreateTestDataArray<float32>(dataStructure, k_InputArrayName, {4ULL}, {3ULL}, {});
   scope.requireExpectedStore(*quats);
 
@@ -63,21 +63,17 @@ TEST_CASE("OrientationAnalysis::RodriguesConvertorFilter", "[OrientationAnalysis
   (*exemplarData)[14] = 0.632980F;
   (*exemplarData)[15] = 17.3781F;
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
     const RodriguesConvertorFilter filter;
 
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(RodriguesConvertorFilter::k_RodriguesDataArrayPath_Key, std::make_any<DataPath>(DataPath({k_InputArrayName})));
     args.insertOrAssign(RodriguesConvertorFilter::k_OutputDataArrayName_Key, std::make_any<std::string>(k_ConvertedName));
     args.insertOrAssign(RodriguesConvertorFilter::k_DeleteOriginalData_Key, std::make_any<bool>(false));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 

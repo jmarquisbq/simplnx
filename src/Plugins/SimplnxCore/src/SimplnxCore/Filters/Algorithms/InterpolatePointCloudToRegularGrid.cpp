@@ -23,6 +23,7 @@ using namespace nx::core;
 namespace
 {
 /**
+ * @struct VoxelAccumulator
  * @brief Per-output-voxel state for interpolated statistics.
  * Welford fields permit stable variance updates without storing every sample.
  */
@@ -38,7 +39,10 @@ struct VoxelAccumulator
 };
 static_assert(std::is_trivially_copyable_v<VoxelAccumulator>);
 
-/** @brief Per-voxel weighted sum used by arrays requested in copy mode. */
+/**
+ * @struct CopyAccumulator
+ * @brief Stores weighted values for copy-mode outputs.
+ */
 struct CopyAccumulator
 {
   float64 weightedSum = 0.0;
@@ -47,8 +51,10 @@ struct CopyAccumulator
 static_assert(std::is_trivially_copyable_v<CopyAccumulator>);
 
 /**
+ * @class AccumulatorStorage
  * @brief Owns one accumulator vector per source array using either resident
  * vectors or temporary record stores with bounded page caches.
+ * @tparam T Specifies the accumulator record type.
  *
  * Genuine OOC output requires an external provider so voxel-scale scratch
  * cannot unexpectedly consume RAM. Forced OOC over resident arrays may use the
@@ -60,10 +66,12 @@ class AccumulatorStorage
 public:
   /**
    * @brief Allocates and zero-initializes all accumulator vectors.
-   * @param arrayCount Number of independent source arrays.
-   * @param recordCount Number of output voxels per source array.
-   * @param useExternalStorage Selects record stores instead of direct vectors.
-   * @param requireExternalStorage Makes provider absence an error for genuine OOC execution.
+   * @param arrayCount Specifies the number of source arrays.
+   * @param recordCount Specifies output voxels per source array.
+   * @param useExternalStorage Selects temporary record stores instead of vectors.
+   * @param requireExternalStorage Rejects a missing external provider when true.
+   * @param shouldCancel Is not examined while allocating storage.
+   * @return Initialized accumulator storage, or an allocation/provider error.
    */
   static Result<AccumulatorStorage> Create(usize arrayCount, uint64 recordCount, bool useExternalStorage, bool requireExternalStorage, const std::atomic_bool& shouldCancel)
   {
@@ -134,7 +142,13 @@ public:
   AccumulatorStorage(const AccumulatorStorage&) = delete;
   AccumulatorStorage& operator=(const AccumulatorStorage&) = delete;
 
-  /** @brief Reads one accumulator through the active direct or cached backend. */
+  /**
+   * @brief Reads one accumulator record.
+   * @param arrayIndex Identifies the source array.
+   * @param recordIndex Identifies the output voxel.
+   * @param shouldCancel Stops external cache access when true.
+   * @return Accumulator record, or a cache error.
+   */
   Result<T> read(usize arrayIndex, uint64 recordIndex, const std::atomic_bool& shouldCancel)
   {
     if(!m_Direct.empty())
@@ -144,7 +158,14 @@ public:
     return m_Caches[arrayIndex]->read(recordIndex, shouldCancel);
   }
 
-  /** @brief Replaces one accumulator and marks its external cache page dirty when needed. */
+  /**
+   * @brief Replaces one accumulator record.
+   * @param arrayIndex Identifies the source array.
+   * @param recordIndex Identifies the output voxel.
+   * @param value Provides the new accumulator record.
+   * @param shouldCancel Stops external cache access when true.
+   * @return Error from external cache access, or success.
+   */
   Result<> write(usize arrayIndex, uint64 recordIndex, const T& value, const std::atomic_bool& shouldCancel)
   {
     if(!m_Direct.empty())
@@ -155,7 +176,11 @@ public:
     return m_Caches[arrayIndex]->write(recordIndex, value, shouldCancel);
   }
 
-  /** @brief Commits every dirty page before sequential output conversion. */
+  /**
+   * @brief Commits dirty external pages before output conversion.
+   * @param shouldCancel Stops external cache flushes when true.
+   * @return Error from an external cache flush, or success.
+   */
   Result<> flush(const std::atomic_bool& shouldCancel)
   {
     for(auto& cache : m_Caches)
@@ -168,7 +193,14 @@ public:
     return {};
   }
 
-  /** @brief Bulk-reads a contiguous accumulator range without populating the random-access cache. */
+  /**
+   * @brief Reads a contiguous accumulator page without cache admission.
+   * @param arrayIndex Identifies the source array.
+   * @param recordOffset Identifies the first output voxel.
+   * @param records Receives page records.
+   * @param shouldCancel Stops temporary-store access when true.
+   * @return Error for an invalid page or short temporary-store read, or success.
+   */
   Result<> readPage(usize arrayIndex, uint64 recordOffset, nonstd::span<T> records, const std::atomic_bool& shouldCancel) const
   {
     if(recordOffset + records.size() > m_RecordCount)
@@ -194,7 +226,10 @@ public:
     return {};
   }
 
-  /** @brief Returns the transfer granularity used for bounded output conversion. */
+  /**
+   * @brief Returns the accumulator page size.
+   * @return Number of records in one output page.
+   */
   usize recordsPerPage() const
   {
     return static_cast<usize>(m_RecordsPerPage);
@@ -210,8 +245,18 @@ private:
 
 /**
  * @brief Converts one accumulator vector to its output array in bounded pages.
- * @p converter derives the requested statistic without exposing storage details
- * to the filter-specific output code.
+ * @tparam RecordT Specifies the accumulator record type.
+ * @tparam OutputT Specifies the output scalar type.
+ * @tparam Converter Derives one output value from a record.
+ * @param outputStore Receives converted output values.
+ * @param records Provides accumulator records.
+ * @param arrayIndex Identifies the source array.
+ * @param recordCount Specifies output voxel count.
+ * @param converter Derives the requested statistic.
+ * @param shouldCancel Stops before later output pages when true.
+ * @return Error from page reads or output writes, or success after cancellation.
+ *
+ * converter hides storage details from filter-specific output code.
  */
 template <typename RecordT, typename OutputT, typename Converter>
 Result<> WriteAccumulatorOutput(AbstractDataStore<OutputT>& outputStore, const AccumulatorStorage<RecordT>& records, usize arrayIndex, usize recordCount, Converter&& converter,
@@ -243,10 +288,18 @@ Result<> WriteAccumulatorOutput(AbstractDataStore<OutputT>& outputStore, const A
   return {};
 }
 
-/** @brief Type-dispatch adapter that normalizes a source array to float64 values. */
+/**
+ * @struct ExtractAsFloat64Functor
+ * @brief Converts a selected source array to a float64 vector.
+ */
 struct ExtractAsFloat64Functor
 {
-  /** @brief Returns a resident float64 copy used repeatedly by the vertex/kernel traversal. */
+  /**
+   * @brief Creates a resident float64 copy for repeated kernel traversal.
+   * @tparam T Specifies the source scalar type.
+   * @param sourceArray Provides source values.
+   * @return Float64 values in source tuple order.
+   */
   template <typename T>
   std::vector<float64> operator()(IDataArray* sourceArray)
   {
@@ -261,10 +314,22 @@ struct ExtractAsFloat64Functor
   }
 };
 
-/** @brief Type-dispatch adapter that writes copy-mode weighted averages. */
+/**
+ * @struct WriteWeightedAverageFunctor
+ * @brief Writes copy-mode weighted averages to a typed output array.
+ */
 struct WriteWeightedAverageFunctor
 {
-  /** @brief Converts one CopyAccumulator vector into the runtime-typed output store. */
+  /**
+   * @brief Converts one CopyAccumulator vector to a typed output store.
+   * @tparam T Specifies the output scalar type.
+   * @param outputArray Receives weighted averages.
+   * @param accumulators Provides copy-mode records.
+   * @param arrayIndex Identifies the source array.
+   * @param numVoxels Specifies output voxel count.
+   * @param shouldCancel Stops before later output pages when true.
+   * @return Error from accumulator or output access, or success after cancellation.
+   */
   template <typename T>
   Result<> operator()(IDataArray* outputArray, const AccumulatorStorage<CopyAccumulator>& accumulators, usize arrayIndex, usize numVoxels, const std::atomic_bool& shouldCancel)
   {
@@ -277,6 +342,11 @@ struct WriteWeightedAverageFunctor
 
 /**
  * @brief Precomputes uniform or Gaussian weights for the small 3D kernel.
+ * @param interpolationTechnique Selects uniform or Gaussian weights.
+ * @param sigmas Provides Gaussian standard deviations.
+ * @param kernel Receives flattened kernel weights.
+ * @param kernelNumVoxels Provides radius in each grid direction.
+ *
  * The kernel is reused for every vertex, avoiding repeated exponential work.
  */
 void computeKernel(uint64 interpolationTechnique, const std::vector<float32>& sigmas, std::vector<float32>& kernel, const int64 kernelNumVoxels[3])
@@ -310,7 +380,6 @@ void computeKernel(uint64 interpolationTechnique, const std::vector<float32>& si
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 InterpolatePointCloudToRegularGrid::InterpolatePointCloudToRegularGrid(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                        InterpolatePointCloudToRegularGridInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -320,16 +389,13 @@ InterpolatePointCloudToRegularGrid::InterpolatePointCloudToRegularGrid(DataStruc
 {
 }
 
-// -----------------------------------------------------------------------------
 InterpolatePointCloudToRegularGrid::~InterpolatePointCloudToRegularGrid() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& InterpolatePointCloudToRegularGrid::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> InterpolatePointCloudToRegularGrid::operator()()
 {
   const auto* vertices = m_DataStructure.getDataAs<VertexGeom>(m_InputValues->vertexGeomPath);
@@ -345,7 +411,7 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
 
   const usize numVerts = vertices->getNumberOfVertices();
 
-  // Kernel dimensions in voxels
+  // Convert physical kernel extents to inclusive grid radii.
   int64 kernelNumVoxels[3] = {0, 0, 0};
   kernelNumVoxels[0] = static_cast<int64>(std::ceil((m_InputValues->kernelSize[0] / res[0]) * 0.5f));
   kernelNumVoxels[1] = static_cast<int64>(std::ceil((m_InputValues->kernelSize[1] / res[1]) * 0.5f));
@@ -369,11 +435,9 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
   const auto kDimZ = static_cast<usize>(2 * kernelNumVoxels[2] + 1);
   const usize totalKernel = kDimX * kDimY * kDimZ;
 
-  // Compute kernel weights
   std::vector<float32> kernel(totalKernel, 0.0f);
   computeKernel(m_InputValues->interpolationTechnique, m_InputValues->sigmas, kernel, kernelNumVoxels);
 
-  // Mask
   std::unique_ptr<MaskCompareUtilities::MaskCompare> maskCompare = nullptr;
   if(m_InputValues->useMask)
   {
@@ -382,8 +446,8 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
       maskCompare = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->maskDataPath);
     } catch(const std::exception& exception)
     {
-      // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-      // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+      // Filter validation normally rejects this state. Direct algorithm callers
+      // can still reach it.
       std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->maskDataPath.toString());
       return MakeErrorResult(-34060, message);
     }
@@ -391,7 +455,8 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
 
   const bool needWelford = m_InputValues->findStdDeviation;
 
-  // Pre-extract interpolated source array data as float64
+  // Kernel traversal reuses source values many times. This resident conversion
+  // can be large for selected source arrays.
   std::vector<std::vector<float64>> interpSourceData;
   std::vector<IDataArray*> interpSourceArrays;
   for(const auto& path : m_InputValues->interpolatedDataPaths)
@@ -405,7 +470,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
     interpSourceData.push_back(ExecuteDataFunction(ExtractAsFloat64Functor{}, sourceArray->getDataType(), sourceArray));
   }
 
-  // Pre-extract copy source array data as float64
   std::vector<std::vector<float64>> copySourceData;
   std::vector<IDataArray*> copySourceArrays;
   for(const auto& path : m_InputValues->copyDataPaths)
@@ -480,8 +544,8 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
   }
   AccumulatorStorage<CopyAccumulator> copyAccum = std::move(copyStorageResult.value());
 
-  // Main vertex loop: each accepted point updates only the clipped kernel
-  // neighborhood. Voxel accumulators may reside behind bounded external pages.
+  // Each accepted point updates its clipped kernel neighborhood. Accumulators
+  // can reside behind bounded external pages.
   const usize progIncrement = numVerts / 100;
   usize prog = 1;
 
@@ -492,7 +556,7 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
       return {};
     }
 
-    if(m_InputValues->useMask && !maskCompare->isTrue(i)) // lazy-evaluation ensures the pointer is never accessed nullptr
+    if(m_InputValues->useMask && !maskCompare->isTrue(i)) // Short-circuit avoids a disabled-mask dereference.
     {
       continue;
     }
@@ -509,7 +573,7 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
     const usize curY = (index / dimX) % dimY;
     const usize curZ = index / (dimX * dimY);
 
-    // Compute clipped kernel bounds in grid space (symmetric in all 3 dimensions)
+    // Clip the symmetric kernel at image boundaries.
     const int64 startX = std::max(static_cast<int64>(0), static_cast<int64>(curX) - kernelNumVoxels[0]);
     const int64 startY = std::max(static_cast<int64>(0), static_cast<int64>(curY) - kernelNumVoxels[1]);
     const int64 startZ = std::max(static_cast<int64>(0), static_cast<int64>(curZ) - kernelNumVoxels[2]);
@@ -517,14 +581,12 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
     const int64 endY = std::min(static_cast<int64>(dimY) - 1, static_cast<int64>(curY) + kernelNumVoxels[1]);
     const int64 endZ = std::min(static_cast<int64>(dimZ) - 1, static_cast<int64>(curZ) + kernelNumVoxels[2]);
 
-    // Traverse kernel
     for(int64 gz = startZ; gz <= endZ; gz++)
     {
       for(int64 gy = startY; gy <= endY; gy++)
       {
         for(int64 gx = startX; gx <= endX; gx++)
         {
-          // Compute kernel index using 3D offset
           const auto kx = static_cast<usize>(gx - static_cast<int64>(curX) + kernelNumVoxels[0]);
           const auto ky = static_cast<usize>(gy - static_cast<int64>(curY) + kernelNumVoxels[1]);
           const auto kz = static_cast<usize>(gz - static_cast<int64>(curZ) + kernelNumVoxels[2]);
@@ -533,7 +595,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
           const float32 weight = kernel[kernelIdx];
           const usize voxelIdx = static_cast<usize>(gz) * dimX * dimY + static_cast<usize>(gy) * dimX + static_cast<usize>(gx);
 
-          // Update interpolated array accumulators (using actual kernel weight)
           if(weight != 0.0f)
           {
             const auto w = static_cast<float64>(weight);
@@ -573,7 +634,7 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
             }
           }
 
-          // Update copy array accumulators (always uniform weight = 1.0)
+          // Copy-mode arrays use unweighted point counts in every kernel voxel.
           for(usize a = 0; a < numCopyArrays; a++)
           {
             const float64 sourceVal = copySourceData[a][i];
@@ -602,7 +663,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
     }
   }
 
-  // Finalization pass - write outputs
   m_MessageHandler(IFilter::Message::Type::Info, "Writing interpolated results...");
   if(Result<> result = interpAccum.flush(m_ShouldCancel); result.invalid())
   {
@@ -617,7 +677,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
   {
     const std::string& arrayName = interpSourceArrays[a]->getName();
 
-    // Write interpolated (weighted average) output
     auto& interpOutput = m_DataStructure.getDataRefAs<Float64Array>(interpolatedGroupPath.createChildPath(arrayName));
     if(Result<> result = WriteAccumulatorOutput(
            interpOutput.getDataStoreRef(), interpAccum, a, numVoxels,
@@ -627,7 +686,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
       return result;
     }
 
-    // Write statistics arrays
     if(m_InputValues->findLength)
     {
       auto& lengthOutput = m_DataStructure.getDataRefAs<UInt64Array>(interpolatedGroupPath.createChildPath(arrayName + m_InputValues->lengthSuffix));
@@ -692,7 +750,6 @@ Result<> InterpolatePointCloudToRegularGrid::operator()()
     }
   }
 
-  // Write copy array outputs
   for(usize a = 0; a < numCopyArrays; a++)
   {
     auto* outputArray = m_DataStructure.getDataAs<IDataArray>(interpolatedGroupPath.createChildPath(copySourceArrays[a]->getName()));

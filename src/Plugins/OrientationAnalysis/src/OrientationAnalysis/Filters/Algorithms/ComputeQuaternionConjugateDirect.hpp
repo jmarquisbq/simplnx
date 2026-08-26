@@ -11,16 +11,32 @@ namespace nx::core
 struct ComputeQuaternionConjugateInputValues;
 
 /**
- * @brief Parallel random-access implementation for RAM-backed quaternion arrays.
+ * @class ComputeQuaternionConjugateDirect
+ * @brief Conjugates quaternion arrays through direct access.
  *
- * This preserves the original implementation so in-core performance and behavior
- * remain unchanged while the dispatcher sends out-of-core arrays to Scanline.
+ * The dispatcher normally selects this executor for in-memory targets. The
+ * executor retains the direct ParallelDataAlgorithm loop. It does not provide
+ * a general DataArray or DataStore concurrent-access guarantee.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugateDirect
 {
 public:
+  /**
+   * @brief Initializes the direct quaternion-conjugation executor.
+   * @param dataStructure Provides the selected quaternion arrays.
+   * @param mesgHandler Provides the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies the input and output arrays.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues remain valid
+   *      while this executor runs.
+   * @pre The selected arrays contain four components for each tuple.
+   */
   ComputeQuaternionConjugateDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                    const ComputeQuaternionConjugateInputValues* inputValues);
+
+  /**
+   * @brief Destroys the direct quaternion-conjugation executor.
+   */
   ~ComputeQuaternionConjugateDirect() noexcept;
 
   ComputeQuaternionConjugateDirect(const ComputeQuaternionConjugateDirect&) = delete;
@@ -29,10 +45,18 @@ public:
   ComputeQuaternionConjugateDirect& operator=(ComputeQuaternionConjugateDirect&&) noexcept = delete;
 
   /**
-   * @brief Conjugates all quaternion tuples with the original parallel direct loop.
+   * @brief Conjugates all quaternion tuples through direct array access.
+   * @return Success after the traversal or cancellation.
+   *
+   * Cancellation is checked for each tuple. The method returns success and can
+   * leave output tuples not recomputed.
    */
   Result<> operator()();
 
+  /**
+   * @brief Returns the external cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 private:

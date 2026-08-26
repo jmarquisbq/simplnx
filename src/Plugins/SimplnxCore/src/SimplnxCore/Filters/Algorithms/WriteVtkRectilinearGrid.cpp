@@ -9,7 +9,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 WriteVtkRectilinearGrid::WriteVtkRectilinearGrid(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                  WriteVtkRectilinearGridInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -19,16 +18,13 @@ WriteVtkRectilinearGrid::WriteVtkRectilinearGrid(DataStructure& dataStructure, c
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteVtkRectilinearGrid::~WriteVtkRectilinearGrid() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteVtkRectilinearGrid::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteVtkRectilinearGrid::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);
@@ -43,10 +39,8 @@ Result<> WriteVtkRectilinearGrid::operator()()
     return MakeErrorResult(-2073, fmt::format("Error opening output vtk file '{}'", m_InputValues->OutputFile.string()));
   }
 
-  // write the header
   writeVtkHeader(outputFile);
 
-  // Write the Coordinate Points
   Result<> writeCoordsResults = writeCoords<float32>(outputFile, "X_COORDINATES", "float", dims[0] + 1, origin[0] - res[0] * 0.5f, res[0]);
   if(writeCoordsResults.invalid())
   {
@@ -63,14 +57,12 @@ Result<> WriteVtkRectilinearGrid::operator()()
     return MergeResults(writeCoordsResults, MakeErrorResult(-2077, fmt::format("Error writing Z Coordinates in vtk file '{}'\n ", m_InputValues->OutputFile.string())));
   }
 
-  // Write the data arrays
   const auto totalCells = imageGeom.getNumXCells() * imageGeom.getNumYCells() * imageGeom.getNumZCells();
   fprintf(outputFile, "CELL_DATA %d\n", static_cast<int>(totalCells));
 
   for(const DataPath& arrayPath : m_InputValues->SelectedDataArrayPaths)
   {
-    // VtkUtilities owns the bounded typed-page writer, including portable Bool
-    // handling and local endian conversion for binary output.
+    // The shared writer expands Boolean values and byte-swaps only local pages.
     auto writeArrayResult = ExecuteDataFunction(WriteVtkDataArrayFunctor{}, m_DataStructure.getDataAs<IDataArray>(arrayPath)->getDataType(), outputFile, m_InputValues->WriteBinaryFile,
                                                 m_DataStructure, arrayPath, m_MessageHandler);
     if(writeArrayResult.invalid())
@@ -85,7 +77,6 @@ Result<> WriteVtkRectilinearGrid::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
 void WriteVtkRectilinearGrid::writeVtkHeader(FILE* outputFile) const
 {
   const auto& geom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);
@@ -108,7 +99,6 @@ void WriteVtkRectilinearGrid::writeVtkHeader(FILE* outputFile) const
   fprintf(outputFile, "DIMENSIONS %ld %ld %ld\n", static_cast<long int>(xPoints), static_cast<long int>(yPoints), static_cast<long int>(zPoints));
 }
 
-// -----------------------------------------------------------------------------
 template <typename T>
 Result<> WriteVtkRectilinearGrid::writeCoords(FILE* outputFile, const std::string& axis, const std::string& type, int64 nPoints, T min, T step)
 {
@@ -127,7 +117,7 @@ Result<> WriteVtkRectilinearGrid::writeCoords(FILE* outputFile, const std::strin
       data[idx] = d;
     }
     const usize totalWritten = fwrite(static_cast<void*>(data.data()), sizeof(T), static_cast<usize>(nPoints), outputFile);
-    fprintf(outputFile, "\n"); // Write a newline character at the end of the coordinates
+    fprintf(outputFile, "\n");
     if(totalWritten != static_cast<usize>(nPoints))
     {
       fclose(outputFile);

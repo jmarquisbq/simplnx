@@ -12,59 +12,64 @@ namespace nx::core
 
 /**
  * @struct SurfaceNetsInputValues
- * @brief Aggregates every user-facing parameter and internally-created
- * DataPath needed by the SurfaceNets algorithm family.
+ * @brief Stores smoothing, winding, transfer, geometry, and output selections.
  */
 struct SIMPLNXCORE_EXPORT SurfaceNetsInputValues
 {
-  bool ApplySmoothing;          ///< When true, run iterative relaxation smoothing on mesh vertices
-  bool RepairTriangleWinding;   ///< When true, run winding repair on the output triangle mesh
-  int32 SmoothingIterations;    ///< Number of smoothing iterations to perform
-  float32 MaxDistanceFromVoxel; ///< Maximum distance a vertex can move from its voxel center during smoothing
-  float32 RelaxationFactor;     ///< Blending factor for neighbor-averaging during smoothing (0..1)
+  bool ApplySmoothing;
+  bool RepairTriangleWinding;
+  int32 SmoothingIterations;
+  float32 MaxDistanceFromVoxel;
+  float32 RelaxationFactor;
 
-  DataPath GridGeomDataPath;                                             ///< Path to the input ImageGeom
-  DataPath FeatureIdsArrayPath;                                          ///< Path to the Int32 FeatureIds cell array
-  MultiArraySelectionParameter::ValueType SelectedCellDataArrayPaths;    ///< Cell arrays to transfer to the triangle face attribute matrix
-  MultiArraySelectionParameter::ValueType SelectedFeatureDataArrayPaths; ///< Feature arrays to transfer to the triangle face attribute matrix
-  DataPath TriangleGeometryPath;                                         ///< Path to the created TriangleGeom output
-  DataPath VertexGroupDataPath;                                          ///< Path to the vertex attribute matrix
-  DataPath NodeTypesDataPath;                                            ///< Path to the Int8 NodeTypes vertex array
-  DataPath FaceGroupDataPath;                                            ///< Path to the face attribute matrix
-  DataPath FaceLabelsDataPath;                                           ///< Path to the Int32 FaceLabels (2-component) face array
-  MultiArraySelectionParameter::ValueType CreatedDataArrayPaths;         ///< Paths to the created face arrays (transferred cell/feature data)
+  DataPath GridGeomDataPath;
+  DataPath FeatureIdsArrayPath;
+  MultiArraySelectionParameter::ValueType SelectedCellDataArrayPaths;
+  MultiArraySelectionParameter::ValueType SelectedFeatureDataArrayPaths;
+  DataPath TriangleGeometryPath;
+  DataPath VertexGroupDataPath;
+  DataPath NodeTypesDataPath;
+  DataPath FaceGroupDataPath;
+  DataPath FaceLabelsDataPath;
+  MultiArraySelectionParameter::ValueType CreatedDataArrayPaths;
 };
 
 /**
  * @class SurfaceNets
- * @brief Dispatcher that selects between SurfaceNetsDirect (in-core) and
- * SurfaceNetsScanline (OOC) based on the storage type of input arrays.
+ * @brief Creates a triangle mesh from labeled ImageGeom feature boundaries.
  *
- * The Surface Nets algorithm generates a smoothed triangle mesh of feature
- * boundaries using the method from Frisken (2022). Unlike QuickSurfaceMesh
- * which places vertices at dual-grid corners, Surface Nets places vertices
- * at voxel centers where features change, then optionally relaxes positions
- * toward neighbor averages to produce smoother surfaces while preserving
- * sharp boundaries between materials.
+ * The implementation follows the multimaterial Surface Nets method from
+ * Frisken (2022). Padded exterior cells close the volume boundary. Optional
+ * relaxation moves vertices toward face-neighbor averages and clamps each local
+ * coordinate around its cell center. Face labels use ascending feature order;
+ * exterior label zero becomes -1.
  *
- * Dispatch is performed by DispatchAlgorithm: if the FeatureIds array is
- * backed by an in-memory DataStore, SurfaceNetsDirect is used (which
- * delegates to the MMSurfaceNet library). If it uses chunked OOC storage,
- * SurfaceNetsScanline is selected instead.
+ * Every participating input, transfer output, mesh store, NodeTypes, and
+ * FaceLabels store drives dispatch. Direct uses a complete padded MMCellMap.
+ * Scanline uses two Feature ID slices and padded-cell temporary records behind
+ * a bounded page cache. Storage overrides can force either path.
  *
- * @see SurfaceNetsDirect, SurfaceNetsScanline
+ * The triangle-area helper passes its cross-product output by value, so both
+ * candidate areas remain zero. Quad call sites also provide zero positions.
+ * Each oriented quad therefore uses its default diagonal. Both paths subtract
+ * half of Y spacing from world Z. Anisotropic Y and Z spacing therefore shifts Z.
  */
 class SIMPLNXCORE_EXPORT SurfaceNets
 {
 public:
   /**
-   * @brief Constructs the dispatcher.
-   * @param dataStructure The DataStructure containing all input/output objects
-   * @param mesgHandler Callback for progress and status messages
-   * @param shouldCancel Atomic flag checked periodically for user cancellation
-   * @param inputValues Pointer to the parameter struct (must outlive this object)
+   * @brief Initializes the Surface Nets dispatcher.
+   * @param dataStructure Contains input and output objects.
+   * @param mesgHandler Receives phase and winding messages.
+   * @param shouldCancel Signals cancellation at implementation checkpoints.
+   * @param inputValues Selects smoothing, winding, transfers, and paths.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   SurfaceNets(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, SurfaceNetsInputValues* inputValues);
+  /**
+   * @brief Destroys the Surface Nets dispatcher.
+   */
   ~SurfaceNets() noexcept;
 
   SurfaceNets(const SurfaceNets&) = delete;
@@ -73,21 +78,24 @@ public:
   SurfaceNets& operator=(SurfaceNets&&) noexcept = delete;
 
   /**
-   * @brief Dispatches to the appropriate in-core or OOC algorithm implementation.
-   * @return Result<> indicating success or an error code from the selected algorithm
+   * @brief Builds the mesh with the storage-appropriate implementation.
+   * @return Allocation, storage, transfer, geometry, or winding result.
+   * @pre FeatureIdsArrayPath is scalar Int32 and matches the ImageGeom cells.
+   * @pre CreatedDataArrayPaths lists cell outputs, then feature outputs, in selection order.
+   *
+   * Cancellation returns success in most phases and does not roll back resized
+   * or written mesh arrays. Different output arrays can contain different
+   * completed ranges after cancellation or error.
    */
   Result<> operator()();
 
-  /**
-   * @brief Returns a reference to the cancellation flag (used by MMSurfaceNet internals).
-   */
   const std::atomic_bool& getCancel();
 
 private:
-  DataStructure& m_DataStructure;                        ///< Reference to the active DataStructure
-  const SurfaceNetsInputValues* m_InputValues = nullptr; ///< User parameters and created array paths
-  const std::atomic_bool& m_ShouldCancel;                ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;       ///< Progress message callback
+  DataStructure& m_DataStructure;
+  const SurfaceNetsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

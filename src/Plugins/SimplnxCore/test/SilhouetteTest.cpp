@@ -177,24 +177,21 @@ TEST_CASE("SimplnxCore::SilhouetteFilter: Medoids Test", "[SimplnxCore][Silhouet
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/k_files_v2/7_0_silhouette_exemplar.dream3d", unit_test::k_TestFilesDir)));
 
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
+    // Configure the filter arguments.
     SilhouetteFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(SilhouetteFilter::k_UseMask_Key, std::make_any<bool>(false));
     args.insertOrAssign(SilhouetteFilter::k_SelectedArrayPath_Key, std::make_any<DataPath>(k_CellPath.createChildPath("DAMAGE")));
     args.insertOrAssign(SilhouetteFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(k_MedoidsClusterIdsPath));
     args.insertOrAssign(SilhouetteFilter::k_SilhouetteArrayPath_Key, std::make_any<DataPath>(k_MedoidsSilhouettePathNX));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
     CHECK(preflightResult.outputActions.value().actions.size() == 1);
     CHECK(preflightResult.outputActions.value().deferredActions.empty());
     CHECK(dataStructure.getDataAs<IDataArray>(DataPath({"temp_mask"})) == nullptr);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
@@ -216,21 +213,18 @@ TEST_CASE("SimplnxCore::SilhouetteFilter: Means Test", "[SimplnxCore][Silhouette
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/k_files_v2/7_0_silhouette_exemplar.dream3d", unit_test::k_TestFilesDir)));
 
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
+    // Configure the filter arguments.
     SilhouetteFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(SilhouetteFilter::k_UseMask_Key, std::make_any<bool>(false));
     args.insertOrAssign(SilhouetteFilter::k_SelectedArrayPath_Key, std::make_any<DataPath>(k_CellPath.createChildPath("DAMAGE")));
     args.insertOrAssign(SilhouetteFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(k_MeansClusterIdsPath));
     args.insertOrAssign(SilhouetteFilter::k_SilhouetteArrayPath_Key, std::make_any<DataPath>(k_MeansSilhouettePathNX));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }

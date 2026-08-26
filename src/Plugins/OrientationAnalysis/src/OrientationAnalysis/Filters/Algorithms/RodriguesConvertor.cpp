@@ -14,7 +14,13 @@ using namespace nx::core;
 
 namespace
 {
-/** @brief Preserved parallel resident worker that converts Rodrigues triples through direct array indexing. */
+/**
+ * @class RodriguesConvertorImpl
+ * @brief Converts disjoint resident tuple ranges through direct array indexing.
+ *
+ * Parallel workers share the array objects and write disjoint output tuples.
+ * This design does not establish generic DataArray or DataStore thread safety.
+ */
 class RodriguesConvertorImpl
 {
 private:
@@ -23,7 +29,6 @@ private:
   const std::atomic_bool* m_ShouldCancel;
 
 public:
-  /** @brief Borrows resident input/output arrays and cancellation state for the parallel run. */
   RodriguesConvertorImpl(const Float32Array* inputQuat, Float32Array* outputQuat, const std::atomic_bool* shouldCancel)
   : m_Input(inputQuat)
   , m_Output(outputQuat)
@@ -31,7 +36,6 @@ public:
   {
   }
 
-  /** @brief Converts a half-open resident tuple range to unit axis plus magnitude. */
   void convert(size_t start, size_t end) const
   {
     for(size_t i = start; i < end; i++)
@@ -43,6 +47,8 @@ public:
       const float r0 = (*m_Input)[i * 3];
       const float r1 = (*m_Input)[i * 3 + 1];
       const float r2 = (*m_Input)[i * 3 + 2];
+      // The filter contract requires nonzero triples. A zero magnitude produces
+      // nonfinite axis components in the current implementation.
       const float length = sqrtf(r0 * r0 + r1 * r1 + r2 * r2);
 
       (*m_Output)[i * 4] = r0 / length;
@@ -52,7 +58,6 @@ public:
     }
   }
 
-  /** @brief Adapts a ParallelDataAlgorithm range to convert(). */
   void operator()(const Range& range) const
   {
     convert(range.min(), range.max());
@@ -61,9 +66,15 @@ public:
 
 /**
  * @brief Converts Rodrigues triples with bounded three-component reads and four-component writes.
+ * @param input Supplies three-component Rodrigues tuples.
+ * @param output Receives unit-axis and magnitude tuples.
+ * @param shouldCancel Signals cancellation between pages and before each write.
+ * @return Input or output bulk-I/O errors. Cancellation returns success after completed pages.
+ * @pre Input and output tuple counts match, with three and four components respectively.
+ * @pre Each Rodrigues triple has nonzero magnitude.
  *
- * The mathematical operation and tuple order match the Direct worker; only the
- * DataStore transfer granularity changes for OOC safety.
+ * The mathematical operation and tuple order match the direct worker. Local
+ * buffers hold at most 65,536 tuples.
  */
 Result<> ConvertRodriguesBulk(const Float32Array& input, Float32Array& output, const std::atomic_bool& shouldCancel)
 {
@@ -92,6 +103,7 @@ Result<> ConvertRodriguesBulk(const Float32Array& input, Float32Array& output, c
       const float32 r0 = inputValues[inputOffset];
       const float32 r1 = inputValues[inputOffset + 1];
       const float32 r2 = inputValues[inputOffset + 2];
+      // The filter contract requires nonzero triples.
       const float32 length = sqrtf(r0 * r0 + r1 * r1 + r2 * r2);
       outputValues[outputOffset] = r0 / length;
       outputValues[outputOffset + 1] = r1 / length;
@@ -113,7 +125,6 @@ Result<> ConvertRodriguesBulk(const Float32Array& input, Float32Array& output, c
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 RodriguesConvertor::RodriguesConvertor(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, RodriguesConvertorInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -122,16 +133,13 @@ RodriguesConvertor::RodriguesConvertor(DataStructure& dataStructure, const IFilt
 {
 }
 
-// -----------------------------------------------------------------------------
 RodriguesConvertor::~RodriguesConvertor() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& RodriguesConvertor::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> RodriguesConvertor::operator()()
 {
   const auto& input = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->RodriguesDataArrayPath);

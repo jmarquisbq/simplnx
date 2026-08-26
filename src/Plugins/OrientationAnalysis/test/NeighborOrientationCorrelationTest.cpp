@@ -34,23 +34,11 @@ using namespace nx::core::UnitTest;
 
 namespace
 {
-/**
- * V&V oracle fixtures (Class 1 analytical + Class 2 reference implementation).
- *
- * Every orientation is a rotation about +Z by an angle <= 45 deg (cubic) / <= 30 deg (hex),
- * where the misorientation under any Laue fold convention is exactly |theta1 - theta2| —
- * the expected outputs below are hand-derivable and convention-free. Full derivations and
- * the NumPy reference implementation live in the V&V archive (oracle/DERIVATIONS.md,
- * oracle/reference_noc.py); the deviation IDs cited below are documented in
- * src/Plugins/OrientationAnalysis/vv/deviations/NeighborOrientationCorrelationFilter.md.
- *
- * All fixtures: MinConfidence = 0.1, MisorientationTolerance = 5 deg, good CI = 0.9,
- * bad CI = 0.01; every similar/dissimilar decision sits >= 1 deg away from the tolerance.
- * Neighbor scan order is -Z, -Y, -X, +X, +Y, +Z; the argmax resolves ties to the LAST
- * neighbor in scan order ('>=' with count > 0), so fully-tied neighborhoods pick the
- * same neighbor as DREAM3D 6.5.171 and migration diffs concentrate where the D3
- * ranking defect actually mattered.
- */
+// Oracle rotations give closed-form misorientations. Decisions are at least one
+// degree from the 5-degree tolerance. Derivations and the independent reference
+// are in oracle/DERIVATIONS.md and oracle/reference_noc.py. The deviation
+// document is src/Plugins/OrientationAnalysis/vv/deviations/NeighborOrientationCorrelationFilter.md.
+// Ties select the final valid neighbor in -Z, -Y, -X, +X, +Y, +Z order.
 namespace NOCOracle
 {
 constexpr float32 k_GoodCI = 0.9f;
@@ -70,6 +58,10 @@ const DataPath k_MaskPath = k_CellAMPath.createChildPath("Mask");
 const DataPath k_EnsembleAMPath = k_GeomPath.createChildPath("Ensemble Data");
 const DataPath k_XtalPath = k_EnsembleAMPath.createChildPath("CrystalStructures");
 
+/**
+ * @struct OracleFixture
+ * @brief Holds one analytical neighbor-correlation fixture.
+ */
 struct OracleFixture
 {
   usize nx = 0;
@@ -162,6 +154,10 @@ void ExecuteFixture(DataStructure& dataStructure, int32 level, const std::vector
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 }
 
+/**
+ * @struct CellSnapshot
+ * @brief Stores all transferable tuples before execution.
+ */
 struct CellSnapshot
 {
   std::vector<float32> ci;
@@ -198,10 +194,13 @@ CellSnapshot Capture(const DataStructure& dataStructure)
 }
 
 /**
- * Verifies a single-pass fixture result against the pre-execution snapshot.
- * expectedSource maps each replaced cell to the cell whose ORIGINAL tuple it must now hold;
- * every other cell must be untouched in every array (Class 4 invariant I1).
- * ignoredArrayNames lists arrays excluded from the transfer (invariant I2: never modified).
+ * @brief Verifies tuple transfers after one pass.
+ * @param dataStructure Contains the post-execution arrays.
+ * @param before Captures the original tuple values.
+ * @param expectedSource Maps a replaced cell to its source cell.
+ * @param ignoredArrayNames Identifies arrays that must retain destination values.
+ *
+ * Replaced cells copy the original source tuple. Other cells remain unchanged.
  */
 void VerifyAgainstSnapshot(const DataStructure& dataStructure, const CellSnapshot& before, const std::map<usize, usize>& expectedSource, const std::set<std::string>& ignoredArrayNames = {})
 {
@@ -235,10 +234,12 @@ void VerifyAgainstSnapshot(const DataStructure& dataStructure, const CellSnapsho
 namespace SmallIn100Invariants
 {
 /**
- * Losslessly widen a numeric cell array to float64 for before/after comparison.
- * Every type in the Small IN100 cell data (bool/uint8/int32/float32) is exactly
- * representable as float64, so equality of the widened values is equality of the
- * originals.
+ * @brief Widens a numeric cell array for snapshot comparison.
+ * @tparam T Specifies the array value type.
+ * @param iDataArray Provides the source array.
+ * @return Values widened to float64.
+ *
+ * Small IN100 values are exactly representable as float64.
  */
 template <typename T>
 std::vector<float64> ToDoubles(const IDataArray& iDataArray)
@@ -283,6 +284,10 @@ std::vector<float64> SnapshotArray(const IDataArray& iDataArray)
   }
 }
 
+/**
+ * @struct CellArraySnapshot
+ * @brief Stores one numeric cell-array snapshot.
+ */
 struct CellArraySnapshot
 {
   DataPath path;
@@ -300,9 +305,8 @@ std::vector<CellArraySnapshot> SnapshotCellArrays(const DataStructure& dataStruc
     const auto* arrayPtr = dataStructure.getDataAs<IDataArray>(arrayPath);
     if(arrayPtr == nullptr)
     {
-      // This snapshot only widens numeric IDataArrays to float64 for comparison. The Small
-      // IN100 cell data contains no NeighborList/String arrays, so none are skipped here;
-      // the transfer of those types (when present) is covered by Oracle F13.
+      // This snapshot supports numeric IDataArrays. Oracle F13 covers
+      // NeighborList and StringArray transfer.
       continue;
     }
     snapshots.push_back({arrayPath, arrayPtr->getNumberOfComponents(), SnapshotArray(*arrayPtr)});
@@ -312,32 +316,12 @@ std::vector<CellArraySnapshot> SnapshotCellArrays(const DataStructure& dataStruc
 } // namespace SmallIn100Invariants
 } // namespace
 
-/**
- * Read H5Ebsd File
- * MultiThreshold Objects
- * Convert Orientation Representation (Euler->Quats)
- * Align Sections Misorientation
- * Identify Sample
- * Align Sections Feature Centroid
- *
- * Read DREAM3D File (read the exemplar 'align_sections_feature_centroid.dream3d' file from
- * [Optional] Write out dream3d file
- *
- *
- * Compare the shifts file 'align_sections_feature_centroid.txt' to what was written
- *
- * Compare all the data arrays from the "Exemplar Data / CellData"
- */
-
 TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Preflight Error - Cell array tuple count mismatch (-580093)",
           "[OrientationAnalysis][NeighborOrientationCorrelationFilter][preflight]")
 {
   UnitTest::LoadPlugins();
 
-  // Build a minimal synthetic DataStructure where the cell-level arrays validated
-  // together (ConfidenceIndex, CellPhases, Quats, plus the sibling arrays of the
-  // ConfidenceIndex parent group) do NOT all share the same tuple count. This drives
-  // the validateNumberOfTuples() guard in preflightImpl that emits k_InvalidNumTuples (-580093).
+  // Cell arrays have different tuple counts and must report -580093.
   DataStructure dataStructure;
   auto* imageGeom = ImageGeom::Create(dataStructure, "DataContainer");
   imageGeom->setDimensions({10, 1, 1});
@@ -346,8 +330,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Preflight 
   UnitTest::CreateTestDataArray<float32>(dataStructure, "ConfidenceIndex", {10}, {1}, cellAM->getId());
   UnitTest::CreateTestDataArray<float32>(dataStructure, "Quats", {10}, {4}, cellAM->getId());
 
-  // CellPhases lives in a separate AttributeMatrix with a deliberately different tuple
-  // count (9 != 10) so the cross-array tuple-count check fails.
+  // The separate group gives CellPhases nine tuples instead of ten.
   auto* mismatchAM = AttributeMatrix::Create(dataStructure, "MismatchData", {9}, imageGeom->getId());
   UnitTest::CreateTestDataArray<int32>(dataStructure, "Phases", {9}, {1}, mismatchAM->getId());
 
@@ -468,25 +451,19 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: SIMPL Back
       CHECK(args.value<DataPath>(NeighborOrientationCorrelationFilter::k_CellPhasesArrayPath_Key) == DataPath({"DataContainer", "CellData", "TestArray"}));
       CHECK(args.value<DataPath>(NeighborOrientationCorrelationFilter::k_QuatsArrayPath_Key) == DataPath({"DataContainer", "CellData", "TestArray"}));
       CHECK(args.value<DataPath>(NeighborOrientationCorrelationFilter::k_CrystalStructuresArrayPath_Key) == DataPath({"DataContainer", "CellData", "TestArray"}));
-      // Complex type (MultiDataArraySelectionFilterParameterConverter) - verified by successful pipeline loading
+      // Pipeline loading verifies MultiDataArraySelectionFilterParameterConverter.
     }
   }
 }
 
-// -----------------------------------------------------------------------------
-// V&V oracle fixtures. Derivations: V&V archive oracle/DERIVATIONS.md.
-// Linear index = z*ny*nx + y*nx + x. 5x5x5 center = 62; its face neighbors in scan
-// order (-Z,-Y,-X,+X,+Y,+Z) are 37, 57, 61, 63, 67, 87.
-// -----------------------------------------------------------------------------
+// Oracle fixtures use z*ny*nx + y*nx + x linear indexing.
 
 TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F01 - uniform neighbors 3D", "[OrientationAnalysis][NeighborOrientationCorrelationFilter]")
 {
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Center (2,2,2)=62 is bad (CI 0.01, 30 deg); all 6 neighbors are 0 deg -> all 15
-  // neighbor pairs similar -> every simCount = 5 (tie). Last-of-ties = +Z neighbor 87
-  // (same pick as 6.5.171 on fully-tied neighborhoods).
+  // Fully tied neighbors select the final +Z neighbor at index 87.
   OracleFixture fixture(5, 5, 5, {999, 1});
   const usize center = fixture.idx(2, 2, 2);
   fixture.ci[center] = k_BadCI;
@@ -496,7 +473,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F01
   const CellSnapshot before = Capture(dataStructure);
   ExecuteFixture(dataStructure, 5);
 
-  // Class 1 expected: cell 62 holds the full ORIGINAL tuple of cell 87; nothing else moves (I1).
+  // Only the center receives the original tuple from index 87.
   VerifyAgainstSnapshot(dataStructure, before, {{62, 87}});
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
@@ -506,8 +483,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F02
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Neighbor angles 10,17,24,31,38,45 deg: pairwise >= 7 deg > 5 deg tolerance -> all
-  // simCounts 0 -> no replacement anywhere.
+  // All neighbor pairs exceed the tolerance, so no tuple is replaced.
   OracleFixture fixture(5, 5, 5, {999, 1});
   const usize center = fixture.idx(2, 2, 2);
   fixture.ci[center] = k_BadCI;
@@ -604,11 +580,10 @@ void BuildTestData(DataStructure& dataStructure, usize dimX, usize dimY, usize d
     ciStore.copyFromBuffer(zOffset, nonstd::span<const float32>(ciBuf.data(), sliceSize));
   }
 
-  // Ensemble data — small enough for per-element writes
   auto* ensembleAM = AttributeMatrix::Create(dataStructure, "Ensemble Data", {2}, imageGeom->getId());
   auto crystalStructuresDataStore = DataStoreUtilities::CreateDataStore<uint32>(dataStructure, k_CrystalStructuresPath, {2}, {1}, IDataAction::Mode::Execute);
   auto* crystalStructuresArray = DataArray<uint32>::Create(dataStructure, "CrystalStructures", crystalStructuresDataStore, ensembleAM->getId());
-  std::array<uint32, 2> csData = {999, 1}; // Unknown, Cubic-High (m-3m)
+  std::array<uint32, 2> csData = {999, 1};
   crystalStructuresArray->getDataStoreRef().copyFromBuffer(0, nonstd::span<const uint32>(csData.data(), 2));
 }
 } // namespace NOCOocTest
@@ -619,7 +594,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Generate T
   const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "neighbor_orientation_correlation";
   fs::create_directories(outputDir);
 
-  // Large input data (200x200x200, blockSize=25)
+  // The 200-cubed fixture uses 25-tuple blocks to exercise bounded I/O.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 200, 200, 200, 25);
@@ -632,10 +607,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F03
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // -Z,-Y,-X,+X = 0,1,2,1.5 deg (4-clique, simCount 3 each); +Y,+Z = 20,21 deg (pair,
-  // simCount 1 each). The argmax must pick the last of the count-3 maxes, +X (63).
-  // The legacy last-wins defect (deviation D3) picked +Z (87) - a count-1 neighbor
-  // beating a count-3 neighbor. This fixture is the primary D3 regression pin.
+  // The four-neighbor clique must choose +X, the final highest-count neighbor.
+  // This prevents a lower-count +Z neighbor from winning.
   OracleFixture fixture(5, 5, 5, {999, 1});
   const usize center = fixture.idx(2, 2, 2);
   fixture.ci[center] = k_BadCI;
@@ -657,10 +630,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F03
 
 namespace
 {
-// 3x3x3 bad cube (x,y,z in 2..4) of pairwise-dissimilar garbage (distance-2 mod-7
-// coloring, angles 6..42 deg) inside a uniform 0-deg 7x7x7 good volume. Erosion fills
-// corners+edges (pass 1), face centers (pass 2), cube center (pass 3). The legacy
-// double-decrement defect (deviation D2) halved the intended 6-Level pass count.
+// A dissimilar 3x3x3 bad cube needs three erosion passes. This fixture detects
+// an incorrect cleanup-pass count.
 NOCOracle::OracleFixture BuildCascadeFixture()
 {
   NOCOracle::OracleFixture fixture(7, 7, 7, {999, 1});
@@ -685,8 +656,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F04
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Level 2 -> 4 passes; the cascade needs 3, so the cube must be fully filled. The
-  // legacy double-decrement schedule ran only 2 passes and left the cube center bad.
+  // Level two gives four passes, enough to fill the three-pass cascade.
   OracleFixture fixture = BuildCascadeFixture();
   DataStructure dataStructure = BuildDataStructure(fixture);
   ExecuteFixture(dataStructure, 2);
@@ -697,8 +667,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F04
   {
     CAPTURE(i);
     REQUIRE(ciRef[i] >= k_MinConfidence);
-    // Every filled cell must carry the good region's identity quaternion: a garbage
-    // neighbor is pairwise-dissimilar to everything so it can never win the argmax.
+    // Filled cells must copy an identity quaternion from the good region.
     REQUIRE(quatsRef[i * 4 + 2] == 0.0f);
     REQUIRE(quatsRef[i * 4 + 3] == 1.0f);
   }
@@ -710,13 +679,12 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F10
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Level 4 -> 2 passes: corners+edges then face centers fill; only the cube center
-  // remains unfilled. The legacy double-decrement schedule ran a single pass.
+  // Level four gives two passes and leaves only the cube center.
   OracleFixture fixture = BuildCascadeFixture();
   DataStructure dataStructure = BuildDataStructure(fixture);
   ExecuteFixture(dataStructure, 4);
 
-  const usize cubeCenter = fixture.idx(3, 3, 3); // = 171
+  const usize cubeCenter = fixture.idx(3, 3, 3);
   const auto& ciRef = dataStructure.getDataRefAs<Float32Array>(k_CIPath).getDataStoreRef();
   for(usize i = 0; i < fixture.count(); i++)
   {
@@ -738,11 +706,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F05
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // 2D 5x5x1, center (2,2)=12 bad, phase 1, 10 deg. Neighbors: -Y(7)=0 deg ph1,
-  // -X(11)=1 deg ph1, +X(13)=2 deg PHASE 2, +Y(17)=40 deg ph1. Only legitimate similar
-  // pair is (-Y,-X) -> counts (1,1,0,0) -> last-of-ties picks -X (11) and the phase stays 1.
-  // The legacy stale-w defect (deviation D1) counted the mixed-phase (-Y,+X) pair via the
-  // inherited w and copied PHASE-2 data from +X (13).
+  // Only same-phase neighbors can contribute. The mixed-phase +X neighbor must
+  // not replace the center.
   OracleFixture fixture(5, 5, 1, {999, 1, 1});
   const usize center = fixture.idx(2, 2, 0);
   fixture.ci[center] = k_BadCI;
@@ -768,9 +733,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F06
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // -Z(37)=0 deg / -Y(57)=1 deg are the only similar pair (counts 1,1 -> last of ties
-  // = -Y, 57); -X(61)=30, +X(63)=38 deg; +Y(67), +Z(87) are phase 0 (unindexed) and
-  // must never be counted or chosen.
+  // Phase-zero neighbors must not contribute or become source tuples.
   OracleFixture fixture(5, 5, 5, {999, 1, 1});
   const usize center = fixture.idx(2, 2, 2);
   fixture.ci[center] = k_BadCI;
@@ -795,9 +758,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F07
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // 5x5x1: center (2,2)=12 bad; the 4 in-plane neighbors (7,11,13,17) all 0 deg ->
-  // counts all 3 (tie) -> last-of-ties = +Y neighbor 17. Exercises the z-degenerate
-  // boundary masks.
+  // A z-degenerate image selects the final in-plane +Y neighbor.
   OracleFixture fixture(5, 5, 1, {999, 1});
   const usize center = fixture.idx(2, 2, 0);
   fixture.ci[center] = k_BadCI;
@@ -816,25 +777,14 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F08
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Discriminating Laue-class test. The bad center 62's six face neighbors are set so that exactly
-  // ONE pair — the -Z neighbor 37 (0 deg) and the +Z neighbor 87 (58 deg) — has a c-axis
-  // misorientation of 58 deg. The four remaining neighbors (57,61,63,67 at 20,27,34,41 deg) are
-  // mutually dissimilar and dissimilar to both 0 and 58 under either Laue class.
-  //
-  // A 58 deg misorientation about the c-axis folds to:
-  //   * Hexagonal-High (6/mmm, 60 deg periodicity): min(58, 60-58) = 2 deg  -> < 5 deg tol -> SIMILAR
-  //   * Cubic-High     (m-3m, 90 deg periodicity):  min(58, 90-58) = 32 deg -> > 5 deg tol -> NOT similar
-  //
-  // So the SAME fixture must give different results, which pins the Laue-class dispatch's folding
-  // (a bug that folded hex with cubic periodicity, or vice versa, would break exactly one section):
-  //   * Hex:   the 37/87 pair is similar; both get count 1, last-of-ties (+Z, 87) wins -> center<-87.
-  //   * Cubic: no pair is similar; all counts 0 -> center untouched.
+  // The 37/87 pair differs by 58 degrees. Hexagonal folds it to 2 degrees;
+  // cubic folds it to 32. Hex replaces the center with 87; cubic keeps it.
   const std::array<usize, 6> neighbors = {37, 57, 61, 63, 67, 87};
   const std::array<float64, 6> angles = {0.0, 20.0, 27.0, 34.0, 41.0, 58.0};
 
   SECTION("Hexagonal-High: 58 deg folds to 2 deg -> center replaced by +Z neighbor 87")
   {
-    OracleFixture fixture(5, 5, 5, {999, 0}); // phase 1 = Hexagonal-High
+    OracleFixture fixture(5, 5, 5, {999, 0});
     const usize center = fixture.idx(2, 2, 2);
     fixture.ci[center] = k_BadCI;
     for(usize j = 0; j < 6; j++)
@@ -850,7 +800,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F08
 
   SECTION("Cubic-High: 58 deg folds to 32 deg -> no similar pair, center untouched")
   {
-    OracleFixture fixture(5, 5, 5, {999, 1}); // phase 1 = Cubic-High
+    OracleFixture fixture(5, 5, 5, {999, 1});
     const usize center = fixture.idx(2, 2, 2);
     fixture.ci[center] = k_BadCI;
     for(usize j = 0; j < 6; j++)
@@ -870,8 +820,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F09
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // F01 with Payload2 in IgnoredDataArrayPaths: Payload2 must be bit-identical to input
-  // while every other array is copied from cell 87.
+  // Ignored Payload2 must retain its original tuple while other arrays transfer.
   OracleFixture fixture(5, 5, 5, {999, 1});
   const usize center = fixture.idx(2, 2, 2);
   fixture.ci[center] = k_BadCI;
@@ -890,11 +839,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F13
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // Same geometry as F01 (uniform neighbors -> center 62 replaced by the last-of-ties +Z
-  // neighbor 87), but the cell attribute matrix also carries a NeighborList and a StringArray.
-  // The transfer must copy every cell array type into replaced cells (matching legacy DREAM3D
-  // 6.5.171): this pins that both are transferred (center inherits neighbor 87's list/string)
-  // while every other cell keeps its own values.
+  // F13 adds NeighborList and StringArray to F01. Their transfer matches legacy
+  // DREAM3D 6.5.171 behavior: a replaced cell copies the complete source tuple.
   OracleFixture fixture(5, 5, 5, {999, 1});
   const usize center = fixture.idx(2, 2, 2);
   const usize source = 87;
@@ -906,7 +852,6 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F13
   REQUIRE(cellAMPtr != nullptr);
   const std::vector<usize> tupleShape = {fixture.nz, fixture.ny, fixture.nx};
 
-  // Each cell's NeighborList holds its own linear index; each cell's string is "cell_<index>".
   auto* neighborListPtr = NeighborList<int32>::Create(dataStructure, "NeighborIds", tupleShape, cellAMPtr->getId());
   std::vector<std::string> strings(fixture.count());
   for(usize i = 0; i < fixture.count(); i++)
@@ -922,11 +867,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F13
   const CellSnapshot before = Capture(dataStructure);
   ExecuteFixture(dataStructure, 5);
 
-  // Numeric arrays behave exactly as F01.
   VerifyAgainstSnapshot(dataStructure, before, {{center, source}});
 
-  // The NeighborList and String at the replaced cell now hold the source neighbor's values;
-  // every other cell is untouched.
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<NeighborList<int32>>(neighborListPath));
   const auto& resultNeighborList = dataStructure.getDataRefAs<NeighborList<int32>>(neighborListPath);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<StringArray>(stringArrayPath));
@@ -947,9 +889,7 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F11
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // 4x4x4, bad cell at corner (0,0,0): only +X(1)=0 deg, +Y(4)=1 deg, +Z(16)=2 deg are
-  // valid; all 3 pairs similar -> counts 2 each (tie) -> last-of-ties = +Z neighbor 16.
-  // Exercises the volume-boundary validity masks.
+  // A corner has three valid neighbors and selects the final +Z neighbor.
   OracleFixture fixture(4, 4, 4, {999, 1});
   fixture.ci[0] = k_BadCI;
   fixture.anglesDeg[0] = 20.0;
@@ -970,12 +910,8 @@ TEST_CASE("OrientationAnalysis::NeighborOrientationCorrelationFilter: Oracle F12
   using namespace NOCOracle;
   UnitTest::LoadPlugins();
 
-  // 4x5x3 (nx != ny != nz) so an x/y/z stride or axis-swap bug cannot hide behind
-  // dimension symmetry. Bad cell (1,2,1) = 29; neighbors in scan order:
-  // -Z(9)=0, -Y(25)=1, -X(28)=2, +X(30)=20, +Y(33)=21, +Z(49)=40 deg.
-  // Counts: clique {-Z,-Y,-X} = 2 each, pair {+X,+Y} = 1 each, +Z = 0.
-  // Argmax picks the last of the count-2 maxes, -X (28); the legacy last-wins defect
-  // (deviation D3) would pick +Y (33).
+  // Asymmetric dimensions detect x, y, or z stride swaps. The highest-count
+  // tie must select -X.
   OracleFixture fixture(4, 5, 3, {999, 1});
   const usize center = fixture.idx(1, 2, 1);
   REQUIRE(center == 29);

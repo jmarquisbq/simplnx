@@ -13,50 +13,52 @@
 namespace nx::core
 {
 /**
- * @brief Input values for the MergeTwins algorithm.
+ * @struct MergeTwinsInputValues
+ * @brief Identifies twin-merging inputs.
+ *
+ * AxisTolerance and AngleTolerance are in degrees.
  */
 struct ORIENTATIONANALYSIS_EXPORT MergeTwinsInputValues
 {
-  DataPath ContiguousNeighborListArrayPath;   ///< Feature-level NeighborList of contiguous neighbors
-  float32 AxisTolerance;                      ///< Tolerance (degrees) for the twin axis direction
-  float32 AngleTolerance;                     ///< Tolerance (degrees) for the twin misorientation angle
-  DataPath FeaturePhasesArrayPath;            ///< Feature-level Int32 phase index per feature
-  DataPath AvgQuatsArrayPath;                 ///< Feature-level Float32 average quaternions (4 components)
-  DataPath FeatureIdsArrayPath;               ///< Cell-level Int32 feature ID per voxel
-  DataPath CrystalStructuresArrayPath;        ///< Ensemble-level UInt32 crystal structure Laue classes
-  DataPath CellParentIdsArrayPath;            ///< Output: Cell-level Int32 parent feature ID
-  DataPath NewCellFeatureAttributeMatrixPath; ///< Output: AttributeMatrix for new parent features
-  DataPath FeatureParentIdsArrayPath;         ///< Output: Feature-level Int32 parent feature ID
-  DataPath ActiveArrayPath;                   ///< Output: Feature-level bool active status
-  uint64 Seed;                                ///< Random seed for parent ID randomization
-  bool RandomizeParentIds = false;            ///< Whether to randomize the order of parent IDs
+  DataPath ContiguousNeighborListArrayPath;
+  float32 AxisTolerance;
+  float32 AngleTolerance;
+  DataPath FeaturePhasesArrayPath;
+  DataPath AvgQuatsArrayPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CrystalStructuresArrayPath;
+  DataPath CellParentIdsArrayPath;
+  DataPath NewCellFeatureAttributeMatrixPath;
+  DataPath FeatureParentIdsArrayPath;
+  DataPath ActiveArrayPath;
+  uint64 Seed;
+  bool RandomizeParentIds = false;
 };
 
 /**
  * @class MergeTwins
- * @brief Groups neighboring Features that share a sigma-3 twin relationship
- *        (FCC, 60 degrees about <111>) into parent features.
+ * @brief Groups neighboring sigma-3 twins into parent features.
  *
- * Only Cubic-High (m3m) Laue class features are considered. The algorithm
- * compares average orientations of neighboring features against the sigma-3
- * twin misorientation within user-specified axis and angle tolerances.
- *
- * ## OOC Optimization
- *
- * The voxel-level pass that assigns cellParentIds from featureParentIds is
- * the only cell-level operation. It uses chunked bulk I/O:
- *   - `cellParentIds` is filled with -1 in chunks via `copyFromBuffer()`.
- *   - `featureIds` are read in chunks of 65536 via `copyIntoBuffer()`.
- *   - `featureParentIds` are cached locally (feature-level, small).
- *   - The computed `cellParentIds` are written back in matching chunks.
- *
- * This avoids per-voxel virtual dispatch that would cause OOC chunk thrashing
- * during the cell-level parent ID assignment loop.
+ * Cubic features compare average orientations to the 60-degree [111]
+ * relationship. Cell parent IDs use 65,536-tuple bulk transfers. Feature
+ * parent IDs stay local for random cell-to-feature lookup.
  */
 class ORIENTATIONANALYSIS_EXPORT MergeTwins
 {
 public:
+  /**
+   * @brief Initializes twin merging.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and tolerances.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   MergeTwins(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, MergeTwinsInputValues* inputValues);
+  /**
+   * @brief Destroys the twin-merging executor.
+   */
   ~MergeTwins() noexcept;
 
   MergeTwins(const MergeTwins&) = delete;
@@ -65,11 +67,15 @@ public:
   MergeTwins& operator=(MergeTwins&&) noexcept = delete;
 
   /**
-   * @brief Executes twin merging and assigns parent IDs using chunked bulk I/O.
-   * @return Result<> with any errors or warnings encountered.
+   * @brief Merges twin features and assigns parent IDs.
+   * @return Result from grouping and cell-parent assignment.
    */
   Result<> operator()();
 
+  /**
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 private:
@@ -83,11 +89,8 @@ private:
   std::mt19937_64 m_Generator = {};
   std::uniform_real_distribution<float32> m_Distribution = {};
 
-  /** @brief Iterates over features, grouping twins into parent features. */
   void groupFeaturesExecute();
-  /** @brief Returns the seed feature for a new parent group. */
   int getSeed(int32 newFid);
-  /** @brief Tests if two features satisfy the sigma-3 twin relationship. */
   bool determineGrouping(int32 referenceFeature, int32 neighborFeature, int32 newFid);
 };
 

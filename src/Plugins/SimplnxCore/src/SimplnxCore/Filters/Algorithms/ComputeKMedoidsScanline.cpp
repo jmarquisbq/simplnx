@@ -17,18 +17,29 @@ namespace
 {
 constexpr usize k_TileTuples = 4096;
 
-/** @brief Converts optional Bool/UInt8 mask tiles into a uniform byte representation without a synthetic full mask. */
+/**
+ * @class MaskReader
+ * @brief Normalizes optional Bool or UInt8 mask tiles to bytes.
+ *
+ * A disabled mask fills the caller buffer with selected values. This avoids a
+ * synthetic full-size mask.
+ */
 class MaskReader
 {
 public:
-  /** @brief Borrows the optional mask and records whether mask filtering is enabled. */
   MaskReader(const IDataArray* array, bool useMask)
   : m_Array(array)
   , m_UseMask(useMask)
   {
   }
 
-  /** @brief Bulk-loads one mask tile, or fills it true when masking is disabled. */
+  /**
+   * @brief Reads one mask tile.
+   * @param offset First tuple in the tile.
+   * @param count Number of tuples to read.
+   * @param values Receives normalized byte values.
+   * @return Success, or a type or bulk-read error.
+   */
   Result<> read(usize offset, usize count, nonstd::span<uint8> values) const
   {
     if(!m_UseMask)
@@ -63,17 +74,18 @@ private:
 };
 
 /**
- * @brief Exact typed K-Medoids iteration using bounded candidate and target tiles.
+ * @class KMedoidsTemplate
+ * @brief Performs typed K-Medoids iteration with bounded tiles.
+ * @tparam T Input and medoid value type.
  *
  * Cluster medoids and costs scale with K, while membership, distance, and mask
- * data are streamed in fixed tiles. Candidate costs retain original tuple order
- * and strict comparisons so seeded selection and ties match the Direct path.
+ * data use fixed tiles. Candidate costs retain tuple order and strict
+ * comparisons, so ties match the direct path.
  */
 template <typename T>
 class KMedoidsTemplate
 {
 public:
-  /** @brief Borrows typed stores, mask state, metric, cluster count, and deterministic seed. */
   KMedoidsTemplate(ComputeKMedoidsScanline* filter, const IDataArray* inputArray, IDataArray* medoidsArray, const IDataArray* maskArray, bool useMask, usize clusters,
                    Int32AbstractDataStore& featureIds, ClusterUtilities::DistanceMetric metric, std::mt19937_64::result_type seed)
   : m_Filter(filter)
@@ -87,7 +99,14 @@ public:
   {
   }
 
-  /** @brief Initializes medoids and repeats assignment/optimization until the medoid indices stop changing. */
+  /**
+   * @brief Initializes medoids and repeats assignment and optimization phases.
+   * @return Success, or a mask, shape, overflow, recovery, or transfer error.
+   *
+   * Seeded selection samples with replacement. Exact medoid-index equality
+   * controls convergence, and there is no iteration limit. Cancellation returns
+   * success and preserves output from completed bounded operations.
+   */
   Result<> operator()()
   {
     const usize tuples = m_Input.getNumberOfTuples();
@@ -165,7 +184,16 @@ public:
   }
 
 private:
-  /** @brief Selects seeded eligible medoid indices while scanning the real mask in bounded tiles. */
+  /**
+   * @brief Selects eligible medoid indices and writes their tuples.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
+   * @param medoidIndices Receives the sampled tuple indices.
+   * @return Success, or a mask, medoid-recovery, or transfer error.
+   *
+   * The first pass proves that at least one tuple is eligible. Sampling then
+   * uses replacement and reuses the current mask tile.
+   */
   Result<> initialize(usize tuples, usize dims, std::vector<usize>& medoidIndices)
   {
     std::vector<uint8> maskBuffer(k_TileTuples);
@@ -218,7 +246,15 @@ private:
     return writeMedoids(tuples, dims, medoidIndices);
   }
 
-  /** @brief Assigns each eligible tuple to its nearest cached medoid through tiled input/ID transfers. */
+  /**
+   * @brief Assigns each selected tuple to its nearest cached medoid.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
+   * @return Success, or a bulk-transfer error.
+   *
+   * Masked tuples receive cluster ID zero. Cancellation leaves completed
+   * assignment tiles in FeatureIds.
+   */
   Result<> findClusters(usize tuples, usize dims)
   {
     std::vector<T> medoids((m_Clusters + 1) * dims);
@@ -279,7 +315,18 @@ private:
     return {};
   }
 
-  /** @brief Evaluates member candidates against target tiles and retains each cluster's exact lowest-cost medoid. */
+  /**
+   * @brief Finds each cluster member with the lowest total peer distance.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
+   * @param medoidIndices Supplies current medoids and receives optimized indices.
+   * @param costs Receives the minimum cost for each cluster.
+   * @return Success, or a medoid-recovery or bulk-transfer error.
+   *
+   * Candidate and target tiles provide bounded RAM but retain quadratic input
+   * reads. Strict comparison keeps the first minimum-cost tuple. Cancellation
+   * does not publish the active medoid update.
+   */
   Result<> optimizeClusters(usize tuples, usize dims, std::vector<usize>& medoidIndices, std::vector<float64>& costs)
   {
     costs.assign(m_Clusters, std::numeric_limits<float64>::max());
@@ -343,7 +390,16 @@ private:
     return writeMedoids(tuples, dims, medoidIndices);
   }
 
-  /** @brief Reads aligned input, assignment, and mask tiles needed by assignment and optimization. */
+  /**
+   * @brief Reads aligned input, assignment, and mask tiles.
+   * @param offset First tuple in the tile.
+   * @param count Number of tuples to read.
+   * @param dims Number of components in each tuple.
+   * @param values Receives input values.
+   * @param ids Receives cluster assignments.
+   * @param mask Receives normalized mask values.
+   * @return Success, or a bulk-transfer error.
+   */
   Result<> readTile(usize offset, usize count, usize dims, std::vector<T>& values, std::vector<int32>& ids, std::vector<uint8>& mask)
   {
     auto result = m_Input.copyIntoBuffer(offset * dims, nonstd::span<T>(values.data(), count * dims));
@@ -359,7 +415,15 @@ private:
     return m_Mask.read(offset, count, nonstd::span<uint8>(mask.data(), mask.size()));
   }
 
-  /** @brief Gathers final medoid tuples through bounded reads and performs one feature-scale output write. */
+  /**
+   * @brief Gathers medoid tuples and writes the cluster-scale output.
+   * @param tuples Number of input tuples.
+   * @param dims Number of components in each tuple.
+   * @param medoidIndices Identifies the source tuple for each cluster.
+   * @return Success, or a medoid-recovery or bulk-transfer error.
+   *
+   * The output write occurs only after all requested tuples are recovered.
+   */
   Result<> writeMedoids(usize tuples, usize dims, const std::vector<usize>& medoidIndices)
   {
     std::vector<T> input(k_TileTuples * dims), medoids((m_Clusters + 1) * dims);

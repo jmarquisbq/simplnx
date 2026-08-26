@@ -108,14 +108,14 @@ TEST_CASE("SimplnxCore::ErodeDilateCoordinationNumberFilter: Generate Test Data"
   const auto outputDir = fs::path(unit_test::k_BinaryTestOutputDir.view()) / "generated_test_data" / "erode_dilate_coordination_number";
   fs::create_directories(outputDir);
 
-  // Small input data (20x20x20, blockSize=5)
+  // The small fixture uses a 20-cubed volume and block size 5.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 20, 20, 20, 5);
     UnitTest::WriteTestDataStructure(buildDS, outputDir / "small_input.dream3d");
   }
 
-  // Large input data (200x200x200, blockSize=25)
+  // The large fixture uses a 200-cubed volume and block size 25.
   {
     DataStructure buildDS;
     BuildTestData(buildDS, 200, 200, 200, 25);

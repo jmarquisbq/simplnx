@@ -180,7 +180,7 @@ template <class T, class PredicateT>
 bool DoesRangeSatisfyCondition(const IDataStore& dataStore, uint64 xMin, uint64 yMin, uint64 zMin, uint64 xMax, uint64 yMax, uint64 zMax, PredicateT&& predicate)
 {
   auto& dataStoreTyped = dynamic_cast<const AbstractDataStore<T>&>(dataStore);
-  // Z Y X
+  // Tuple dimensions use {Z, Y, X} order.
   auto dims = dataStoreTyped.getTupleShape();
   usize numComps = dataStoreTyped.getNumberOfComponents();
 
@@ -317,7 +317,7 @@ TEST_CASE("SimplnxCore::InitializeImageGeomCellDataFilter(Manual)", "[SimplnxCor
 
     DataType type = dataStore.getDataType();
 
-    // Check that the data inside the range is changed to the correct value and the data outside it is unchanged
+    // Values inside the range must change. Values outside it must remain unchanged.
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, 0, xMin - 1, 0, yMin - 1, 0, zMin - 1, 0.0));                                                    // No bool
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, xMin, xMax, yMin, yMax, zMin, zMax, initValue));                                                 // No bool
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, xMax + 1, k_ImageDims[0] - 1, yMax + 1, k_ImageDims[1] - 1, zMax + 1, k_ImageDims[2] - 1, 0.0)); // No bool
@@ -355,8 +355,8 @@ TEST_CASE("SimplnxCore::InitializeImageGeomCellDataFilter(Random)", "[SimplnxCor
 
     DataType type = dataStore.getDataType();
 
-    // Check that the data outside the range is not changed
-    // Since the data inside the range is random, we cannot check it
+    // Values outside the range must remain unchanged. The range values are random.
+
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, 0, xMin - 1, 0, yMin - 1, 0, zMin - 1, 0.0));                                                    // No bool
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, xMax + 1, k_ImageDims[0] - 1, yMax + 1, k_ImageDims[1] - 1, zMax + 1, k_ImageDims[2] - 1, 0.0)); // No bool
   }
@@ -394,7 +394,7 @@ TEST_CASE("SimplnxCore::InitializeImageGeomCellDataFilter(RandomWithRange)", "[S
 
     DataType type = dataStore.getDataType();
 
-    // Check that the data inside the range is within the given range and that the data outside it is unchanged
+    // Values inside the range must use the requested range. Values outside it must remain unchanged.
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, 0, xMin - 1, 0, yMin - 1, 0, zMin - 1, 0.0));                                                    // No bool
     REQUIRE(ExecuteNeighborFunction(IsDataWithinInclusiveRangeFunctor{}, type, dataStore, xMin, xMax, yMin, yMax, zMin, zMax, initRange));                                          // No bool
     REQUIRE(ExecuteNeighborFunction(DoesRangeEqualValueFunctor{}, type, dataStore, xMax + 1, k_ImageDims[0] - 1, yMax + 1, k_ImageDims[1] - 1, zMax + 1, k_ImageDims[2] - 1, 0.0)); // No bool

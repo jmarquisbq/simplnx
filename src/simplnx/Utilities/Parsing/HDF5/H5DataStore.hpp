@@ -12,6 +12,21 @@ namespace nx::core::HDF5
 {
 namespace Support
 {
+/**
+ * @brief Reads an HDF5 dataset region directly into an in-memory DataStore.
+ * @tparam T Specifies the numeric value type.
+ * @param dataArray Supplies the destination array.
+ * @param dataArrayPath Identifies the destination for diagnostics.
+ * @param datasetReader Supplies the open HDF5 dataset.
+ * @param start Specifies an optional region origin.
+ * @param count Specifies optional region dimensions.
+ * @return Valid result or an HDF5 read or store-type error.
+ * @pre dataArray uses DataStore<T>. start and count are both present or both absent.
+ * @pre A selected region contains the destination value count.
+ *
+ * DatasetIO owns HDF5 API synchronization. This function performs one read and
+ * does not provide cancellation.
+ */
 template <typename T>
 Result<> FillDataStore(DataArray<T>& dataArray, const DataPath& dataArrayPath, const nx::core::HDF5::DatasetIO& datasetReader, const std::optional<std::vector<hsize_t>>& start = std::nullopt,
                        const std::optional<std::vector<hsize_t>>& count = std::nullopt)
@@ -47,22 +62,42 @@ Result<> FillDataStore(DataArray<T>& dataArray, const DataPath& dataArrayPath, c
   return {};
 }
 
+/**
+ * @brief Streams an HDF5 dataset region into an OOC data store.
+ * @tparam T Specifies a non-boolean numeric value type.
+ * @param dataArray Supplies the destination array.
+ * @param dataArrayPath Identifies the destination for diagnostics.
+ * @param datasetReader Supplies the open HDF5 dataset.
+ * @param start Specifies optional leading region coordinates.
+ * @param count Specifies optional leading region dimensions.
+ * @param shouldCancel Supplies optional cancellation state.
+ * @return Valid result, validation error, HDF5 read error, or store write error.
+ * @pre dataArray uses an OOC AbstractDataStore<T>.
+ * @pre Extra start or count entries beyond the dataset rank are absent.
+ * @pre The selected region value count equals the destination store size.
+ *
+ * Missing start coordinates default to zero. Missing count dimensions extend
+ * to the dataset boundary. The C-order decomposition selects contiguous regions
+ * of at most 65,536 values. It supports a row whose full trailing extent exceeds
+ * that target by batching along an inner dimension.
+ *
+ * Cancellation returns a valid result and preserves completed destination ranges.
+ * DatasetIO serializes its HDF5 calls. Destination writes are sequential.
+ */
 template <typename T>
 Result<> FillOocDataStore(DataArray<T>& dataArray, const DataPath& dataArrayPath, const nx::core::HDF5::DatasetIO& datasetReader, const std::optional<std::vector<hsize_t>>& start = std::nullopt,
                           const std::optional<std::vector<hsize_t>>& count = std::nullopt, const std::atomic_bool* shouldCancel = nullptr)
 {
   auto& absDataStore = dataArray.getDataStoreRef();
 
-  // Streaming path: read HDF5 dataset in row-batches using hyperslab reads
-  // to avoid allocating a buffer proportional to the full dataset size.
-  // When start/count are provided, the read is restricted to that sub-region.
+  // Read bounded HDF5 regions instead of allocating the full dataset.
   auto dims = datasetReader.getDimensions();
   if(dims.empty())
   {
     return MakeErrorResult(-21005, fmt::format("Error reading dataset '{}': unable to get dimensions.", dataArrayPath.getTargetName()));
   }
 
-  // Compute effective start/count for the read region
+  // Expand partial start and count vectors to the complete rank.
   const usize rank = dims.size();
   std::vector<uint64> effStart(rank, 0);
   std::vector<uint64> effCount(rank);
@@ -94,12 +129,9 @@ Result<> FillOocDataStore(DataArray<T>& dataArray, const DataPath& dataArrayPath
     }
   }
 
-  // Walk a C-order hyperslab decomposition.  Batching solely along dimension 0
-  // would require a complete row to fit in memory, which is not true for
-  // vector-valued 3-D datasets.  Instead, select the first dimension whose
-  // trailing extent fits in the fixed transfer buffer and iterate all preceding
-  // dimensions one at a time.  Each selected hyperslab remains a contiguous
-  // run in both the source dataset and the flattened destination DataArray.
+  // Select the first dimension whose trailing extent fits the transfer target.
+  // Preceding dimensions advance one coordinate at a time. Each hyperslab stays
+  // contiguous in the source dataset and flattened destination.
   constexpr usize k_TargetBatchElements = 65536;
   usize expectedElements = 1;
   for(const uint64 dimensionSize : effCount)
@@ -202,6 +234,21 @@ Result<> FillOocDataStore(DataArray<T>& dataArray, const DataPath& dataArrayPath
   return {};
 }
 
+/**
+ * @brief Reads an HDF5 dataset into the destination's current store type.
+ * @tparam T Specifies a non-boolean numeric value type.
+ * @param dataStructure Owns the destination array.
+ * @param dataArrayPath Identifies the destination array.
+ * @param datasetReader Supplies the open HDF5 dataset.
+ * @param start Specifies an optional region origin.
+ * @param count Specifies optional region dimensions.
+ * @param shouldCancel Supplies cancellation for the OOC path.
+ * @return Result from the in-memory or OOC transfer.
+ * @pre For non-OOC stores, start and count are both present or both absent.
+ *
+ * StoreType::OutOfCore selects bounded streaming. Other store types use the
+ * direct DataStore path, which requires DataStore<T> and ignores shouldCancel.
+ */
 template <typename T>
 Result<> FillDataArray(DataStructure& dataStructure, const DataPath& dataArrayPath, const nx::core::HDF5::DatasetIO& datasetReader, const std::optional<std::vector<hsize_t>>& start = std::nullopt,
                        const std::optional<std::vector<hsize_t>>& count = std::nullopt, const std::atomic_bool* shouldCancel = nullptr)

@@ -47,6 +47,13 @@ const DataPath k_ParityMaskPath = k_ParityCellPath.createChildPath("Mask");
 const DataPath k_ParityFeaturePath = k_ParityGeomPath.createChildPath("Feature Data");
 const DataPath k_ParityMedoidsPath = k_ParityFeaturePath.createChildPath("Medoids");
 
+/**
+ * @brief Builds deterministic two-cluster input for seeded K-medoids parity tests.
+ * @param dataStructure Receives the geometry and output arrays.
+ * @param maskKind 0 for no mask, 1 for Boolean, or 2 for uint8.
+ * @param metric Distance metric for the returned algorithm input.
+ * @return Input values that reference the created arrays.
+ */
 KMedoidsInputValues buildParityData(DataStructure& dataStructure, int32 maskKind, ClusterUtilities::DistanceMetric metric)
 {
   const ShapeType tupleShape = {8, 1, 1};
@@ -85,6 +92,11 @@ KMedoidsInputValues buildParityData(DataStructure& dataStructure, int32 maskKind
   return {2, metric, maskKind != 0, k_ParityInputPath, k_ParityMaskPath, k_ParityIdsPath, k_ParityMedoidsPath, 5489};
 }
 
+/**
+ * @brief Builds zero-tuple input for the empty-input error test.
+ * @param dataStructure Receives the empty geometry and arrays.
+ * @return Input values that reference the created arrays.
+ */
 KMedoidsInputValues buildEmptyData(DataStructure& dataStructure)
 {
   const ShapeType tupleShape = {0, 1, 1};
@@ -260,11 +272,10 @@ TEST_CASE("SimplnxCore::ComputeKMedoidsFilter: Valid Filter Execution", "[Simpln
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/k_files_v2/7_0_medoids_exemplar.dream3d", unit_test::k_TestFilesDir)));
 
   {
-    // Instantiate the filter, a DataStructure object and an Arguments Object
     ComputeKMedoidsFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
+    // Use a fixed seed so both algorithm paths receive the same initial medoids.
     args.insertOrAssign(ComputeKMedoidsFilter::k_UseSeed_Key, std::make_any<bool>(true));
     args.insertOrAssign(ComputeKMedoidsFilter::k_SeedValue_Key, std::make_any<uint64>(5489)); // Default Seed
     args.insertOrAssign(ComputeKMedoidsFilter::k_InitClusters_Key, std::make_any<uint64>(3));
@@ -274,43 +285,22 @@ TEST_CASE("SimplnxCore::ComputeKMedoidsFilter: Valid Filter Execution", "[Simpln
     args.insertOrAssign(ComputeKMedoidsFilter::k_FeatureAMPath_Key, std::make_any<DataPath>(k_ClusterDataPathNX));
     args.insertOrAssign(ComputeKMedoidsFilter::k_MedoidsArrayName_Key, std::make_any<std::string>(k_MedoidsNameNX));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
 
-  /**
-   * To check the validity of the filter we will be testing for a 5x5 square cut out as a pattern
-   * rather then specific data constants. This is due to the disparity between cross platform random distribution.
+  /*
+   * Random distributions can assign different cluster identifiers on each platform.
+   * The test therefore verifies a 5 by 5 symbol pattern instead of fixed identifiers.
    *
-   * Here's how it should look:
-   * T = triangle
-   * C = Circle
-   * X = X
+   * Rows 1 and 2 are `X C T C T` and `T X C C X`.
+   * Rows 3 through 5 are `T X C X C`, `T C C T X`, and `C C C T C`.
    *
-   * X C T C T
-   * T X C C X
-   * T X C X C
-   * T C C T X
-   * C C C T C
-   *
-   * The identifiers for the types is most easily defined by checking the following:
-   * |--------------|
-   * | Type | Index |
-   * |--------------|
-   * |  X  |  741   |
-   * |--------------|
-   * |  C  |  742   |
-   * |--------------|
-   * |  T  |  743   |
-   * |--------------|
-   *
-   * Be sure to check that oll of those values are unique before validating the rest of the indexes,
-   * i.e. index 741 and 742 should not be the same
+   * X, C, and T identify the values at indices 741, 742, and 743.
+   * Those three values must differ before they define the remaining expected positions.
    */
 
   auto& clusterIds = dataStructure.getDataRefAs<Int32Array>(k_ClusterIdsPathNX);
@@ -338,7 +328,7 @@ TEST_CASE("SimplnxCore::ComputeKMedoidsFilter: Valid Filter Execution", "[Simpln
     REQUIRE(tVal == clusterIds[index]);
   }
 
-  // Write the DataStructure out to the file system
+  // The optional output supports manual inspection of the clustering result.
 #ifdef SIMPLNX_WRITE_TEST_OUTPUT
   WriteTestDataStructure(dataStructure, fs::path(fmt::format("{}/7_0_k_medoids_0_test.dream3d", unit_test::k_BinaryTestOutputDir)));
 #endif
@@ -379,7 +369,7 @@ TEST_CASE("SimplnxCore::ComputeKMedoidsFilter: SIMPL Backwards Compatibility", "
       CHECK(pipelineFilter->getComments().empty());
 
       const Arguments args = pipelineFilter->getArguments();
-      // Complex type (AMPathBuilderFilterParameterConverter) - verified by successful pipeline loading
+      // Successful pipeline loading verifies the AMPathBuilderFilterParameterConverter value.
       CHECK(args.value<uint64>(ComputeKMedoidsFilter::k_InitClusters_Key) == 5);
       CHECK(args.value<ChoicesParameter::ValueType>(ComputeKMedoidsFilter::k_DistanceMetric_Key) == 0);
       CHECK(args.value<bool>(ComputeKMedoidsFilter::k_UseMask_Key) == true);

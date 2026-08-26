@@ -103,7 +103,7 @@ Result<> ComputeLargestCrossSectionsScanline::operator()()
     }
     else
     {
-      // FeatureIds tuple axes are [Z, Y, X]. Extent reads gather an entire
+      // Feature Id tuple axes are [Z, Y, X]. Extent reads collect one
       // noncontiguous cross-section without per-cell OOC access or rescanning.
       const Extent planeExtent = m_InputValues->Plane == 1 ? Extent({0, planeIndex, 0}, {zCells - 1, planeIndex, xCells - 1}) : Extent({0, 0, planeIndex}, {zCells - 1, yCells - 1, planeIndex});
       stridedPlane = featureIdsStore.readExtent(planeExtent);

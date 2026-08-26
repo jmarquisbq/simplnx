@@ -12,19 +12,19 @@
 
 namespace
 {
-// Counts every ReadFile() open so tests can assert that cached preflight paths
-// perform zero file opens. Process-wide and atomic because ReadFile() is called
-// from preflight worker threads.
+// Tests use this process-wide count to verify cached preflight paths without
+// timing assertions. ReadFile() can run on preflight worker threads.
 std::atomic<nx::core::uint64> s_ReadOpenCount{0};
 
-// Optional test-only hook applied to the file-access property list just before
-// a file is opened. Unset in production, so opens use H5P_DEFAULT unchanged.
+// Tests can configure a file-access property list to simulate I/O latency.
+// Production leaves this hook empty and uses H5P_DEFAULT.
 std::function<void(hid_t)> s_FaplConfigurator;
 
-// Builds the file-access property list for a file open. Returns H5P_DEFAULT
-// when no configurator is installed (the production path); otherwise creates a
-// fapl, hands it to the configurator, and returns it. The caller must close a
-// non-default result with CloseFaplId().
+/**
+ * @brief Creates and configures a file-access property list when tests install a hook.
+ * @return H5P_DEFAULT when no hook exists. Otherwise, returns an identifier that the caller must close.
+ * @pre The caller holds Support::ApiLock(). The hook can call raw HDF5 functions, but it must not call a wrapper that acquires this non-recursive lock.
+ */
 hid_t MakeFaplId()
 {
   if(!s_FaplConfigurator)
@@ -36,8 +36,11 @@ hid_t MakeFaplId()
   return faplId;
 }
 
-// Releases a fapl produced by MakeFaplId(). H5P_DEFAULT is a constant, not an
-// allocated id, so it is left alone.
+/**
+ * @brief Closes a file-access property list that MakeFaplId() created.
+ * @param faplId Identifies the property list. H5P_DEFAULT does not require a close operation.
+ * @pre The caller holds Support::ApiLock().
+ */
 void CloseFaplId(hid_t faplId)
 {
   if(faplId != H5P_DEFAULT)
@@ -51,8 +54,7 @@ namespace nx::core::HDF5
 FileIO FileIO::ReadFile(const std::filesystem::path& filepath)
 {
   s_ReadOpenCount++;
-  // Serialize the property-list lifecycle and file open on the process-wide HDF5 lock.
-  // The FileIO constructor below touches no HDF5, so it stays outside the lock.
+  // Keep the property-list lifecycle and file open in one HDF5 critical section.
   hid_t fileId = H5I_INVALID_HID;
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -81,8 +83,7 @@ void FileIO::SetFaplConfigurator(std::function<void(hid_t)> configurator)
 
 FileIO FileIO::WriteFile(const std::filesystem::path& filepath)
 {
-  // The filesystem existence check and removal are pure OS calls (no HDF5), so they run
-  // outside the lock; only the bare H5Fcreate leaf call is serialized on the ApiLock.
+  // Filesystem calls do not use HDF5. Keep them outside the HDF5 critical section.
   if(std::filesystem::exists(filepath))
   {
     try
@@ -111,7 +112,7 @@ FileIO FileIO::WriteFile(const std::filesystem::path& filepath)
 
 FileIO FileIO::AppendFile(const std::filesystem::path& filepath)
 {
-  // Self-locks the bare H5Fopen leaf call; the FileIO constructor touches no HDF5.
+  // The constructor does not call HDF5. Lock only the H5Fopen call.
   hid_t fileId = H5I_INVALID_HID;
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
@@ -138,8 +139,7 @@ hid_t FileIO::open() const
   {
     return getId();
   }
-  // Self-locks the bare H5Fopen leaf call. getFilePath() touches no HDF5, so the path
-  // string is resolved before the lock.
+  // Resolve the path before the non-recursive HDF5 lock.
   const std::string pathStr = getFilePath().string();
   hid_t id = H5I_INVALID_HID;
   {
@@ -152,10 +152,8 @@ hid_t FileIO::open() const
 
 void FileIO::close()
 {
-  // Self-locks the bare H5Fclose leaf call. Invoked by ~FileIO, so destruction of a
-  // FileIO on any thread serializes its close against every other HDF5 C call. The id is
-  // captured before the lock (isOpen() already guarantees it is open) so nothing
-  // lock-taking runs inside the leaf scope.
+  // Resolve the identifier before the non-recursive lock. This also serializes
+  // destruction with other HDF5 calls.
   if(isOpen())
   {
     const hid_t selfId = getId();

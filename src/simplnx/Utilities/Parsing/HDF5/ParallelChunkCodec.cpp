@@ -37,11 +37,13 @@ constexpr usize k_MaxPreparedBatchBytes = 64 * 1024 * 1024;
 constexpr usize k_MaxPreparedBatchChunks = 64;
 
 /**
- * @brief Reads one chunk's storage metadata via H5Dget_chunk_info_by_coord.
+ * @brief Reads raw metadata for one chunk while the HDF5 API lock is held.
+ * @param datasetId Open HDF5 dataset identifier.
+ * @param offset Full-rank chunk-origin offset.
+ * @return Allocation and raw-storage metadata for offset.
+ * @pre Support::ApiLock() is held by the caller.
  *
- * @pre The caller holds @c Support::ApiLock(). A query failure or an unallocated chunk both yield
- * @c allocated == false; the caller distinguishes those cases by context (an unallocated chunk is
- * a valid fill-value region, not an error).
+ * allocated is false when HDF5 has no stored chunk address or the query fails.
  */
 ParallelChunkCodec::ChunkInfo peekChunkInfoAtOffsetUnlocked(hid_t datasetId, const hsize_t* offset)
 {
@@ -55,6 +57,14 @@ ParallelChunkCodec::ChunkInfo peekChunkInfoAtOffsetUnlocked(hid_t datasetId, con
   return info;
 }
 
+/**
+ * @brief Builds one full-rank chunk-origin offset and reads its metadata.
+ * @param datasetId Open HDF5 dataset identifier.
+ * @param bounds Tuple-space chunk extent.
+ * @param componentRank Number of trailing component dimensions.
+ * @return Allocation and raw-storage metadata for bounds.
+ * @pre Support::ApiLock() is held by the caller.
+ */
 ParallelChunkCodec::ChunkInfo peekChunkInfoUnlocked(hid_t datasetId, const Extent& bounds, usize componentRank)
 {
   const usize tupleDims = bounds.min.size();
@@ -68,24 +78,32 @@ ParallelChunkCodec::ChunkInfo peekChunkInfoUnlocked(hid_t datasetId, const Exten
   return peekChunkInfoAtOffsetUnlocked(datasetId, offset.data());
 }
 
+/**
+ * @brief Reads one chunk's metadata under Support::ApiLock().
+ * @param datasetId Open HDF5 dataset identifier.
+ * @param bounds Tuple-space chunk extent.
+ * @param componentRank Number of trailing component dimensions.
+ * @return Allocation and raw-storage metadata for bounds.
+ */
 ParallelChunkCodec::ChunkInfo peekChunkInfo(hid_t datasetId, const Extent& bounds, usize componentRank)
 {
   std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
   return peekChunkInfoUnlocked(datasetId, bounds, componentRank);
 }
 
-/// product of a shape vector (empty product is 1).
 usize product(const std::vector<uint64>& shape)
 {
   return std::accumulate(shape.begin(), shape.end(), usize{1}, std::multiplies<usize>());
 }
 
 /**
- * @brief Records the first failure into @p firstErrorOut, thread-safely (first-failure-wins).
+ * @brief Records the first worker failure.
+ * @param firstErrorOut Optional shared diagnostic destination.
+ * @param errorMutex Mutex that guards firstErrorOut.
+ * @param message Failure diagnostic to record.
  *
- * Workers run concurrently and any of them may fail; only the first message is kept so the
- * caller's fallback log shows the originating cause. A null sink is a no-op (the caller did not
- * ask for a diagnostic). @p errorMutex serializes the empty-check-then-write against other workers.
+ * Concurrent workers retain only the first message. A null destination ignores
+ * diagnostics.
  */
 void recordFirstError(std::string* firstErrorOut, std::mutex& errorMutex, std::string message)
 {
@@ -100,6 +118,14 @@ void recordFirstError(std::string* firstErrorOut, std::mutex& errorMutex, std::s
   }
 }
 
+/**
+ * @brief Tests a distributed sample for likely incompressibility.
+ * @param nominalBytes Full padded chunk bytes.
+ * @param deflateLevel Dataset deflate level.
+ * @return True when the sampled deflate result does not shrink.
+ *
+ * The probe avoids full-chunk compression for clearly incompressible data.
+ */
 bool isLikelyIncompressible(nonstd::span<const std::byte> nominalBytes, int32 deflateLevel)
 {
   if(nominalBytes.size() <= k_IncompressibilityProbeBytes)
@@ -138,9 +164,7 @@ ParallelChunkCodec::ParallelChunkCodec(std::filesystem::path filePath, std::stri
   m_NumComponents = product(m_ComponentShape);
   m_NominalChunkElements = product(m_ChunkShape) * m_NumComponents;
   m_NumChunks = getNumberOfChunks(m_TupleShape, m_ChunkShape);
-  // Single probe (single-filter deflate + byte-order gate). The captured deflate level makes the
-  // deflate path's compress2 produce exactly what the dataset's creation property list specifies;
-  // the inflate side ignores it (it inflates with whatever level the chunks were compressed at).
+  // Probe once for single-deflate eligibility and capture the write deflate level.
   m_Eligible = probeSingleDeflateEligibility(m_DatasetId, m_ElementSize, &m_DeflateLevel);
 }
 
@@ -177,16 +201,11 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunk(uint64 flatChunkIndex) c
 {
   const Extent bounds = getChunkBounds(flatChunkIndex, m_TupleShape, m_ChunkShape);
 
-  // Metadata: chunk file address, stored (compressed) size, filter mask. Peeked once here;
-  // the inflate body below reuses it without a second metadata call. This is the ONLY
-  // metadata peek on the read path, so a best-effort prewarm caller pays exactly one peek
-  // per cache miss and none on a cache hit (its loader never runs).
+  // Reuse one metadata snapshot so this read performs one HDF5 chunk query.
   const ChunkInfo info = peekChunkInfo(m_DatasetId, bounds, m_ComponentShape.size());
   if(!info.allocated)
   {
-    // An unallocated chunk is a legitimate sparse / fill-value region, not a failure: signal
-    // it with the distinct UnallocatedChunkError so a prewarm caller catches and skips it,
-    // while a genuine inflate failure below throws a plain std::runtime_error and propagates.
+    // A sparse chunk has no raw bytes. Best-effort prewarm can skip this distinct error.
     throw UnallocatedChunkError(fmt::format("ParallelChunkCodec: chunk {} not allocated (sparse / fill-value region) in '{}:{}'", flatChunkIndex, m_FilePath.string(), m_DatasetPath));
   }
   return inflateChunk(flatChunkIndex, info);
@@ -230,10 +249,8 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
 
   std::vector<std::byte> stored(static_cast<usize>(storedSize));
 #ifdef _WIN32
-  // HDF5's Windows VFD holds an exclusive LockFileEx range over the entire open file, so an
-  // independent native handle cannot read raw chunk ranges while the dataset is open. Read only
-  // the stored chunk through HDF5 under ApiLock, then release the lock before doing the expensive
-  // inflate on this worker.
+  // Windows HDF5 owns the file range lock. Read raw bytes through HDF5, then
+  // release Support::ApiLock() before worker inflation.
   const usize fullRank = tupleDims + m_ComponentShape.size();
   std::vector<hsize_t> offset(fullRank, 0);
   for(usize dimension = 0; dimension < tupleDims; ++dimension)
@@ -251,9 +268,8 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   filterMask = readFilterMask;
   static_cast<void>(storedAddress);
 #else
-  // Lock-free positional read of the raw stored bytes. POSIX pread workers reuse one lazily opened
-  // descriptor, and retry after an HDF5 flush only when an independently opened descriptor cannot
-  // yet see a recently extended file.
+  // POSIX workers reuse one positional descriptor. Recovery flushes only after
+  // a short read from a recently extended file.
   auto readStoredBytes = [&]() -> std::ptrdiff_t {
     const nx::core::detail::FileHandle rawHandle = getPositionalReadHandle();
     return nx::core::detail::positionalRead(rawHandle, stored.data(), static_cast<std::size_t>(storedSize), static_cast<uint64_t>(storedAddress));
@@ -262,9 +278,8 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   std::ptrdiff_t got = readStoredBytes();
   if(got != static_cast<std::ptrdiff_t>(storedSize))
   {
-    // Keep the normal read path lock- and flush-free: only a short read enters recovery. The second
-    // read under the recovery mutex avoids redundant H5Fflush calls when another worker already
-    // recovered the file before this worker acquired the mutex.
+    // Keep normal reads lock and flush free. A second read under this mutex can
+    // observe another worker's recovery before H5Fflush().
     std::lock_guard<std::mutex> recoveryLock(m_PositionalReadRecoveryMutex);
     got = readStoredBytes();
     if(got != static_cast<std::ptrdiff_t>(storedSize))
@@ -286,13 +301,11 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   }
 #endif
 
-  // Inflate (or memcpy) into the nominal (full, padded) chunk buffer.
+  // Inflate or copy into the full padded chunk buffer.
   const usize nominalBytes = m_NominalChunkElements * m_ElementSize;
   std::vector<std::byte> nominal(nominalBytes);
 
-  // filter_mask bit i is SET when filter i was SKIPPED for this chunk. Eligibility
-  // guarantees deflate is the single filter at pipeline index 0, so bit 0 set means HDF5
-  // stored this chunk uncompressed (deflate didn't shrink it) -> memcpy, not inflate.
+  // Bit zero marks skipped deflate. Such a chunk stores raw nominal bytes.
   const bool deflateSkipped = (filterMask & 0x1u) != 0u;
   if(deflateSkipped)
   {
@@ -304,8 +317,7 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   }
   else
   {
-    // zlib's uLong/uLongf are 32-bit on LLP64 (Windows), so a nominal chunk >= 4 GiB would
-    // silently truncate in the uncompress() length arguments. Reject it explicitly.
+    // LLP64 zlib lengths can be 32-bit. Reject nominal chunks that would truncate.
     if(nominalBytes > static_cast<usize>(std::numeric_limits<uLongf>::max()))
     {
       throw std::runtime_error(
@@ -319,9 +331,8 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
           fmt::format("ParallelChunkCodec: zlib uncompress failed (ret={}, got {} of {} bytes) on chunk {} of '{}'", zret, destLen, nominalBytes, flatChunkIndex, m_FilePath.string()));
     }
   }
-  // Interior chunk: nominal buffer already IS the clamped layout (row-major over
-  // chunkShape ++ componentShape). Edge chunk: extract the in-bounds sub-region so the
-  // result is byte-identical to a clamped serial H5Dread of that chunk region.
+  // Interior chunks already match the clamped layout. Edge chunks extract the
+  // in-bounds region for serial H5Dread parity.
   bool isInterior = true;
   std::vector<uint64> clampedTupleDims(tupleDims);
   for(usize d = 0; d < tupleDims; ++d)
@@ -342,7 +353,6 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   std::vector<std::byte> clamped(clampedTuples * compBytes);
   for(usize flatClamped = 0; flatClamped < clampedTuples; ++flatClamped)
   {
-    // Chunk-local N-D tuple position (0-based, < clampedTupleDims <= chunkShape).
     const std::vector<uint64> nd = flatToNd(static_cast<uint64>(flatClamped), clampedTupleDims);
     const usize nominalTupleFlat = static_cast<usize>(ndToFlat(nd, m_ChunkShape));
     std::memcpy(clamped.data() + flatClamped * compBytes, nominal.data() + nominalTupleFlat * compBytes, compBytes);
@@ -361,26 +371,15 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
   const usize tupleDims = m_TupleShape.size();
   const usize compBytes = m_NumComponents * m_ElementSize;
 
-  // Validate the destination size before any worker writes: the scatter computes a global
-  // flat offset per tuple and memcpy's into out.data() + offset * compBytes with no per-write
-  // bounds check, so an undersized span would be a silent out-of-bounds heap write. This cold,
-  // single-threaded check converts that into a clear, fail-fast error.
+  // Validate once before workers scatter without per-write bounds checks.
   const usize requiredBytes = product(m_TupleShape) * compBytes;
   if(out.size() < requiredBytes)
   {
     throw std::runtime_error(fmt::format("ParallelChunkCodec: output span too small for '{}:{}' ({} < {} bytes)", m_FilePath.string(), m_DatasetPath, out.size(), requiredBytes));
   }
 
-  // Scatters one chunk's clamped, in-bounds bytes into their natural offsets in @p out.
-  // The clamped buffer is row-major over clampedTupleDims ++ componentShape; out is
-  // row-major over m_TupleShape ++ m_ComponentShape. Each chunk writes a disjoint region.
-  //
-  // Rather than a per-tuple copy (one memcpy of compBytes for every tuple, which on a
-  // full-slab chunk degenerates into hundreds of millions of tiny copies plus N-D coordinate
-  // math), this collapses the largest run of tuples that is contiguous in BOTH layouts and
-  // copies it in a single memcpy. This mirrors what AbstractDataStore::copyFromBuffer does for
-  // a contiguous flat range, so the cost is bulk-transfer (memory-bandwidth) bound, not
-  // per-element bound — for an interior full-slab chunk the whole chunk is one contiguous run.
+  // Scatter clamped bytes into their natural full-dataset offsets. Merge contiguous
+  // rows so full-slab chunks use bulk memcpy instead of per-tuple copies.
   auto scatter = [&](const Extent& bounds, const std::vector<std::byte>& clamped) {
     std::vector<uint64> clampedTupleDims(tupleDims);
     for(usize d = 0; d < tupleDims; ++d)
@@ -388,11 +387,8 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
       clampedTupleDims[d] = bounds.max[d] - bounds.min[d] + 1;
     }
 
-    // The innermost tuple dimension is always contiguous in row-major order. Merge each
-    // next-outer dimension into the run only while the dimension just inside it is fully
-    // spanned (clamped extent == full extent): a partially-spanned inner dimension leaves a
-    // gap in @p out between successive outer steps, breaking contiguity. firstRunDim is the
-    // outermost dimension folded into the contiguous run; dims [0, firstRunDim) are iterated.
+    // Merge outer dimensions only when the next inner dimension spans the full
+    // dataset. A partial inner dimension leaves an output gap.
     usize runTuples = clampedTupleDims[tupleDims - 1];
     usize firstRunDim = tupleDims - 1;
     for(usize d = tupleDims - 1; d-- > 0;)
@@ -413,7 +409,6 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
       numRuns *= clampedTupleDims[d];
     }
 
-    // Inner (merged) dimensions start at their chunk minimum and never change across runs.
     std::vector<uint64> globalCoords(tupleDims);
     for(usize d = firstRunDim; d < tupleDims; ++d)
     {
@@ -434,14 +429,8 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
     }
   };
 
-  // Serial, fill-aware read for a legitimately unallocated (sparse / fill-value) chunk:
-  // a clamped H5Dread of the chunk region into a returned clamped buffer (the loader hands
-  // it to the sink, which scatters it exactly like an inflated chunk). Returning the fill
-  // bytes rather than throwing UnallocatedChunkError keeps the output correct for fill-value
-  // datasets — the engine would SKIP a throwing chunk, leaving its region unwritten.
-  // ApiLock() guards ONLY the leaf HDF5 calls (this is a leaf read path). In practice
-  // simplnx writes full arrays, so every chunk is allocated and this path is rarely taken;
-  // it is the documented correctness backstop for fill-value datasets.
+  // Chunks without raw metadata need a fill-aware serial read. Throwing
+  // UnallocatedChunkError would skip the sink and leave the output region unwritten.
   auto serialFillRead = [&](uint64 flatChunkIndex, const Extent& bounds) -> std::vector<std::byte> {
     std::vector<uint64> clampedTupleDims(tupleDims);
     for(usize d = 0; d < tupleDims; ++d)
@@ -487,8 +476,7 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
       {
         H5Sclose(fileSpace);
       }
-      // Name the first failing call so the diagnostic pinpoints the cause instead of only
-      // surfacing a generic "serial H5Dread failed".
+      // Report the first failed HDF5 call for a useful fallback-read diagnostic.
       const char* failedCall = nullptr;
       if(fileSpace < 0)
       {
@@ -518,12 +506,8 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
     return clamped;
   };
 
-  // Loads one chunk's clamped bytes: peek allocation ONCE, then either inflate the allocated
-  // chunk from the info just fetched (no second metadata call under the lock) or serve the
-  // unallocated (fill-value) chunk's bytes via the serial fill-aware read. Both branches RETURN
-  // bytes for the sink to scatter — a fill-value chunk is served, not skipped, so its region of
-  // @p out is written. Only a genuine failure (short read / inflate error) of an allocated chunk
-  // throws, which the engine records and rethrows after the scheduled batch finishes.
+  // One metadata probe selects raw inflation or the fill-aware H5Dread fallback.
+  // A false allocation state can represent sparse data or a metadata-query failure.
   auto loader = [&](uint64 idx) -> std::vector<std::byte> {
     const Extent bounds = getChunkBounds(idx, m_TupleShape, m_ChunkShape);
     const ChunkInfo info = peekChunkInfo(m_DatasetId, bounds, m_ComponentShape.size());
@@ -534,18 +518,13 @@ void ParallelChunkCodec::inflateChunksIntoSpan(nonstd::span<std::byte> out, nons
     return serialFillRead(idx, bounds);
   };
 
-  // Scatters the loaded bytes into their disjoint region of @p out. Tasks own disjoint local
-  // indices and each chunk writes a disjoint output region, so no lock
-  // is needed (the distinct-index precondition guarantees it). Bounds are recomputed from the
-  // chunk index exactly as in the loader.
+  // Distinct chunk indices give tasks disjoint scatter regions without an output lock.
   auto sink = [&](usize localIndex, std::vector<std::byte>&& bytes) {
     const Extent bounds = getChunkBounds(flatChunkIndices[localIndex], m_TupleShape, m_ChunkShape);
     scatter(bounds, bytes);
   };
 
-  // Fan the peek/inflate/fill loader and the scatter sink across the process-wide task scheduler
-  // via the shared engine, which owns the disjoint-write guarantee and the record-first-then-
-  // rethrow error policy. A genuine failure surfaces after the batch finishes.
+  // The shared engine records the first worker failure and rethrows after tasks finish.
   ParallelLoadChunks<std::vector<std::byte>>(flatChunkIndices, loader, sink);
 }
 
@@ -560,19 +539,12 @@ std::vector<std::byte> ParallelChunkCodec::gatherChunkBytes(uint64 flatChunkInde
     clampedTupleDims[d] = bounds.max[d] - bounds.min[d] + 1;
   }
 
-  // Zero-initialized nominal buffer: the untouched tail of an edge chunk IS the padding, so a later
-  // serial H5Dread of the (clamped) in-bounds region sees exactly the gathered source bytes.
+  // Zero initialization provides edge-chunk padding for serial-read parity.
   const usize compBytes = m_NumComponents * m_ElementSize;
   std::vector<std::byte> nominal(m_NominalChunkElements * m_ElementSize);
 
-  // Collapse the largest run of tuples that is contiguous in BOTH the dataset source (row-major
-  // over m_TupleShape) and the nominal chunk buffer (row-major over m_ChunkShape), and copy it in
-  // one memcpy. The innermost tuple dimension is always contiguous; each next-outer dimension can
-  // be merged only while the dimension just inside it fully spans BOTH layouts (clamped extent ==
-  // source extent AND == chunk extent) — a partial inner dimension leaves a gap in one layout and
-  // breaks contiguity. Without this collapse a trailing size-1 component dimension would degrade
-  // the copy to one tuple at a time. firstRunDim is the outermost dimension folded into the run;
-  // dims [0, firstRunDim) are iterated, one memcpy each.
+  // Merge rows contiguous in both layouts. A partial inner dimension prevents
+  // an outer merge and would otherwise degrade to per-tuple copies.
   usize runTuples = clampedTupleDims[tupleDims - 1];
   usize firstRunDim = tupleDims - 1;
   for(usize d = tupleDims - 1; d-- > 0;)
@@ -593,8 +565,6 @@ std::vector<std::byte> ParallelChunkCodec::gatherChunkBytes(uint64 flatChunkInde
     numRuns *= clampedTupleDims[d];
   }
 
-  // Inner (merged) dimensions start at the chunk's local origin (0) and its global minimum, and
-  // never change across runs; only the iterated outer dimensions advance.
   std::vector<uint64> localNd(tupleDims, 0);
   std::vector<uint64> globalNd(tupleDims, 0);
   for(usize d = firstRunDim; d < tupleDims; ++d)
@@ -612,7 +582,6 @@ std::vector<std::byte> ParallelChunkCodec::gatherChunkBytes(uint64 flatChunkInde
         globalNd[d] = bounds.min[d] + outerNd[d];
       }
     }
-    // The source begins at sourceStartTuple, so subtract it to land at the run's offset in source.
     const usize srcOffset = static_cast<usize>(ndToFlat(globalNd, m_TupleShape) - sourceStartTuple) * compBytes;
     const usize dstOffset = static_cast<usize>(ndToFlat(localNd, m_ChunkShape)) * compBytes;
     std::memcpy(nominal.data() + dstOffset, source.data() + srcOffset, runBytes);
@@ -622,9 +591,7 @@ std::vector<std::byte> ParallelChunkCodec::gatherChunkBytes(uint64 flatChunkInde
 
 std::vector<std::byte> ParallelChunkCodec::compressChunkBytesImpl(uint64 flatChunkIndex, nonstd::span<const std::byte> nominalBytes, std::string* firstErrorOut, std::mutex& errorMutex) const
 {
-  // Compress OFF the HDF5 API lock: this is the dominant cost and the whole point of the parallel
-  // path. zlib's uLong is 32-bit on LLP64 (Windows), so a nominal chunk >= 4 GiB would silently
-  // truncate the length argument; reject it explicitly rather than corrupt the stream.
+  // Compression stays off the HDF5 lock. Reject chunks that exceed zlib lengths.
   if(nominalBytes.size() > static_cast<usize>(std::numeric_limits<uLong>::max()))
   {
     recordFirstError(firstErrorOut, errorMutex,
@@ -634,9 +601,7 @@ std::vector<std::byte> ParallelChunkCodec::compressChunkBytesImpl(uint64 flatChu
   }
   const uLong srcLen = static_cast<uLong>(nominalBytes.size());
   uLongf destLen = compressBound(srcLen);
-  // compress2 overwrites the destination and usually produces far fewer bytes than
-  // compressBound. Avoid value-initializing the full bound-sized allocation, then copy
-  // only the actual compressed prefix into the returned vector.
+  // Allocate the zlib bound without initialization, then retain only the used prefix.
   std::unique_ptr<std::byte[]> compressed = std::unique_ptr<std::byte[]>(new std::byte[static_cast<usize>(destLen)]);
   const int zret = compress2(reinterpret_cast<Bytef*>(compressed.get()), &destLen, reinterpret_cast<const Bytef*>(nominalBytes.data()), srcLen, m_DeflateLevel);
   if(zret != Z_OK)
@@ -670,7 +635,7 @@ ParallelChunkCodec::PreparedChunkBytes ParallelChunkCodec::prepareChunkBytesImpl
 
 bool ParallelChunkCodec::writeCompressedChunkImpl(uint64 flatChunkIndex, nonstd::span<const std::byte> storedBytes, uint32 filterMask, std::string* firstErrorOut, std::mutex& errorMutex) const
 {
-  // Full-rank chunk-origin offset: tuple mins ++ component zeros (components never split).
+  // Full-rank chunk origin appends component zeros because components remain whole.
   const usize tupleDims = m_TupleShape.size();
   const usize fullRank = tupleDims + m_ComponentShape.size();
   const Extent bounds = getChunkBounds(flatChunkIndex, m_TupleShape, m_ChunkShape);
@@ -680,8 +645,7 @@ bool ParallelChunkCodec::writeCompressedChunkImpl(uint64 flatChunkIndex, nonstd:
     offset[d] = static_cast<hsize_t>(bounds.min[d]);
   }
 
-  // filter_mask bit 0 records whether deflate was skipped for this chunk. ApiLock() guards ONLY
-  // this leaf write — never the off-lock gather/compress or incompressibility probe above it.
+  // Bit zero marks raw storage. Support::ApiLock() guards only the leaf write.
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
     if(H5Dwrite_chunk(m_DatasetId, H5P_DEFAULT, filterMask, offset.data(), storedBytes.size(), storedBytes.data()) >= 0)
@@ -708,9 +672,7 @@ bool ParallelChunkCodec::writeNominalChunkImpl(uint64 flatChunkIndex, nonstd::sp
 
 std::vector<std::byte> ParallelChunkCodec::compressNominalChunk(uint64 flatChunkIndex, nonstd::span<const std::byte> nominalBytes, std::string* errorOut) const
 {
-  // Single-threaded wrapper over the shared compression impl: a private per-call mutex stands in
-  // for the worker-shared one, so the impl's first-failure-wins recording writes straight into the
-  // caller's errorOut. No worker contention exists here, but the impl signature is uniform.
+  // A private mutex keeps the shared first-error implementation uniform.
   if(errorOut != nullptr)
   {
     errorOut->clear();
@@ -721,7 +683,7 @@ std::vector<std::byte> ParallelChunkCodec::compressNominalChunk(uint64 flatChunk
 
 bool ParallelChunkCodec::writeCompressedChunk(uint64 flatChunkIndex, nonstd::span<const std::byte> compressedBytes, std::string* errorOut) const
 {
-  // Single-threaded wrapper over the shared write impl (see compressNominalChunk for the mutex note).
+  // A private mutex keeps the shared first-error implementation uniform.
   if(errorOut != nullptr)
   {
     errorOut->clear();
@@ -819,8 +781,7 @@ bool ParallelChunkCodec::deflateSpanIntoChunks(nonstd::span<const std::byte> sou
     return true;
   }
 
-  // The source describes the tuple range [sourceStartTuple, sourceStartTuple + sourceTupleCount):
-  // a whole number of tuples that fits inside the dataset.
+  // Source must contain whole tuples within the dataset range.
   const uint64 totalTuples = static_cast<uint64>(product(m_TupleShape));
   const usize compBytes = m_NumComponents * m_ElementSize;
   if(source.size() % compBytes != 0)
@@ -838,11 +799,7 @@ bool ParallelChunkCodec::deflateSpanIntoChunks(nonstd::span<const std::byte> sou
     return false;
   }
 
-  // Validate every index up front (range + tuple-range containment) so a rejection never leaves a
-  // half-written batch behind purely due to bad arguments. A chunk's gathers touch flat tuples
-  // [ndToFlat(bounds.min), ndToFlat(bounds.max)] (row-major stripes between those endpoints), so
-  // endpoint containment covers every gathered byte — and this is the one check the band and the
-  // full-array call differ on: a full-array call (sourceStartTuple 0, every chunk) always passes it.
+  // Validate indices and source containment before any batch commits.
   for(uint64 idx : flatChunkIndices)
   {
     if(idx >= m_NumChunks)
@@ -879,10 +836,9 @@ bool ParallelChunkCodec::deflateSpanIntoChunks(nonstd::span<const std::byte> sou
     }
   };
 
-  // Keep preparation memory bounded independently of the dataset size. Compression remains
-  // parallel inside each batch; the raw HDF5 commits run serially on this calling thread because
-  // H5Dwrite_chunk is already serialized by ApiLock and calling it from alternating worker threads
-  // intermittently corrupts adjacent chunks on non-thread-safe HDF5 builds.
+  // Limit preparation to 64 chunks. The 64 MiB target applies when one nominal
+  // chunk is no larger than 64 MiB. A larger nominal chunk forms a one-chunk
+  // batch. Commits stay serial because alternating H5Dwrite_chunk workers can corrupt adjacent chunks.
   const usize nominalChunkBytes = m_NominalChunkElements * m_ElementSize;
   const usize batchChunksByBytes = nominalChunkBytes == 0 ? 1 : std::max<usize>(1, k_MaxPreparedBatchBytes / nominalChunkBytes);
   const usize maxBatchChunks = std::min(k_MaxPreparedBatchChunks, batchChunksByBytes);
@@ -953,7 +909,7 @@ bool ParallelChunkCodec::deflateSpanIntoChunks(nonstd::span<const std::byte> sou
         }
       } catch(...)
       {
-        // No-throw contract: allocation or any other failure becomes a false return.
+        // Worker failures become a false result with the first diagnostic retained.
         recordFirstError(firstErrorOut, errorMutex, fmt::format("ParallelChunkCodec: exception while gathering/compressing chunk {} of '{}:{}'", idx, m_FilePath.string(), m_DatasetPath));
         ok.store(false, std::memory_order_relaxed);
       }

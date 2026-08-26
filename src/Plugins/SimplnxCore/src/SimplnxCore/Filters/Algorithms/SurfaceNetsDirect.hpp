@@ -11,51 +11,34 @@ struct SurfaceNetsInputValues;
 
 /**
  * @class SurfaceNetsDirect
- * @brief In-core algorithm for SurfaceNets that delegates to the MMSurfaceNet
- * library for cell classification and mesh generation.
+ * @brief Builds Surface Nets output through the resident MMSurfaceNet library.
  *
- * Selected by DispatchAlgorithm when all input arrays are backed by in-memory
- * DataStore. This is the original algorithm implementation and serves as the
- * reference for correctness.
+ * MMSurfaceNet retains one cell for each padded grid position and reads Feature
+ * IDs by value. Memory and random access are proportional to padded volume.
+ * A forced direct run on disk-backed data can cause repeated chunk access.
  *
- * The algorithm runs in six phases:
- *   1. **Build surface net** -- MMSurfaceNet classifies every cell in a padded
- *      grid (dimX+2, dimY+2, dimZ+2), identifying surface cells where the 8
- *      corner labels are not all identical. Each surface cell gets a vertex.
- *      Uses operator[] to read FeatureIds, which is fast for in-memory stores.
+ * Classification and optional relaxation do not inspect cancellation. Later
+ * vertex, counting, and face-generation loops check between vertices. Selected
+ * tuple transfers use per-value store access and cannot report storage errors.
+ * Optional winding repair creates resident connectivity before it runs.
  *
- *   2. **Smooth surface net** (optional) -- Iterative relaxation moves vertices
- *      toward the average of their face-connected neighbors, clamped to stay
- *      within MaxDistanceFromVoxel of their cell center.
- *
- *   3. **Transform vertices** -- Converts local cell-relative positions to
- *      world coordinates using the ImageGeom origin and spacing.
- *
- *   4. **Count triangles** -- Iterates surface vertices, checking 3 edges per
- *      cell (BackBottom, LeftBottom, LeftBack) for crossings that produce quads.
- *      Each quad becomes 2 triangles.
- *
- *   5. **Generate triangles** -- Second pass that writes triangle connectivity,
- *      face labels, and runs TupleTransfer for cell/feature data.
- *
- *   6. **Winding repair** (optional) -- Fixes inconsistent triangle orientations.
- *
- * Memory: O(volume) for the MMCellMap internal data structure (one Cell per
- * padded voxel). This is the main reason the Scanline variant exists.
- *
- * @see SurfaceNetsScanline for the OOC-optimized variant
+ * @see SurfaceNetsScanline for external padded-cell records and bulk output.
  */
 class SIMPLNXCORE_EXPORT SurfaceNetsDirect
 {
 public:
   /**
-   * @brief Constructs the in-core algorithm.
-   * @param dataStructure The DataStructure containing all input/output objects
-   * @param mesgHandler Callback for progress and status messages
-   * @param shouldCancel Atomic flag checked periodically for user cancellation
-   * @param inputValues Pointer to the parameter struct (must outlive this object)
+   * @brief Initializes the resident Surface Nets implementation.
+   * @param dataStructure Contains input and output objects.
+   * @param mesgHandler Receives winding messages.
+   * @param shouldCancel Signals cancellation after classification and between later vertices.
+   * @param inputValues Selects smoothing, winding, transfers, and paths.
+   * @pre All arguments outlive this executor.
    */
   SurfaceNetsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const SurfaceNetsInputValues* inputValues);
+  /**
+   * @brief Destroys the resident Surface Nets implementation.
+   */
   ~SurfaceNetsDirect() noexcept;
 
   SurfaceNetsDirect(const SurfaceNetsDirect&) = delete;
@@ -64,18 +47,19 @@ public:
   SurfaceNetsDirect& operator=(SurfaceNetsDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the full in-core Surface Nets pipeline: cell classification,
-   * optional smoothing, vertex transformation, triangle generation, and optional
-   * winding repair.
-   * @return Result<> indicating success or an error from allocation or winding repair
+   * @brief Classifies cells, writes mesh output, and optionally repairs winding.
+   * @return Cell-map allocation, connectivity, or winding result.
+   *
+   * Cancellation returns success without rollback. Tuple-transfer storage
+   * failures cannot be returned by the direct per-value interface.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                        ///< Reference to the active DataStructure
-  const SurfaceNetsInputValues* m_InputValues = nullptr; ///< User parameters and created array paths
-  const std::atomic_bool& m_ShouldCancel;                ///< User cancellation flag
-  const IFilter::MessageHandler& m_MessageHandler;       ///< Progress message callback
+  DataStructure& m_DataStructure;
+  const SurfaceNetsInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

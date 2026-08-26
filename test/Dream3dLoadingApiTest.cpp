@@ -19,9 +19,7 @@ using namespace nx::core;
 
 namespace
 {
-// ---------------------------------------------------------------------------
-// Constants for path construction
-// ---------------------------------------------------------------------------
+// These constants define paths used by the loading API scenarios.
 constexpr StringLiteral k_GroupName = "TopGroup";
 constexpr StringLiteral k_SmallAttrMatName = "SmallAM";
 constexpr StringLiteral k_LargeAttrMatName = "LargeAM";
@@ -31,14 +29,14 @@ constexpr StringLiteral k_LargeArrayName = "LargeArray";
 constexpr usize k_SmallArraySize = 10;
 constexpr usize k_LargeArraySize = 100;
 
-// Common DataPaths for the simple test structure
+// These paths select arrays and their ancestor containers.
 const DataPath k_GroupPath({k_GroupName});
 const DataPath k_SmallAMPath({k_GroupName, k_SmallAttrMatName});
 const DataPath k_LargeAMPath({k_GroupName, k_LargeAttrMatName});
 const DataPath k_SmallArrayPath({k_GroupName, k_SmallAttrMatName, k_SmallArrayName});
 const DataPath k_LargeArrayPath({k_GroupName, k_LargeAttrMatName, k_LargeArrayName});
 
-// Paths used in the multi-group prune test (scenario 7)
+// These paths select the multi-group prune fixture.
 constexpr StringLiteral k_GroupAName = "GroupA";
 constexpr StringLiteral k_GroupBName = "GroupB";
 constexpr StringLiteral k_AttrMatAName = "AttrMatA";
@@ -58,12 +56,11 @@ const DataPath k_AttrMatBPath({k_GroupBName, k_AttrMatBName});
 const DataPath k_ArrayB1Path({k_GroupBName, k_AttrMatBName, k_ArrayB1Name});
 const DataPath k_ArrayB2Path({k_GroupBName, k_AttrMatBName, k_ArrayB2Name});
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// The helpers create and clean temporary DREAM3D files.
 
 /**
- * @brief RAII guard that removes a temporary file on destruction.
+ * @struct ScopedTempFile
+ * @brief Removes one temporary file when the guard is destroyed.
  *
  * Ensures test-output files are cleaned up even when a REQUIRE assertion
  * throws and skips the remaining test body.
@@ -82,19 +79,21 @@ struct ScopedTempFile
   fs::path path;
 };
 
+/**
+ * @brief Returns the binary test-output directory.
+ * @return Directory for temporary DREAM3D files.
+ */
 fs::path GetTestOutputDir()
 {
   return fs::path(unit_test::k_BinaryTestOutputDir.view());
 }
 
 /**
- * @brief Creates a DataStructure with the hierarchy:
- *   TopGroup / SmallAM  / SmallArray (10 x int32)
- *            / LargeAM  / LargeArray (100 x float32)
+ * @brief Creates a two-array DataStructure for loading tests.
+ * @return A hierarchy with independent small and large AttributeMatrices.
  *
- * Two separate AttributeMatrices are needed because AM enforces that all
- * child arrays share the same tuple dimensions.
- * SmallArray values are filled with i * 3, LargeArray with i * 1.5f.
+ * Separate AttributeMatrices permit different tuple dimensions. SmallArray
+ * values use `i * 3`; LargeArray values use `i * 1.5`.
  */
 DataStructure CreateSimpleTestDataStructure()
 {
@@ -131,7 +130,10 @@ DataStructure CreateSimpleTestDataStructure()
 }
 
 /**
- * @brief Writes the given DataStructure to a temp .dream3d file and returns the path.
+ * @brief Writes a DataStructure to a temporary DREAM3D file.
+ * @param ds DataStructure to write.
+ * @param fileName Output file name.
+ * @return The written file path.
  */
 fs::path WriteTestFile(const DataStructure& ds, const std::string& fileName)
 {
@@ -143,11 +145,8 @@ fs::path WriteTestFile(const DataStructure& ds, const std::string& fileName)
 }
 
 /**
- * @brief Creates a DataStructure for the multi-group prune test:
- *   GroupA / AttrMatA / ArrayA1 (20 x int32)
- *                     / ArrayA2 (20 x int32)
- *   GroupB / AttrMatB / ArrayB1 (20 x float32)
- *                     / ArrayB2 (20 x float32)
+ * @brief Creates two groups with distinct integer and float arrays for pruning.
+ * @return A populated multi-group DataStructure.
  */
 DataStructure CreateMultiGroupTestDataStructure()
 {

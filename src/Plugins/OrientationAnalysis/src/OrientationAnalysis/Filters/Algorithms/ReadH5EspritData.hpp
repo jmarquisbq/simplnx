@@ -9,6 +9,10 @@
 namespace nx::core
 {
 
+/**
+ * @struct ReadH5EspritDataInputValues
+ * @brief Selects whether imported Euler angles convert from degrees to radians.
+ */
 struct ORIENTATIONANALYSIS_EXPORT ReadH5EspritDataInputValues
 {
   bool DegreesToRadians;
@@ -16,19 +20,28 @@ struct ORIENTATIONANALYSIS_EXPORT ReadH5EspritDataInputValues
 
 /**
  * @class ReadH5EspritData
- * @brief Algorithm that reads Bruker Esprit H5OINA EBSD data into an Image Geometry.
+ * @brief Imports Bruker Esprit HDF5 EBSD scans into an ImageGeom.
  *
- * Reads one slice at a time from the HDF5 file via the EbsdLib H5EspritReader,
- * then copies each slice's data into the volume-wide DataStructure arrays.
+ * IEbsdOemReader loads one scan and checks cancellation between scans. This
+ * class interleaves Euler channels in 65,536-tuple pages. It writes scalar and
+ * pattern channels with one scan-sized destination transfer.
  *
- * @section ooc_summary OOC Optimization Summary
- * Same copyFromBuffer() bulk write approach as the other EBSD readers. Euler angles use
- * chunked interleaving with optional degree-to-radian conversion. Single-component arrays
- * are written in one bulk call per slice at the correct offset.
+ * The destination transfers support out-of-core stores, but the current method
+ * does not inspect their Result values. Cancellation returns success between
+ * scans and preserves completed scan data.
  */
 class ORIENTATIONANALYSIS_EXPORT ReadH5EspritData : public IEbsdOemReader<ebsdlib::H5EspritReader>
 {
 public:
+  /**
+   * @brief Initializes a Bruker Esprit scan importer.
+   * @param dataStructure Provides destination arrays and geometry.
+   * @param mesgHandler Receives status messages.
+   * @param shouldCancel Signals cancellation between scans.
+   * @param inputValues Identifies scans and destination paths.
+   * @param espritInputValues Selects Euler-angle conversion.
+   * @pre All arguments outlive this importer.
+   */
   ReadH5EspritData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ReadH5DataInputValues* inputValues,
                    ReadH5EspritDataInputValues* espritInputValues);
   ~ReadH5EspritData() noexcept override;
@@ -39,14 +52,17 @@ public:
   ReadH5EspritData& operator=(ReadH5EspritData&&) noexcept = delete;
 
   /**
-   * @brief Executes the algorithm by delegating to the base class execute().
+   * @brief Imports each selected scan through IEbsdOemReader.
+   * @return Reader or missing-pattern-data errors.
    */
   Result<> operator()();
 
   /**
-   * @brief Copies raw EBSD data for one slice from the H5Esprit reader into the DataStructure.
-   * @param index Zero-based slice index, used to compute the tuple offset.
-   * @return Result<> indicating success or an error if pattern data is missing.
+   * @brief Copies one loaded scan into its volume destination range.
+   * @param index Zero-based scan index.
+   * @return Error when requested pattern data is absent.
+   *
+   * The current method does not inspect destination bulk-I/O Result values.
    */
   Result<> copyRawEbsdData(int index) override;
 

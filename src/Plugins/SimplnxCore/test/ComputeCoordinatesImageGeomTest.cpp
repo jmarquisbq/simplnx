@@ -41,20 +41,17 @@ TEST_CASE("SimplnxCore::ComputeCoordinatesImageGeom: Physical", "[SimplnxCore][C
 
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/image_coords_test/compute_coord_image_geom_test.dream3d", unit_test::k_TestFilesDir)));
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     ComputeCoordinatesImageGeomFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_OutputType_Key, std::make_any<ChoicesParameter::ValueType>(to_underlying(ComputeCoordinatesImageGeom::OutputType::Physical)));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_SelectedImageGeomPath_Key, std::make_any<DataPath>(k_ImageGeomPath));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_CoordsArrayPath_Key, std::make_any<DataPath>(k_ComputedCoordsPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
@@ -73,20 +70,17 @@ TEST_CASE("SimplnxCore::ComputeCoordinatesImageGeom: Indices", "[SimplnxCore][Co
 
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/image_coords_test/compute_coord_image_geom_test.dream3d", unit_test::k_TestFilesDir)));
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     ComputeCoordinatesImageGeomFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_OutputType_Key, std::make_any<ChoicesParameter::ValueType>(to_underlying(ComputeCoordinatesImageGeom::OutputType::Index)));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_SelectedImageGeomPath_Key, std::make_any<DataPath>(k_ImageGeomPath));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_IndicesArrayPath_Key, std::make_any<DataPath>(k_ComputedIndicesPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }
@@ -105,21 +99,18 @@ TEST_CASE("SimplnxCore::ComputeCoordinatesImageGeom: Both", "[SimplnxCore][Compu
 
   DataStructure dataStructure = UnitTest::LoadDataStructure(fs::path(fmt::format("{}/image_coords_test/compute_coord_image_geom_test.dream3d", unit_test::k_TestFilesDir)));
   {
-    // Instantiate the filter and an Arguments Object
+    // Configure the filter arguments.
     ComputeCoordinatesImageGeomFilter filter;
     Arguments args;
 
-    // Create default Parameters for the filter.
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_OutputType_Key, std::make_any<ChoicesParameter::ValueType>(to_underlying(ComputeCoordinatesImageGeom::OutputType::Both)));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_SelectedImageGeomPath_Key, std::make_any<DataPath>(k_ImageGeomPath));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_CoordsArrayPath_Key, std::make_any<DataPath>(k_ComputedCoordsPath));
     args.insertOrAssign(ComputeCoordinatesImageGeomFilter::k_IndicesArrayPath_Key, std::make_any<DataPath>(k_ComputedIndicesPath));
 
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
   }

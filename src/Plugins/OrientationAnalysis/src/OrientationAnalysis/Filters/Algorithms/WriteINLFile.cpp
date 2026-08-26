@@ -27,7 +27,11 @@ namespace
 constexpr usize k_ChunkTuples = 65536;
 constexpr usize k_EulerComponents = 3;
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Maps a simplnx crystal structure to the INL TSL symmetry code.
+ * @param symmetry Simplnx crystal-structure value.
+ * @return Matching TSL phase symmetry, or UnknownCrystalStructure when unsupported.
+ */
 uint32 mapCrystalSymmetryToTslSymmetry(uint32 symmetry)
 {
   switch(symmetry)
@@ -44,9 +48,6 @@ uint32 mapCrystalSymmetryToTslSymmetry(uint32 symmetry)
     return ebsdlib::Ang::PhaseSymmetry::Orthorhombic;
   case ebsdlib::CrystalStructure::Monoclinic:
     return ebsdlib::Ang::PhaseSymmetry::Monoclinic_c;
-    // Not sure why these are here, but they were in the original filter and will never be reached so commented out
-    //    return ebsdlib::Ang::PhaseSymmetry::Monoclinic_b;
-    //    return ebsdlib::Ang::PhaseSymmetry::Monoclinic_a;
   case ebsdlib::CrystalStructure::Triclinic:
     return ebsdlib::Ang::PhaseSymmetry::Triclinic;
   case ebsdlib::CrystalStructure::Hexagonal_High:
@@ -63,7 +64,6 @@ uint32 mapCrystalSymmetryToTslSymmetry(uint32 symmetry)
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteINLFile::WriteINLFile(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WriteINLFileInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -72,28 +72,22 @@ WriteINLFile::WriteINLFile(DataStructure& dataStructure, const IFilter::MessageH
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteINLFile::~WriteINLFile() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteINLFile::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteINLFile::operator()()
 {
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
+  // Create the destination directory before opening and truncating the file.
   Result<> createDirectoriesResult = nx::core::CreateOutputDirectories(m_InputValues->OutputFile.parent_path());
   if(createDirectoriesResult.invalid())
   {
     return createDirectoriesResult;
   }
 
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
   std::ofstream fout(m_InputValues->OutputFile, std::ios_base::out | std::ios_base::binary);
   if(!fout.is_open())
   {
@@ -120,7 +114,8 @@ Result<> WriteINLFile::operator()()
   const auto& eulerAnglesStore = eulerAngles.getDataStoreRef();
   const auto& cellPhasesStore = cellPhases.getDataStoreRef();
 
-  // Forced and real OOC stores retain bounded bulk reads; in-memory stores bypass the staging copies.
+  // Concrete DataStore instances bypass staging unless tests force the bulk path.
+  // Other store implementations retain bounded sequential reads.
   const auto* directFeatureIdsStore = dynamic_cast<const Int32DataStore*>(&featureIdsStore);
   const auto* directEulerAnglesStore = dynamic_cast<const Float32DataStore*>(&eulerAnglesStore);
   const auto* directCellPhasesStore = dynamic_cast<const Int32DataStore*>(&cellPhasesStore);
@@ -132,7 +127,7 @@ Result<> WriteINLFile::operator()()
   const bool usesOutOfCoreStore = AnyOutOfCore({&featureIds, &eulerAngles, &cellPhases});
   RecordAlgorithmPathExecution(useDirectCellData ? AlgorithmPath::InCore : AlgorithmPath::OutOfCore, usesOutOfCoreStore);
 
-  // Ensemble arrays remain small enough to cache completely.
+  // Cache ensemble arrays in full. Memory scales with the phase count.
   std::vector<uint32> crystalStructuresCache(crystalStructures.getSize());
   if(Result<> readResult = crystalStructures.getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(crystalStructuresCache.data(), crystalStructuresCache.size())); readResult.invalid())
   {
@@ -191,7 +186,7 @@ Result<> WriteINLFile::operator()()
     return {};
   }
 
-  // Write the header, Each line starts with a "#" symbol
+  // Build the comment-prefixed INL header before the first output write.
   std::ostringstream headerBuffer;
   headerBuffer << "# File written from " << nx::core::Version::PackageComplete() << "\n";
   headerBuffer << "# X_STEP: " << std::fixed << res[0] << "\n";
@@ -210,24 +205,6 @@ Result<> WriteINLFile::operator()()
   headerBuffer << "# Y_DIM: " << dims[1] << "\n";
   headerBuffer << "# Z_DIM: " << dims[2] << "\n";
   headerBuffer << "#\n";
-
-  /*
-   * -------------------------------------------- -
-   * #Phase_1 : MOX with 30 % Pu
-   * #Symmetry_1 : 43
-   * #Features_1 : 4
-   * #
-   * #Phase_2 : Brahman
-   * #Symmetry_2 : 62
-   * #Features_2 : 6
-   * #
-   * #Phase_3 : Void
-   * #Symmetry_3 : 22
-   * #Features_3 : 1
-   * #
-   * #Total_Features : 11
-   * -------------------------------------------- -
-   */
 
   const int32 materialCount = static_cast<int32>(materialNames.getNumberOfTuples());
   for(uint32 i = 1; i < materialCount; ++i)
@@ -310,7 +287,7 @@ Result<> WriteINLFile::operator()()
       textBuffer.clear();
     }
 
-    // Resolve the first tuple once, then carry coordinates in the legacy X-fastest order.
+    // Resolve the first tuple once, then advance coordinates in INL X-fastest order.
     usize x = tupleOffset % dims[0];
     const usize yzOffset = tupleOffset / dims[0];
     usize y = yzOffset % dims[1];

@@ -24,7 +24,8 @@ constexpr int64 k_MissingInputArray = -601;
 constexpr int64 k_MissingOrIncorrectGoodVoxelsArray = -602;
 
 /**
- * @brief The TSpecificCompareFunctorBool class extends @see CompareFunctor to compare boolean data
+ * @class TSpecificCompareFunctorBool
+ * @brief Compares resident Boolean values for exact equality.
  */
 class TSpecificCompareFunctorBool : public SegmentFeatures::CompareFunctor
 {
@@ -32,7 +33,12 @@ public:
   using DataArrayType = BoolArray;
   CX_DEFAULT_CONSTRUCTORS(TSpecificCompareFunctorBool)
 
-  /** @brief Borrows a Boolean array and its validated tuple count for exact comparisons. */
+  /**
+   * @brief Initializes the resident Boolean comparator.
+   * @param data Supplies Boolean values.
+   * @param length Exclusive upper bound for valid indexes.
+   * @pre data identifies a BoolArray and outlives this comparator.
+   */
   TSpecificCompareFunctorBool(IDataArray* data, int64 length)
   : m_Length(length)
   , m_Data(dynamic_cast<DataArrayType*>(data))
@@ -41,7 +47,13 @@ public:
   TSpecificCompareFunctorBool() = default;
   ~TSpecificCompareFunctorBool() override = default;
 
-  /** @brief Returns true when both indices are in range and contain the same Boolean value. */
+  /**
+   * @brief Tests two Boolean values for equality.
+   * @param index First flat value index.
+   * @param neighIndex Neighbor flat value index.
+   * @return True when both indexes are in range and values are equal.
+   * @pre index and neighIndex are nonnegative.
+   */
   bool compare(int64 index, int64 neighIndex) override
   {
     if(index >= m_Length || neighIndex >= m_Length)
@@ -52,14 +64,18 @@ public:
   }
 
 private:
-  int64 m_Length = 0;              // Length of the Data Array
-  DataArrayType* m_Data = nullptr; // The data that is being compared
+  int64 m_Length = 0;
+  DataArrayType* m_Data = nullptr;
 };
 
 /**
- * @brief Resident fallback comparator for one numeric scalar type.
- * The scanline CCL normally compares preloaded float64 slice values; this
- * adapter preserves exact typed behavior for comparisons outside that window.
+ * @class TSpecificCompareFunctor
+ * @brief Compares resident scalar values in their native type.
+ * @tparam T Specifies the scalar value type.
+ *
+ * The buffered CCL normally compares preloaded float64 slice values; this
+ * fallback preserves native typed behavior outside that window. Signed
+ * subtraction requires a representable absolute difference.
  */
 template <class T>
 class TSpecificCompareFunctor : public SegmentFeatures::CompareFunctor
@@ -70,7 +86,13 @@ public:
   using DataArrayType = DataArray<T>;
   using DataStoreType = AbstractDataStore<T>;
 
-  /** @brief Borrows the typed store and stores the tolerance in its native type. */
+  /**
+   * @brief Initializes the resident typed comparator.
+   * @param data Supplies scalar values.
+   * @param length Exclusive upper bound for valid indexes.
+   * @param tolerance Maximum native-type difference.
+   * @pre data has type T and outlives this comparator.
+   */
   TSpecificCompareFunctor(IDataArray* data, int64 length, T tolerance)
   : m_Length(length)
   , m_Tolerance(tolerance)
@@ -80,7 +102,14 @@ public:
   TSpecificCompareFunctor() = default;
   ~TSpecificCompareFunctor() override = default;
 
-  /** @brief Performs an unsigned-safe absolute-difference comparison. */
+  /**
+   * @brief Tests the native-type absolute difference.
+   * @param index First flat value index.
+   * @param neighIndex Neighbor flat value index.
+   * @return True when both indexes are in range and their difference is within tolerance.
+   * @pre index and neighIndex are nonnegative.
+   * @pre Signed differences are representable in T.
+   */
   bool compare(int64 index, int64 neighIndex) override
   {
     if(index >= m_Length || neighIndex >= m_Length)
@@ -96,28 +125,34 @@ public:
   }
 
 private:
-  int64 m_Length = 0;                // Length of the Data Array
-  T m_Tolerance = static_cast<T>(0); // The tolerance of the comparison
-  DataStoreType& m_Data;             // The data that is being compared
+  int64 m_Length = 0;
+  T m_Tolerance = static_cast<T>(0);
+  DataStoreType& m_Data;
 };
 
 /**
- * @brief Functor for type-dispatched filling of a scalar slice buffer.
- * Bulk-reads an entire slice via copyIntoBuffer() into a local typed buffer,
- * then converts to float64 for uniform comparison. Uses std::make_unique<T[]>
- * instead of std::vector<T> to avoid std::vector<bool> specialization issues.
+ * @struct FillScalarSliceBufferFunctor
+ * @brief Bulk-reads one typed scalar slice and widens it to float64.
  */
 struct FillScalarSliceBufferFunctor
 {
   /**
-   * @brief Bulk-reads one typed slice and widens it into the shared float64 buffer.
-   * @return The backing-store read failure, or success after all values convert.
+   * @brief Reads one scalar slice into the selected LRU slot.
+   * @tparam T Specifies the scalar input type.
+   * @param dataArray Supplies scalar values.
+   * @param baseIndex First flat source value.
+   * @param sliceSize Number of values to read.
+   * @param buffer Receives widened values.
+   * @param bufferOffset First destination-buffer index.
+   * @return Source bulk-read result.
+   * @pre baseIndex is nonnegative.
+   * @pre Source and destination ranges contain sliceSize values.
    */
   template <typename T>
   Result<> operator()(IDataArray* dataArray, int64 baseIndex, usize sliceSize, std::vector<float64>& buffer, usize bufferOffset)
   {
     auto& store = dataArray->template getIDataStoreRefAs<AbstractDataStore<T>>();
-    // Bulk-read the entire slice into a local typed buffer, then convert to float64
+    // A raw buffer provides contiguous storage for every dispatched type.
     auto tempBuffer = std::make_unique<T[]>(sliceSize);
     auto readResult = store.copyIntoBuffer(static_cast<usize>(baseIndex), nonstd::span<T>(tempBuffer.get(), sliceSize));
     if(readResult.invalid())
@@ -143,38 +178,6 @@ ScalarSegmentFeatures::ScalarSegmentFeatures(DataStructure& dataStructure, Scala
 
 ScalarSegmentFeatures::~ScalarSegmentFeatures() noexcept = default;
 
-// -----------------------------------------------------------------------------
-// Segments an image/rectilinear grid into features (regions) by grouping
-// contiguous voxels whose scalar values differ by no more than a user-specified
-// tolerance. This is a general-purpose segmentation: it works on any single-
-// component scalar array (int8 through float64, plus boolean), unlike the
-// orientation-based EBSD and CAxis segment filters.
-//
-// Comparator setup:
-//   A type-dispatched CompareFunctor is instantiated via a switch on the input
-//   array's DataType. Each TSpecificCompareFunctor<T> stores the tolerance cast
-//   to the native type and performs |a - b| <= tolerance using unsigned-safe
-//   subtraction. Boolean arrays use a dedicated TSpecificCompareFunctorBool
-//   that checks for exact equality (no tolerance concept). If the input array
-//   has more than one component, a default CompareFunctor that always returns
-//   false is used, effectively preventing any grouping.
-//
-// Segmentation:
-//   The base-class connected-component labeling algorithm (executeCCL()) walks
-//   the volume one Z-slice at a time. Slice buffers are allocated first so the
-//   comparison overrides can read pre-loaded input data, then released once the
-//   algorithm completes.
-//
-// Post-processing:
-//   1. Validate that at least one feature was found (error if not).
-//   2. Resize the Feature AttributeMatrix to (m_FoundFeatures + 1) tuples so
-//      that all per-feature arrays (Active, etc.) have the correct size.
-//      Index 0 is reserved as an invalid/background feature.
-//   3. Initialize the Active array: fill with 1 (active), then set index 0
-//      to 0 to mark it as the reserved background slot.
-//   4. Optionally randomize FeatureIds so that spatially adjacent features get
-//      non-sequential IDs, improving visual contrast in color-mapped renders.
-// -----------------------------------------------------------------------------
 Result<> ScalarSegmentFeatures::operator()()
 {
   this->m_NeighborScheme = m_InputValues->NeighborScheme;
@@ -185,8 +188,7 @@ Result<> ScalarSegmentFeatures::operator()()
       m_GoodVoxels = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->MaskArrayPath);
     } catch(const std::out_of_range& exception)
     {
-      // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-      // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+      // Direct algorithm callers can bypass filter path and type validation.
       std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString());
       return MakeErrorResult(-54110, message);
     }
@@ -252,7 +254,7 @@ Result<> ScalarSegmentFeatures::operator()()
   }
   if(inputDataArray->getNumberOfComponents() != 1)
   {
-    m_CompareFunctor = std::make_shared<SegmentFeatures::CompareFunctor>(); // The default CompareFunctor which ALWAYS returns false for the comparison
+    m_CompareFunctor = std::make_shared<SegmentFeatures::CompareFunctor>();
   }
 
   SizeVec3 udims = gridGeom->getDimensions();
@@ -274,25 +276,22 @@ Result<> ScalarSegmentFeatures::operator()()
     return {};
   }
 
-  // Sanity check the result.
   if(m_FoundFeatures < 1)
   {
     return MakeErrorResult(-87000, "No Features were detected: no Cell was eligible to seed a Feature. Every Cell is excluded by the Mask.");
   }
 
-  // Resize the Feature Attribute Matrix
+  // Final feature IDs include positive labels and the reserved zero tuple.
   ShapeType tDims = {static_cast<usize>(m_FoundFeatures + 1)};
   auto& cellFeaturesAM = m_DataStructure.getDataRefAs<AttributeMatrix>(m_InputValues->CellFeatureAttributeMatrixPath);
-  cellFeaturesAM.resizeTuples(tDims); // This will resize the active array
+  cellFeaturesAM.resizeTuples(tDims);
 
-  // make sure all values are initialized and "re-reserve" index 0
+  // Positive features start active. Feature zero remains reserved background.
   auto* activeArray = m_DataStructure.getDataAs<UInt8Array>(m_InputValues->ActiveArrayPath);
   activeArray->getDataStore()->fill(1);
   (*activeArray)[0] = 0;
 
-  // Randomize the feature Ids for purely visual clarify. Having random Feature Ids
-  // allows users visualizing the data to better discern each grain otherwise the coloring
-  // would look like a smooth gradient. This is a user input parameter
+  // A deterministic permutation improves adjacent-feature color contrast.
   if(m_InputValues->RandomizeFeatureIds)
   {
     randomizeFeatureIds(m_FeatureIdsArray, m_FoundFeatures + 1);
@@ -301,21 +300,6 @@ Result<> ScalarSegmentFeatures::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// Checks whether a single voxel is eligible for segmentation. For scalar
-// segmentation, validity only depends on the mask -- there is no phase check
-// because scalar data is phase-agnostic.
-//
-// Slice buffer fast path:
-//   When m_UseSliceBuffers is true, the method first checks whether the voxel's
-//   Z-slice is currently loaded in either LRU slot. If it is resident, the
-//   mask value is read directly from the in-memory m_MaskBuffer,
-//   avoiding an on-disk I/O round-trip.
-//
-// Inactive-buffer fallback:
-//   Direct access is retained for callers outside executeCCL. During CCL,
-//   missing slice state is rejected instead of issuing a DataStore read.
-// -----------------------------------------------------------------------------
 bool ScalarSegmentFeatures::isValidVoxel(int64 point) const
 {
   if(m_UseSliceBuffers)
@@ -334,7 +318,7 @@ bool ScalarSegmentFeatures::isValidVoxel(int64 point) const
     return false;
   }
 
-  // In-core fallback used only when slice buffering is inactive.
+  // Direct fallback supports calls outside buffered CCL execution.
   if(m_InputValues->UseMask && !m_GoodVoxels->isTrue(point))
   {
     return false;
@@ -342,27 +326,6 @@ bool ScalarSegmentFeatures::isValidVoxel(int64 point) const
   return true;
 }
 
-// -----------------------------------------------------------------------------
-// Determines whether two neighboring voxels have sufficiently similar scalar
-// values to belong to the same feature.
-//
-// Slice buffer fast path:
-//   When both voxels' Z-slices are present in the rolling 2-slot buffer, all
-//   data is read from the in-memory buffers (m_ScalarBuffer, m_MaskBuffer).
-//   The buffer offset for each point is computed as:
-//     slot * sliceSize + (point - iz * sliceSize)
-//   The method then:
-//     1. Checks point2's mask validity.
-//     2. Reads both scalar values from m_ScalarBuffer as float64.
-//     3. Computes |val1 - val2| and returns true if <= ScalarTolerance.
-//   All scalar types are stored as float64 in the buffer so that a single
-//   comparison path works regardless of the original data type. The tolerance
-//   is also cast to float64 for the comparison.
-//
-// Inactive-buffer fallback:
-//   Direct comparison is retained for callers outside executeCCL. Periodic CCL
-//   explicitly loads both required slices and never takes this path.
-// -----------------------------------------------------------------------------
 bool ScalarSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
 {
   if(m_UseSliceBuffers)
@@ -378,13 +341,13 @@ bool ScalarSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) cons
       const usize off1 = static_cast<usize>(slot1) * sliceSize + static_cast<usize>(point1 - iz1 * m_BufSliceSize);
       const usize off2 = static_cast<usize>(slot2) * sliceSize + static_cast<usize>(point2 - iz2 * m_BufSliceSize);
 
-      // Check point2 validity
+      // Similarity also requires the candidate neighbor to pass the mask.
       if(m_InputValues->UseMask && m_MaskBuffer[off2] == 0)
       {
         return false;
       }
 
-      // Compare scalar values from the pre-loaded buffer
+      // Widened comparison avoids type dispatch in the CCL neighbor loop.
       float64 val1 = m_ScalarBuffer[off1];
       float64 val2 = m_ScalarBuffer[off2];
       float64 diff = val1 >= val2 ? (val1 - val2) : (val2 - val1);
@@ -393,7 +356,7 @@ bool ScalarSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) cons
     return false;
   }
 
-  // In-core fallback used only when slice buffering is inactive.
+  // Direct fallback supports calls outside buffered CCL execution.
   if(!isValidVoxel(point2))
   {
     return false;
@@ -401,24 +364,6 @@ bool ScalarSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) cons
   return m_CompareFunctor->compare(point1, point2);
 }
 
-// -----------------------------------------------------------------------------
-// Allocates the rolling 2-slot slice buffers used by the CCL algorithm.
-// Called once in operator(), before executeCCL().
-//
-// Each slot holds one full XY slice (dimX * dimY voxels). Two slots are needed
-// because the CCL algorithm compares the current slice (iz) with the previous
-// slice (iz-1), so both must be in memory simultaneously.
-//
-// Buffers allocated:
-//   - m_ScalarBuffer : 2 * sliceSize float64 values (one scalar per voxel,
-//                      stored as float64 regardless of the original data type
-//                      so that a single comparison path works for all types)
-//   - m_MaskBuffer   : 2 * sliceSize uint8 values (one mask flag per voxel)
-//
-// Both m_BufferedSliceZ slots are initialized to -1 (no slice loaded).
-// m_UseSliceBuffers is set to true so that isValidVoxel() and
-// areNeighborsSimilar() will use the fast buffer path.
-// -----------------------------------------------------------------------------
 void ScalarSegmentFeatures::allocateSliceBuffers(int64 dimX, int64 dimY)
 {
   m_BufSliceSize = dimX * dimY;
@@ -432,13 +377,6 @@ void ScalarSegmentFeatures::allocateSliceBuffers(int64 dimX, int64 dimY)
   m_UseSliceBuffers = true;
 }
 
-// -----------------------------------------------------------------------------
-// Releases the slice buffers after executeCCL() completes, freeing the memory
-// back to the system. Called in operator() after the CCL algorithm finishes.
-// Resets m_UseSliceBuffers to false and both
-// m_BufferedSliceZ slots to -1. The vectors are replaced with default-
-// constructed (empty) instances to guarantee memory deallocation.
-// -----------------------------------------------------------------------------
 void ScalarSegmentFeatures::deallocateSliceBuffers()
 {
   m_UseSliceBuffers = false;
@@ -450,24 +388,6 @@ void ScalarSegmentFeatures::deallocateSliceBuffers()
   m_NextBufferUseSequence = 1;
 }
 
-// -----------------------------------------------------------------------------
-// Pre-loads voxel data for a single Z-slice into the rolling 2-slot buffer,
-// called by executeCCL() before processing each slice.
-//
-// Rolling buffer design:
-//   Two LRU slots retain the current/previous forward-pass slices and any pair
-//   explicitly requested by periodic-boundary merging. Resident slices are not
-//   re-read.
-//
-// Data loaded per slice:
-//   - Scalar values (1 float64 per voxel) into m_ScalarBuffer. The type
-//     dispatch uses ExecuteDataFunctionNoBool with FillScalarSliceBufferFunctor
-//     to convert the original typed data (int8..float64) to float64. Boolean
-//     arrays are handled separately because ExecuteDataFunctionNoBool excludes
-//     bool; they are converted to 0.0/1.0 manually.
-//   - Mask flags (1 uint8 per voxel) into m_MaskBuffer; if masking is disabled,
-//     all mask values are set to 1 (valid).
-// -----------------------------------------------------------------------------
 Result<> ScalarSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ)
 {
   if(iz < 0)
@@ -503,12 +423,12 @@ Result<> ScalarSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY
   const usize slotOffset = static_cast<usize>(slot) * sliceSize;
   const int64 baseIndex = iz * m_BufSliceSize;
 
-  // Fill scalar data buffer using type dispatch
+  // Widen one scalar slice into the selected LRU slot.
   DataType dataType = m_InputDataArray->getDataType();
   if(dataType == DataType::boolean)
   {
     auto& store = m_InputDataArray->template getIDataStoreRefAs<AbstractDataStore<bool>>();
-    // Bulk-read the entire boolean slice, then convert to float64
+    // Bool dispatch uses a raw temporary because vector<bool> is not contiguous.
     auto boolBuf = std::make_unique<bool[]>(sliceSize);
     auto readResult = store.copyIntoBuffer(static_cast<usize>(baseIndex), nonstd::span<bool>(boolBuf.get(), sliceSize));
     if(readResult.invalid())
@@ -529,13 +449,12 @@ Result<> ScalarSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY
     }
   }
 
-  // Fill mask buffer using bulk reads to avoid per-element OOC overhead
+  // Cache mask values with the scalar slice.
   if(m_InputValues->UseMask && m_GoodVoxels != nullptr)
   {
     auto& maskArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->MaskArrayPath);
     if(maskArray.getDataType() == DataType::uint8)
     {
-      // Bulk-read uint8 mask data directly into the mask buffer
       auto& typedStore = maskArray.getIDataStoreRefAs<AbstractDataStore<uint8>>();
       auto readResult = typedStore.copyIntoBuffer(static_cast<usize>(baseIndex), nonstd::span<uint8>(m_MaskBuffer.data() + slotOffset, sliceSize));
       if(readResult.invalid())
@@ -545,7 +464,7 @@ Result<> ScalarSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY
     }
     else if(maskArray.getDataType() == DataType::boolean)
     {
-      // Bulk-read boolean mask data into a temp buffer, then convert to uint8
+      // Bool mask input needs a contiguous temporary buffer.
       auto& typedStore = maskArray.getIDataStoreRefAs<AbstractDataStore<bool>>();
       auto boolBuf = std::make_unique<bool[]>(sliceSize);
       auto readResult = typedStore.copyIntoBuffer(static_cast<usize>(baseIndex), nonstd::span<bool>(boolBuf.get(), sliceSize));

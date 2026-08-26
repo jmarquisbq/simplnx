@@ -23,9 +23,8 @@ bool probeSingleDeflateEligibility(hid_t datasetId, usize elementSize, int32* de
 {
   std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
 
-  // Single-filter deflate pipeline? Also capture the deflate level (cd_values[0]) when the
-  // caller asked for it, so a writer's compress2 produces exactly what the dataset's
-  // creation property list specifies.
+  // Require one deflate filter. The captured level lets raw writers match the
+  // dataset creation property list.
   hid_t dcpl = H5Dget_create_plist(datasetId);
   if(dcpl < 0)
   {
@@ -36,7 +35,7 @@ bool probeSingleDeflateEligibility(hid_t datasetId, usize elementSize, int32* de
   if(nFilters == 1)
   {
     unsigned int flags = 0;
-    size_t cdNelmts = 16; // in: capacity of cdValues; out: number of client values
+    size_t cdNelmts = 16; // Input capacity and output client-value count.
     unsigned int cdValues[16] = {0};
     char name[64] = {0};
     unsigned int filterConfig = 0;
@@ -53,9 +52,8 @@ bool probeSingleDeflateEligibility(hid_t datasetId, usize elementSize, int32* de
     return false;
   }
 
-  // Byte-order gate: the fast paths bypass the file<->host swap H5Dread/H5Dwrite would
-  // perform, so eligible only when the file element order matches the host (or the
-  // element is single-byte, order-irrelevant).
+  // Raw chunk paths bypass HDF5 byte conversion. Multi-byte elements must use the
+  // host byte order. Byte order does not affect single-byte elements.
   if(elementSize == 1)
   {
     return true;

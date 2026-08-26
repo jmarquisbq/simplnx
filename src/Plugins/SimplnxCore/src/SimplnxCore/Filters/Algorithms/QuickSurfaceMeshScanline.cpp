@@ -1,48 +1,11 @@
 /**
  * @file QuickSurfaceMeshScanline.cpp
- * @brief Out-of-core (OOC) optimized implementation of the QuickSurfaceMesh algorithm.
+ * @brief Implements scanline QuickSurfaceMesh execution for out-of-core (OOC) arrays.
  *
- * This file implements the scanline variant of QuickSurfaceMesh that avoids
- * per-element random access to chunked DataStores. Instead of using operator[]
- * on the FeatureIds array (which triggers chunk load/evict cycles on OOC stores),
- * this algorithm reads exactly two Z-slices at a time via copyIntoBuffer() and
- * processes them entirely in local buffers.
- *
- * ## Key Differences from QuickSurfaceMeshDirect
- *
- * 1. **FeatureIds access**: Direct uses operator[], Scanline uses copyIntoBuffer()
- *    to bulk-read one Z-slice (xP * yP elements) at a time.
- *
- * 2. **Node ID mapping**: Direct allocates an O(volume) nodeIds array of size
- *    (xP+1)*(yP+1)*(zP+1). Scanline uses two rolling node-plane buffers of
- *    size O((xP+1)*(yP+1)) each, swapped after each Z-slice. This reduces
- *    memory from O(volume) to O(slice).
- *
- * 3. **Output writes**: Direct writes vertices, triangles, and face labels
- *    per-element via operator[]. Scanline keeps node state in bounded pages
- *    over temporary records, while triangle connectivity and face labels are
- *    buffered per slice and flushed via copyFromBuffer().
- *
- * 4. **Problem voxel correction**: Direct reads/writes the DataStore directly.
- *    Scanline loads Z-slice pairs, mutates the local buffers, and only writes
- *    back slices that were actually modified (dirty flag optimization).
- *
- * 5. **TupleTransfer**: Direct calls quickSurfaceTransfer() per-triangle.
- *    Scanline uses quickSurfaceTransferBatch() to process all triangles from
- *    a Z-slice in one call, reducing virtual function call overhead.
- *
- * ## Rolling Buffer Diagram
- *
- * For Z-slice k, the algorithm needs:
- *   - curSlice[]:  FeatureIds for Z = k     (xP * yP elements)
- *   - nextSlice[]: FeatureIds for Z = k+1   (xP * yP elements)
- *   - nodePlane0[]: Vertex IDs for Z = k    ((xP+1) * (yP+1) elements)
- *   - nodePlane1[]: Vertex IDs for Z = k+1  ((xP+1) * (yP+1) elements)
- *
- * After processing slice k:
- *   - std::swap(curSlice, nextSlice)   -- old next becomes current
- *   - std::swap(nodePlane0, nodePlane1) -- plane1 becomes plane0
- *   - nodePlane1 is reset to sentinel values
+ * The algorithm holds two Feature ID slices and two node planes. Bulk I/O and
+ * bounded temporary records avoid repeated load and eviction of disk-backed chunks.
+ * The first pass resolves diagonal ambiguities. The second pass counts exact
+ * output sizes. The final pass emits topology in per-slice batches.
  */
 
 #include "QuickSurfaceMeshScanline.hpp"
@@ -73,41 +36,45 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 namespace
 {
-// RNG constants -- must match QuickSurfaceMeshDirect.cpp to produce identical
-// problem-voxel corrections (same seed, same sequence of random draws).
+// Match QuickSurfaceMeshDirect random-number generator seed and call order for identical problem-voxel corrections.
 constexpr float64 k_RangeMin = 0.0;
 constexpr float64 k_RangeMax = 1.0;
 constexpr std::mt19937_64::result_type k_Seed = 3412341234123412;
 std::mt19937_64 generator(k_Seed);
 std::uniform_real_distribution<> distribution(k_RangeMin, k_RangeMax);
 
+// Fixed batches bound resident node-record memory independently of mesh size.
 constexpr uint64 k_NodeRecordBatch = 4096;
 constexpr usize k_NodeRecordPages = 16;
 
 /**
- * @brief Fixed-width external state for one generated mesh vertex.
+ * @struct QuickSurfaceNodeRecord
+ * @brief Stores external state for one generated mesh vertex.
  *
- * Coordinates and the bounded set of incident feature owners replace the
- * mesh-sized resident owner lists used by the Direct implementation.
+ * Bounded record pages hold coordinates and owner state instead of a mesh-sized
+ * resident owner-list array.
  */
 struct QuickSurfaceNodeRecord
 {
   std::array<float32, 3> coordinates = {};
-  std::array<int32, 4> owners = {};
+  std::array<int32, 4> owners = {}; // Holds up to four owner IDs because node types cap the count at four.
   uint8 ownerCount = 0;
   uint8 touchesExterior = 0;
   uint8 assigned = 0;
-  uint8 reserved = 0;
+  uint8 reserved = 0; // Keeps the temporary record fixed-width.
 };
 
 /**
- * @brief Creates and zero-initializes one external node record per generated vertex.
+ * @brief Creates initialized temporary records for generated nodes.
+ * @param nodeCount Number of node records to create.
+ * @param allowInMemoryFallback True to permit resident temporary records.
+ * @param shouldCancel Cancellation flag.
+ * @return Owned node records or a provider, initialization, or cancellation error.
  *
- * Genuine OOC dispatch disallows resident fallback so node-count scratch cannot
- * exceed RAM merely because the input cells themselves are disk-backed.
+ * OOC execution does not permit resident fallback. The restriction prevents node-state
+ * scratch from exceeding RAM when the input cells use disk-backed storage.
  */
 Result<std::unique_ptr<ITemporaryRecordStore>> CreateNodeRecordStore(uint64 nodeCount, bool allowInMemoryFallback, const std::atomic_bool& shouldCancel)
 {
@@ -147,26 +114,39 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateNodeRecordStore(uint64 node
 }
 
 /**
- * @brief Adapts bounded external node records to the owner/coordinate interface expected by tuple transfer.
+ * @class ExternalNodeRecords
+ * @brief Adapts temporary node records for mesh generation.
  *
- * Errors are captured internally because the legacy transfer callbacks do not
- * return Result; callers must check invalid()/takeResult() and flush() afterward.
+ * The adapter borrows the record store and cancellation flag. Its void mutators
+ * capture I/O errors. Callers must return takeResult() when invalid() reports an error.
  */
 class ExternalNodeRecords
 {
 public:
-  /** @brief Lightweight proxy that lets existing transfer code insert an owner for one node. */
+  /**
+   * @class OwnerProxy
+   * @brief Inserts owners for one node record.
+   *
+   * The proxy borrows its ExternalNodeRecords adapter. The adapter must outlive the proxy.
+   */
   class OwnerProxy
   {
   public:
-    /** @brief Borrows the owning record adapter and identifies the target node. */
+    /**
+     * @brief Binds an adapter to one node record.
+     * @param records Adapter that remains valid for the proxy lifetime.
+     * @param nodeId Identifies the target node record.
+     */
     OwnerProxy(ExternalNodeRecords& records, uint64 nodeId)
     : m_Records(records)
     , m_NodeId(nodeId)
     {
     }
 
-    /** @brief Adds an owner if it is not already present in the node's bounded owner set. */
+    /**
+     * @brief Records an owner and any exterior contact.
+     * @param owner Feature owner. A value of -1 identifies exterior contact.
+     */
     void insert(int32 owner)
     {
       m_Records.insert(m_NodeId, owner);
@@ -177,20 +157,34 @@ public:
     uint64 m_NodeId;
   };
 
-  /** @brief Binds a non-owning record store to a fixed-size node-page cache. */
+  /**
+   * @brief Binds temporary records to a fixed-size node-page cache.
+   * @param store Record store that remains valid for the adapter lifetime.
+   * @param shouldCancel Cancellation flag that remains valid for the adapter lifetime.
+   */
   ExternalNodeRecords(ITemporaryRecordStore& store, const std::atomic_bool& shouldCancel)
   : m_Cache(store, k_NodeRecordBatch, k_NodeRecordPages)
   , m_ShouldCancel(shouldCancel)
   {
   }
 
-  /** @brief Returns an insertion proxy for one node record. */
+  /**
+   * @brief Returns an owner-insertion proxy for one node record.
+   * @param nodeId Identifies the target node record.
+   * @return Proxy that borrows the ExternalNodeRecords adapter.
+   */
   OwnerProxy operator[](uint64 nodeId)
   {
     return OwnerProxy(*this, nodeId);
   }
 
-  /** @brief Stores one node's coordinates and marks that node assigned. */
+  /**
+   * @brief Stores coordinates and marks a node as assigned.
+   * @param nodeId Identifies the target node record.
+   * @param coordinates Specifies the grid coordinates.
+   *
+   * The adapter captures cache errors for the caller to return after generation.
+   */
   void setCoordinates(uint64 nodeId, const Point3D<float64>& coordinates)
   {
     if(m_ShouldCancel || m_Result.invalid())
@@ -209,19 +203,24 @@ public:
     m_Result = m_Cache.write(nodeId, record, m_ShouldCancel);
   }
 
-  /** @brief Reports whether a callback operation captured an error. */
   bool invalid() const
   {
     return m_Result.invalid();
   }
 
-  /** @brief Moves the captured callback error to the caller. */
+  /**
+   * @brief Moves a captured I/O result to the caller.
+   * @return Captured I/O error or a valid result.
+   */
   Result<> takeResult()
   {
     return std::move(m_Result);
   }
 
-  /** @brief Flushes dirty node pages unless an earlier callback already failed. */
+  /**
+   * @brief Flushes dirty node pages.
+   * @return Captured I/O error, cache flush error, or a valid result.
+   */
   Result<> flush()
   {
     if(m_Result.invalid())
@@ -232,7 +231,11 @@ public:
   }
 
 private:
-  /** @brief Updates exterior and unique-owner metadata for one node through the bounded cache. */
+  /**
+   * @brief Updates exterior and unique-owner metadata through the bounded cache.
+   * @param nodeId Identifies the target node record.
+   * @param owner Feature owner to add. A value of -1 marks exterior contact.
+   */
   void insert(uint64 nodeId, int32 owner)
   {
     if(m_ShouldCancel || m_Result.invalid())
@@ -265,8 +268,15 @@ private:
 
 /**
  * @brief Resolves a body-diagonal problem-voxel case in the local slice buffer.
+ * @param buf Contains local Feature IDs.
+ * @param v1 First index in the Direct-compatible case order.
+ * @param v2 Second index in the Direct-compatible case order.
+ * @param v3 Third index in the Direct-compatible case order.
+ * @param v4 Fourth index in the Direct-compatible case order.
+ * @param v5 Fifth index in the Direct-compatible case order.
+ * @param v6 Sixth index in the Direct-compatible case order.
  *
- * The choices and RNG sequence match the Direct implementation exactly; only
+ * The choices and random-number sequence match QuickSurfaceMeshDirect. Only
  * the storage access changes from DataStore indexing to buffered values.
  */
 void FlipProblemVoxelCase1(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3,
@@ -292,7 +302,17 @@ void FlipProblemVoxelCase1(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v
   }
 }
 
-/** @brief Resolves an edge-diagonal conflict in buffered Feature IDs with the Direct path's eight choices. */
+/**
+ * @brief Resolves an edge-diagonal conflict in a local Feature ID buffer.
+ * @param buf Contains local Feature IDs.
+ * @param v1 First index in the Direct-compatible case order.
+ * @param v2 Second index in the Direct-compatible case order.
+ * @param v3 Third index in the Direct-compatible case order.
+ * @param v4 Fourth index in the Direct-compatible case order.
+ *
+ * The random-number sequence and conditional order match QuickSurfaceMeshDirect.
+ * Values below 0.375 perform an initial assignment before the independent below-0.5 branch.
+ */
 void FlipProblemVoxelCase2(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3,
                            QuickSurfaceMeshScanline::MeshIndexType v4)
 {
@@ -332,7 +352,15 @@ void FlipProblemVoxelCase2(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v
   }
 }
 
-/** @brief Resolves the isolated-voxel conflict in buffered Feature IDs with the Direct path's two choices. */
+/**
+ * @brief Resolves an isolated-voxel conflict in a local Feature ID buffer.
+ * @param buf Contains local Feature IDs.
+ * @param v1 First index in the Direct-compatible case order.
+ * @param v2 Second index in the Direct-compatible case order.
+ * @param v3 Third index in the Direct-compatible case order.
+ *
+ * The random-number sequence and two choices match QuickSurfaceMeshDirect.
+ */
 void FlipProblemVoxelCase3(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v1, QuickSurfaceMeshScanline::MeshIndexType v2, QuickSurfaceMeshScanline::MeshIndexType v3)
 {
   auto val = static_cast<float32>(distribution(generator));
@@ -348,7 +376,6 @@ void FlipProblemVoxelCase3(int32* buf, QuickSurfaceMeshScanline::MeshIndexType v
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 QuickSurfaceMeshScanline::QuickSurfaceMeshScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                    const QuickSurfaceMeshInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -359,21 +386,8 @@ QuickSurfaceMeshScanline::QuickSurfaceMeshScanline(DataStructure& dataStructure,
   generator.seed(k_Seed);
 }
 
-// -----------------------------------------------------------------------------
 QuickSurfaceMeshScanline::~QuickSurfaceMeshScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Executes the full OOC meshing pipeline.
- *
- * Orchestrates three phases: problem voxel correction, node/triangle counting,
- * and mesh generation. Between the counting and generation phases, the output
- * TriangleGeom arrays are resized to their final sizes. After mesh generation,
- * optional winding repair is applied.
- *
- * All FeatureIds access uses copyIntoBuffer() for bulk Z-slice reads.
- * All output writes use copyFromBuffer() for bulk sequential writes.
- */
 Result<> QuickSurfaceMeshScanline::operator()()
 {
   auto& grid = m_DataStructure.getDataRefAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
@@ -389,7 +403,7 @@ Result<> QuickSurfaceMeshScanline::operator()()
   MeshIndexType triangleCount = 0;
   usize numFeatures = 0;
 
-  // Phase 1: Fix diagonal-conflict voxel configurations (optional)
+  // Correct diagonal ambiguities before the count pass determines exact output sizes.
   if(m_InputValues->FixProblemVoxels)
   {
     auto correctionResult = correctProblemVoxels();
@@ -413,6 +427,7 @@ Result<> QuickSurfaceMeshScanline::operator()()
     return {};
   }
 
+  // Resize after counting so generation writes contiguous, final-size output arrays.
   ShapeType tupleShape = {triangleCount};
   triangleGeom.resizeFaceList(triangleCount);
   triangleGeom.resizeVertexList(nodeCount);
@@ -442,6 +457,7 @@ Result<> QuickSurfaceMeshScanline::operator()()
   if(m_InputValues->RepairTriangleWinding)
   {
     auto& ioCollection = DataStoreUtilities::GetIOCollection();
+    // External sorting and temporary records repair winding without a mesh-sized resident adjacency structure.
     if(ioCollection.hasExternalSortCapability() && ioCollection.hasTemporaryRecordStoreCapability())
     {
       windingResult = MeshingUtilities::RepairTriangleWindingExternal(triangleGeom.getFaces()->getDataStoreRef(),
@@ -467,7 +483,7 @@ Result<> QuickSurfaceMeshScanline::operator()()
         return MakeErrorResult(
             -56344, "QuickSurfaceMesh cannot repair triangle winding for an out-of-core target because the active I/O provider does not support external sorting and temporary record stores.");
       }
-      // Forced-scanline tests may run entirely in memory without an external-storage provider.
+      // In-memory targets can build transient adjacency when external sorting is unavailable.
       triangleGeom.findElementNeighbors(true);
       const auto optionalId = triangleGeom.getElementNeighborsId();
       if(!optionalId.has_value())
@@ -485,28 +501,6 @@ Result<> QuickSurfaceMeshScanline::operator()()
   return windingResult;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief OOC problem-voxel correction using double-buffered Z-slice pairs.
- *
- * This is the OOC equivalent of QuickSurfaceMeshDirect::correctProblemVoxels().
- * Instead of using operator[] to read/write the FeatureIds DataStore directly,
- * it loads two adjacent Z-slices (sliceA = k-1, sliceB = k) into local buffers
- * via copyIntoBuffer(), performs all the same diagonal-conflict checks and
- * random reassignments in local memory, then writes back only modified slices
- * via copyFromBuffer() using dirty flags.
- *
- * The problem voxel checks examine 2x2x2 blocks where the 8 voxels span two
- * adjacent Z-slices. voxels v1-v4 are in sliceA (Z = k-1) and v5-v8 are in
- * sliceB (Z = k). The Case1/Case2/Case3 flip logic is inlined rather than
- * delegated to helper functions because the mutations may target either
- * sliceA or sliceB, and we need to track which slice was modified.
- *
- * The doCase2 lambda handles Case2 variants that may target 4 voxels across
- * either or both slices. It takes buffer pointers and dirty-flag references
- * for each of the 4 voxel positions, allowing it to work with any combination
- * of sliceA and sliceB targets.
- */
 Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
 {
   m_MessageHandler(IFilter::Message::Type::Info, "Correcting Problem Voxels");
@@ -522,13 +516,13 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
 
   const MeshIndexType sliceSize = xP * yP;
 
-  // Double-buffered Z-slices: sliceA holds Z = (k-1), sliceB holds Z = k.
-  // Each buffer is xP * yP elements (one full Z-slice of FeatureIds).
+  // Adjacent slice buffers bound correction memory to two Feature ID Z slices.
   auto sliceA = std::make_unique<int32[]>(sliceSize);
   auto sliceB = std::make_unique<int32[]>(sliceSize);
 
   MeshIndexType count = 1;
   MeshIndexType iter = 0;
+  // Match the QuickSurfaceMeshDirect correction limit while repeated passes remove new conflicts.
   while(count > 0 && iter < 20)
   {
     if(m_ShouldCancel)
@@ -540,7 +534,6 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
 
     for(MeshIndexType k = 1; k < zP; k++)
     {
-      // Load slice (k-1) into sliceA and slice k into sliceB
       auto readResult = featureIdsStore.copyIntoBuffer((k - 1) * sliceSize, nonstd::span<int32>(sliceA.get(), sliceSize));
       if(readResult.invalid())
       {
@@ -561,7 +554,7 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
         MeshIndexType row2 = j * xP;
         for(MeshIndexType i = 1; i < xP; i++)
         {
-          // v1-v4 are in slice (k-1) = sliceA, v5-v8 are in slice k = sliceB
+          // Direct parity maps v1-v4 to sliceA (k-1) and v5-v8 to matching sliceB (k) offsets.
           MeshIndexType v1Local = row1 + i - 1;
           MeshIndexType v2Local = row1 + i;
           MeshIndexType v3Local = row2 + i - 1;
@@ -576,36 +569,29 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
           int32 f7 = sliceB[v3Local];
           int32 f8 = sliceB[v4Local];
 
-          // For the flip functions, we need indices into a combined 2-slice buffer.
-          // sliceA occupies [0, sliceSize), sliceB occupies [sliceSize, 2*sliceSize)
-          // But since FlipProblemVoxelCase functions operate on voxels that may be
-          // in either slice, we use a combined buffer approach:
-          // We'll use local indices directly into the correct slice buffer.
-
+          // The inlined changes preserve QuickSurfaceMeshDirect case ordering and random-number draws. Dirty flags identify each changed slice.
           if(f1 == f8 && f1 != f2 && f1 != f3 && f1 != f4 && f1 != f5 && f1 != f6 && f1 != f7)
           {
-            // v1=plane1+row1+i-1, v2=plane1+row1+i, v3=plane1+row2+i-1
-            // v6=plane2+row1+i, v7=plane2+row2+i-1, v8=plane2+row2+i
             // FlipProblemVoxelCase1(featureIds, v1, v2, v3, v6, v7, v8)
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.25f)
             {
-              sliceB[v4Local] = sliceB[v2Local]; // v8 = v6
+              sliceB[v4Local] = sliceB[v2Local];
               sliceBDirty = true;
             }
             else if(val < 0.5f)
             {
-              sliceB[v4Local] = sliceB[v3Local]; // v8 = v7
+              sliceB[v4Local] = sliceB[v3Local];
               sliceBDirty = true;
             }
             else if(val < 0.75f)
             {
-              sliceA[v1Local] = sliceA[v2Local]; // v1 = v2
+              sliceA[v1Local] = sliceA[v2Local];
               sliceADirty = true;
             }
             else
             {
-              sliceA[v1Local] = sliceA[v3Local]; // v1 = v3
+              sliceA[v1Local] = sliceA[v3Local];
               sliceADirty = true;
             }
             count++;
@@ -616,22 +602,22 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.25f)
             {
-              sliceB[v3Local] = sliceB[v1Local]; // v7 = v5
+              sliceB[v3Local] = sliceB[v1Local];
               sliceBDirty = true;
             }
             else if(val < 0.5f)
             {
-              sliceB[v3Local] = sliceB[v4Local]; // v7 = v8
+              sliceB[v3Local] = sliceB[v4Local];
               sliceBDirty = true;
             }
             else if(val < 0.75f)
             {
-              sliceA[v2Local] = sliceA[v1Local]; // v2 = v1
+              sliceA[v2Local] = sliceA[v1Local];
               sliceADirty = true;
             }
             else
             {
-              sliceA[v2Local] = sliceA[v4Local]; // v2 = v4
+              sliceA[v2Local] = sliceA[v4Local];
               sliceADirty = true;
             }
             count++;
@@ -642,22 +628,22 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.25f)
             {
-              sliceB[v2Local] = sliceB[v1Local]; // v6 = v5
+              sliceB[v2Local] = sliceB[v1Local];
               sliceBDirty = true;
             }
             else if(val < 0.5f)
             {
-              sliceB[v2Local] = sliceB[v4Local]; // v6 = v8
+              sliceB[v2Local] = sliceB[v4Local];
               sliceBDirty = true;
             }
             else if(val < 0.75f)
             {
-              sliceA[v3Local] = sliceA[v1Local]; // v3 = v1
+              sliceA[v3Local] = sliceA[v1Local];
               sliceADirty = true;
             }
             else
             {
-              sliceA[v3Local] = sliceA[v4Local]; // v3 = v4
+              sliceA[v3Local] = sliceA[v4Local];
               sliceADirty = true;
             }
             count++;
@@ -668,29 +654,28 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.25f)
             {
-              sliceB[v1Local] = sliceB[v2Local]; // v5 = v6
+              sliceB[v1Local] = sliceB[v2Local];
               sliceBDirty = true;
             }
             else if(val < 0.5f)
             {
-              sliceB[v1Local] = sliceB[v3Local]; // v5 = v7
+              sliceB[v1Local] = sliceB[v3Local];
               sliceBDirty = true;
             }
             else if(val < 0.75f)
             {
-              sliceA[v4Local] = sliceA[v2Local]; // v4 = v2
+              sliceA[v4Local] = sliceA[v2Local];
               sliceADirty = true;
             }
             else
             {
-              sliceA[v4Local] = sliceA[v3Local]; // v4 = v3
+              sliceA[v4Local] = sliceA[v3Local];
               sliceADirty = true;
             }
             count++;
           }
 
-          // Case2 variants - these use FlipProblemVoxelCase2 which operates on 4 voxels
-          // We inline the RNG consumption but delegate to a helper for the actual mutation
+          // Case 2 preserves the QuickSurfaceMeshDirect conditional sequence and marks each modified slice.
           auto doCase2 = [&](int32* bufX, MeshIndexType ix1, int32* bufY, MeshIndexType iy1, int32* bufZ, MeshIndexType iz1, int32* bufW, MeshIndexType iw1, bool& dirtyX, bool& dirtyY, bool& dirtyZ,
                              bool& dirtyW) {
             auto val = static_cast<float32>(distribution(generator));
@@ -736,7 +721,6 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             }
           };
 
-          // f1==f6: v1(A),v2(A),v5(B),v6(B)
           if(f1 == f6 && f1 != f2 && f1 != f5)
           {
             doCase2(sliceA.get(), v1Local, sliceA.get(), v2Local, sliceB.get(), v1Local, sliceB.get(), v2Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
@@ -777,7 +761,7 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             doCase2(sliceA.get(), v4Local, sliceA.get(), v2Local, sliceB.get(), v4Local, sliceB.get(), v2Local, sliceADirty, sliceADirty, sliceBDirty, sliceBDirty);
             count++;
           }
-          // Same-plane Case2 variants (all in sliceA or all in sliceB)
+          // Same-plane Case 2 variants modify only one slice.
           if(f1 == f4 && f1 != f2 && f1 != f3)
           {
             doCase2(sliceA.get(), v1Local, sliceA.get(), v2Local, sliceA.get(), v3Local, sliceA.get(), v4Local, sliceADirty, sliceADirty, sliceADirty, sliceADirty);
@@ -799,18 +783,18 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             count++;
           }
 
-          // Case3 variants
+          // Case 3 preserves the QuickSurfaceMeshDirect two-way choice and dirty-slice tracking.
           if(f2 == f3 && f2 == f4 && f2 == f5 && f2 == f6 && f2 == f7 && f2 != f1 && f2 != f8)
           {
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.5f)
             {
-              sliceA[v1Local] = sliceA[v2Local]; // v1 = v2
+              sliceA[v1Local] = sliceA[v2Local];
               sliceADirty = true;
             }
             else
             {
-              sliceB[v4Local] = sliceA[v2Local]; // v8 = v2
+              sliceB[v4Local] = sliceA[v2Local];
               sliceBDirty = true;
             }
             count++;
@@ -820,12 +804,12 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.5f)
             {
-              sliceA[v2Local] = sliceA[v1Local]; // v2 = v1
+              sliceA[v2Local] = sliceA[v1Local];
               sliceADirty = true;
             }
             else
             {
-              sliceB[v3Local] = sliceA[v1Local]; // v7 = v1
+              sliceB[v3Local] = sliceA[v1Local];
               sliceBDirty = true;
             }
             count++;
@@ -835,12 +819,12 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.5f)
             {
-              sliceA[v3Local] = sliceA[v1Local]; // v3 = v1
+              sliceA[v3Local] = sliceA[v1Local];
               sliceADirty = true;
             }
             else
             {
-              sliceB[v2Local] = sliceA[v1Local]; // v6 = v1
+              sliceB[v2Local] = sliceA[v1Local];
               sliceBDirty = true;
             }
             count++;
@@ -850,12 +834,12 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
             auto val = static_cast<float32>(distribution(generator));
             if(val < 0.5f)
             {
-              sliceA[v4Local] = sliceA[v1Local]; // v4 = v1
+              sliceA[v4Local] = sliceA[v1Local];
               sliceADirty = true;
             }
             else
             {
-              sliceB[v1Local] = sliceA[v1Local]; // v5 = v1
+              sliceB[v1Local] = sliceA[v1Local];
               sliceBDirty = true;
             }
             count++;
@@ -863,7 +847,7 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
         }
       }
 
-      // Write back dirty slices
+      // Dirty flags avoid writes for unchanged Feature ID slices.
       if(sliceADirty)
       {
         auto writeResult = featureIdsStore.copyFromBuffer((k - 1) * sliceSize, nonstd::span<const int32>(sliceA.get(), sliceSize));
@@ -888,34 +872,6 @@ Result<> QuickSurfaceMeshScanline::correctProblemVoxels()
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Counting pass using rolling 2-plane node buffers and double-buffered
- * FeatureId Z-slices.
- *
- * This is the OOC equivalent of QuickSurfaceMeshDirect::determineActiveNodes().
- * The key difference is memory reduction: instead of an O(volume) nodeIds array,
- * this method uses two node-plane buffers of size O((xP+1)*(yP+1)) each.
- *
- * ## Rolling Buffer Strategy
- *
- * For Z-slice k, the dual-grid nodes lie on two planes:
- *   - nodePlane0: nodes at Z = k   (the "current" plane)
- *   - nodePlane1: nodes at Z = k+1 (the "next" plane)
- *
- * After processing all voxels in slice k:
- *   1. nodePlane0 is discarded (all its nodes have been assigned)
- *   2. nodePlane1 becomes nodePlane0 for the next iteration
- *   3. A fresh nodePlane1 is initialized with sentinel values
- *
- * This works because each node is referenced only by voxels at Z = k and Z = k-1.
- * Once we advance past Z = k, nodes in the Z = k plane are never accessed again.
- *
- * The FeatureIds are double-buffered similarly: curSlice holds Z = k, nextSlice
- * holds Z = k+1. After processing, they swap so the old next becomes current.
- *
- * Also tracks the maximum FeatureId value (numFeatures) for later array sizing.
- */
 Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& nodeCount, MeshIndexType& triangleCount, usize& numFeatures)
 {
   auto* grid = m_DataStructure.getDataAs<IGridGeometry>(m_InputValues->GridGeomDataPath);
@@ -931,14 +887,12 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
   const MeshIndexType nodePlaneSize = (xP + 1) * (yP + 1);
   constexpr auto kMax = std::numeric_limits<MeshIndexType>::max();
 
-  // Rolling node-plane buffers: O(2 * nodePlaneSize) instead of O((xP+1)*(yP+1)*(zP+1)).
-  // nodePlane0 corresponds to Z = k (current), nodePlane1 to Z = k+1 (next).
-  // Entries start at kMax (sentinel) and are assigned sequential IDs on first use.
+  // Two planes keep node IDs proportional to one slice. Later cells cannot reference a retired Z plane.
+  // The sentinel marks a node that needs an output ID.
   std::vector<MeshIndexType> nodePlane0(nodePlaneSize, kMax);
   std::vector<MeshIndexType> nodePlane1(nodePlaneSize, kMax);
 
-  // Lambda to count a node: if not yet assigned in this plane, assign the
-  // next sequential vertex ID and increment the counter.
+  // Count each dual-grid node once before mesh output uses its ID.
   auto countNode = [&](std::vector<MeshIndexType>& plane, MeshIndexType offset) {
     if(plane[offset] == kMax)
     {
@@ -947,11 +901,10 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
     }
   };
 
-  // Double-buffered FeatureId Z-slices: curSlice holds Z = k, nextSlice holds Z = k+1.
+  // Two buffers supply the current and +Z neighbor slices through bulk I/O.
   auto curSlice = std::make_unique<int32[]>(sliceSize);
   auto nextSlice = std::make_unique<int32[]>(sliceSize);
 
-  // Load the first Z-slice (k = 0) via bulk I/O
   auto readResult = featureIdsStore.copyIntoBuffer(0, nonstd::span<int32>(curSlice.get(), sliceSize));
   if(readResult.invalid())
   {
@@ -962,11 +915,11 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
 
   for(MeshIndexType k = 0; k < zP; k++)
   {
+    // Check cancellation per Z slice to keep the voxel loop free of atomic reads.
     if(m_ShouldCancel)
     {
       return {};
     }
-    // Load next z-slice if available
     if(k < zP - 1)
     {
       readResult = featureIdsStore.copyIntoBuffer((k + 1) * sliceSize, nonstd::span<int32>(nextSlice.get(), sliceSize));
@@ -983,15 +936,13 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
         MeshIndexType localIdx = j * xP + i;
         int32 curFeature = curSlice[localIdx];
 
-        // Track max featureId for numFeatures
+        // Feature array sizing needs the greatest observed Feature ID.
         if(static_cast<usize>(curFeature) > numFeatures)
         {
           numFeatures = static_cast<usize>(curFeature);
         }
 
-        // Node offsets within a plane for node grid position (ni, nj):
-        //   offset = nj * (xP + 1) + ni
-        // Plane 0 corresponds to z=k, Plane 1 corresponds to z=k+1
+        // A dual-grid node at (ni, nj) has offset nj * (xP + 1) + ni.
 
         if(i == 0)
         {
@@ -1025,7 +976,7 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
           countNode(nodePlane1, (j + 1) * (xP + 1) + (i + 1));
           triangleCount += 2;
         }
-        else if(curFeature != curSlice[localIdx + 1]) // neigh1 = point + 1
+        else if(curFeature != curSlice[localIdx + 1])
         {
           countNode(nodePlane0, j * (xP + 1) + (i + 1));
           countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
@@ -1041,7 +992,7 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
           countNode(nodePlane1, (j + 1) * (xP + 1) + i);
           triangleCount += 2;
         }
-        else if(curFeature != curSlice[localIdx + xP]) // neigh2 = point + xP
+        else if(curFeature != curSlice[localIdx + xP])
         {
           countNode(nodePlane0, (j + 1) * (xP + 1) + (i + 1));
           countNode(nodePlane0, (j + 1) * (xP + 1) + i);
@@ -1057,7 +1008,7 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
           countNode(nodePlane1, (j + 1) * (xP + 1) + i);
           triangleCount += 2;
         }
-        else if(curFeature != nextSlice[localIdx]) // neigh3 = point + xP*yP
+        else if(curFeature != nextSlice[localIdx])
         {
           countNode(nodePlane1, j * (xP + 1) + (i + 1));
           countNode(nodePlane1, j * (xP + 1) + i);
@@ -1068,50 +1019,16 @@ Result<> QuickSurfaceMeshScanline::countActiveNodesAndTriangles(MeshIndexType& n
       }
     }
 
-    // Rotate planes: plane1 becomes plane0 for next z-step, reinitialize plane1
+    // The next node plane becomes current. Reset the other plane for later nodes.
     std::swap(nodePlane0, nodePlane1);
     std::fill(nodePlane1.begin(), nodePlane1.end(), kMax);
 
-    // Swap featureId buffers: current becomes the old "next"
+    // The next Feature ID slice becomes current.
     std::swap(curSlice, nextSlice);
   }
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Generation pass: creates the output triangle mesh with OOC-safe I/O.
- *
- * This is the OOC equivalent of QuickSurfaceMeshDirect::createNodesAndTriangles().
- * It produces identical output but uses bulk I/O for all reads and writes:
- *
- * ## Output Buffering Strategy
- *
- * - **Vertex coordinates and node ownership**: Stored by vertex ID in
- *   disk-backed fixed records behind a bounded page cache, then streamed to
- *   the final arrays in fixed contiguous batches.
- *
- * - **Triangle connectivity**: Accumulated in triBuffer per Z-slice, flushed
- *   via copyFromBuffer() at the end of each slice. This keeps peak memory
- *   proportional to the number of triangles in one Z-slice.
- *
- * - **Face labels**: Accumulated in faceLabelBuf per Z-slice, flushed with
- *   triangle connectivity.
- *
- * - **TupleTransfer**: Arguments accumulated in ttArgsBuf per Z-slice and
- *   flushed via quickSurfaceTransferBatch() to reduce virtual call overhead.
- *
- * - **Node types**: Unique-owner count and exterior contact are accumulated in
- *   the same bounded node records and streamed with vertex coordinates.
- *
- * ## Node Assignment
- *
- * Uses the same rolling 2-plane node buffer strategy as countActiveNodesAndTriangles().
- * The assignNode lambda both assigns sequential vertex IDs and writes vertex
- * coordinates into vertCoordBuf. Multiple calls to assignNode with the same
- * plane offset are harmless -- the coordinate write is idempotent (last-write-wins
- * matches the Direct variant's behavior).
- */
 Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCount, MeshIndexType triangleCount, usize numFeatures)
 {
   if(m_ShouldCancel)
@@ -1150,6 +1067,7 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
   VertexStore& vertex = triangleGeom->getVertices()->getDataStoreRef();
   TriStore& triangle = triangleGeom->getFaces()->getDataStoreRef();
 
+  // A disk-backed source or output disallows resident node-record fallback.
   const auto isOutOfCore = [](const IArray* array) { return array != nullptr && IsOutOfCore(*array); };
   bool hasOutOfCoreTarget = isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->FeatureIdsArrayPath)) ||
                             isOutOfCore(m_DataStructure.getDataAs<IDataArray>(m_InputValues->NodeTypesDataPath)) ||
@@ -1164,6 +1082,7 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
   inspectPaths(m_InputValues->SelectedFeatureDataArrayPaths);
   inspectPaths(m_InputValues->CreatedDataArrayPaths);
 
+  // OOC targets retain mesh-sized owner state externally instead of materializing it in RAM.
   auto nodeRecordStoreResult = CreateNodeRecordStore(nodeCount, !hasOutOfCoreTarget, m_ShouldCancel);
   if(nodeRecordStoreResult.invalid())
   {
@@ -1184,17 +1103,15 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
                                       m_InputValues->FeatureIdsArrayPath, tupleTransferFunctions);
   }
 
-  // Buffer current and next z-slices for featureIds
+  // Two Feature ID slices cover the +Z neighbor check without per-element store reads.
   auto curSlice = std::make_unique<int32[]>(sliceSize);
   auto nextSlice = std::make_unique<int32[]>(sliceSize);
 
-  // Rolling node-plane buffers: O(2 * nodePlaneSize) instead of O((xP+1)*(yP+1)*(zP+1))
+  // Two node planes keep vertex IDs proportional to one Z slice.
   std::vector<MeshIndexType> nodePlane0(nodePlaneSize, kMax);
   std::vector<MeshIndexType> nodePlane1(nodePlaneSize, kMax);
 
-  // Lambda to assign a node: if not yet assigned, assign sequential ID.
-  // Coordinates and owner state are kept in bounded external records. Repeated
-  // assignments preserve the direct algorithm's last-write-wins behavior.
+  // Repeated face visits preserve QuickSurfaceMeshDirect last-write behavior. Bounded records hold owner state outside rolling planes.
   auto assignNode = [&](std::vector<MeshIndexType>& plane, MeshIndexType offset, MeshIndexType& assignedNodeCount, usize coordX, usize coordY, usize coordZ) {
     if(plane[offset] == kMax)
     {
@@ -1205,7 +1122,6 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
     ownerLists.setCoordinates(plane[offset], tmpCoords);
   };
 
-  // Load first slice
   auto featureReadResult = featureIdsStore.copyIntoBuffer(0, nonstd::span<int32>(curSlice.get(), sliceSize));
   if(featureReadResult.invalid())
   {
@@ -1215,18 +1131,18 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
   MeshIndexType triangleIndex = 0;
   MeshIndexType assignedNodeCount = 0;
 
-  // Per-slice buffers declared outside the loop so vector capacity is reused across slices.
+  // Retain vector capacity to avoid allocation for each Z slice.
   std::vector<MeshIndexType> triBuffer;
   std::vector<int32> faceLabelBuf;
   std::vector<QuickSurfaceTransferData> ttArgsBuf;
 
   for(MeshIndexType k = 0; k < zP; k++)
   {
+    // Check cancellation per Z slice before the next bulk read and mesh batch.
     if(m_ShouldCancel)
     {
       return {};
     }
-    // Load next z-slice if available
     if(k < zP - 1)
     {
       featureReadResult = featureIdsStore.copyIntoBuffer((k + 1) * sliceSize, nonstd::span<int32>(nextSlice.get(), sliceSize));
@@ -1248,9 +1164,9 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
         MeshIndexType point = k * sliceSize + localIdx;
         int32 curFeature = curSlice[localIdx];
 
-        // Node plane offsets: offset = nj * (xP+1) + ni
-        // nodePlane0 = z=k plane, nodePlane1 = z=k+1 plane
+        // A dual-grid node at (ni, nj) has offset nj * (xP + 1) + ni.
 
+        // Boundary faces use -1 for the exterior feature. Internal faces use Feature ID order for labels and winding.
         if(i == 0)
         {
           MeshIndexType n1Off = j * (xP + 1) + i;
@@ -1703,7 +1619,7 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
       return ownerLists.takeResult();
     }
 
-    // Flush buffered triangle connectivity for this z-slice
+    // Write each Z slice in contiguous batches to avoid per-face OOC I/O.
     if(!triBuffer.empty())
     {
       MeshIndexType sliceTriStart = triangleIndex - (triBuffer.size() / 3);
@@ -1713,14 +1629,13 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
         return triangleWriteResult;
       }
 
-      // Flush buffered face labels for this z-slice
       auto faceLabelsWriteResult = faceLabelsStore.copyFromBuffer(sliceTriStart * 2, nonstd::span<const int32>(faceLabelBuf.data(), faceLabelBuf.size()));
       if(faceLabelsWriteResult.invalid())
       {
         return faceLabelsWriteResult;
       }
 
-      // Batch TupleTransfer calls with face labels embedded in the records
+      // Transfer all slice triangles together to avoid one virtual call per triangle.
       for(const auto& tupleTransferFunction : tupleTransferFunctions)
       {
         auto transferResult = tupleTransferFunction->quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData>(ttArgsBuf.data(), ttArgsBuf.size()));
@@ -1731,11 +1646,11 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
       }
     }
 
-    // Rotate planes: plane1 becomes plane0 for next z-step, reinitialize plane1
+    // The next node plane becomes current. Reset the other plane for later nodes.
     std::swap(nodePlane0, nodePlane1);
     std::fill(nodePlane1.begin(), nodePlane1.end(), kMax);
 
-    // Swap featureId buffers
+    // The next Feature ID slice becomes current.
     std::swap(curSlice, nextSlice);
   }
 
@@ -1745,8 +1660,7 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
     return nodeFlushResult;
   }
 
-  // Stream the externally stored node state to the output arrays in fixed-size
-  // contiguous batches. No allocation scales with the generated mesh size.
+  // Stream external node state in fixed contiguous batches. Fixed batches avoid a mesh-sized resident output buffer.
   auto recordBuffer = std::make_unique<QuickSurfaceNodeRecord[]>(k_NodeRecordBatch);
   auto coordinateBuffer = std::make_unique<VertexStore::value_type[]>(k_NodeRecordBatch * 3);
   auto nodeTypeBuffer = std::make_unique<int8[]>(k_NodeRecordBatch);
@@ -1767,6 +1681,7 @@ Result<> QuickSurfaceMeshScanline::createNodesAndTriangles(MeshIndexType nodeCou
     {
       return MakeErrorResult(-56344, "QuickSurfaceMesh received a short read from its node-state store.");
     }
+    // Match QuickSurfaceMeshDirect node types: capped owner count plus 10 for exterior contact.
     for(usize local = 0; local < recordCount; local++)
     {
       const auto& record = recordBuffer[local];

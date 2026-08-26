@@ -32,11 +32,19 @@ namespace
 constexpr usize k_MaximumTransferValues = 65536;
 
 /**
- * @brief Reads an HDF5 dataset as C-order hyperslabs no larger than maximumValues.
+ * @brief Reads an HDF5 dataset in bounded C-order hyperslabs.
+ * @tparam T Dataset value type.
+ * @tparam Callback Batch consumer type.
+ * @param datasetReader Source dataset.
+ * @param datasetName Dataset name for diagnostics.
+ * @param shouldCancel Signals cancellation between transfers.
+ * @param maximumValues Maximum values in one transfer. The limit is 65,536.
+ * @param callback Consumes each batch and its flat dataset offset.
+ * @return Read or callback errors. Cancellation returns success after the last completed batch.
  *
- * The callback consumes each flat batch immediately, allowing phase, Rodrigues,
- * IPF, quaternion, and absorption conversions to write bounded output pages
- * without materializing a complete volume dataset.
+ * The callback consumes each flat batch immediately. Phase, Rodrigues, IPF,
+ * quaternion, and absorption conversions can write bounded output pages without
+ * materializing a complete volume dataset.
  */
 template <typename T, typename Callback>
 Result<> ReadDatasetInBatches(const nx::core::HDF5::DatasetIO& datasetReader, const std::string& datasetName, const std::atomic_bool& shouldCancel, usize maximumValues, Callback&& callback)
@@ -51,9 +59,8 @@ Result<> ReadDatasetInBatches(const nx::core::HDF5::DatasetIO& datasetReader, co
     return MakeErrorResult(-89361, fmt::format("ReadGrainMapper3D: Invalid bounded transfer size for '/LabDCT/Data/{}'.", datasetName));
   }
 
-  // Decompose the source in C-order hyperslabs.  Choosing a batch dimension
-  // whose trailing dimensions fit in the buffer avoids ever materializing an
-  // entire XY plane for vector-valued volumes.
+  // Select a batch dimension whose trailing dimensions fit in the buffer. This
+  // avoids a full XY plane allocation for vector-valued volumes.
   const usize rank = dimensions.size();
   usize totalValues = 1;
   for(const usize dimensionSize : dimensions)
@@ -65,10 +72,8 @@ Result<> ReadDatasetInBatches(const nx::core::HDF5::DatasetIO& datasetReader, co
     totalValues *= dimensionSize;
   }
 
-  // trailingValues is the product of dimensions strictly AFTER the dimension
-  // that is batched.  Keeping the batch dimension itself out of this product
-  // is important when the complete dataset fits in one transfer; otherwise its
-  // extent would be counted twice.
+  // Exclude the batch dimension from the trailing product. Including it would
+  // count that extent twice when the full dataset fits in one transfer.
   usize trailingValues = 1;
   usize batchDimension = 0;
   for(usize dimension = rank - 1; dimension > 0; dimension--)
@@ -151,10 +156,9 @@ Result<> ReadDatasetInBatches(const nx::core::HDF5::DatasetIO& datasetReader, co
 
 namespace ebsdlib::CrystalStructure
 {
-inline constexpr uint32_t UnknownCrystalStructure = 999; //!< UnknownCrystalStructure
+inline constexpr uint32_t UnknownCrystalStructure = 999; // Sentinel for an invalid ensemble entry.
 }
 
-// -----------------------------------------------------------------------------
 ReadGrainMapper3D::ReadGrainMapper3D(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ReadGrainMapper3DInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -163,7 +167,6 @@ ReadGrainMapper3D::ReadGrainMapper3D(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ReadGrainMapper3D::getCancel()
 {
   return m_ShouldCancel;
@@ -184,7 +187,7 @@ Result<> ReadGrainMapper3D::copyPhaseInformation(GrainMapperReader& reader, hid_
   auto phases = reader.getPhaseVector();
   DataPath cellEnsembleAMPath = m_InputValues->DctImageGeometryPath.createChildPath(m_InputValues->DctCellEnsembleAttributeMatrixName);
 
-  // These arrays are purposely created using the AngFile constant names for BOTH the Oim and the Esprit readers!
+  // Use the standard EBSD ensemble names that downstream orientation filters expect.
   auto& crystalStructures = m_DataStructure.getDataRefAs<UInt32Array>(cellEnsembleAMPath.createChildPath(GM3DConstants::k_CrystalStructures));
   auto& materialNames = m_DataStructure.getDataRefAs<StringArray>(cellEnsembleAMPath.createChildPath(GM3DConstants::k_MaterialName));
   auto& latticeConstantsArray = m_DataStructure.getDataRefAs<Float32Array>(cellEnsembleAMPath.createChildPath(GM3DConstants::k_LatticeConstants));
@@ -235,8 +238,6 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
   }
   auto groupSentinel = H5Support::H5ScopedGroupSentinel(labDctGid, true);
 
-  // Now check that each of the known data sets exist
-  // Get the Image Geometry Dimensions
   hid_t dataGid = H5Gopen(labDctGid, GM3DConst::k_DataGroupName.c_str(), H5P_DEFAULT);
   if(dataGid < 0)
   {
@@ -270,10 +271,10 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
 
   Result<> result;
 
-  // We need to special case this because we are converting from an uint8 value to an int32 value.
+  // Convert phase IDs from the file's uint8 representation to the requested int32 array.
   if(m_InputValues->ConvertPhaseData && (std::count(dctDataSets.begin(), dctDataSets.end(), GM3DConst::k_PhaseIdName) > 0))
   {
-    uint8DataSets.erase(GM3DConst::k_PhaseIdName); // Pop off the PhaseIdName data set since we are specifically reading it here.
+    uint8DataSets.erase(GM3DConst::k_PhaseIdName);
     DataPath dataArrayPath = m_InputValues->DctImageGeometryPath.createChildPath(m_InputValues->DctCellAttributeMatrixName).createChildPath(GM3DConst::k_PhaseIdName);
     auto& phaseI32 = m_DataStructure.getDataRefAs<Int32Array>(dataArrayPath).getDataStoreRef();
     nx::core::HDF5::DatasetIO datasetReader(dataGid, GM3DConst::k_PhaseIdName);
@@ -293,10 +294,10 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
     }
   }
 
-  // We need to special case this because we are converting from a 3 component to a 4 component
+  // Convert each Rodrigues triple to a unit axis and magnitude.
   if(m_InputValues->ConvertOrientationData && (std::count(dctDataSets.begin(), dctDataSets.end(), GM3DConst::k_RodriguesName) > 0))
   {
-    floatDataSets.erase(GM3DConst::k_RodriguesName); // Pop off the Rodrigues data set since we are specifically reading it here.
+    floatDataSets.erase(GM3DConst::k_RodriguesName);
     DataPath dataArrayPath = m_InputValues->DctImageGeometryPath.createChildPath(m_InputValues->DctCellAttributeMatrixName).createChildPath(GM3DConst::k_RodriguesName);
     auto& rodData = m_DataStructure.getDataRefAs<Float32Array>(dataArrayPath).getDataStoreRef();
     nx::core::HDF5::DatasetIO datasetReader(dataGid, GM3DConst::k_RodriguesName);
@@ -319,6 +320,8 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
             const float32 r0 = source[tuple * 3] * -1.0f;
             const float32 r1 = source[tuple * 3 + 1] * -1.0f;
             const float32 r2 = source[tuple * 3 + 2] * -1.0f;
+            // The file format must supply a nonzero Rodrigues vector. A zero
+            // vector produces a nonfinite axis in the current implementation.
             const float length = sqrtf(r0 * r0 + r1 * r1 + r2 * r2);
             converted[tuple * 4] = r0 / length;
             converted[tuple * 4 + 1] = r1 / length;
@@ -338,7 +341,7 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
     std::vector<std::string> ipfDataSets = {GM3DConst::k_IPF001Name, GM3DConst::k_IPF010Name, GM3DConst::k_IPF100Name};
     for(const auto& dataSetName : ipfDataSets)
     {
-      floatDataSets.erase(dataSetName); // Pop off the PhaseIdName data set since we are specifically reading it here.
+      floatDataSets.erase(dataSetName);
       DataPath dataArrayPath = m_InputValues->DctImageGeometryPath.createChildPath(m_InputValues->DctCellAttributeMatrixName).createChildPath(dataSetName);
       auto& ipfUint8 = m_DataStructure.getDataRefAs<UInt8Array>(dataArrayPath).getDataStoreRef();
       nx::core::HDF5::DatasetIO datasetReader(dataGid, dataSetName);
@@ -353,6 +356,8 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
             {
               return MakeErrorResult(-89365, fmt::format("ReadGrainMapper3D: Destination range exceeds '{}'.", dataArrayPath.toString()));
             }
+            // The file format must keep IPF components in [0, 1]. The current
+            // conversion does not clamp values before the uint8 cast.
             std::vector<uint8> converted(source.size());
             std::transform(source.begin(), source.end(), converted.begin(), [](float32 value) { return static_cast<uint8>(value * 255.0f); });
             return ipfUint8.copyFromBuffer(offset, nonstd::span<const uint8>(converted.data(), converted.size()));
@@ -393,7 +398,7 @@ Result<> ReadGrainMapper3D::copyDctData(GrainMapperReader& reader, hid_t fileId)
     }
   }
 
-  // Read all remaining data sets from the HDF5 file.
+  // Stream datasets that do not require representation conversion.
   for(const auto& dataSetName : dctDataSets)
   {
     DataPath dataArrayPath = m_InputValues->DctImageGeometryPath.createChildPath(m_InputValues->DctCellAttributeMatrixName).createChildPath(dataSetName);
@@ -442,7 +447,6 @@ Result<> ReadGrainMapper3D::copyAbsorptionData(GrainMapperReader& reader, hid_t 
   return nx::core::HDF5::Support::FillDataArray<uint16>(m_DataStructure, dataArrayPath, datasetReader, std::nullopt, std::nullopt, &m_ShouldCancel);
 }
 
-// -----------------------------------------------------------------------------
 Result<> ReadGrainMapper3D::operator()()
 {
   GrainMapperReader reader(m_InputValues->InputFile.string(), m_InputValues->ReadDctData, m_InputValues->ReadAbsorptionData);
@@ -454,24 +458,18 @@ Result<> ReadGrainMapper3D::operator()()
   }
   auto sentinel = H5Support::H5ScopedFileSentinel(fileId, false);
 
-  // ***********************************************************************
-  // Read the Phase Information
   Result<> result = copyPhaseInformation(reader, fileId);
   if(result.invalid())
   {
     return result;
   }
 
-  // ***********************************************************************
-  // Read the LabDCT Information
   result = copyDctData(reader, fileId);
   if(result.invalid())
   {
     return result;
   }
 
-  // ***********************************************************************
-  // Read the Absorption Data Information
   result = copyAbsorptionData(reader, fileId);
   if(result.invalid())
   {

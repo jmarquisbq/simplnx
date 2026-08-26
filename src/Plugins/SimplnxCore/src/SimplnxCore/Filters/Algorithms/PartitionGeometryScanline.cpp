@@ -13,6 +13,13 @@ namespace
 {
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Writes sequential IDs to a created partition-grid array.
+ * @param featureIdsStore Receives partition-grid Feature IDs.
+ * @param startingFeatureId Specifies the first ID.
+ * @param shouldCancel Stops before later output chunks when true.
+ * @return First output error, or success after completion or cancellation.
+ */
 Result<> WritePartitionGridFeatureIds(Int32AbstractDataStore& featureIdsStore, int32 startingFeatureId, const std::atomic_bool& shouldCancel)
 {
   const usize numTuples = featureIdsStore.getNumberOfTuples();
@@ -42,7 +49,6 @@ Result<> WritePartitionGridFeatureIds(Int32AbstractDataStore& featureIdsStore, i
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 PartitionGeometryScanline::PartitionGeometryScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                      PartitionGeometryInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -52,16 +58,13 @@ PartitionGeometryScanline::PartitionGeometryScanline(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 PartitionGeometryScanline::~PartitionGeometryScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& PartitionGeometryScanline::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryScanline::operator()()
 {
   auto partitioningMode = static_cast<PartitionGeometryFilter::PartitioningMode>(m_InputValues->PartitioningMode);
@@ -133,9 +136,6 @@ Result<> PartitionGeometryScanline::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryScanline::partitionCellBasedGeometry(const IGridGeometry& inputGeometry, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue)
 {
   const usize numTuples = partitionIdsStore.getNumberOfTuples();
@@ -166,9 +166,6 @@ Result<> PartitionGeometryScanline::partitionCellBasedGeometry(const IGridGeomet
   return {};
 }
 
-// -----------------------------------------------------------------------------
-//
-// -----------------------------------------------------------------------------
 Result<> PartitionGeometryScanline::partitionNodeBasedGeometry(const VertexStore& vertexListStore, Int32AbstractDataStore& partitionIdsStore, const ImageGeom& psImageGeom, int outOfBoundsValue,
                                                                const std::optional<const BoolArray>& maskArrayOpt)
 {

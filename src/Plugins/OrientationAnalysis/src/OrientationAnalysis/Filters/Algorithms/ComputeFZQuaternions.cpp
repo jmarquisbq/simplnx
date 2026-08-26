@@ -24,11 +24,16 @@ constexpr usize k_QuaternionComponents = 4;
 /**
  * @brief Number of tuples held by the OOC streaming path at one time.
  *
- * This fixed chunk keeps memory independent of the total cell count while making each
- * datastore operation large enough to amortize OOC chunk lookup and transfer overhead.
+ * This chunk bounds local memory and amortizes OOC transfer overhead.
  */
 constexpr usize k_ChunkTuples = 65536;
 
+/**
+ * @brief Creates an out-of-range phase error.
+ * @param numPhases Specifies crystal-structure array tuples.
+ * @param warningCount Specifies invalid phase IDs.
+ * @return Success when warningCount is zero, or error -49008 otherwise.
+ */
 Result<> CreatePhaseErrorResult(int32 numPhases, int32 warningCount)
 {
   if(warningCount <= 0)
@@ -44,10 +49,12 @@ This indicates a problem with the input cell phase data. DREAM3D-NX may have giv
 }
 
 /**
+ * @class GenerateFZQuatsAbstractImpl
  * @brief Parallel fallback worker for forced-direct execution on non-contiguous stores.
+ * @tparam MaskArrayType Specifies the mask array type.
  *
- * Normal in-memory execution uses GenerateFZQuatsContiguousImpl. This worker preserves
- * direct-path correctness when tests explicitly force Direct against another store type.
+ * Normal in-memory execution uses GenerateFZQuatsContiguousImpl. This worker
+ * supports tests that force Direct for another store type.
  */
 template <typename MaskArrayType>
 class GenerateFZQuatsAbstractImpl
@@ -124,10 +131,12 @@ private:
 };
 
 /**
+ * @class GenerateFZQuatsContiguousImpl
  * @brief Parallel worker using raw pointers from contiguous in-memory DataStores.
+ * @tparam MaskType Specifies the mask value type.
  *
- * Direct pointer access removes DataArray proxy and virtual datastore calls from the
- * per-tuple loop. The worker only writes its assigned range, so parallel partitions remain disjoint.
+ * Direct pointers remove DataArray and virtual DataStore access from the tuple
+ * loop. This is not a generic DataArray or DataStore concurrency guarantee.
  */
 template <typename MaskType>
 class GenerateFZQuatsContiguousImpl
@@ -192,10 +201,11 @@ private:
 };
 
 /**
- * @brief Uses parallel contiguous-store access for in-memory datastores.
+ * @class ComputeFZQuaternionsDirect
+ * @brief Uses direct access for in-memory arrays.
  *
- * Symmetry operators are resolved once per phase before execution. If Direct is explicitly
- * forced for a non-contiguous store, the abstract-access worker preserves that test path.
+ * Symmetry operators are resolved once per phase. requireArraysInMemory()
+ * disables parallel scheduling when a listed array is not in-memory.
  */
 class ComputeFZQuaternionsDirect
 {
@@ -291,10 +301,11 @@ private:
 };
 
 /**
- * @brief OOC-safe implementation that processes cell arrays through fixed-size bulk buffers.
+ * @class ComputeFZQuaternionsScanline
+ * @brief Processes cell arrays through fixed-size bulk buffers.
  *
- * All datastore I/O occurs outside the tuple loop. Crystal structures are cached once because
- * ensemble cardinality is small, while cell data remains bounded to one reusable chunk.
+ * All DataStore I/O occurs outside the tuple loop. Crystal structures stay
+ * local, while cell data remains bounded to one reusable chunk.
  */
 class ComputeFZQuaternionsScanline
 {
@@ -325,7 +336,7 @@ public:
         return executeWithMaskType<int8>();
       }
 
-      // Selection parameters reject other mask types; retain the legacy no-op fallback.
+      // Legacy behavior treats an unsupported mask type as a no-op.
       return {};
     }
 
@@ -439,7 +450,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFZQuaternions::ComputeFZQuaternions(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFZQuaternionsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -448,10 +458,8 @@ ComputeFZQuaternions::ComputeFZQuaternions(DataStructure& dataStructure, const I
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFZQuaternions::~ComputeFZQuaternions() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFZQuaternions::operator()()
 {
   const auto& phaseArray = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath);

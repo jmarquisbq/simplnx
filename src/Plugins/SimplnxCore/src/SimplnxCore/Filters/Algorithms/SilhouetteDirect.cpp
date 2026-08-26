@@ -18,17 +18,28 @@ using namespace nx::core;
 namespace
 {
 /**
- * @brief Type-specific implementation of the original resident-array silhouette calculation.
+ * @class SilhouetteTemplate
+ * @brief Computes typed silhouette scores with a complete distance table.
+ * @tparam T Specifies the clustering-array value type.
  *
- * The complete per-tuple/per-feature distance table is intentionally retained in
- * this Direct route: it avoids recomputation and is efficient only when the data
- * and workspace fit in memory. The dispatched Scanline route uses tiles instead.
+ * Retaining accumulated distance for each tuple and cluster avoids rereading
+ * input pairs. This trades N by (K + 1) resident memory for direct reuse.
  */
 template <typename T>
 class SilhouetteTemplate
 {
 public:
-  /** @brief Borrows the typed stores and immutable calculation settings used by operator()(). */
+  /**
+   * @brief Initializes the typed resident calculation.
+   * @param inputIDataArray Supplies clustering tuples.
+   * @param outputDataArray Receives silhouette scores.
+   * @param maskDataArray Supplies an optional mask comparator.
+   * @param useMask True to apply maskDataArray.
+   * @param numClusters Number of distinct Feature IDs.
+   * @param featureIds Supplies one cluster ID per tuple.
+   * @param distMetric Selects the tuple distance function.
+   * @pre All arguments outlive this calculation.
+   */
   SilhouetteTemplate(const IDataArray& inputIDataArray, Float64AbstractDataStore& outputDataArray, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& maskDataArray, bool useMask,
                      usize numClusters, const Int32AbstractDataStore& featureIds, ClusterUtilities::DistanceMetric distMetric)
   : m_InputData(inputIDataArray.template getIDataStoreRefAs<AbstractDataStoreT>())
@@ -42,7 +53,10 @@ public:
   }
 
   /**
-   * @brief Builds feature counts and the complete distance table, then derives each enabled tuple's score.
+   * @brief Builds the distance table and writes each score.
+   *
+   * The own-cluster mean includes self-distance. Empty cluster columns divide by
+   * zero but cannot win a finite minimum. A zero score denominator produces NaN.
    */
   void operator()()
   {
@@ -145,7 +159,7 @@ SilhouetteDirect::~SilhouetteDirect() noexcept = default;
 
 Result<> SilhouetteDirect::operator()()
 {
-  // Discover the number of feature slots before allocating the resident distance table.
+  // Distinct-ID count sizes the direct distance table. IDs still index it directly.
   auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath).getDataStoreRef();
   std::unordered_set<int32> uniqueIds;
   for(usize i = 0; i < featureIds.getNumberOfTuples(); i++)
@@ -153,7 +167,7 @@ Result<> SilhouetteDirect::operator()()
     uniqueIds.insert(featureIds[i]);
   }
 
-  // Instantiate the real mask only when requested; a synthetic cell-sized all-true mask is unnecessary.
+  // Avoid a cell-sized synthetic all-true mask when masking is disabled.
   std::unique_ptr<MaskCompareUtilities::MaskCompare> maskCompare;
   if(m_InputValues->UseMask)
   {

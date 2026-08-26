@@ -11,30 +11,10 @@ struct ComputeSurfaceFeaturesInputValues;
 
 /**
  * @class ComputeSurfaceFeaturesDirect
- * @brief In-core (direct memory access) algorithm for identifying surface features.
+ * @brief Identifies surface features from in-memory Feature Id values.
  *
- * This is the traditional algorithm that uses operator[] to read FeatureIds and write
- * SurfaceFeatures directly through the DataStore abstraction. It supports both 3D and
- * 2D image geometries, branching into separate helper functions based on the geometry's
- * dimensionality.
- *
- * **When this variant is selected**: DispatchAlgorithm selects this class when all
- * input arrays are backed by contiguous in-memory DataStore.
- *
- * **3D algorithm**: Iterates all voxels in Z-Y-X order. For each voxel, checks:
- * - Whether the voxel is on the outer boundary (x/y/z == 0 or max).
- * - Whether any of its 6 face neighbors has FeatureId == 0 (if MarkFeature0Neighbors
- *   is enabled).
- * If either condition is met, the feature owning that voxel is marked as a surface feature.
- *
- * **2D algorithm**: Determines which dimension is degenerate (size == 1) and performs
- * the equivalent 4-neighbor boundary check on the non-degenerate plane.
- *
- * **Why a separate OOC variant exists**: The Direct variant accesses the FeatureIds
- * array via operator[], and for the 3D case, neighbor lookups span +/-1, +/-dimX,
- * and +/-(dimX*dimY) in flat index space. When FeatureIds is stored in chunked OOC
- * format, these scattered accesses cause chunk thrashing. The Scanline variant reads
- * entire Z-slices sequentially to avoid this.
+ * The algorithm uses four or six face neighbors for 2D or 3D geometries. The
+ * Scanline variant replaces disk-backed neighbor reads with sequential slice I/O.
  *
  * @see ComputeSurfaceFeaturesScanline for the OOC-optimized variant.
  * @see ComputeSurfaceFeatures for the dispatcher.
@@ -43,13 +23,17 @@ class SIMPLNXCORE_EXPORT ComputeSurfaceFeaturesDirect
 {
 public:
   /**
-   * @brief Constructs the in-core surface feature identifier.
-   * @param dataStructure The DataStructure containing FeatureIds and SurfaceFeatures arrays.
-   * @param mesgHandler Handler for progress/info messages.
-   * @param shouldCancel Atomic flag for cooperative cancellation.
-   * @param inputValues Algorithm parameters (geometry path, array paths, flags).
+   * @brief Creates an in-memory surface-feature algorithm.
+   * @param dataStructure Provides the selected arrays and geometry.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later slices when true.
+   * @param inputValues Specifies validated paths and options. The caller must
+   * keep this object alive for the algorithm lifetime.
    */
   ComputeSurfaceFeaturesDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeSurfaceFeaturesInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning in-memory algorithm.
+   */
   ~ComputeSurfaceFeaturesDirect() noexcept;
 
   ComputeSurfaceFeaturesDirect(const ComputeSurfaceFeaturesDirect&) = delete;
@@ -58,20 +42,18 @@ public:
   ComputeSurfaceFeaturesDirect& operator=(ComputeSurfaceFeaturesDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core surface feature identification algorithm.
+   * @brief Labels surface features.
+   * @return Error from validation or unsupported dimensionality, or success after cancellation.
    *
-   * Validates the feature-to-attribute-matrix mapping, determines whether the
-   * geometry is 2D or 3D, and delegates to the appropriate helper function.
-   *
-   * @return Result<> indicating success, errors, or unsupported dimensionality.
+   * Cancellation can retain labels assigned before the method returns.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                   ///< Reference to the DataStructure containing all data.
-  const ComputeSurfaceFeaturesInputValues* m_InputValues = nullptr; ///< Algorithm parameters.
-  const std::atomic_bool& m_ShouldCancel;                           ///< Cooperative cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                  ///< Progress message handler.
+  DataStructure& m_DataStructure;
+  const ComputeSurfaceFeaturesInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

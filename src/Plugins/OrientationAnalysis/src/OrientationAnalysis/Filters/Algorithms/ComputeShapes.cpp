@@ -22,11 +22,13 @@
 namespace
 {
 /**
- * @brief Sorts the 3 values
- * @param a First Value
- * @param b Second Value
- * @param c Third Value
- * @return The indices in their sorted order
+ * @brief Sorts three values by index.
+ * @tparam T Specifies the comparable value type.
+ * @param a Identifies the first value.
+ * @param b Identifies the second value.
+ * @param c Identifies the third value.
+ * @param lowToHigh Selects ascending order.
+ * @return Indices in the selected order.
  */
 template <typename T>
 std::array<size_t, 3> TripletSort(T a, T b, T c, bool lowToHigh)
@@ -203,15 +205,11 @@ void ComputeShapes::findMoments()
   float xdist1 = 0.0f, xdist2 = 0.0f, xdist3 = 0.0f, xdist4 = 0.0f, xdist5 = 0.0f, xdist6 = 0.0f, xdist7 = 0.0f, xdist8 = 0.0f;
   float ydist1 = 0.0f, ydist2 = 0.0f, ydist3 = 0.0f, ydist4 = 0.0f, ydist5 = 0.0f, ydist6 = 0.0f, ydist7 = 0.0f, ydist8 = 0.0f;
   float zdist1 = 0.0f, zdist2 = 0.0f, zdist3 = 0.0f, zdist4 = 0.0f, zdist5 = 0.0f, zdist6 = 0.0f, zdist7 = 0.0f, zdist8 = 0.0f;
-  // Cache the feature-level centroids into a local buffer once. Centroids is indexed by feature id
-  // inside the per-voxel loop below; reading it through the data array would route every access
-  // through the (out-of-core-capable) store's virtual dispatch. A one-time local copy keeps those
-  // reads in RAM. Sized by feature count, not voxel count.
+  // The local centroid cache avoids random feature lookup in the voxel loop.
   std::vector<float32> localCentroids(numfeatures * 3);
   centroids.getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(localCentroids.data(), localCentroids.size()));
 
-  // Accumulate each feature's voxel count locally instead of doing a per-voxel read-modify-write on
-  // the volumes data array; the raw counts are written back once after the scan. Sized by feature count.
+  // Local counts avoid per-voxel volume writes.
   std::vector<float32> featureVoxelCounts(numfeatures, 0.0f);
 
   // Read FeatureIds one Z-slice at a time: a single bulk read per slice replaces one store access per
@@ -332,7 +330,7 @@ void ComputeShapes::findMoments()
     m_FeatureMoments[featureId * 6 + 4] = -m_FeatureMoments[featureId * 6 + 4] * konst1;
     m_FeatureMoments[featureId * 6 + 5] = -m_FeatureMoments[featureId * 6 + 5] * konst1;
 
-    // Now store the 3x3 Matrix for the Eigen Value/Vectors
+    // Assemble the moment matrix for eigen analysis.
     Eigen::Matrix3f moment;
     /* clang-format off */
     moment <<
@@ -350,8 +348,7 @@ void ComputeShapes::findMoments()
     m_FeatureEigenVals[featureId * 3 + 1] = eigenValues[idxs[1]].real();
     m_FeatureEigenVals[featureId * 3 + 2] = eigenValues[idxs[2]].real();
 
-    // These values will be used to compute the axis eulers
-    // EigenVector associated with the largest EigenValue goes in the 3rd column
+    // The largest eigenvector becomes the third reference-frame column.
     auto col = eigenVectors.col(idxs[0]);
     m_EFVec[featureId * 9 + 2] = col(0).real();
     m_EFVec[featureId * 9 + 5] = col(1).real();
@@ -487,8 +484,7 @@ void ComputeShapes::findMoments2D()
     }
   }
 
-  // Write the accumulated raw voxel counts back to the volumes array (feature-level, one pass); the
-  // feature loop below reads them in place and rescales to physical area, matching the original flow.
+  // The feature loop rescales raw counts to physical area.
   for(size_t featureId = 0; featureId < numfeatures; featureId++)
   {
     volumes[featureId] = featureVoxelCounts[featureId];
@@ -655,8 +651,7 @@ void ComputeShapes::findAxisEulers()
       return;
     }
 
-    // insert principal unit vectors into rotation matrix representing Feature reference frame within the sample reference frame
-    // (Note that the 3 directions are actually the long axis and the 1 direction is actually the short axis)
+    // Principal vectors define the feature reference frame.
     /* clang-format off */
     size_t idx = featureId*9;
     ebsdlib::OrientationMatrixDType g = {m_EFVec[idx + 0], m_EFVec[idx + 3], m_EFVec[idx + 6],

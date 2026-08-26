@@ -19,6 +19,17 @@
 
 namespace nx::core::HDF5
 {
+/**
+ * @brief Runs one body invocation for each local chunk position.
+ * @tparam Body Specifies a callable that accepts one usize position.
+ * @param chunkCount Specifies the number of positions.
+ * @param body Processes one position.
+ * @pre body supports concurrent invocations when multicore support is enabled.
+ *
+ * Multicore builds use the process-wide oneTBB scheduler. Other builds use the
+ * calling thread. Each invocation receives a different position. Exceptions use
+ * the active scheduler's propagation behavior.
+ */
 template <class Body>
 void ParallelForChunkPositions(usize chunkCount, const Body& body)
 {
@@ -45,42 +56,28 @@ void ParallelForChunkPositions(usize chunkCount, const Body& body)
 }
 
 /**
- * @brief Runs a per-chunk @p loader then @p sink for every index in @p chunkIndices, in parallel.
+ * @brief Loads and consumes each selected chunk position.
+ * @tparam Result Specifies the moveable value that loader produces and sink consumes.
+ * @param chunkIndices Supplies one chunk index for each local position. An empty span is a no-op.
+ * @param loader Produces a result for one chunk index.
+ * @param sink Consumes one local position and its result.
+ * @throws std::exception Rethrows the first observed non-skip exception after scheduled work finishes.
+ * @pre loader and sink support concurrent invocations when multicore support is enabled.
  *
- * @par What it does
- * For each local position @c i in @p chunkIndices this calls @p loader with the chunk index at
- * that position, then hands the produced @c Result to @p sink as @c sink(i, std::move(result)).
- * Work is submitted to oneTBB's process-wide scheduler, whose persistent worker pool is reused
- * across calls. Each task owns disjoint local-index values, so a @p sink that writes @c result[i]
- * into a pre-sized container needs no lock of its own.
+ * Each task owns a different local position. A sink can write to that position in
+ * a pre-sized container without a lock. This property does not make generic
+ * DataStore, AbstractDataStore, or shared external state thread-safe.
  *
- * @par Why a task partition and a callable seam
- * The task split gives each invocation a disjoint local index with no shared write target, which
- * is what lets the sink be lock-free. Threading @c loader (rather than a single
- * serial loop) is the point: for a deflate-compressed chunk the decompression, not the disk, is
- * the cost, and it can run off any process-wide HDF5 lock on separate worker threads. The loader
- * and sink are injected as callables because callers vary only in what a loaded chunk produces
- * (an owned byte buffer, a move-only handle, ...) and what they do with it (scatter into an
- * output span, retain the handle), while the thread harness, partition, and error policy are identical.
+ * The callable seam lets callers keep decompression outside the process-wide HDF5
+ * lock. Deflate work is CPU-intensive and can run on worker threads. The seam also
+ * supports move-only results and different sinks with one thread harness.
  *
- * @par Per-chunk exception policy
- * - An @c UnallocatedChunkError thrown by @p loader marks a never-written (fill-value) chunk of a
- *   sparse dataset. Such a chunk has nothing to load and is not a chunk-level error, so it is
- *   SKIPPED: @p sink is not called for it and its slot is left as the caller pre-sized it.
- * - ANY other exception (from @p loader or @p sink) is a genuine failure. The first such exception
- *   is recorded under a mutex; remaining chunks still run, and after the scheduled batch finishes
- *   the first recorded exception is rethrown. This preserves the "do as much work as possible,
- *   then surface the first real error" contract.
- *
- * @tparam Result The value @p loader produces for one chunk and @p sink consumes. May be move-only.
- * @param chunkIndices The chunk indices to load, one per local position; @c count == 0 is a no-op.
- * @param loader Produces the @c Result for a given chunk index; may throw @c UnallocatedChunkError
- *               to signal a skippable unallocated chunk.
- * @param sink Consumes @c (localIndex, Result&&); called at most once per non-skipped chunk, and
- *             only on the worker that owns that local index.
- *
- * @throw std::exception (or subclass) The first non-@c UnallocatedChunkError exception thrown by
- *        @p loader or @p sink, rethrown after the scheduled batch finishes.
+ * UnallocatedChunkError skips sink output for that position. The exception can
+ * mean sparse storage or unavailable raw metadata. This function cannot identify
+ * the cause. The catch covers both callables, so sink must not throw this exception
+ * unless skip behavior is correct. Other exceptions are recorded under a mutex.
+ * Remaining scheduled positions continue. Concurrent execution makes the first
+ * observed exception order nondeterministic.
  */
 template <class Result>
 void ParallelLoadChunks(nonstd::span<const uint64> chunkIndices, const std::function<Result(uint64 chunkIndex)>& loader, const std::function<void(usize localIndex, Result&&)>& sink)
@@ -98,18 +95,16 @@ void ParallelLoadChunks(nonstd::span<const uint64> chunkIndices, const std::func
     try
     {
       Result result = loader(chunkIndices[i]);
-      // Tasks own disjoint local indices, so a sink that writes result[i] needs no lock.
+      // A sink can write one pre-sized local slot without sharing that slot.
       sink(i, std::move(result));
     } catch(const UnallocatedChunkError&)
     {
-      // A never-written (fill-value) chunk of a sparse dataset has nothing to load; skip it
-      // rather than fail the whole load. The sink is not called, leaving this local index's
-      // slot exactly as the caller pre-sized it.
+      // Raw bytes are unavailable. Leave the caller's local slot unchanged.
+      // The exception does not distinguish sparse storage from metadata failure.
       return;
     } catch(...)
     {
-      // Any OTHER exception is a genuine failure and must propagate: record the first and keep
-      // going so other chunks still load; it is rethrown after the scheduler finishes the batch.
+      // Record the first observed failure. Other scheduled positions still run.
       std::lock_guard<std::mutex> lk(errMutex);
       if(!firstError)
       {

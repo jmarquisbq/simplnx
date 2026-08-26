@@ -31,8 +31,8 @@ constexpr float64 k_BallVolumesM3M[ComputeGBCDMetricBased::k_NumberResolutionCho
 namespace GBCDMetricBased
 {
 /**
- * @brief The TriAreaAndNormals struct defines a container that stores the area of a given triangle
- * and the two normals for grains on either side of the triangle
+ * @struct TriAreaAndNormals
+ * @brief Stores one triangle area and its grain normals.
  */
 struct TriAreaAndNormals
 {
@@ -58,13 +58,12 @@ struct TriAreaAndNormals
 };
 
 /**
- * @brief Parallel worker that selects triangles matching the specified
- * misorientation for the metric-based GBCD calculation. Receives raw pointers
- * to locally cached feature-level Euler angles and phases (pre-read via
- * copyIntoBuffer), plus the resolved crystal structure for the phase of
- * interest. This eliminates OOC virtual dispatch during the parallel loop.
- * Triangle-level arrays (faceLabels, faceNormals, faceAreas) are still
- * accessed through DataArray references because they are read sequentially.
+ * @class TrianglesSelector
+ * @brief Selects triangles for metric-based GBCD calculation.
+ *
+ * Feature Euler angles and phases are local caches. The worker reads triangle
+ * arrays through specialized resident access. This does not establish generic
+ * DataArray or DataStore thread safety.
  */
 class TrianglesSelector
 {
@@ -237,8 +236,8 @@ private:
 };
 
 /**
- * @brief The ProbeDistribution class implements a threaded algorithm that determines the distribution values
- * for the GBCD
+ * @class ProbeDistribution
+ * @brief Calculates metric-based GBCD values at sample points.
  */
 class ProbeDistribution
 {
@@ -327,7 +326,6 @@ private:
 
 } // namespace GBCDMetricBased
 
-// -----------------------------------------------------------------------------
 ComputeGBCDMetricBased::ComputeGBCDMetricBased(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                ComputeGBCDMetricBasedInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -337,33 +335,16 @@ ComputeGBCDMetricBased::ComputeGBCDMetricBased(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeGBCDMetricBased::~ComputeGBCDMetricBased() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeGBCDMetricBased::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes the Grain Boundary Character Distribution using a metric-based
- * approach. Triangles matching a specified misorientation (within tolerance) are
- * selected, then the distribution is evaluated at sampling points on the unit
- * hemisphere using a kernel density estimator.
- *
- * OOC strategy: Feature-level arrays (Euler angles, phases) and ensemble-level
- * arrays (crystal structures) are bulk-read into local vectors at startup. The
- * TrianglesSelector parallel worker receives raw pointers to these caches,
- * eliminating OOC virtual dispatch. Triangle-level arrays (face labels, areas)
- * are chunk-read per iteration for the totalFaceArea accumulation. Feature-face
- * labels are also cached locally for the distinct boundary count loop.
- */
 Result<> ComputeGBCDMetricBased::operator()()
 {
-  // -------------------- check if directories are ok and if output files can be opened -----------
-  // Make sure the file name ends with _1 so the GMT scripts work correctly
+  // GMT scripts require the _1 filename suffix.
   fs::path distributionOutput = m_InputValues->DistOutputFile;
   std::string distFName = m_InputValues->DistOutputFile.stem().string();
   if(!distFName.empty() && !StringUtilities::ends_with(distFName, "_1"))
@@ -380,8 +361,7 @@ Result<> ComputeGBCDMetricBased::operator()()
     errorOutput = fs::path(m_InputValues->ErrOutputFile.parent_path() / errFName);
   }
 
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
+  // Create requested output directories before opening files.
   Result<> createDirectoriesResult = CreateOutputDirectories(distributionOutput.parent_path());
   if(createDirectoriesResult.invalid())
   {

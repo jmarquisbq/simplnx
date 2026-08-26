@@ -10,7 +10,8 @@ namespace nx::core
 {
 
 /**
- * @brief Holds the paths and options used to compute quaternion conjugates.
+ * @struct ComputeQuaternionConjugateInputValues
+ * @brief Identifies quaternion-conjugation inputs.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugateInputValues
 {
@@ -20,15 +21,28 @@ struct ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugateInputValues
 };
 
 /**
- * @brief Selects the direct or bulk-I/O quaternion conjugation implementation.
+ * @class ComputeQuaternionConjugate
+ * @brief Dispatches quaternion conjugation.
  *
- * The dispatcher keeps the existing parallel direct path for RAM-backed arrays and
- * selects the bounded scanline path whenever either quaternion array is out-of-core.
+ * The direct path uses direct array access. The scanline path uses bounded
+ * bulk buffers for OOC targets.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeQuaternionConjugate
 {
 public:
+  /**
+   * @brief Initializes quaternion-conjugation dispatch.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies input and output arrays.
+   * @pre dataStructure, mesgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
+   */
   ComputeQuaternionConjugate(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeQuaternionConjugateInputValues* inputValues);
+  /**
+   * @brief Destroys the quaternion-conjugation dispatcher.
+   */
   ~ComputeQuaternionConjugate() noexcept;
 
   ComputeQuaternionConjugate(const ComputeQuaternionConjugate&) = delete;
@@ -37,10 +51,15 @@ public:
   ComputeQuaternionConjugate& operator=(ComputeQuaternionConjugate&&) noexcept = delete;
 
   /**
-   * @brief Computes quaternion conjugates using the storage-appropriate algorithm.
+   * @brief Dispatches quaternion conjugation.
+   * @return Result from the selected executor.
    */
   Result<> operator()();
 
+  /**
+   * @brief Returns the retained cancellation flag.
+   * @return Reference to the cancellation flag supplied at construction.
+   */
   const std::atomic_bool& getCancel();
 
 private:

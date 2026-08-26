@@ -18,23 +18,26 @@ using namespace nx::core;
 
 namespace
 {
-/// Number of FeatureId tuples to read per bulk I/O call. 256K tuples = 1 MB of int32
-/// per chunk, which minimizes copyIntoBuffer() round-trips on multi-billion-voxel
-/// datasets while keeping per-chunk buffers bounded. The RectGrid path reads a second
-/// 256K-tuple float32 buffer alongside, for ~2 MB peak working set per chunk.
+// Each Feature ID chunk has 262,144 tuples and uses one MiB. RectGrid adds one MiB for element sizes.
 constexpr usize k_ChunkTuples = 262144;
+// This error reports a feature count that cannot fit in the int32 output array.
 constexpr int32 k_BadFeatureCount = -78231;
+// NumElements stores int32 values.
 constexpr uint64 k_MaxVoxelCount = std::numeric_limits<int32>::max();
-/**
- * Volume of Sphere - `V = 4/3 * pi * r^3`
- * Radius of Sphere - `r = cubed_root(3V / 4pi)`
- * However we can cut a multiplication out of the
- * equation at runtime by isolating the `V`
- * 3V / 4pi == V / (4pi / 3)
- */
+// Equivalent spherical diameter uses d = 2*cbrt(V/(4*pi/3)).
 constexpr float64 k_ESDVolumeDenominator = (4.0 * nx::core::numbers::pi_v<float64>) / 3.0;
+// Equivalent circular diameter uses d = 2*sqrt(A/pi).
 constexpr float64 k_ECDAreaDenominator = nx::core::numbers::pi_v<float64>;
 
+/**
+ * @brief Validates Feature ID bounds observed during a scanline pass.
+ * @param featureIdsName Identifies the Feature ID array for errors.
+ * @param featureAttributeMatrixPath Identifies the feature output parent.
+ * @param numFeatures Identifies the feature output count.
+ * @param minFeatureId Supplies the observed minimum Feature ID.
+ * @param maxFeatureId Supplies the observed maximum Feature ID.
+ * @return Success, or a negative or out-of-range Feature ID error.
+ */
 Result<> ValidateFeatureIdsInScanlinePass(const std::string& featureIdsName, const DataPath& featureAttributeMatrixPath, usize numFeatures, int32 minFeatureId, int32 maxFeatureId)
 {
   if(minFeatureId < 0)
@@ -53,6 +56,22 @@ Result<> ValidateFeatureIdsInScanlinePass(const std::string& featureIdsName, con
   return {};
 }
 
+/**
+ * @brief Computes ImageGeom feature sizes with sequential bulk reads.
+ * @param imageGeom Supplies dimensions, spacing, and optional element sizes.
+ * @param volumes Receives feature area or volume.
+ * @param equivalentDiameters Receives equivalent circular or spherical diameter.
+ * @param numElements Receives voxel counts.
+ * @param featureIds Supplies Feature IDs.
+ * @param featureIdsName Identifies the Feature ID array for errors.
+ * @param featureAttributeMatrixPath Identifies the feature output parent.
+ * @param saveElementSizes True to retain generated element sizes.
+ * @param msgHelper Supplies progress messages.
+ * @param shouldCancel Signals cancellation between chunks or features.
+ * @return Success, or an element-size, Feature ID, or feature-count error.
+ *
+ * The scan traverses global raster order. Current Feature ID bulk-I/O Result values are not inspected.
+ */
 Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volumes, Float32AbstractDataStore& equivalentDiameters, Int32AbstractDataStore& numElements,
                           const Int32AbstractDataStore& featureIds, const std::string& featureIdsName, const DataPath& featureAttributeMatrixPath, const bool saveElementSizes,
                           MessageHelper& msgHelper, const std::atomic_bool& shouldCancel)
@@ -67,8 +86,7 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   int32 maxFeatureId = std::numeric_limits<int32>::lowest();
 
   msgHelper.sendMessage("Finding Voxel Counts...");
-  // Count voxels per feature and validate the observed FeatureId range during the
-  // same chunked bulk-I/O pass. This avoids a separate full-array validation scan.
+  // The count pass validates Feature IDs without a second full-volume read.
   auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
   for(usize offset = 0; offset < numVoxels; offset += k_ChunkTuples)
   {
@@ -103,43 +121,17 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   const usize yDimSize = imageGeom.getNumYCells();
   const usize zDimSize = imageGeom.getNumZCells();
 
-  // Treat dimensions of 1 as flat for image geom
+  // A unit dimension selects flat ImageGeom area calculation.
   if(xDimSize == 1 || yDimSize == 1 || zDimSize == 1)
   {
     msgHelper.sendMessage("Singular image detected. Proceeding with 2D calculations...");
-    // One of the dimensions is empty, so we will be calculating area instead
-
-    /**
-     * IMPORTANT: Due the nature of ImageGeom the preflight is expected to impose a
-     * restriction on the number of empty dimensions (denoted as `1`) in an input
-     * ImageGeom. To illustrate why this is consider the following cases:
-     *
-     * An ImageGeom with 2 "empty" dimensions, such as 5x1x1. In this case the code would
-     * calculate the area/volume (ie distance between points) by only using the valid dimension.
-     * Functionally flattening the problem to 1D. You may think the solution is to explicitly
-     * define the area cases, but there is a caveat of which of the two empty dimensions to
-     * select for the area calculation. An image with 1x1x5 (XYZ) illustrates this problem,
-     * would you select X or Y for the scaling for area calculation? Clearly it has been rotated,
-     * but you lack the orientation information to determine the proper orientation.
-     *
-     * An ImageGeom with 3 "empty" dimensions, ie 1x1x1. This is a semi-ludicrous case since
-     * the value can be derived directly from the spacing, but the issue previously outlined
-     * will present itself once again. You cannot determine the orientation for proper area
-     * calculation.
-     *
-     * For these two cases the following code would BREAK, so do not enable.
-     **/
-
-    // OPEN DESIGN QUESTION: this includes the flat dimension's spacing, matching the PR #1590
-    // "slab" convention used by ImageGeom::findElementSizes, but it diverges from legacy DREAM3D
-    // 6.5.171 (FindSizes::findSizesImage uses only the two non-flat resolutions) whenever the flat
-    // dimension's spacing != 1. See the "[2DFlatSpacing]" test case, which characterizes the
-    // divergence, and the ComputeFeatureSizesFilter V&V deviations entry.
-    // Calculate the area of a single voxel
+    // Preflight permits one unit dimension. More unit dimensions do not identify a unique area plane.
+    // The slab convention matches ImageGeom::findElementSizes.
+    // It differs from DREAM3D 6.5.171 when flat spacing is not one.
+    // The [2DFlatSpacing] V&V case records this compatibility difference.
     const float64 voxelArea = static_cast<float64>(spacing[0]) * static_cast<float64>(spacing[1]) * static_cast<float64>(spacing[2]);
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Area and ECD...");
-    // Process each feature storing feature voxel counts, areas, and equivalent circular diameter
     for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
     {
       if(shouldCancel)
@@ -147,7 +139,6 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
         return {};
       }
 
-      // Check for integer overflow
       if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
       {
         return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
@@ -155,33 +146,21 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
 
       throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-      // Store the number of voxels in feature as int32
       numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
 
-      // Calculate and store the area of the feature
       const float64 newArea = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelArea;
       volumes.setValue(featureIdx, static_cast<float32>(newArea));
 
-      /** Determine diameter from area:
-       * Area of Circle - `A = pi * r^2`
-       * Radius of Circle - `r = square_root(A / pi)`
-       * Diameter of Circle - `d = 2 * r`
-       * Thus
-       * Equivalent Circular Diameter - `2 * square_root(A / pi)`
-       **/
       equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::sqrt(newArea / k_ECDAreaDenominator)));
     }
   }
   else
   {
-    // If we are here, it is an image stack and thus should be treated as 3D.
     msgHelper.sendMessage("Image Stack detected. Proceeding with 3D calculations...");
 
-    // Calculate the volume of a single voxel
     const float64 voxelVolume = spacing[0] * spacing[1] * spacing[2];
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Volume and ESD...");
-    // Process each feature storing feature voxel counts, volumes, and equivalent spherical diameter
     for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
     {
       if(shouldCancel)
@@ -189,7 +168,6 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
         return {};
       }
 
-      // Check for integer overflow
       if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
       {
         return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
@@ -197,20 +175,11 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
 
       throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-      // Store the number of voxels in feature as int32
       numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
 
-      // Calculate and store the volume of the feature
       const float64 newVolume = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelVolume;
       volumes.setValue(featureIdx, static_cast<float32>(newVolume));
 
-      /** Determine diameter from volume:
-       * Volume of Sphere - `V = 4/3 * pi * r^3`
-       * Radius of Sphere - `r = cubed_root(3V / 4pi)`
-       * Diameter of Sphere - `d = 2 * r`
-       * Thus
-       * Equivalent Spherical Diameter - `2 * cubed_root(V / (4pi / 3))`
-       **/
       equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(newVolume / k_ESDVolumeDenominator)));
     }
   }
@@ -224,6 +193,22 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
   return {};
 }
 
+/**
+ * @brief Computes RectGrid feature sizes with sequential paired reads.
+ * @param rectGridGeom Supplies dimensions and generated element sizes.
+ * @param volumes Receives feature volumes.
+ * @param equivalentDiameters Receives equivalent spherical diameters.
+ * @param numElements Receives voxel counts.
+ * @param featureIds Supplies Feature IDs.
+ * @param featureIdsName Identifies the Feature ID array for errors.
+ * @param featureAttributeMatrixPath Identifies the feature output parent.
+ * @param saveElementSizes True to retain generated element sizes.
+ * @param msgHelper Supplies progress messages.
+ * @param shouldCancel Signals cancellation between chunks or features.
+ * @return Success, or an element-size, Feature ID, or feature-count error.
+ *
+ * Feature IDs and element sizes use matching chunks. Current bulk-I/O Result values are not inspected.
+ */
 Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStore& volumes, Float32AbstractDataStore& equivalentDiameters, Int32AbstractDataStore& numElements,
                              const Int32AbstractDataStore& featureIds, const std::string& featureIdsName, const DataPath& featureAttributeMatrixPath, const bool saveElementSizes,
                              MessageHelper& msgHelper, const std::atomic_bool& shouldCancel)
@@ -244,15 +229,13 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
 
   std::vector<uint64> featureVoxelCounts(numFeatures, 0);
   std::vector<float64> featureVolumes(numFeatures, 0.0);
-  // Needed for Kahan summation of volumes
+  // Kahan compensation retains low-order feature-volume contributions.
   std::vector<float64> featureCompensators(numFeatures, 0.0);
   int32 minFeatureId = std::numeric_limits<int32>::max();
   int32 maxFeatureId = std::numeric_limits<int32>::lowest();
 
   msgHelper.sendMessage("Cell Level: Finding Voxel Counts and Summing Volumes...");
-  // Count voxels, sum volumes, and validate the FeatureId range using the same
-  // chunked bulk-I/O pass. For RectGrid, both FeatureIds and element sizes are
-  // read in lockstep chunks so the Kahan accumulation stays on local buffers.
+  // Matching chunks validate Feature IDs and keep Kahan accumulation local.
   auto featureIdBuf = std::make_unique<int32[]>(k_ChunkTuples);
   auto elemSizeBuf = std::make_unique<float32[]>(k_ChunkTuples);
   for(usize offset = 0; offset < numVoxels; offset += k_ChunkTuples)
@@ -274,7 +257,6 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
       {
         featureVoxelCounts[voxelFeatureId]++;
 
-        // Use Kahan summation to determine overall volume
         float64 value = static_cast<float64>(elemSizeBuf[i]) - featureCompensators[voxelFeatureId];
         float64 volSum = featureVolumes[voxelFeatureId] + value;
         featureCompensators[voxelFeatureId] = (volSum - featureVolumes[voxelFeatureId]) - value;
@@ -290,7 +272,6 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
   }
 
   msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating ESD...");
-  // Process each feature storing feature voxel counts and equivalent spherical diameter
   for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
   {
     if(shouldCancel)
@@ -300,24 +281,13 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
 
     throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
 
-    // Check for integer overflow
     if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
     {
       return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
     }
 
-    // Store the number of voxels in feature as int32
     numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
-    // Store the volume of the feature
     volumes.setValue(featureIdx, static_cast<float32>(featureVolumes[featureIdx]));
-
-    /** Determine diameter from volume:
-     * Volume of Sphere - `V = 4/3 * pi * r^3`
-     * Radius of Sphere - `r = cubed_root(3V / 4pi)`
-     * Diameter of Sphere - `d = 2 * r`
-     * Thus
-     * Equivalent Spherical Diameter - `2 * cubed_root(V / (4pi / 3))`
-     **/
     equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(featureVolumes[featureIdx] / k_ESDVolumeDenominator)));
   }
 
@@ -331,7 +301,6 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeFeatureSizesScanline::ComputeFeatureSizesScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          const ComputeFeatureSizesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -341,10 +310,8 @@ ComputeFeatureSizesScanline::ComputeFeatureSizesScanline(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureSizesScanline::~ComputeFeatureSizesScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureSizesScanline::operator()()
 {
   MessageHelper messageHelper(m_MessageHandler);

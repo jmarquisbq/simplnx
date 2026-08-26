@@ -11,7 +11,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 AlignSectionsFeatureCentroid::AlignSectionsFeatureCentroid(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                            AlignSectionsFeatureCentroidInputValues* inputValues)
 : AlignSections(dataStructure, shouldCancel, mesgHandler)
@@ -22,16 +21,8 @@ AlignSectionsFeatureCentroid::AlignSectionsFeatureCentroid(DataStructure& dataSt
 {
 }
 
-// -----------------------------------------------------------------------------
 AlignSectionsFeatureCentroid::~AlignSectionsFeatureCentroid() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Entry point: delegates to the base-class AlignSections::execute() which
- * calls findShifts() to compute per-slice shifts, then applies them to all cell
- * data arrays by physically reordering voxels within each Z-slice.
- */
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsFeatureCentroid::operator()()
 {
   if(m_ShouldCancel)
@@ -43,18 +34,10 @@ Result<> AlignSectionsFeatureCentroid::operator()()
   return execute(gridGeom.getDimensions(), m_InputValues->ImageGeometryPath);
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes per-slice X/Y centroid shifts. Dispatches to findShiftsOoc()
- * when the mask array is out-of-core to avoid per-element chunk thrashing;
- * otherwise uses the in-memory MaskCompare path with per-element isTrue() calls.
- */
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, std::vector<int64>& yShifts)
 {
   bool usesOutOfCoreStore = false;
-  // Check if OOC dispatch is needed before creating MaskCompare (which would
-  // eagerly load the entire array for some store types).
+  // Select storage-neutral bulk access before MaskCompare can perform element access.
   {
     const auto& maskCheck = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->MaskArrayPath);
     usesOutOfCoreStore = IsOutOfCore(maskCheck);
@@ -73,8 +56,7 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
     maskCompare = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->MaskArrayPath);
   } catch(const std::out_of_range& exception)
   {
-    // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-    // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+    // Direct callers can bypass preflight, so return an invalid mask as a Result.
     std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString());
     return MakeErrorResult(-53900, message);
   }
@@ -98,7 +80,7 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
   std::vector<float32> yCentroid(dims[2], 0.0f);
 
   ThrottledMessenger throttledMessenger = getMessageHelper().createThrottledMessenger();
-  // Loop over the Z Direction
+  // Traverse source slices from highest Z to lowest Z.
   for(usize iter = 0; iter < dims[2]; iter++)
   {
     if(m_ShouldCancel)
@@ -134,6 +116,8 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
   bool yWarning = false;
   if(m_InputValues->StoreAlignmentShifts)
   {
+    // These unsigned intermediates preserve current direct-path behavior.
+    // A negative relative shift can wrap before it reaches signed output storage.
     usize relativexshift = 0;
     usize relativeyshift = 0;
 
@@ -142,13 +126,13 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
     auto& cumulativeShiftsStore = m_DataStructure.getDataAs<Int64Array>(m_InputValues->CumulativeShiftsArrayPath)->getDataStoreRef();
     auto& centroidsStore = m_DataStructure.getDataAs<Float32Array>(m_InputValues->CentroidsArrayPath)->getDataStoreRef();
 
-    // Calculate the X&Y shifts based on the centroid. Note the shifts are in real units
+    // Convert physical centroid differences to integer voxel offsets.
     for(usize iter = 1; iter < dims[2]; iter++)
     {
       slice = (dims[2] - 1) - iter;
       if(m_InputValues->UseReferenceSlice)
       {
-        // Cumulative and Relative are identical
+        // Reference-relative and cumulative shifts are identical in this mode.
         relativexshift = static_cast<int64>((xCentroid[iter] - xCentroid[static_cast<usize>(m_InputValues->ReferenceSlice)]) / spacing[0]);
         relativeyshift = static_cast<int64>((yCentroid[iter] - yCentroid[static_cast<usize>(m_InputValues->ReferenceSlice)]) / spacing[1]);
         xShifts[iter] = relativexshift;
@@ -156,7 +140,7 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
       }
       else
       {
-        // Cumulative and Relative are different
+        // Accumulate consecutive-slice offsets.
         relativexshift = static_cast<int64>((xCentroid[iter] - xCentroid[iter - 1]) / spacing[0]);
         relativeyshift = static_cast<int64>((yCentroid[iter] - yCentroid[iter - 1]) / spacing[1]);
         xShifts[iter] = xShifts[iter - 1] + relativexshift;
@@ -206,7 +190,7 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
   }
   else
   {
-    // Calculate the X&Y shifts based on the centroid. Note the shifts are in real units
+    // Compute shifts without writing diagnostic arrays.
     for(usize iter = 1; iter < dims[2]; iter++)
     {
       if(m_InputValues->UseReferenceSlice)
@@ -254,25 +238,9 @@ Result<> AlignSectionsFeatureCentroid::findShifts(std::vector<int64>& xShifts, s
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief OOC-optimized shift computation. Instead of per-element MaskCompare::isTrue()
- * calls (which trigger a chunk load per voxel for OOC stores), this method reads
- * one complete Z-slice of mask data at a time via copyIntoBuffer(). The centroid
- * computation then iterates over the in-memory buffer with zero OOC overhead.
- *
- * Memory usage: one XY-slice of uint8 mask data (dims[0] * dims[1] bytes), plus
- * a temporary bool[] buffer of the same size when the mask is boolean-typed.
- *
- * The shift calculation logic after centroid computation is identical to the
- * in-core path (without the StoreAlignmentShifts diagnostic storage, which is
- * handled separately at the end).
- */
-// -----------------------------------------------------------------------------
 Result<> AlignSectionsFeatureCentroid::findShiftsOoc(std::vector<int64>& xShifts, std::vector<int64>& yShifts)
 {
-  // Obtain typed DataStore pointers for bulk reads. Only uint8 and bool masks
-  // are supported; other types produce an error.
+  // Resolve Bool or UInt8 storage for one-slice bulk reads.
   const auto& maskArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->MaskArrayPath);
   const AbstractDataStore<uint8>* maskUInt8StorePtr = nullptr;
   const AbstractDataStore<bool>* maskBoolStorePtr = nullptr;
@@ -305,7 +273,8 @@ Result<> AlignSectionsFeatureCentroid::findShiftsOoc(std::vector<int64>& xShifts
   const usize sliceVoxels = dims[0] * dims[1];
   std::vector<uint8> maskBuf(sliceVoxels);
 
-  // Compute centroids per Z-slice using bulk mask reads
+  // Read and reduce one mask slice at a time. The current implementation does
+  // not inspect the bulk-read Result.
   for(usize iter = 0; iter < dims[2]; iter++)
   {
     if(m_ShouldCancel)
@@ -316,7 +285,6 @@ Result<> AlignSectionsFeatureCentroid::findShiftsOoc(std::vector<int64>& xShifts
     usize slice = static_cast<usize>((dims[2] - 1) - iter);
     usize sliceOffset = slice * sliceVoxels;
 
-    // Bulk-read mask for this slice
     if(maskUInt8StorePtr != nullptr)
     {
       maskUInt8StorePtr->copyIntoBuffer(sliceOffset, nonstd::span<uint8>(maskBuf.data(), sliceVoxels));
@@ -353,7 +321,7 @@ Result<> AlignSectionsFeatureCentroid::findShiftsOoc(std::vector<int64>& xShifts
     yCentroid[iter] = yCentroid[iter] / static_cast<float32>(count);
   }
 
-  // Calculate shifts from centroids (same logic as in-core path)
+  // Convert physical centroid differences to integer voxel offsets.
   bool xWarning = false;
   bool yWarning = false;
   for(usize iter = 1; iter < dims[2]; iter++)
@@ -395,7 +363,7 @@ Result<> AlignSectionsFeatureCentroid::findShiftsOoc(std::vector<int64>& xShifts
     }
   }
 
-  // Store alignment shifts if requested
+  // Scanline diagnostics keep relative shifts signed.
   if(m_InputValues->StoreAlignmentShifts)
   {
     auto& slicesStore = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->SlicesArrayPath)->getDataStoreRef();

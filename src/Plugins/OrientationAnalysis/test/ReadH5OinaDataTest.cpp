@@ -30,11 +30,9 @@ TEST_CASE("OrientationAnalysis::ReadH5OinaDataFilter: Valid Filter Execution", "
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "H5Oina_Test_Data.tar.gz", "H5Oina_Test_Data");
 
-  // Read Exemplar DREAM3D File
   auto exemplarFilePath = fs::path(fmt::format("{}/H5Oina_Test_Data/H5Oina_Test_Data.dream3d", unit_test::k_TestFilesDir));
   DataStructure exemplarDataStructure = UnitTest::LoadDataStructure(exemplarFilePath);
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   ReadH5OinaDataFilter filter;
   DataStructure dataStructure;
   Arguments args;
@@ -42,7 +40,6 @@ TEST_CASE("OrientationAnalysis::ReadH5OinaDataFilter: Valid Filter Execution", "
   auto h5TestFile = fs::path(fmt::format("{}/H5Oina_Test_Data/H5Oina_Test_Data.h5oina", unit_test::k_TestFilesDir));
   OEMEbsdScanSelectionParameter::ValueType scanSelections = {h5TestFile, ebsdlib::RefFrameZDir::LowtoHigh, {k_ScanName}};
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ReadH5OinaDataFilter::k_SelectedScanNames_Key, std::make_any<OEMEbsdScanSelectionParameter::ValueType>(scanSelections));
   args.insertOrAssign(ReadH5OinaDataFilter::k_ZSpacing_Key, std::make_any<float32>(1.0f));
   args.insertOrAssign(ReadH5OinaDataFilter::k_Origin_Key, std::make_any<VectorFloat32Parameter::ValueType>(std::vector<float32>(3, 0.0f)));
@@ -51,11 +48,9 @@ TEST_CASE("OrientationAnalysis::ReadH5OinaDataFilter: Valid Filter Execution", "
   args.insertOrAssign(ReadH5OinaDataFilter::k_CellAttributeMatrixName_Key, std::make_any<std::string>(k_CellData));
   args.insertOrAssign(ReadH5OinaDataFilter::k_CellEnsembleAttributeMatrixName_Key, std::make_any<std::string>(k_CellEnsembleData));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -89,7 +84,6 @@ TEST_CASE("OrientationAnalysis::ReadH5OinaDataFilter: InValid Filter Execution",
 
   const nx::core::UnitTest::TestFileSentinel testDataSentinel(nx::core::unit_test::k_TestFilesDir, "6_6_ImportH5Data.tar.gz", "6_6_ImportH5Data");
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
   ReadH5OinaDataFilter filter;
   DataStructure dataStructure;
   Arguments args;
@@ -123,11 +117,9 @@ TEST_CASE("OrientationAnalysis::ReadH5OinaDataFilter: InValid Filter Execution",
     args.insertOrAssign(ReadH5OinaDataFilter::k_ReadPatternData_Key, std::make_any<bool>(false));
   }
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
 

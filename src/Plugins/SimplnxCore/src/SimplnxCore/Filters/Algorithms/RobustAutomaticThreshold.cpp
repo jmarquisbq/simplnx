@@ -12,15 +12,29 @@ using namespace nx::core;
 namespace
 {
 /**
- * @brief Computes the weighted threshold and emits the Bool mask with two bounded passes.
+ * @struct FindThresholdFunctor
+ * @brief Computes a weighted threshold and writes a Bool mask in two passes.
  *
- * The first pass preserves the legacy accumulation order while replacing
- * singleton input/gradient reads. The second re-reads only the scalar input and
- * writes complete mask chunks, avoiding a full resident output mask.
+ * Sequential input order preserves established float rounding. The second pass
+ * rereads only scalar values and writes complete mask chunks. No buffer scales
+ * with the total tuple count.
  */
 struct FindThresholdFunctor
 {
-  /** @brief Executes both passes for the runtime-selected scalar input type. */
+  /**
+   * @brief Computes the threshold and writes selected mask values.
+   * @tparam T Specifies the scalar input type.
+   * @param inputObject Supplies scalar values.
+   * @param gradMag Supplies float32 gradient weights.
+   * @param maskStore Receives Bool threshold results.
+   * @param shouldCancel Signals cancellation between chunks.
+   * @return Source, gradient, or mask bulk-I/O result.
+   * @pre All stores have equal tuple counts and one component.
+   *
+   * The function does not guard a zero gradient sum. Cancellation during the
+   * first pass leaves the mask unchanged. Later cancellation preserves completed
+   * mask chunks.
+   */
   template <class T>
   Result<> operator()(const IDataArray* inputObject, const Float32AbstractDataStore& gradMag, BoolAbstractDataStore& maskStore, const std::atomic_bool& shouldCancel)
   {
@@ -33,7 +47,7 @@ struct FindThresholdFunctor
     float numerator = 0;
     float denominator = 0;
 
-    // Preserve the legacy accumulation order while replacing singleton OOC reads with bounded batches.
+    // Sequential tuple order preserves the established float accumulation result.
     for(usize start = 0; start < numTuples; start += kTuplesPerBatch)
     {
       if(shouldCancel)
@@ -87,7 +101,6 @@ struct FindThresholdFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 RobustAutomaticThreshold::RobustAutomaticThreshold(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                    RobustAutomaticThresholdInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -97,10 +110,8 @@ RobustAutomaticThreshold::RobustAutomaticThreshold(DataStructure& dataStructure,
 {
 }
 
-// -----------------------------------------------------------------------------
 RobustAutomaticThreshold::~RobustAutomaticThreshold() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> RobustAutomaticThreshold::operator()()
 {
   const auto* inputArray = m_DataStructure.getDataAs<IDataArray>(m_InputValues->InputArrayPath);

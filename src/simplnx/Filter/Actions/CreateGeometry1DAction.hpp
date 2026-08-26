@@ -17,8 +17,14 @@
 
 namespace nx::core
 {
+
 /**
- * @brief Action for creating an Edge Geometry in a DataStructure
+ * @class CreateGeometry1DAction
+ * @brief Creates a one-dimensional geometry and its support arrays.
+ * @tparam Geometry1DType Edge-geometry type to create.
+ *
+ * Copy, Move, and Reference attach supplied topology arrays. Create allocates
+ * new topology arrays and attribute matrices.
  */
 template <typename Geometry1DType>
 class CreateGeometry1DAction : public IDataCreationAction
@@ -26,16 +32,6 @@ class CreateGeometry1DAction : public IDataCreationAction
 public:
   using DimensionType = std::vector<size_t>;
 
-  /**
-   * @brief Constructor to create the 1D geometry and allocate a default arrays for the shared vertex & shared edge lists
-   * @param geometryPath The path to the created geometry
-   * @param numEdges The number of edges in the geometry
-   * @param numVertices The number of vertices in the geometry
-   * @param vertexAttributeMatrixName The name of the vertex AttributeMatrix to be created
-   * @param edgeAttributeMatrixName The name of the edge AttributeMatrix to be created
-   * @param sharedVerticesName The name of the shared vertex list array to be created
-   * @param sharedEdgesName The name of the shared edge list array to be created
-   */
   CreateGeometry1DAction(const DataPath& geometryPath, size_t numEdges, size_t numVertices, const std::string& vertexAttributeMatrixName, const std::string& edgeAttributeMatrixName,
                          const std::string& sharedVerticesName, const std::string& sharedEdgesName)
   : IDataCreationAction(geometryPath)
@@ -48,15 +44,6 @@ public:
   {
   }
 
-  /**
-   * @brief Constructor to create the 1D geometry using existing vertices & edges arrays by either copying, moving, or referencing them
-   * @param geometryPath The path to the created geometry
-   * @param inputVerticesArrayPath The path to the existing vertices array
-   * @param inputEdgesArrayPath The path to the existing edges array
-   * @param vertexAttributeMatrixName The name of the vertex AttributeMatrix to be created
-   * @param edgeAttributeMatrixName The name of the edge AttributeMatrix to be created
-   * @param arrayType Tells whether to copy, move, or reference the existing input vertices array
-   */
   CreateGeometry1DAction(const DataPath& geometryPath, const DataPath& inputVerticesArrayPath, const DataPath& inputEdgesArrayPath, const std::string& vertexAttributeMatrixName,
                          const std::string& edgeAttributeMatrixName, const ArrayHandlingType& arrayType)
   : IDataCreationAction(geometryPath)
@@ -78,11 +65,13 @@ public:
   CreateGeometry1DAction& operator=(CreateGeometry1DAction&&) noexcept = delete;
 
   /**
-   * @brief Applies this action's change to the given DataStructure in the given mode.
-   * Returns any warnings/errors. On error, DataStructure is not guaranteed to be consistent.
-   * @param dataStructure The DataStructure to modify
-   * @param mode The mode (Preflight or Execute)
-   * @return Result<> Result with any errors or warnings
+   * @brief Creates and configures the edge geometry.
+   * @param dataStructure Destination data structure.
+   * @param mode Preflight or execute action mode.
+   * @return Validation, allocation, or reparenting errors.
+   *
+   * Copy, Move, and Reference materialize out-of-core topology arrays in place.
+   * Unstructured geometry visualization requires in-memory topology access.
    */
   Result<> apply(DataStructure& dataStructure, Mode mode) const override
   {
@@ -93,13 +82,11 @@ public:
     DataPath edgeDataPath = getEdgeDataPath();
     DataPath vertexDataPath = getVertexDataPath();
 
-    // Check for empty Geometry DataPath
     if(getCreatedPath().empty())
     {
       return MakeErrorResult(-5401, fmt::format("{}CreateGeometry1DAction: Geometry Path cannot be empty", prefix));
     }
 
-    // Check if the Geometry Path already exists
     const BaseGroup* parentObject = dataStructure.getDataAs<BaseGroup>(getCreatedPath());
     if(parentObject != nullptr)
     {
@@ -115,41 +102,34 @@ public:
         return MakeErrorResult(-5403, fmt::format("{}CreateGeometry1DAction: Geometry could not be created at path:'{}'", prefix, getCreatedPath().toString()));
       }
     }
-    // Get the Parent ID
     if(!dataStructure.getId(parentPath).has_value())
     {
       return MakeErrorResult(-5404, fmt::format("{}CreateGeometry1DAction: Parent Id was not available for path:'{}'", prefix, parentPath.toString()));
     }
 
-    // Get the vertices list if we are using an existing array
     const auto vertices = dataStructure.getDataAs<Float32Array>(m_InputVertices);
     if(m_ArrayHandlingType != ArrayHandlingType::Create && vertices == nullptr)
     {
       return MakeErrorResult(-5405, fmt::format("{}CreateGeometry1DAction: Could not find vertices array at path '{}'", prefix, m_InputVertices.toString()));
     }
 
-    // Get the faces list if we are using an existing array
     const auto edges = dataStructure.getDataAs<DataArray<MeshIndexType>>(m_InputEdges);
     if(m_ArrayHandlingType != ArrayHandlingType::Create && edges == nullptr)
     {
       return MakeErrorResult(-5406, fmt::format("{}CreateGeometry1DAction: Could not find edges array at path '{}'", prefix, m_InputEdges.toString()));
     }
 
-    // Create the EdgeGeometry
     auto geometry1d = Geometry1DType::Create(dataStructure, getCreatedPath().getTargetName(), dataStructure.getId(parentPath).value());
     DimensionType edgeTupleShape = {m_NumEdges};
-    DimensionType vertexTupleShape = {m_NumVertices}; // We probably don't know how many Vertices there are but take what ever the developer sends us
+    DimensionType vertexTupleShape = {m_NumVertices};
 
-    // For Copy/Move/Reference, read shapes and materialize OOC stores upfront
     if(m_ArrayHandlingType != ArrayHandlingType::Create)
     {
       edgeTupleShape = edges->getTupleShape();
       vertexTupleShape = vertices->getTupleShape();
 
-      // If the source arrays have OOC-backed stores, materialize them into
-      // in-core stores. These arrays may have been created OOC earlier in
-      // the pipeline when they lived outside any geometry. Unstructured/poly
-      // geometry topology arrays must be in-core for the visualization layer.
+      // Unstructured geometry visualization requires in-memory vertex and edge
+      // topology. Materialize supplied out-of-core arrays before attachment.
       if(vertices->getIDataStore()->getStoreType() == IDataStore::StoreType::OutOfCore)
       {
         auto inCoreStore = std::make_shared<DataStore<float32>>(vertexTupleShape, ShapeType{3}, std::optional<float32>{});
@@ -223,8 +203,6 @@ public:
     else
     {
       DataPath edgesPath = getCreatedPath().createChildPath(m_SharedEdgesName);
-      // Create the default DataArray that will hold the EdgeList and Vertices. We
-      // size these to 1 because the Csv parser will resize them to the appropriate number of tuples
       Result result = ArrayCreationUtilities::CreateArray<MeshIndexType>(dataStructure, edgeTupleShape, {2}, edgesPath, mode);
       if(result.invalid())
       {
@@ -237,7 +215,7 @@ public:
       }
       geometry1d->setEdgeList(*createdEdges);
 
-      // Create the Vertex Array with a component size of 3
+      // Vertices use three coordinates.
       DataPath vertexPath = getCreatedPath().createChildPath(m_SharedVerticesName);
 
       result = ArrayCreationUtilities::CreateArray<float32>(dataStructure, vertexTupleShape, {3}, vertexPath, mode);
@@ -253,7 +231,6 @@ public:
       geometry1d->setVertices(*vertexArray);
     }
 
-    // Create the vertex and edge AttributeMatrix
     auto* edgeAttributeMatrix = AttributeMatrix::Create(dataStructure, m_EdgeDataName, edgeTupleShape, geometry1d->getId());
     if(edgeAttributeMatrix == nullptr)
     {
@@ -271,10 +248,6 @@ public:
     return {};
   }
 
-  /**
-   * @brief Returns a copy of the action.
-   * @return UniquePointer A unique pointer to the cloned action
-   */
   UniquePointer clone() const override
   {
     auto action =
@@ -285,54 +258,35 @@ public:
     return action;
   }
 
-  /**
-   * @brief Returns the path of the 1D geometry to be created.
-   * @return const DataPath& The geometry path
-   */
   const DataPath& geometryPath() const
   {
     return getCreatedPath();
   }
 
-  /**
-   * @brief Returns the path of the edge AttributeMatrix.
-   * @return DataPath The edge data path
-   */
   DataPath getEdgeDataPath() const
   {
     return getCreatedPath().createChildPath(m_EdgeDataName);
   }
 
-  /**
-   * @brief Returns the path of the vertex AttributeMatrix.
-   * @return DataPath The vertex data path
-   */
   DataPath getVertexDataPath() const
   {
     return getCreatedPath().createChildPath(m_VertexDataName);
   }
 
-  /**
-   * @brief Returns the number of edges.
-   * @return IGeometry::MeshIndexType The number of edges
-   */
   IGeometry::MeshIndexType numEdges() const
   {
     return m_NumEdges;
   }
 
-  /**
-   * @brief Returns the number of vertices (estimated in some circumstances).
-   * @return IGeometry::MeshIndexType The number of vertices
-   */
   IGeometry::MeshIndexType numVertices() const
   {
     return m_NumVertices;
   }
 
   /**
-   * @brief Returns all of the DataPaths to be created.
-   * @return std::vector<DataPath>
+   * @brief Returns paths created by this action.
+   * @return Geometry and attribute-matrix paths. Create and Copy also return
+   * topology-array paths.
    */
   std::vector<DataPath> getAllCreatedPaths() const override
   {

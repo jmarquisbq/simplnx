@@ -16,18 +16,26 @@ using namespace nx::core;
 
 namespace
 {
-/// Target values per transfer. Conditional processing rounds this down to complete tuples
-/// so OOC writes never require a partial-tuple read-modify-write.
+// Conditional processing rounds this value down to complete tuples. This avoids
+// partial-tuple read-modify-write operations for disk-backed stores.
 constexpr usize k_TargetChunkValues = 65536;
 
 template <typename T>
 inline constexpr bool k_IsConditionalType = std::is_same_v<T, bool> || std::is_same_v<T, uint8> || std::is_same_v<T, int8>;
 
+/**
+ * @brief Creates an unsupported conditional-array type error.
+ * @return Error that identifies the accepted conditional types.
+ */
 Result<> MakeInvalidConditionalTypeError()
 {
   return MakeErrorResult<>(-4001, "Mask array was not of type [BOOL | UINT8 | INT8].");
 }
 
+/**
+ * @struct ReplaceValueInArrayDirectFunctor
+ * @brief Replaces matching scalar values with direct array access.
+ */
 struct ReplaceValueInArrayDirectFunctor
 {
   template <typename ScalarType>
@@ -82,6 +90,11 @@ struct ReplaceValueInArrayDirectFunctor
   }
 };
 
+/**
+ * @struct ConditionalReplaceValueDirectFunctor
+ * @brief Replaces complete target tuples selected by a conditional value.
+ * @tparam TargetType Specifies the target scalar type.
+ */
 template <typename TargetType>
 struct ConditionalReplaceValueDirectFunctor
 {
@@ -171,6 +184,10 @@ struct ConditionalReplaceValueDirectFunctor
   }
 };
 
+/**
+ * @struct ConditionalReplaceValueDirectTargetFunctor
+ * @brief Converts a replacement string before direct conditional replacement.
+ */
 struct ConditionalReplaceValueDirectTargetFunctor
 {
   template <typename TargetType>
@@ -186,6 +203,10 @@ struct ConditionalReplaceValueDirectTargetFunctor
   }
 };
 
+/**
+ * @struct ReplaceValueInArrayScanlineFunctor
+ * @brief Replaces matching scalar values through bounded bulk transfers.
+ */
 struct ReplaceValueInArrayScanlineFunctor
 {
   template <typename ScalarType>
@@ -240,6 +261,11 @@ struct ReplaceValueInArrayScanlineFunctor
   }
 };
 
+/**
+ * @struct ConditionalReplaceValueScanlineFunctor
+ * @brief Replaces complete target tuples through bounded bulk transfers.
+ * @tparam TargetType Specifies the target scalar type.
+ */
 template <typename TargetType>
 struct ConditionalReplaceValueScanlineFunctor
 {
@@ -308,6 +334,10 @@ struct ConditionalReplaceValueScanlineFunctor
   }
 };
 
+/**
+ * @struct ConditionalReplaceValueScanlineTargetFunctor
+ * @brief Converts a replacement string before bulk conditional replacement.
+ */
 struct ConditionalReplaceValueScanlineTargetFunctor
 {
   template <typename TargetType>
@@ -324,11 +354,21 @@ struct ConditionalReplaceValueScanlineTargetFunctor
 };
 
 /**
- * @brief Uses contiguous in-memory pointers to avoid both staging copies and virtual per-value access.
+ * @class ConditionalSetValueDirect
+ * @brief Replaces values through in-memory target and condition arrays.
+ *
+ * Contiguous stores avoid staging copies and virtual per-value access.
  */
 class ConditionalSetValueDirect
 {
 public:
+  /**
+   * @brief Creates a direct replacement algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param shouldCancel Stops later chunks when true.
+   * @param inputValues Specifies validated paths and options. It must outlive
+   * this algorithm.
+   */
   ConditionalSetValueDirect(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const ConditionalSetValueInputValues* inputValues)
   : m_DataStructure(dataStructure)
   , m_InputValues(inputValues)
@@ -336,6 +376,10 @@ public:
   {
   }
 
+  /**
+   * @brief Replaces selected target values.
+   * @return Error from type conversion, or success after cancellation.
+   */
   Result<> operator()()
   {
     auto& targetArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedArrayPath);
@@ -356,11 +400,21 @@ private:
 };
 
 /**
- * @brief Streams OOC target and condition stores through bounded buffers to eliminate per-cell store I/O.
+ * @class ConditionalSetValueScanline
+ * @brief Replaces values through bounded target and condition buffers.
+ *
+ * Bulk transfers eliminate per-cell disk access.
  */
 class ConditionalSetValueScanline
 {
 public:
+  /**
+   * @brief Creates a bulk-I/O replacement algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param shouldCancel Stops later chunks when true.
+   * @param inputValues Specifies validated paths and options. It must outlive
+   * this algorithm.
+   */
   ConditionalSetValueScanline(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const ConditionalSetValueInputValues* inputValues)
   : m_DataStructure(dataStructure)
   , m_InputValues(inputValues)
@@ -368,6 +422,10 @@ public:
   {
   }
 
+  /**
+   * @brief Replaces selected target values.
+   * @return Error from conversion or bulk I/O, or success after cancellation.
+   */
   Result<> operator()()
   {
     auto& targetArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedArrayPath);
@@ -388,7 +446,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ConditionalSetValue::ConditionalSetValue(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ConditionalSetValueInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -397,10 +454,8 @@ ConditionalSetValue::ConditionalSetValue(DataStructure& dataStructure, const IFi
 {
 }
 
-// -----------------------------------------------------------------------------
 ConditionalSetValue::~ConditionalSetValue() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ConditionalSetValue::operator()()
 {
   auto& targetArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->SelectedArrayPath);

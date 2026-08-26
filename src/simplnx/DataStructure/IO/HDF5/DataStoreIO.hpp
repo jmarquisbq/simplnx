@@ -16,11 +16,15 @@ namespace HDF5
 {
 namespace DataStoreIO
 {
+
 /**
- * @brief Writes the data store to HDF5. Returns the HDF5 error code should
- * one be encountered. Otherwise, returns 0.
- * @param datasetWriter
- * @return H5::ErrorType
+ * @brief Writes a data store and its shape attributes.
+ * @tparam T Stored value type.
+ * @param datasetWriter Destination HDF5 dataset.
+ * @param dataStore Source store.
+ * @return Write errors from the store operation.
+ *
+ * The implementation does not return shape-attribute write results.
  */
 template <typename T>
 inline Result<> WriteDataStore(nx::core::HDF5::DatasetIO& datasetWriter, const AbstractDataStore<T>& dataStore)
@@ -37,7 +41,6 @@ inline Result<> WriteDataStore(nx::core::HDF5::DatasetIO& datasetWriter, const A
     return writeResult;
   }
 
-  // Write shape attributes to the dataset
   const auto tupleShape = dataStore.getTupleShape();
   const auto componentShape = dataStore.getComponentShape();
   datasetWriter.writeVectorAttribute(IOConstants::k_TupleShapeTag, tupleShape);
@@ -48,20 +51,16 @@ inline Result<> WriteDataStore(nx::core::HDF5::DatasetIO& datasetWriter, const A
 
 /**
  * @brief Reads an HDF5 dataset into an in-memory DataStore.
+ * @tparam T Stored value type.
+ * @param datasetReader Source HDF5 dataset.
+ * @return Materialized in-memory store, or a warning with nullptr for a
+ * recovery placeholder.
  *
- * Reads tuple/component shapes from HDF5 attributes, allocates an
- * in-core DataStore<T>, and loads all data from the dataset into memory.
- * This function does not handle OOC stores or recovery-file placeholders;
- * those are handled by the data store import handler at a higher level.
- *
- * If the physical HDF5 dataset element count does not match the expected
- * count from shape attributes, the dataset is skipped and a warning is
- * returned. This guards against reading placeholder datasets written by
- * an OOC-enabled build.
- *
- * @param datasetReader The HDF5 dataset to read from
- * @return Result containing the in-memory data store, or a warning with
- *         nullptr if the dataset is a placeholder
+ * The function treats a shape and physical-count mismatch as a recovery
+ * placeholder. Malformed data can produce the same mismatch. The caller
+ * selects an out-of-core store before this in-memory path.
+ * @pre Tuple and component shape products, including their full product, fit
+ * usize.
  */
 template <typename T>
 inline Result<std::shared_ptr<AbstractDataStore<T>>> ReadDataStoreIntoMemory(const nx::core::HDF5::DatasetIO& datasetReader)
@@ -69,9 +68,8 @@ inline Result<std::shared_ptr<AbstractDataStore<T>>> ReadDataStoreIntoMemory(con
   auto tupleShape = IDataStoreIO::ReadTupleShape(datasetReader);
   auto componentShape = IDataStoreIO::ReadComponentShape(datasetReader);
 
-  // Check that the physical HDF5 dataset size matches the expected size
-  // from shape attributes. A mismatch indicates the dataset is a
-  // placeholder (e.g. written by an OOC-enabled build).
+  // This path treats a physical-count mismatch as a recovery placeholder. A
+  // malformed inline dataset can produce the same mismatch.
   usize expectedElements = std::accumulate(tupleShape.cbegin(), tupleShape.cend(), static_cast<usize>(1), std::multiplies<>()) *
                            std::accumulate(componentShape.cbegin(), componentShape.cend(), static_cast<usize>(1), std::multiplies<>());
   usize physicalElements = datasetReader.getNumElements();
@@ -86,14 +84,14 @@ inline Result<std::shared_ptr<AbstractDataStore<T>>> ReadDataStoreIntoMemory(con
     return result;
   }
 
-  // In-core branch of the import pipeline: always allocate a plain in-memory
-  // DataStore and load from disk. The OOC branch is handled by the higher-level
-  // data store import handler before this is reached, so the resolver should
-  // not be consulted here.
+  // The higher import layer selects out-of-core stores. This branch always
+  // materializes a plain in-memory DataStore.
   auto dataStore = std::make_shared<DataStore<T>>(tupleShape, componentShape, T{});
+  // The current implementation does not inspect the readHdf5() Result.
   dataStore->readHdf5(datasetReader);
   return {std::move(dataStore)};
 }
+
 } // namespace DataStoreIO
 } // namespace HDF5
 } // namespace nx::core

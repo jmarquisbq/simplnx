@@ -11,36 +11,26 @@ struct DBSCANInputValues;
 
 /**
  * @class DBSCANScanline
- * @brief Out-of-core algorithm for grid-based DBSCAN using bounded external records.
+ * @brief Computes grid-based DBSCAN with bounded external records.
  *
- * The DBSCAN algorithm has two major data access phases that benefit from OOC optimization:
+ * Genuine OOC execution externally sorts selected points into grid order. It
+ * stores grid, core, axis, and label records in temporary files. Fixed caches
+ * and tiles bound RAM even for dense cells. Temporary disk use scales with
+ * selected points and occupied grids.
  *
- * **Grid construction**: The input array and optional mask are scanned in fixed tuple
- * windows. Selected points are externally sorted into grid membership order, while
- * active-grid state and occupied-axis indexes use temporary fixed-width record stores.
- *
- * **Distance computation**: Grid membership records preserve coordinates in the source
- * primitive type. Pairwise checks read fixed-size record tiles, so even a densely
- * populated grid cell does not require a cell-sized allocation.
- *
- * **Clustering and labeling**: Cluster state uses a bounded page cache over temporary
- * records. Labels are externally restored to tuple order and written in fixed windows.
- *
- * Selected by DispatchAlgorithm when the coordinates, enabled mask, or created
- * FeatureIds target is backed by out-of-core storage.
- *
- * @see DBSCANDirect for the in-core-optimized alternative.
- * @see AlgorithmDispatch.hpp for the dispatch mechanism that selects between them.
+ * A forced scanline call on resident arrays uses the resident fallback. It does
+ * not create the external record pipeline.
  */
 class SIMPLNXCORE_EXPORT DBSCANScanline
 {
 public:
   /**
-   * @brief Constructs the out-of-core algorithm with all resources it needs.
-   * @param dataStructure The DataStructure containing input/output arrays
-   * @param mesgHandler Message handler for progress reporting
-   * @param shouldCancel Atomic flag checked periodically to support user cancellation
-   * @param inputValues Non-owning pointer to the parameter bundle
+   * @brief Initializes scanline DBSCAN clustering.
+   * @param dataStructure Contains input and output arrays.
+   * @param mesgHandler Supplies the common interface. This path emits no messages.
+   * @param shouldCancel Signals cancellation between bounded operations.
+   * @param inputValues Selects settings and array paths.
+   * @pre All arguments and the inputValues object outlive this executor.
    */
   DBSCANScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const DBSCANInputValues* inputValues);
   ~DBSCANScanline() noexcept;
@@ -51,15 +41,18 @@ public:
   DBSCANScanline& operator=(DBSCANScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the OOC-optimized DBSCAN clustering: grid construction, clustering, labeling.
-   * @return Result<> with any errors encountered during execution
+   * @brief Builds grids, merges clusters, and labels tuples.
+   * @return Success or a no-cluster warning, or a validation, mask, storage, or record-I/O error.
+   *
+   * Cancellation returns success. Completed label windows remain, and the
+   * feature AttributeMatrix keeps its previous size after cancellation.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                   ///< Reference to the DataStructure containing all arrays
-  const DBSCANInputValues* m_InputValues = nullptr; ///< Non-owning pointer to input parameters
-  const std::atomic_bool& m_ShouldCancel;           ///< User cancellation flag
+  DataStructure& m_DataStructure;
+  const DBSCANInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
 };
 
 } // namespace nx::core

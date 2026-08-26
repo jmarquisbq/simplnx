@@ -16,13 +16,22 @@ using namespace nx::core;
 
 namespace
 {
-// -----------------------------------------------------------------------------
+/**
+ * @brief Calculates a nonnegative integer factorial recursively.
+ * @param n Specifies the nonnegative integer.
+ * @return Factorial of n.
+ * @pre n is nonnegative.
+ */
 int Factorial(int n)
 {
   return (n == 1 || n == 0) ? 1 : Factorial(n - 1) * n;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Builds binomial coefficients through the selected order.
+ * @param maxOrder Specifies the largest moment order.
+ * @return Symmetric coefficient matrix.
+ */
 ComputeMomentInvariants2D::DoubleMatrixType Binomial(usize maxOrder)
 {
   const int dim = static_cast<int>(maxOrder + 1);
@@ -40,7 +49,12 @@ ComputeMomentInvariants2D::DoubleMatrixType Binomial(usize maxOrder)
   return bn;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Builds normalized integration weights for one coordinate axis.
+ * @param maxOrder Specifies the largest moment order.
+ * @param dim Specifies the square feature-image dimension.
+ * @return Matrix that maps cell occupancy to moment terms.
+ */
 ComputeMomentInvariants2D::DoubleMatrixType GetBigX(usize maxOrder, usize dim)
 {
   const int dRows = static_cast<int>(dim);
@@ -70,7 +84,6 @@ ComputeMomentInvariants2D::DoubleMatrixType GetBigX(usize maxOrder, usize dim)
     doubleMatrix(r, r + 1) = 1.0;
   }
 
-  // Set the Scale Factors
   ComputeMomentInvariants2D::DoubleMatrixType sc(1, maxOrder + 1);
   const int mop1 = static_cast<int>(maxOrder + 1);
   for(int c = 0; c < mop1; c++)
@@ -101,7 +114,14 @@ ComputeMomentInvariants2D::DoubleMatrixType GetBigX(usize maxOrder, usize dim)
   return bigX;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Converts a square binary image to central moments.
+ * @param input Provides the feature occupancy image.
+ * @param inputDims Specifies the square image dimensions.
+ * @param maxOrder Specifies the largest moment order.
+ * @return Central-moment matrix through the selected order.
+ * @pre inputDims contains equal nonzero dimensions.
+ */
 ComputeMomentInvariants2D::DoubleMatrixType ComputeMomentInvariants(const ComputeMomentInvariants2D::DoubleMatrixType& input, const usize* inputDims, usize maxOrder)
 {
   assert(inputDims[0] == inputDims[1]);
@@ -111,7 +131,6 @@ ComputeMomentInvariants2D::DoubleMatrixType ComputeMomentInvariants(const Comput
   const int mDim = static_cast<int>(maxOrder + 1);
   const double fNorm = static_cast<double>(dim - 1) / 2.0;
 
-  // precompute the binomial coefficients for central moment conversion;  (could be hard-coded for maxOrder = 2)
   ComputeMomentInvariants2D::DoubleMatrixType bn = Binomial(maxOrder);
 
   ComputeMomentInvariants2D::DoubleMatrixType mnk(mDim, mDim);
@@ -129,16 +148,13 @@ ComputeMomentInvariants2D::DoubleMatrixType ComputeMomentInvariants(const Comput
     }
   }
 
-  // transform the moments to central moments using the binomial theorem
-  // first get the center of mass coordinates (xc, yc)
+  // The binomial theorem moves raw moments to the feature centroid.
   const double xc = mnk(1, 0) / mnk(0, 0); // mnk[0,0] is the area of the object in units of pixels
   const double yc = mnk(0, 1) / mnk(0, 0);
 
-  // declare an intermediate array to hold the transformed moment values
   ComputeMomentInvariants2D::DoubleMatrixType mnkNew(mDim, mDim);
   mnkNew.setZero();
 
-  // apply the binomial theorem
   for(int p = 0; p < mDim; p++)
   {
     for(int q = 0; q < mDim; q++)
@@ -156,7 +172,12 @@ ComputeMomentInvariants2D::DoubleMatrixType ComputeMomentInvariants(const Comput
   return mnkNew;
 }
 
-// -----------------------------------------------------------------------------
+/**
+ * @brief Converts raw moments to second-order central moments.
+ * @param mnk Provides raw moment values.
+ * @param dim Specifies the square feature-image dimension.
+ * @return Second-order central-moment matrix.
+ */
 ComputeMomentInvariants2D::DoubleMatrixType ComputeCentralMoments(ComputeMomentInvariants2D::DoubleMatrixType mnk, usize dim)
 {
   constexpr usize k_MaxOrder = 2;
@@ -194,9 +215,29 @@ ComputeMomentInvariants2D::DoubleMatrixType ComputeCentralMoments(ComputeMomentI
   return centralMoments;
 }
 
+/**
+ * @class ComputeMomentInvariants2DImpl
+ * @brief Calculates feature moments with direct array access.
+ *
+ * The parallel worker reads and writes shared DataStore instances. DataStore
+ * does not generally guarantee concurrent access. This is an existing direct-
+ * path limitation.
+ */
 class ComputeMomentInvariants2DImpl
 {
 public:
+  /**
+   * @brief Creates a direct moment worker.
+   * @param featureIds Provides cell Feature Id values.
+   * @param featureRect Provides feature bounding rectangles.
+   * @param omega1 Receives the first Omega invariant.
+   * @param omega2 Receives the second Omega invariant.
+   * @param centralMoments Receives optional central moments.
+   * @param volDims Specifies image dimensions.
+   * @param normalizeMomentInvariants Enables circle-based normalization.
+   * @param mesgHandler Receives feature progress messages.
+   * @param shouldCancel Stops later feature work when true.
+   */
   ComputeMomentInvariants2DImpl(const Int32AbstractDataStore& featureIds, const UInt32AbstractDataStore& featureRect, Float32AbstractDataStore& omega1, Float32AbstractDataStore& omega2,
                                 Float32Array* centralMoments, const SizeVec3& volDims, const bool normalizeMomentInvariants, const IFilter::MessageHandler& mesgHandler,
                                 const std::atomic_bool& shouldCancel)
@@ -212,6 +253,14 @@ public:
   {
   }
 
+  /**
+   * @brief Calculates moments and writes optional central moments.
+   * @param start Specifies the first feature index.
+   * @param end Specifies the exclusive feature index.
+   * @param centralMoments Receives nine values per feature.
+   *
+   * A non-XY feature stops this worker range after zeroing its Omega values.
+   */
   void convert(usize start, usize end, Float32AbstractDataStore& centralMoments) const
   {
     const usize numRectComponents = m_FeatureRect.getNumberOfComponents();
@@ -223,7 +272,7 @@ public:
                                       m_FeatureRect[featureIdRectIndex + 3], m_FeatureRect[featureIdRectIndex + 4], m_FeatureRect[featureIdRectIndex + 5]};
       constexpr usize maxOrder = 2;
 
-      // Figure the largest X || Y dimension so we can create a square matrix
+      // The larger XY extent makes a square image for the moment basis.
       const uint32 xDim = corner[3] - corner[0] + 1;
       const uint32 yDim = corner[4] - corner[1] + 1;
       const uint32 zDim = corner[5] - corner[2] + 1;
@@ -290,6 +339,13 @@ public:
     }
   }
 
+  /**
+   * @brief Calculates Omega moments without central-moment output.
+   * @param start Specifies the first feature index.
+   * @param end Specifies the exclusive feature index.
+   *
+   * A non-XY feature stops this worker range after zeroing its Omega values.
+   */
   void convert(usize start, usize end) const
   {
     const usize numRectComponents = m_FeatureRect.getNumberOfComponents();
@@ -301,7 +357,7 @@ public:
                                       m_FeatureRect[featureIdRectIndex + 3], m_FeatureRect[featureIdRectIndex + 4], m_FeatureRect[featureIdRectIndex + 5]};
       constexpr usize maxOrder = 2;
 
-      // Figure the largest X || Y dimension so we can create a square matrix
+      // The larger XY extent makes a square image for the moment basis.
       const uint32 xDim = corner[3] - corner[0] + 1;
       const uint32 yDim = corner[4] - corner[1] + 1;
       const uint32 zDim = corner[5] - corner[2] + 1;
@@ -345,7 +401,7 @@ public:
 
       if(m_NormalizeMomentInvariants)
       {
-        // normalize the invariants by those of the circle
+        // Circle values make the selected invariants dimensionless.
         constexpr double circleOmega[2] = {4.0 * numbers::pi, 16.0 * numbers::pi * numbers::pi};
         omega1 /= circleOmega[0];
         omega2 /= circleOmega[1];
@@ -362,6 +418,10 @@ public:
     }
   }
 
+  /**
+   * @brief Processes one parallel feature range.
+   * @param range Specifies the half-open feature-index range.
+   */
   void operator()(const Range& range) const
   {
     if(m_CentralMoments != nullptr)
@@ -374,6 +434,10 @@ public:
     }
   }
 
+  /**
+   * @brief Executes direct calculation for all non-background features.
+   * @return Success after worker completion.
+   */
   Result<> operator()() const
   {
     const int32 numFeatures = static_cast<int32>(m_FeatureRect.getNumberOfTuples());
@@ -396,10 +460,28 @@ private:
   const IFilter::MessageHandler& m_MessageHandler;
 };
 
-// -----------------------------------------------------------------------------
+/**
+ * @class ComputeMomentInvariants2DScanline
+ * @brief Calculates feature moments from bounded cell chunks.
+ *
+ * A 64 Ki-cell buffer bounds Feature Id I/O. Feature rectangles, moments, and
+ * result buffers scale with the feature count.
+ */
 class ComputeMomentInvariants2DScanline
 {
 public:
+  /**
+   * @brief Creates a bulk-I/O moment worker.
+   * @param featureIds Provides cell Feature Id values.
+   * @param featureRect Provides feature bounding rectangles.
+   * @param omega1 Receives the first Omega invariant.
+   * @param omega2 Receives the second Omega invariant.
+   * @param centralMoments Receives optional central moments.
+   * @param volDims Specifies image dimensions.
+   * @param normalizeMomentInvariants Enables circle-based normalization.
+   * @param mesgHandler Receives feature progress messages.
+   * @param shouldCancel Stops later feature work when true.
+   */
   ComputeMomentInvariants2DScanline(const Int32AbstractDataStore& featureIds, const UInt32AbstractDataStore& featureRect, Float32AbstractDataStore& omega1, Float32AbstractDataStore& omega2,
                                     Float32Array* centralMoments, const SizeVec3& volDims, const bool normalizeMomentInvariants, const IFilter::MessageHandler& mesgHandler,
                                     const std::atomic_bool& shouldCancel)
@@ -415,6 +497,14 @@ public:
   {
   }
 
+  /**
+   * @brief Calculates all non-background feature moments.
+   * @return Error from bulk I/O, or success after cancellation.
+   *
+   * Cancellation occurs before result-array write-back. Sequential Omega1,
+   * Omega2, and central-moment writes can fail separately. A later write error
+   * can leave earlier output arrays written.
+   */
   Result<> operator()() const
   {
     constexpr usize k_MaxOrder = 2;
@@ -425,6 +515,7 @@ public:
     const usize numRectComponents = m_FeatureRect.getNumberOfComponents();
     const usize numCells = m_FeatureIds.getNumberOfTuples();
 
+    // Feature buffers avoid a full cell cache but can be large for many features.
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized buffer; std::array cannot represent this extent.
     auto featureRects = std::make_unique<uint32[]>(numFeatures * numRectComponents);
     Result<> result = m_FeatureRect.copyIntoBuffer(0, nonstd::span<uint32>(featureRects.get(), numFeatures * numRectComponents));
@@ -573,6 +664,12 @@ public:
   }
 
 private:
+  /**
+   * @brief Integrates normalized coordinate powers over one cell.
+   * @param coordinate Specifies the zero-based cell coordinate.
+   * @param dim Specifies the square feature-image dimension.
+   * @return Basis terms through second order.
+   */
   static std::array<double, 3> getBasis(usize coordinate, usize dim)
   {
     std::array<double, 3> basis = {};
@@ -602,7 +699,6 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 } // namespace
-// -----------------------------------------------------------------------------
 ComputeMomentInvariants2D::ComputeMomentInvariants2D(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                      ComputeMomentInvariants2DInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -612,16 +708,13 @@ ComputeMomentInvariants2D::ComputeMomentInvariants2D(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeMomentInvariants2D::~ComputeMomentInvariants2D() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeMomentInvariants2D::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeMomentInvariants2D::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ImageGeometryPath);

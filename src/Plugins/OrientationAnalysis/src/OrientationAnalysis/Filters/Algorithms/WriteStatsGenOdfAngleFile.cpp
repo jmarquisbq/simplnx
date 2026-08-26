@@ -4,6 +4,7 @@
 #include "simplnx/Common/TypesUtility.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/DataStore.hpp"
+#include "simplnx/SIMPLNXVersion.hpp"
 #include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/FilterUtilities.hpp"
 
@@ -25,6 +26,8 @@ namespace
 {
 constexpr usize k_ChunkTuples = 65536;
 constexpr usize k_EulerComponents = 3;
+// Choice three is labeled Colon but currently writes a double quote. Preserve
+// this mismatch until output-format behavior is changed explicitly.
 constexpr std::array<char, 5> k_Delimiters = {',', ';', ' ', '"', '\t'};
 const std::array<std::string, 5> k_DelimiterStr = {"Comma", "Semicolon", "Space", "Colon", "Tab"};
 
@@ -32,7 +35,7 @@ void WriteHeader(std::ofstream& out, const WriteStatsGenOdfAngleFileInputValues&
 {
   out << "# All lines starting with '#' are comments and should come before the data.\n";
   out << "# DREAM3D-NX StatsGenerator ODF Angles Input File\n";
-  out << "# DREAM3D-NX Version 7.0.0\n";
+  out << "# " << nx::core::Version::PackageComplete() << "\n";
 
   out << "# Angle Data is " << k_DelimiterStr[inputValues.Delimiter] << " delimited.\n";
   if(inputValues.ConvertToDegrees)
@@ -389,7 +392,11 @@ Result<> ExecuteScanline(const Int32AbstractDataStore& phasesStore, const Float3
 }
 
 /**
+ * @class WriteStatsGenOdfAngleFileScanline
  * @brief Streams phase, mask, and Euler stores through fixed-size buffers.
+ *
+ * This sequential path propagates source bulk-read failures. Cancellation is
+ * checked between pages and phase files.
  */
 class WriteStatsGenOdfAngleFileScanline
 {
@@ -436,7 +443,10 @@ private:
 };
 
 /**
+ * @class WriteStatsGenOdfAngleFileDirect
  * @brief Uses contiguous in-memory pointers and phase-sized state for the fast path.
+ *
+ * A non-DataStore input delegates the complete operation to the scanline path.
  */
 class WriteStatsGenOdfAngleFileDirect
 {
@@ -500,7 +510,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteStatsGenOdfAngleFile::WriteStatsGenOdfAngleFile(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                      WriteStatsGenOdfAngleFileInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -510,16 +519,13 @@ WriteStatsGenOdfAngleFile::WriteStatsGenOdfAngleFile(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteStatsGenOdfAngleFile::~WriteStatsGenOdfAngleFile() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteStatsGenOdfAngleFile::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 int WriteStatsGenOdfAngleFile::determineOutputLineCount(const Int32Array& cellPhases, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, usize totalPoints, int32 phase) const
 {
   const auto& phasesStore = cellPhases.getDataStoreRef();
@@ -553,7 +559,6 @@ int WriteStatsGenOdfAngleFile::determineOutputLineCount(const Int32Array& cellPh
   return countResult.value();
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteStatsGenOdfAngleFile::writeOutputFile(std::ofstream& out, const Int32Array& cellPhases, const std::unique_ptr<MaskCompareUtilities::MaskCompare>& mask, int32 lineCount,
                                                     usize totalPoints, int32 phase) const
 {
@@ -578,7 +583,6 @@ Result<> WriteStatsGenOdfAngleFile::writeOutputFile(std::ofstream& out, const In
   return MakeErrorResult(-9405, k_InvalidMaskCompareMessage);
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteStatsGenOdfAngleFile::operator()()
 {
   Result<> createDirectoriesResult = CreateOutputDirectories(m_InputValues->OutputFile.parent_path());

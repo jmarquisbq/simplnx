@@ -18,6 +18,17 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @brief Tests for non-positive Feature IDs with bounded reads.
+ * @param featureIds Supplies cell Feature IDs.
+ * @param bufferSize Requests the scan buffer size.
+ * @param shouldCancel Signals cancellation between scan blocks.
+ * @return True if a blocked cell exists. Returns false if none exists. Returns
+ * nullopt after cancellation.
+ *
+ * Concrete DataStore input uses a contiguous view. Other stores use bulk reads.
+ * Current bulk-I/O Result values are not inspected.
+ */
 std::optional<bool> ContainsBlockedCells(const Int32AbstractDataStore& featureIds, usize bufferSize, const std::atomic_bool& shouldCancel)
 {
   const usize scanBlockSize = std::max<usize>(bufferSize, 1);
@@ -59,11 +70,14 @@ std::optional<bool> ContainsBlockedCells(const Int32AbstractDataStore& featureId
 }
 
 /**
- * @brief The ComputeDistanceMapImpl class implements a threaded algorithm that computes the distance map
- * for each point in the supplied volume.
+ * @class ComputeDistanceMapImpl
+ * @brief Computes one direct distance map from resident buffers.
+ * @tparam T Specifies the output distance type.
+ * @tparam MapType Selects the seed map category.
  *
- * Accepts pre-buffered local arrays instead of DataStore references to avoid
- * per-element virtual dispatch overhead on the direct in-memory path.
+ * The worker uses local source and output buffers during propagation. Tasks write distinct map
+ * components in nearest-neighbor storage. This specialization does not establish generic DataArray
+ * or DataStore thread safety. The final bulk write does not inspect its Result value.
  */
 template <typename T, ComputeEuclideanDistMap::MapType MapType = ComputeEuclideanDistMap::MapType::FeatureBoundary>
 class ComputeDistanceMapImpl
@@ -78,6 +92,19 @@ class ComputeDistanceMapImpl
   FloatVec3 m_Spacing = {};
 
 public:
+  /**
+   * @brief Initializes a direct distance-map worker.
+   * @param inputValues Preserves the direct worker constructor signature.
+   * @param nearestNeighbors Stores nearest seeds for all map categories.
+   * @param featureIds Supplies resident Feature IDs.
+   * @param distBuf Supplies and receives resident output distances.
+   * @param outputStore Receives the final bulk distance write.
+   * @param totalVoxels Identifies the number of image cells.
+   * @param dims Supplies image dimensions.
+   * @param spacing Supplies image spacing.
+   * @pre All pointers reference storage for totalVoxels values.
+   * @pre All arguments outlive the worker execution.
+   */
   ComputeDistanceMapImpl(const ComputeEuclideanDistMapInputValues& inputValues, std::vector<int64>& nearestNeighbors, const int32* featureIds, T* distBuf, AbstractDataStore<T>* outputStore,
                          usize totalVoxels, SizeVec3 dims, FloatVec3 spacing)
   : m_InputValues(inputValues)
@@ -91,8 +118,17 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the direct distance-map worker.
+   */
   virtual ~ComputeDistanceMapImpl() = default;
 
+  /**
+   * @brief Propagates one map and writes its final distances.
+   *
+   * This worker does not inspect cancellation. It runs to completion after its
+   * task starts.
+   */
   void operator()() const
   {
     auto xpoints = static_cast<int64_t>(m_Dims[0]);
@@ -116,25 +152,21 @@ public:
     std::vector<float64> voxel_Distance(m_TotalVoxels, 0.0);
 
     Distance = 0;
-    // This loop initializes the `voxel_NearestNeighbor` and `voxel_Distance` temp arrays with values
+    // Initialize each voxel with its nearest seed or blocked state.
     for(usize voxelTupleIdx = 0; voxelTupleIdx < m_TotalVoxels; ++voxelTupleIdx)
     {
-      // For the given `mapType`, get the value that was stored for the nearestNeighbor,
-      // essentially, as long as the value is **NOT** -1.
       if(m_NearestNeighbors[voxelTupleIdx * 3 + static_cast<usize>(MapType)] >= 0)
       {
-        // if voxel is boundary voxel, then use itself as the nearest boundary voxel
         voxel_NearestNeighbor[voxelTupleIdx] = static_cast<int64>(voxelTupleIdx);
       }
       else
       {
-        // If a default value was stored into the NearestNeighbor then set that into the voxel_NearestNeighbor vector at the current voxel index
         voxel_NearestNeighbor[voxelTupleIdx] = -1;
       }
       voxel_Distance[voxelTupleIdx] = static_cast<float64>(m_DistBuf[voxelTupleIdx]);
     }
 
-    // ------------- Calculate the Manhattan Distance ----------------
+    // Propagate city-block distances until no voxel changes.
     count = 1;
     changed = 1;
     int64_t i = 0;
@@ -186,23 +218,14 @@ public:
             }
 
             i = zStride + yStride + x;
-            // If the nearestNeighbor value == -1 (invalid value?) and the featureId
-            // of the current voxel is valid. Does this mean we are on a border
-            // voxel like the border between the overscan and sample of an EBSD data set?
             if(voxel_NearestNeighbor[i] == -1 && m_FeatureIds[i] > 0)
             {
-              count++; // increment the count?
-              // Loop over all neighbors (6 face neighbors)
+              count++;
               for(int32 j = 0; j < 6; j++)
               {
                 neighpoint = i + neighbors[j];
                 if(mask[j] == 1)
                 {
-                  // if the mask for this voxel is true and the voxel_distance != -1, i.e.,
-                  // meaning that we are on a boundary voxel of some type, then set
-                  // the voxel_nearestNeighbor of the current voxel to that of
-                  // its neighbor? This value could get overwritten by the next
-                  // neighbor value? I wonder if this has any ramifications.?
                   if(voxel_Distance[neighpoint] != -1.0)
                   {
                     voxel_NearestNeighbor[i] = voxel_NearestNeighbor[neighpoint];
@@ -214,7 +237,6 @@ public:
         }
       }
 
-      // Now run back over all voxels to increment "changed" and voxel_Distance.
       for(usize voxelIdx = 0; voxelIdx < m_TotalVoxels; ++voxelIdx)
       {
         if(voxel_NearestNeighbor[voxelIdx] != -1 && voxel_Distance[voxelIdx] == -1.0 && m_FeatureIds[voxelIdx] > 0)
@@ -225,7 +247,7 @@ public:
       }
     }
 
-    // ------------- Calculate the Euclidian Distance ----------------
+    // Float output converts nearest-seed positions to Euclidean distances.
     if constexpr(std::is_same_v<T, float32>)
     {
       float64 x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0, z1 = 0.0, z2 = 0.0;
@@ -257,20 +279,18 @@ public:
       }
     }
 
-    // Write results back to the nearestNeighbors vector and output distance buffer
+    // Publish local results after the worker completes propagation.
     for(usize a = 0; a < m_TotalVoxels; ++a)
     {
       m_NearestNeighbors[a * 3 + static_cast<usize>(MapType)] = voxel_NearestNeighbor[a];
       m_DistBuf[a] = static_cast<T>(voxel_Distance[a]);
     }
 
-    // Bulk-write the distance buffer back to the output DataStore
     m_OutputStore->copyFromBuffer(0, nonstd::span<const T>(m_DistBuf, m_TotalVoxels));
   }
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeEuclideanDistMap::ComputeEuclideanDistMap(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                  ComputeEuclideanDistMapInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -280,27 +300,25 @@ ComputeEuclideanDistMap::ComputeEuclideanDistMap(DataStructure& dataStructure, c
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeEuclideanDistMap::~ComputeEuclideanDistMap() noexcept = default;
 
-// -----------------------------------------------------------------------------
 /**
- * @brief Core distance map computation, templated on the output type (int32 for
- * Manhattan distance, float32 for Euclidean distance).
+ * @brief Computes direct distance maps with full-volume resident buffers.
+ * @tparam T Specifies int32 city-block or float32 Euclidean output.
+ * @param dataStructure Contains the ImageGeom, Feature IDs, and output maps.
+ * @param inputValues Selects map types and identifies required objects.
+ * @param shouldCancel Signals cancellation during seed discovery.
+ * @param messageHandler Preserves the common algorithm call signature.
+ * @pre Requested output maps have the Feature ID tuple count.
  *
- * Direct in-memory strategy for the blocked/all-maps exception:
- *   This implementation front-loads DataStore access into contiguous buffers:
- *   1. Bulk-read the entire FeatureIds array into featureIdsBuf.
- *   2. Fill distance stores with -1, then bulk-read into local buffers (gbDistBuf, etc.).
- *   3. Boundary identification runs entirely on local buffers.
- *   4. Each ComputeDistanceMapImpl worker receives raw pointers (not DataStore refs),
- *      so propagation and distance correction use plain memory access.
- *   5. Workers write results back via a single copyFromBuffer() at the end.
+ * The function bulk-copies complete source and output arrays before worker tasks run. Workers then
+ * use local buffers and publish each map with one final bulk write. The normal dispatcher reserves
+ * this memory-heavy path for its measured resident exception.
  *
- * Out-of-core stores and the faster measured in-memory cases are dispatched to
- * ComputeEuclideanDistMapScanline instead.
+ * This function ignores bulk-I/O Result values. Cancellation during seed discovery returns without
+ * starting worker tasks. Output maps are filled with -1 before seed discovery. Cancellation can
+ * leave those initialized maps. Worker tasks do not inspect cancellation. This function does not use messageHandler.
  */
-// -----------------------------------------------------------------------------
 template <typename T>
 void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMapInputValues* inputValues, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& messageHandler)
 {
@@ -310,7 +328,7 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
   const auto& featureIdsStoreRef = dataStructure.getDataRefAs<Int32Array>(inputValues->FeatureIdsArrayPath).getDataStoreRef();
   usize totalVoxels = featureIdsStoreRef.getNumberOfTuples();
 
-  // Bulk-read the entire FeatureIds array into a local buffer for the direct path.
+  // Direct propagation needs contiguous resident Feature IDs.
   std::vector<int32> featureIdsBuf(totalVoxels);
   featureIdsStoreRef.copyIntoBuffer(0, nonstd::span<int32>(featureIdsBuf.data(), totalVoxels));
 
@@ -335,7 +353,7 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
     qpManhattanDistancesStore->fill(static_cast<T>(-1));
   }
 
-  // Bulk-read distance stores into local buffers after the fill(-1) call
+  // Each selected map starts at -1 before its local propagation buffer is filled.
   std::vector<T> gbDistBuf;
   if(inputValues->DoBoundaries)
   {
@@ -355,7 +373,7 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
     qpManhattanDistancesStore->copyIntoBuffer(0, nonstd::span<T>(qpDistBuf.data(), totalVoxels));
   }
 
-  // Create a temporary nearest neighbors vector (3 components per voxel)
+  // Each map category stores one nearest-seed index per voxel.
   std::vector<int64> nearestNeighbors(totalVoxels * 3, -1);
 
   const auto& selectedImageGeom = dataStructure.getDataRefAs<ImageGeom>(inputValues->InputImageGeometry);
@@ -375,8 +393,7 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
   std::array<int64, k_NumFaceNeighbors> neighborVoxelIndexOffsets = initializeFaceNeighborOffsets(dims);
   constexpr std::array<FaceNeighborType, k_NumFaceNeighbors> faceNeighborInternalIdx = initializeFaceNeighborInternalIdx();
 
-  // This entire loop finds all 3 kinds of grain boundaries,
-  // Feature Boundaries, Triple Junctions, QuadPoints
+  // The seed pass records distinct neighboring Feature IDs for each valid voxel.
   for(int64 voxelIndex = 0; voxelIndex < static_cast<int64>(totalVoxels); ++voxelIndex)
   {
     if(shouldCancel)
@@ -384,13 +401,12 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
       return;
     }
     feature = featureIdsBuf[voxelIndex];
-    if(feature > 0) // Ignore FeatureId = 0
+    if(feature > 0)
     {
       int64 xIdx = voxelIndex % dims[0];
       int64 yIdx = (voxelIndex / dims[0]) % dims[1];
       int64 zIdx = voxelIndex / (dims[0] * dims[1]);
 
-      // Loop over the 6 face neighbors of the voxel
       std::array<bool, k_NumFaceNeighbors> isValidFaceNeighbor = computeValidFaceNeighbors(xIdx, yIdx, zIdx, dims);
       for(const auto& faceIndex : faceNeighborInternalIdx)
       {
@@ -401,17 +417,11 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
 
         neighborPoint = voxelIndex + neighborVoxelIndexOffsets[faceIndex];
 
-        // If we are a proper neighbor voxel, i.e., have not stepped out of the virtual volume,
-        // and the featureId of the neighbor is NOT the currentFeatureId AND the
-        // neighborFeatureId is valid (greater than 0), then drop into this conditional
         if(featureIdsBuf[neighborPoint] != feature && featureIdsBuf[neighborPoint] >= 0)
         {
-          add = true; // Default to always adding this neighbor to the coordination vector
-          // Loop over the current vector of coordination values
+          add = true;
           for(const auto& coordination_value : coordination)
           {
-            // If the featureId of the neighbor voxel == the current coordination_value
-            // then we set the boolean to ignore this neighbor by setting `add = false`
             if(featureIdsBuf[neighborPoint] == coordination_value)
             {
               add = false;
@@ -420,24 +430,17 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
           }
           if(add)
           {
-            coordination.push_back(featureIdsBuf[neighborPoint]); // Push back the first neighbor found
+            coordination.push_back(featureIdsBuf[neighborPoint]);
           }
         }
       }
 
-      // now that the neighbors are found and the coordination size is found
-      // If no values were pushed into the coordination vector, then just initialize
-      // all 3 components of the nearestNeighbors to -1
       if(coordination.empty())
       {
         nearestNeighbors[voxelIndex * 3 + 0] = -1;
         nearestNeighbors[voxelIndex * 3 + 1] = -1;
         nearestNeighbors[voxelIndex * 3 + 2] = -1;
       }
-      // If ANY values were pushed back into the coordination vector, then this voxel
-      // is a grain boundary. Initialize the first component of the nearestNeighbor to the
-      // first value of the coordination vector.
-      // Initialize the GB output array to 0
       if(!coordination.empty() && inputValues->DoBoundaries)
       {
         gbDistBuf[voxelIndex] = 0;
@@ -446,9 +449,6 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
         nearestNeighbors[voxelIndex * 3 + 2] = -1;
       }
 
-      // Triple lines are defined as a line that separates 3, and only 3, grains.
-      // Initialize the nearestNeighbor components 0 and 1 to the first value in the coordination vector
-      // Initializes the TJ output array to 0;
       if(coordination.size() >= 2 && inputValues->DoTripleLines)
       {
         tjDistBuf[voxelIndex] = 0;
@@ -457,9 +457,6 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
         nearestNeighbors[voxelIndex * 3 + 2] = -1;
       }
 
-      // All other boundaries between 4 or more grains are Quadruple Points.
-      // Initialize the nearestNeighbor components 0, 1, 2 to the first value in the coordination vector
-      // Initializes the QP output array to 0.
       if(coordination.size() > 2 && inputValues->DoQuadPoints)
       {
         qpDistBuf[voxelIndex] = 0;
@@ -473,10 +470,7 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
 
   FloatVec3 spacing = selectedImageGeom.getSpacing();
 
-  // Now that we have all the necessary values, use TBB to initiate a task to compute
-  // the output for each kind of selected output.
-  // Each task gets its own distance buffer and the shared (read-only) featureIds buffer.
-  // The template parameter T already encodes the distance type (int32 for Manhattan, float32 for Euclidean).
+  // Each task owns one output buffer and reads the shared Feature ID buffer.
   ParallelTaskAlgorithm taskRunner;
   if(inputValues->DoBoundaries)
   {
@@ -495,17 +489,14 @@ void FindDistanceMap(DataStructure& dataStructure, const ComputeEuclideanDistMap
     taskRunner.execute(ComputeDistanceMapImpl<T, ComputeEuclideanDistMap::MapType::QuadPoint>(*inputValues, nearestNeighbors, featureIdsBuf.data(), qpDistBuf.data(), qpManhattanDistancesStore,
                                                                                               totalVoxels, udims, spacing));
   }
-  // Wait for tasks to complete
   taskRunner.wait();
 }
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeEuclideanDistMap::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ComputeEuclideanDistMap::operator()()
 {
   const auto* featureIdsArray = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
@@ -525,9 +516,8 @@ Result<> ComputeEuclideanDistMap::operator()()
 
   if(!forceDirectAlgorithm)
   {
-    // A same-storage 200^3 benchmark matrix found one clear direct-path win: in-memory
-    // data with blocked cells and all three maps enabled. Avoid the direct path's
-    // full-volume temporary arrays for every other workload and for all OOC stores.
+    // The measured direct win needs all maps and at least one blocked cell.
+    // Other workloads use scanline execution to avoid full-volume temporary buffers.
     const bool calculatesAllMaps = m_InputValues->DoBoundaries && m_InputValues->DoTripleLines && m_InputValues->DoQuadPoints;
     if(!calculatesAllMaps)
     {

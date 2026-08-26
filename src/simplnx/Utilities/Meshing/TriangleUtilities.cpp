@@ -30,6 +30,10 @@ using EdgeListT = std::set<std::pair<IGeometry::MeshIndexType, IGeometry::MeshIn
 inline constexpr uint64 k_WindingBatchRecords = 4096;
 inline constexpr usize k_WindingCachePages = 8;
 
+/**
+ * @struct VertexOccurrence
+ * @brief Stores one vertex use by a triangle corner.
+ */
 struct VertexOccurrence
 {
   IGeometry::MeshIndexType Vertex = 0;
@@ -37,6 +41,10 @@ struct VertexOccurrence
   uint8 Ordinal = 0;
 };
 
+/**
+ * @struct NeighborContribution
+ * @brief Stores one candidate-neighbor contribution to a source triangle.
+ */
 struct NeighborContribution
 {
   uint64 Source = 0;
@@ -44,6 +52,10 @@ struct NeighborContribution
   uint8 SourceOrdinal = 0;
 };
 
+/**
+ * @struct WindingNeighbor
+ * @brief Stores one ordered triangle-neighbor relation.
+ */
 struct WindingNeighbor
 {
   uint64 Source = 0;
@@ -51,6 +63,10 @@ struct WindingNeighbor
   uint8 SourceOrdinal = 0;
 };
 
+/**
+ * @struct FeatureSeed
+ * @brief Stores one candidate traversal seed for a feature label.
+ */
 struct FeatureSeed
 {
   int32 Feature = 0;
@@ -58,12 +74,20 @@ struct FeatureSeed
   uint8 Component = 0;
 };
 
+/**
+ * @struct NeighborIndex
+ * @brief Stores one source triangle's range in sorted neighbor records.
+ */
 struct NeighborIndex
 {
   uint64 First = 0;
   uint64 Count = 0;
 };
 
+/**
+ * @struct TriangleWindingState
+ * @brief Stores traversal and flip state for one triangle.
+ */
 struct TriangleWindingState
 {
   uint8 Visited = 0;
@@ -77,6 +101,12 @@ static_assert(std::is_trivially_copyable_v<FeatureSeed>);
 static_assert(std::is_trivially_copyable_v<NeighborIndex>);
 static_assert(std::is_trivially_copyable_v<TriangleWindingState>);
 
+/**
+ * @brief Decodes one trivially copyable record from bytes.
+ * @tparam T Specifies the record type.
+ * @param bytes Provides at least sizeof(T) bytes.
+ * @return Decoded record.
+ */
 template <typename T>
 T DecodeWindingRecord(nonstd::span<const std::byte> bytes)
 {
@@ -85,6 +115,13 @@ T DecodeWindingRecord(nonstd::span<const std::byte> bytes)
   return record;
 }
 
+/**
+ * @brief Compares two sortable record values.
+ * @tparam T Specifies an ordered value type.
+ * @param left Provides the first value.
+ * @param right Provides the second value.
+ * @return -1, 0, or 1 for ascending order.
+ */
 template <typename T>
 int32 CompareWindingValue(const T& left, const T& right)
 {
@@ -99,6 +136,12 @@ int32 CompareWindingValue(const T& left, const T& right)
   return 0;
 }
 
+/**
+ * @brief Compares vertex-occurrence records for external sorting.
+ * @param leftBytes Provides the first record.
+ * @param rightBytes Provides the second record.
+ * @return Ascending comparison by vertex, triangle, and ordinal.
+ */
 int32 CompareVertexOccurrences(nonstd::span<const std::byte> leftBytes, nonstd::span<const std::byte> rightBytes)
 {
   const VertexOccurrence left = DecodeWindingRecord<VertexOccurrence>(leftBytes);
@@ -114,6 +157,12 @@ int32 CompareVertexOccurrences(nonstd::span<const std::byte> leftBytes, nonstd::
   return CompareWindingValue(left.Ordinal, right.Ordinal);
 }
 
+/**
+ * @brief Compares neighbor-contribution records for external sorting.
+ * @param leftBytes Provides the first record.
+ * @param rightBytes Provides the second record.
+ * @return Ascending comparison by source, candidate, and ordinal.
+ */
 int32 CompareNeighborContributions(nonstd::span<const std::byte> leftBytes, nonstd::span<const std::byte> rightBytes)
 {
   const NeighborContribution left = DecodeWindingRecord<NeighborContribution>(leftBytes);
@@ -129,6 +178,12 @@ int32 CompareNeighborContributions(nonstd::span<const std::byte> leftBytes, nons
   return CompareWindingValue(left.SourceOrdinal, right.SourceOrdinal);
 }
 
+/**
+ * @brief Compares ordered winding-neighbor records for external sorting.
+ * @param leftBytes Provides the first record.
+ * @param rightBytes Provides the second record.
+ * @return Ascending comparison by source, ordinal, and candidate.
+ */
 int32 CompareWindingNeighbors(nonstd::span<const std::byte> leftBytes, nonstd::span<const std::byte> rightBytes)
 {
   const WindingNeighbor left = DecodeWindingRecord<WindingNeighbor>(leftBytes);
@@ -144,6 +199,12 @@ int32 CompareWindingNeighbors(nonstd::span<const std::byte> leftBytes, nonstd::s
   return CompareWindingValue(left.Candidate, right.Candidate);
 }
 
+/**
+ * @brief Compares feature-seed records for external sorting.
+ * @param leftBytes Provides the first record.
+ * @param rightBytes Provides the second record.
+ * @return Ascending comparison by feature, triangle, and component.
+ */
 int32 CompareFeatureSeeds(nonstd::span<const std::byte> leftBytes, nonstd::span<const std::byte> rightBytes)
 {
   const FeatureSeed left = DecodeWindingRecord<FeatureSeed>(leftBytes);
@@ -159,6 +220,12 @@ int32 CompareFeatureSeeds(nonstd::span<const std::byte> leftBytes, nonstd::span<
   return CompareWindingValue(left.Component, right.Component);
 }
 
+/**
+ * @brief Creates an external sorter for one winding record type.
+ * @tparam T Specifies the record type.
+ * @param compare Specifies record ordering.
+ * @return External sorter or provider error.
+ */
 template <typename T>
 Result<std::unique_ptr<IExternalSort>> CreateWindingSort(ExternalSortCompare compare)
 {
@@ -174,6 +241,12 @@ Result<std::unique_ptr<IExternalSort>> CreateWindingSort(ExternalSortCompare com
   return result;
 }
 
+/**
+ * @brief Creates a temporary store for one winding record type.
+ * @tparam T Specifies the record type.
+ * @param recordCount Specifies initial records.
+ * @return Temporary store or provider error.
+ */
 template <typename T>
 Result<std::unique_ptr<ITemporaryRecordStore>> CreateWindingRecordStore(uint64 recordCount)
 {
@@ -189,10 +262,20 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateWindingRecordStore(uint64 r
   return result;
 }
 
+/**
+ * @class WindingSortAppender
+ * @brief Appends typed winding records through a bounded batch buffer.
+ * @tparam T Specifies the record type.
+ */
 template <typename T>
 class WindingSortAppender
 {
 public:
+  /**
+   * @brief Creates a buffered appender for one external sorter.
+   * @param sorter Receives record batches.
+   * @param shouldCancel Stops sorter operations when true.
+   */
   WindingSortAppender(IExternalSort& sorter, const std::atomic_bool& shouldCancel)
   : m_Sorter(sorter)
   , m_ShouldCancel(shouldCancel)
@@ -200,6 +283,11 @@ public:
     m_Buffer.reserve(k_WindingBatchRecords);
   }
 
+  /**
+   * @brief Adds one record and flushes a full batch.
+   * @param record Specifies the record.
+   * @return Allocation or sorter-append error, or success.
+   */
   Result<> append(const T& record)
   {
     try
@@ -216,6 +304,10 @@ public:
     return {};
   }
 
+  /**
+   * @brief Flushes the current record batch.
+   * @return Sorter-append error or success.
+   */
   Result<> flush()
   {
     if(m_Buffer.empty())
@@ -237,16 +329,31 @@ private:
   std::vector<T> m_Buffer;
 };
 
+/**
+ * @class WindingSortReader
+ * @brief Reads sorted winding records through one bounded page.
+ * @tparam T Specifies the record type.
+ */
 template <typename T>
 class WindingSortReader
 {
 public:
+  /**
+   * @brief Creates a paged reader for one completed sorter.
+   * @param sorter Provides sorted records.
+   * @param shouldCancel Stops sorter reads when true.
+   */
   WindingSortReader(const IExternalSort& sorter, const std::atomic_bool& shouldCancel)
   : m_Sorter(sorter)
   , m_ShouldCancel(shouldCancel)
   {
   }
 
+  /**
+   * @brief Reads one sorted record.
+   * @param index Specifies the record index.
+   * @return Record or range, allocation, or provider error.
+   */
   Result<T> read(uint64 index)
   {
     if(index >= m_Sorter.recordCount())
@@ -289,10 +396,21 @@ private:
   std::vector<T> m_Page;
 };
 
+/**
+ * @class WindingDataStoreCache
+ * @brief Provides bounded LRU tuple access to one DataStore.
+ * @tparam T Specifies the scalar type.
+ */
 template <typename T>
 class WindingDataStoreCache
 {
 public:
+  /**
+   * @brief Creates a read-only tuple cache.
+   * @param store Provides source tuples.
+   * @param tuplesPerPage Specifies page tuple count.
+   * @param maximumPages Limits resident pages.
+   */
   WindingDataStoreCache(const AbstractDataStore<T>& store, uint64 tuplesPerPage, usize maximumPages)
   : m_Store(store)
   , m_TuplesPerPage(tuplesPerPage)
@@ -300,6 +418,12 @@ public:
   {
   }
 
+  /**
+   * @brief Creates a mutable tuple cache.
+   * @param store Provides and receives tuples.
+   * @param tuplesPerPage Specifies page tuple count.
+   * @param maximumPages Limits resident pages.
+   */
   WindingDataStoreCache(AbstractDataStore<T>& store, uint64 tuplesPerPage, usize maximumPages)
   : m_Store(store)
   , m_MutableStore(&store)
@@ -308,6 +432,12 @@ public:
   {
   }
 
+  /**
+   * @brief Reads one tuple through the cache.
+   * @param tupleIndex Specifies the tuple.
+   * @param tuple Receives all tuple components.
+   * @return Shape, range, allocation, or source-read error, or success.
+   */
   Result<> readTuple(uint64 tupleIndex, nonstd::span<T> tuple)
   {
     if(tuple.size() != m_Store.getNumberOfComponents())
@@ -325,6 +455,12 @@ public:
     return {};
   }
 
+  /**
+   * @brief Updates one cached tuple and marks its page dirty.
+   * @param tupleIndex Specifies the tuple.
+   * @param tuple Provides all tuple components.
+   * @return Mutability, shape, range, allocation, or source-read error, or success.
+   */
   Result<> writeTuple(uint64 tupleIndex, nonstd::span<const T> tuple)
   {
     if(m_MutableStore == nullptr)
@@ -347,6 +483,10 @@ public:
     return {};
   }
 
+  /**
+   * @brief Flushes all dirty pages.
+   * @return First destination-write error, or success.
+   */
   Result<> flush()
   {
     for(Page& page : m_Pages)
@@ -361,6 +501,10 @@ public:
   }
 
 private:
+  /**
+   * @struct Page
+   * @brief Stores one tuple page and its dirty state.
+   */
   struct Page
   {
     uint64 FirstTuple = 0;
@@ -369,6 +513,11 @@ private:
     std::vector<T> Values;
   };
 
+  /**
+   * @brief Returns or loads the page for one tuple.
+   * @param tupleIndex Specifies the tuple.
+   * @return Page reference or cache error.
+   */
   Result<std::reference_wrapper<Page>> loadPage(uint64 tupleIndex)
   {
     const uint64 tupleCount = static_cast<uint64>(m_Store.getNumberOfTuples());
@@ -419,6 +568,11 @@ private:
     return {std::ref(m_Pages.front())};
   }
 
+  /**
+   * @brief Writes one dirty page to the mutable store.
+   * @param page Provides cached values and destination range.
+   * @return Mutability or destination-write error, or success.
+   */
   Result<> flushPage(Page& page)
   {
     if(!page.Dirty)
@@ -445,11 +599,24 @@ private:
   std::list<Page> m_Pages;
 };
 
+/**
+ * @brief Finalizes one external winding sort.
+ * @param sorter Provides appended records.
+ * @param shouldCancel Stops sort work when true.
+ * @return Sorter error or success.
+ */
 Result<> FinishWindingSort(IExternalSort& sorter, const std::atomic_bool& shouldCancel)
 {
   return sorter.finish(shouldCancel, {});
 }
 
+/**
+ * @brief Tests whether two triangle windings use a shared edge in the same direction.
+ * @param triangle Provides source connectivity.
+ * @param neighbor Provides adjacent connectivity.
+ * @param neighborUnmodified Applies synthetic reversal when true.
+ * @return True when directed shared edges conflict.
+ */
 bool DirectedEdgesConflict(const std::array<IGeometry::MeshIndexType, 3>& triangle, const std::array<IGeometry::MeshIndexType, 3>& neighbor, bool neighborUnmodified)
 {
   const std::array<std::pair<IGeometry::MeshIndexType, IGeometry::MeshIndexType>, 3> triangleEdges = {std::make_pair(triangle[0], triangle[1]), std::make_pair(triangle[1], triangle[2]),
@@ -467,31 +634,29 @@ bool DirectedEdgesConflict(const std::array<IGeometry::MeshIndexType, 3>& triang
   return false;
 }
 
+/**
+ * @brief Repairs resident triangle winding independently for each face label.
+ * @param triangles Provides and receives flat triangle connectivity.
+ * @param numTris Specifies triangle count.
+ * @param neighbors Provides adjacent triangles.
+ * @param faceLabels Provides two labels per triangle.
+ * @param shouldCancel Stops before later traversal work when true.
+ * @param mesgHandler Receives progress messages.
+ * @param maxFeature Specifies the largest positive label.
+ * @return Warning for unrepaired triangles, or success after cancellation.
+ * @pre The mesh has no duplicate vertices.
+ */
 Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize numTris, const DynamicListArray<uint16, IGeometry::MeshIndexType>& neighbors, const int32* faceLabels,
                                    const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler, int32 maxFeature)
 {
-  /**
-   * This works by making a map of the edges since a properly wound mesh
-   * should have unique edges. The KEY assumption here is that there are NO
-   * DUPLICATE VERTICES IN THE MESH, hence the earlier validation.
-   *
-   * This assumption breaks down if more than two triangles share an edge,
-   * so we will be going feature by feature to avoid running into "corner-edges"
-   * (where three or more features meet).
-   *
-   * NOTE: no duplicate vertices, means no duplicate edges
-   */
-
-  // Walk the features repairing the graph group by group
+  // Process each label separately because three-feature junction edges are not manifold.
   usize count = 0;
   auto start = std::chrono::steady_clock::now();
   std::vector<bool> visited(numTris, false);
   std::vector<bool> unmodified(numTris, false);
 
-  // Single-pass seed precompute: record the first triangle (in ascending index order) that
-  // belongs to each feature. Scanning triangles once in ascending order and keeping only the
-  // first match per feature reproduces exactly the triangle the original per-feature scan below
-  // would have found first, but does so in O(numTris) instead of O(maxFeature * numTris).
+  // Find each feature's first triangle in one ascending pass. This preserves
+  // deterministic seeds without a feature-by-triangle search.
   std::vector<int64> firstSeedPerFeature(maxFeature + 1, -1);
   for(usize i = 0; i < numTris; i++)
   {
@@ -511,7 +676,7 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
   {
     std::queue<IGeometry::MeshIndexType> searchTargets = {};
 
-    // process base case: the seed triangle for this feature was already located in the precompute pass above
+    // Start traversal from the precomputed seed for this feature.
     const int64 seed = firstSeedPerFeature[feature];
     if(seed >= 0)
     {
@@ -532,7 +697,6 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
       visited[i] = true;
     }
 
-    // begin mass search
     while(!searchTargets.empty())
     {
       if(shouldCancel)
@@ -540,7 +704,6 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
         return {};
       }
 
-      // Dequeue a vertex from queue and store it
       const IGeometry::MeshIndexType triangle = searchTargets.front();
       searchTargets.pop();
 
@@ -574,7 +737,7 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
 
       visited[triangle] = true;
 
-      // Load valid adjacent triangle's edges into a list
+      // Collect directed edges from adjacent triangles already visited.
       EdgeListT edgeList = {};
       for(const usize neighbor : localNeighbors)
       {
@@ -589,24 +752,21 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
 
         if(unmodified[neighbor])
         {
-          // synthetic flip to maintain homogeneity
+          // Apply the stored synthetic reversal for this feature traversal.
           edge1 = std::make_pair(triangles[(neighbor * 3) + 0], triangles[(neighbor * 3) + 2]);
           edge2 = std::make_pair(triangles[(neighbor * 3) + 2], triangles[(neighbor * 3) + 1]);
           edge3 = std::make_pair(triangles[(neighbor * 3) + 1], triangles[(neighbor * 3) + 0]);
         }
 
-        // Edges are unique
         edgeList.emplace(std::move(edge1));
         edgeList.emplace(std::move(edge2));
         edgeList.emplace(std::move(edge3));
       }
 
-      // This is computationally heavy
       if(edgeList.find(std::make_pair(triangles[(triangle * 3) + 0], triangles[(triangle * 3) + 1])) != edgeList.end() ||
          edgeList.find(std::make_pair(triangles[(triangle * 3) + 1], triangles[(triangle * 3) + 2])) != edgeList.end() ||
          edgeList.find(std::make_pair(triangles[(triangle * 3) + 2], triangles[(triangle * 3) + 0])) != edgeList.end()) // If true it contains a conflicting edge
       {
-        // check if previously visited
         const usize offset = faceLabels[triangle * 2] == feature ? 1 : 0;
         const int32 alternateLabel = faceLabels[(triangle * 2) + offset];
         if(alternateLabel != 0 && alternateLabel < feature)
@@ -616,7 +776,7 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
         }
         else
         {
-          // Flip it
+          // Reverse connectivity when no earlier feature owns this decision.
           const IGeometry::MeshIndexType tempValue = triangles[(triangle * 3) + 0];
           triangles[(triangle * 3) + 0] = triangles[(triangle * 3) + 2];
           triangles[(triangle * 3) + 2] = tempValue;
@@ -633,29 +793,27 @@ Result<> ProcessWindingsWithLabels(IGeometry::MeshIndexType* triangles, usize nu
   return {};
 }
 
+/**
+ * @brief Repairs resident triangle winding independently for each region ID.
+ * @param triangles Provides and receives flat triangle connectivity.
+ * @param numTris Specifies triangle count.
+ * @param neighbors Provides adjacent triangles.
+ * @param regions Provides one region ID per triangle.
+ * @param shouldCancel Stops before later traversal work when true.
+ * @param mesgHandler Receives progress messages.
+ * @param maxFeature Specifies the largest positive region ID.
+ * @return Success after completion or cancellation.
+ * @pre The mesh has no duplicate vertices.
+ */
 Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize numTris, const DynamicListArray<uint16, IGeometry::MeshIndexType>& neighbors, const int32* regions,
                                     const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler, int32 maxFeature)
 {
-  /**
-   * This works by making a map of the edges since a properly wound mesh
-   * should have unique edges. The KEY assumption here is that there are NO
-   * DUPLICATE VERTICES IN THE MESH, hence the earlier validation.
-   *
-   * This assumption breaks down if more than two triangles share an edge,
-   * so we will be going feature by feature to avoid running into "corner-edges"
-   * (where three or more features meet).
-   *
-   * NOTE: no duplicate vertices, means no duplicate edges
-   */
-
-  // Walk the features repairing the graph group by group
+  // Process each region separately because multi-region junction edges are not manifold.
   auto start = std::chrono::steady_clock::now();
   std::vector<bool> visited(numTris, false);
 
-  // Single-pass seed precompute: record the first triangle (in ascending index order) that
-  // belongs to each region. Scanning triangles once in ascending order and keeping only the
-  // first match per region reproduces exactly the triangle the original per-feature scan below
-  // would have found first, but does so in O(numTris) instead of O(maxFeature * numTris).
+  // Find each region's first triangle in one ascending pass. This preserves
+  // deterministic seeds without a region-by-triangle search.
   std::vector<int64> firstSeedPerFeature(maxFeature + 1, -1);
   for(usize i = 0; i < numTris; i++)
   {
@@ -670,7 +828,7 @@ Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize n
   {
     std::queue<IGeometry::MeshIndexType> searchTargets = {};
 
-    // process base case: the seed triangle for this feature was already located in the precompute pass above
+    // Start traversal from the precomputed seed for this region.
     const int64 seed = firstSeedPerFeature[feature];
     if(seed >= 0)
     {
@@ -691,7 +849,6 @@ Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize n
       visited[i] = true;
     }
 
-    // begin mass search
     while(!searchTargets.empty())
     {
       if(shouldCancel)
@@ -699,7 +856,6 @@ Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize n
         return {};
       }
 
-      // Dequeue a vertex from queue and store it
       const IGeometry::MeshIndexType triangle = searchTargets.front();
       searchTargets.pop();
 
@@ -733,7 +889,7 @@ Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize n
 
       visited[triangle] = true;
 
-      // Load valid adjacent triangle's edges into a list
+      // Collect directed edges from adjacent triangles already visited.
       EdgeListT edgeList = {};
       for(const usize neighbor : localNeighbors)
       {
@@ -742,18 +898,16 @@ Result<> ProcessWindingsWithRegions(IGeometry::MeshIndexType* triangles, usize n
           continue;
         }
 
-        // Edges are unique
         edgeList.emplace(triangles[(neighbor * 3) + 0], triangles[(neighbor * 3) + 1]);
         edgeList.emplace(triangles[(neighbor * 3) + 1], triangles[(neighbor * 3) + 2]);
         edgeList.emplace(triangles[(neighbor * 3) + 2], triangles[(neighbor * 3) + 0]);
       }
 
-      // This is computationally heavy
       if(edgeList.find(std::make_pair(triangles[(triangle * 3) + 0], triangles[(triangle * 3) + 1])) != edgeList.end() ||
          edgeList.find(std::make_pair(triangles[(triangle * 3) + 1], triangles[(triangle * 3) + 2])) != edgeList.end() ||
          edgeList.find(std::make_pair(triangles[(triangle * 3) + 2], triangles[(triangle * 3) + 0])) != edgeList.end()) // If true it contains a conflicting edge
       {
-        // Flip it
+        // Reverse connectivity when a directed shared edge conflicts.
         const IGeometry::MeshIndexType tempValue = triangles[(triangle * 3) + 0];
         triangles[(triangle * 3) + 0] = triangles[(triangle * 3) + 2];
         triangles[(triangle * 3) + 2] = tempValue;
@@ -771,7 +925,7 @@ INodeGeometry2D::SharedVertexList::value_type MeshingUtilities::detail::FindTria
   const usize vertBIndex = vertIndices[1] * 3;
   const usize vertCIndex = vertIndices[2] * 3;
 
-  // This is a 3x3 matrix laid out in typical "C" order where the columns raster the fastest, then the rows
+  // The 3 by 3 matrix uses row-major C order.
   std::array<INodeGeometry2D::SharedVertexList::value_type, 9> volumeMatrix = {
       vertices[vertBIndex + 0] - vertices[vertAIndex + 0], vertices[vertCIndex + 0] - vertices[vertAIndex + 0], 0.0f - vertices[vertAIndex + 0],
       vertices[vertBIndex + 1] - vertices[vertAIndex + 1], vertices[vertCIndex + 1] - vertices[vertAIndex + 1], 0.0f - vertices[vertAIndex + 1],
@@ -800,7 +954,7 @@ Result<> MeshingUtilities::RepairTriangleWinding(INodeGeometry2D::SharedFaceList
   const usize numTris = triangles.getNumberOfTuples();
   const usize idsSize = idsStore.getSize(); // numTris * numComp
 
-  // Bulk-read triangles into local buffer to avoid per-element OOC overhead
+  // Read all triangles before direct traversal.
   auto triBuf = std::make_unique<IGeometry::MeshIndexType[]>(numTris * 3);
   auto triangleReadResult = triangles.copyIntoBuffer(0, nonstd::span<IGeometry::MeshIndexType>(triBuf.get(), numTris * 3));
   if(triangleReadResult.invalid())
@@ -808,7 +962,7 @@ Result<> MeshingUtilities::RepairTriangleWinding(INodeGeometry2D::SharedFaceList
     return triangleReadResult;
   }
 
-  // Bulk-read ids into local buffer
+  // Read all IDs before direct traversal.
   auto idsBuf = std::make_unique<int32[]>(idsSize);
   auto idReadResult = idsStore.copyIntoBuffer(0, nonstd::span<int32>(idsBuf.get(), idsSize));
   if(idReadResult.invalid())
@@ -816,7 +970,7 @@ Result<> MeshingUtilities::RepairTriangleWinding(INodeGeometry2D::SharedFaceList
     return idReadResult;
   }
 
-  // Find max feature from local buffer
+  // Determine the traversal feature range from local IDs.
   int32 maxFeature = 0;
   for(usize i = 0; i < idsSize; i++)
   {
@@ -833,7 +987,7 @@ Result<> MeshingUtilities::RepairTriangleWinding(INodeGeometry2D::SharedFaceList
     result = ::ProcessWindingsWithRegions(triBuf.get(), numTris, neighbors, idsBuf.get(), shouldCancel, mesgHandler, maxFeature);
   }
 
-  // Bulk-write modified triangles back
+  // Write repaired triangles in one transfer.
   auto triangleWriteResult = triangles.copyFromBuffer(0, nonstd::span<const IGeometry::MeshIndexType>(triBuf.get(), numTris * 3));
   if(triangleWriteResult.invalid())
   {

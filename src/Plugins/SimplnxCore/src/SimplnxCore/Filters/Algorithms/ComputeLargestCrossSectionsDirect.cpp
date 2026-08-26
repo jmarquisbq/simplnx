@@ -18,6 +18,20 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @brief Counts Feature Id values in one strided plane.
+ * @tparam FeatureIdsT Specifies the indexed Feature Id store type.
+ * @param featureCounts Receives counts for each Feature Id.
+ * @param featureIds Provides the flat Feature Id values.
+ * @param planeOffset Identifies the first value in the plane.
+ * @param firstDimension Specifies the first plane dimension.
+ * @param secondDimension Specifies the second plane dimension.
+ * @param firstStride Specifies the flat step along the first dimension.
+ * @param secondStride Specifies the flat step along the second dimension.
+ *
+ * The caller selects strides for the requested image plane. Feature 0 is
+ * counted here and excluded when maximum areas are updated.
+ */
 template <class FeatureIdsT>
 void CountPlane(std::vector<float32>& featureCounts, const FeatureIdsT& featureIds, usize planeOffset, usize firstDimension, usize secondDimension, usize firstStride, usize secondStride)
 {
@@ -32,6 +46,15 @@ void CountPlane(std::vector<float32>& featureCounts, const FeatureIdsT& featureI
   }
 }
 
+/**
+ * @brief Updates maximum feature areas from one plane.
+ * @param featureCounts Provides counts for each Feature Id.
+ * @param numFeatures Specifies the number of feature tuples.
+ * @param areaScalar Converts a cell count to physical area.
+ * @param largestCrossSections Receives maximum areas.
+ *
+ * Feature 0 is the background tuple and remains unchanged.
+ */
 void UpdateLargestCrossSections(const float32* featureCounts, usize numFeatures, float32 areaScalar, float32* largestCrossSections)
 {
   for(usize featureId = 1; featureId < numFeatures; featureId++)
@@ -44,8 +67,20 @@ void UpdateLargestCrossSections(const float32* featureCounts, usize numFeatures,
   }
 }
 
+/**
+ * @struct XzCrossSectionScratch
+ * @brief Holds one XZ worker's counts and local maxima.
+ *
+ * Each worker owns one instance. The serial reduction combines maxima after
+ * parallel reads finish.
+ */
 struct XzCrossSectionScratch
 {
+  /**
+   * @brief Creates zeroed counts and copies the starting maxima.
+   * @param numFeatures Specifies the number of feature tuples.
+   * @param initialLargestCrossSections Provides the output values before work.
+   */
   XzCrossSectionScratch(usize numFeatures, const std::vector<float32>& initialLargestCrossSections)
   : featureCounts(numFeatures, 0.0f)
   , largestCrossSections(initialLargestCrossSections)
@@ -58,9 +93,27 @@ struct XzCrossSectionScratch
 
 using XzCrossSectionThreadScratch = tbb::combinable<XzCrossSectionScratch>;
 
+/**
+ * @class ComputeXzCrossSectionsImpl
+ * @brief Counts independent XZ planes with worker-local scratch.
+ *
+ * Workers read an immutable raw pointer. The serial reduction updates shared
+ * maxima after workers finish and prevents concurrent write races.
+ */
 class ComputeXzCrossSectionsImpl
 {
 public:
+  /**
+   * @brief Creates an XZ-plane worker.
+   * @param featureIds Points to the contiguous Feature Id values.
+   * @param xCells Specifies the X dimension.
+   * @param zCells Specifies the Z dimension.
+   * @param sliceSize Specifies the number of cells in one XY slice.
+   * @param numFeatures Specifies the number of feature tuples.
+   * @param areaScalar Converts a cell count to physical area.
+   * @param threadScratch Provides one scratch instance per worker.
+   * @param shouldCancel Stops later rows when true.
+   */
   ComputeXzCrossSectionsImpl(const int32* featureIds, usize xCells, usize zCells, usize sliceSize, usize numFeatures, float32 areaScalar, XzCrossSectionThreadScratch& threadScratch,
                              const std::atomic_bool& shouldCancel)
   : m_FeatureIds(featureIds)
@@ -74,6 +127,12 @@ public:
   {
   }
 
+  /**
+   * @brief Counts XZ planes for a range of Y indexes.
+   * @param range Specifies the half-open Y-index range.
+   *
+   * The worker checks cancellation before each Y plane.
+   */
   void operator()(const Range& range) const
   {
     XzCrossSectionScratch& scratch = m_ThreadScratch.local();
@@ -239,6 +298,7 @@ Result<> ComputeLargestCrossSectionsDirect::operator()()
 
     if(m_InputValues->Plane == 2)
     {
+      // Limit per-block counts to keep YZ scratch bounded for many features.
       constexpr usize k_MaxXPlaneBlockSize = 16;
       constexpr usize k_TargetFeatureCountEntries = 65536;
       const usize xPlaneBlockSize = std::min({xCells, k_MaxXPlaneBlockSize, std::max<usize>(1, k_TargetFeatureCountEntries / std::max<usize>(1, numFeatures))});

@@ -117,10 +117,8 @@ IFilter::PreflightResult ScalarSegmentFeaturesFilter::preflightImpl(const DataSt
   const std::vector<usize> cellTupleDims = {gridDims[2], gridDims[1], gridDims[0]};
   std::vector<DataPath> dataPaths;
 
-  // Input Array
   dataPaths.push_back(inputDataPath);
 
-  // Validate the GoodVoxels/Mask Array combination
   bool useGoodVoxels = filterArgs.value<bool>(k_UseMask_Key);
   if(useGoodVoxels)
   {
@@ -134,10 +132,8 @@ IFilter::PreflightResult ScalarSegmentFeaturesFilter::preflightImpl(const DataSt
     return {MakeErrorResult<OutputActions>(-651, fmt::format("The following DataArrays all must have equal number of tuples but this was not satisfied.\n{}", tupleValidityCheck.error()))};
   }
 
-  // Create the Cell Level FeatureIds array
   auto createFeatureIdsAction = std::make_unique<CreateArrayAction>(DataType::int32, cellTupleDims, std::vector<usize>{1}, featureIdsPath, "", "0");
 
-  // Create the Feature Attribute Matrix
   auto createFeatureGroupAction = std::make_unique<CreateAttributeMatrixAction>(cellFeaturesPath, std::vector<usize>{1});
   auto createActiveAction = std::make_unique<CreateArrayAction>(DataType::uint8, std::vector<usize>{1}, std::vector<usize>{1}, activeArrayPath, "", "1");
 
@@ -197,7 +193,8 @@ Result<Arguments> ScalarSegmentFeaturesFilter::FromSIMPLJson(const nlohmann::jso
   Result<> randomizeResult = SIMPLConversion::ConvertParameter<SIMPLConversion::BooleanFilterParameterConverter>(args, json, SIMPL::k_RandomizeFeatureIdsKey, k_RandomizeFeatures_Key);
   if(randomizeResult.valid())
   {
-    // This parameter does not appear in 6.5, thus we only include it in the output if it's valid
+    // DREAM3D 6.5 pipelines omit this setting. The importer retains the setting
+    // when the input contains it.
     results.push_back(std::move(randomizeResult));
   }
   results.push_back(SIMPLConversion::ConvertParameter<SIMPLConversion::DataArraySelectionFilterParameterConverter>(args, json, SIMPL::k_ScalarArrayPathKey, k_InputArrayPathKey));

@@ -25,19 +25,34 @@
 #include <string>
 
 #if defined(_MSC_VER)
+/**
+ * @def FSEEK64
+ * @brief Selects the 64-bit file-seek function.
+ */
 #define FSEEK64 _fseeki64
 #else
+/**
+ * @def FSEEK64
+ * @brief Selects the 64-bit file-seek function.
+ */
 #define FSEEK64 std::fseek
 #endif
 
+/**
+ * @namespace nx::core
+ * @brief Contains simplnx core types and functions.
+ */
 namespace nx::core
 {
 /**
- * @brief Replaces every value in an array based on a `mask` array.
- * @tparam T The primitive type used in the data array
- * @param inputArrayPtr InputArray that will have values replaced
- * @param condDataPtr The mask array as a boolean array
- * @param replaceValue The value that will be used for every place the conditional array is TRUE
+ * @brief Replaces tuples selected by a mask.
+ * @tparam T Input array value type.
+ * @tparam ConditionalType Mask array value type.
+ * @param inputArrayPtr Array to modify.
+ * @param condArrayPtr Mask array.
+ * @param replaceValue Value stored in selected tuples.
+ * @param invertMask True to select false mask values.
+ * @pre condArrayPtr is not null and has one tuple for each input tuple.
  */
 template <class T, typename ConditionalType>
 void ReplaceValue(DataArray<T>& inputArrayPtr, const DataArray<ConditionalType>* condArrayPtr, T replaceValue, bool invertMask = false)
@@ -68,16 +83,21 @@ void ReplaceValue(DataArray<T>& inputArrayPtr, const DataArray<ConditionalType>*
 }
 
 /**
- * @brief Replaces a value in an array based on a boolean mask.
- * @tparam T Primitive type used for the DataArray
- * @param valueAsStr The value that will be used for the replacement
- * @param inputDataObject Input DataArray that will have values replaced (possibly)
- * @param conditionalDataArray The mask array as a boolean array
- * @return True or False whether the replacement algorithm was run. This function can
- * return FALSE if the wrong array type is specified as the template parameter
+ * @struct ConditionalReplaceValueInArrayFromString
+ * @brief Replaces selected array values from parsed text.
  */
 struct ConditionalReplaceValueInArrayFromString
 {
+  /**
+   * @brief Parses and replaces selected array values.
+   * @tparam T Input array value type.
+   * @param valueAsStr Text that supplies the replacement value.
+   * @param inputDataObject Array to modify.
+   * @param conditionalDataArray Mask array.
+   * @param invertMask True to select false mask values.
+   * @return Error if parsing or mask type validation fails.
+   * @throws std::bad_cast If inputDataObject is not DataArray<T>.
+   */
   template <class T>
   Result<> operator()(const std::string& valueAsStr, DataObject& inputDataObject, const IDataArray& conditionalDataArray, const bool invertMask = false)
   {
@@ -113,14 +133,23 @@ struct ConditionalReplaceValueInArrayFromString
 };
 
 /**
- * @brief Replaces a value in an array based on a boolean mask.
- * @param valueAsStr The value that will be used for the replacement
- * @param inputDataObject Input DataArray that will have values replaced (possibly)
- * @param conditionalDataArray The mask array as a boolean array
- * @return
+ * @brief Replaces selected array values from parsed text.
+ * @param valueAsStr Text that supplies the replacement value.
+ * @param inputDataObject Array to modify.
+ * @param conditionalDataArray Mask array.
+ * @param invertmask True to select false mask values.
+ * @return Error if parsing or mask type validation fails.
+ * @throws std::bad_cast If inputDataObject is not IDataArray.
  */
 SIMPLNX_EXPORT Result<> ConditionalReplaceValueInArray(const std::string& valueAsStr, DataObject& inputDataObject, const IDataArray& conditionalDataArray, bool invertmask = false);
 
+/**
+ * @brief Converts an array to a selected storage format.
+ * @tparam T Array value type.
+ * @param dataArray Array whose store is replaced.
+ * @param dataFormat Target storage format.
+ * @return True if conversion succeeds.
+ */
 template <typename T>
 bool ConvertDataArrayDataStore(const std::shared_ptr<DataArray<T>> dataArray, const std::string& dataFormat)
 {
@@ -139,19 +168,27 @@ bool ConvertDataArrayDataStore(const std::shared_ptr<DataArray<T>> dataArray, co
   return true;
 }
 
+/**
+ * @brief Converts an untyped array to a selected storage format.
+ * @param dataArray Array whose store is replaced.
+ * @param dataFormat Target storage format.
+ * @return True if conversion succeeds.
+ * @pre dataArray is not null.
+ */
 bool ConvertIDataArray(const std::shared_ptr<IDataArray>& dataArray, const std::string& dataFormat);
 
 /**
- * @brief Creates a NeighborList array with the given properties
- * @tparam T Primitive Type (int, float, ...)
- * @param dataStructure The DataStructure to use
- * @param tupleShape The Tuple Dimensions
- * @param path The DataPath to where the list  will be stored.
- * @param mode The mode to assume: PREFLIGHT or EXECUTE. Preflight will NOT allocate any storage. EXECUTE will allocate the memory/storage
- * @param dataFormat An explicit per-filter storage format override, or "" to defer to the format
- *                   resolver. Threaded through to CreateListStore so a filter can force a specific
- *                   backing store format; empty means "Automatic" (let the resolver decide).
- * @return
+ * @brief Creates a NeighborList with resolver-selected storage.
+ * @tparam T Neighbor-list value type.
+ * @param dataStructure Data structure that owns the list.
+ * @param tupleShape Tuple dimensions.
+ * @param path Destination list path.
+ * @param mode Preflight or execute mode.
+ * @param dataFormat Explicit storage format, or empty for resolver selection.
+ * @return Error if parent lookup or list creation fails.
+ * @pre path has at least one segment.
+ *
+ * The data structure owns the created NeighborList.
  */
 template <class T>
 Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleShape, const DataPath& path, IDataAction::Mode mode, const std::string& dataFormat = "")
@@ -175,10 +212,7 @@ Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleSha
   const usize last = path.getLength() - 1;
 
   std::string name = path[last];
-  // Route through the format resolver so NeighborLists get OOC-backed storage
-  // when the OOC plugin is loaded and the array is eligible (the geometry walk
-  // in the resolver still forces in-core for unstructured/poly geometries). An
-  // explicit per-filter dataFormat override, when supplied, wins over the resolver.
+  // The resolver selects OOC storage when eligible. Unstructured geometry remains in-core.
   auto listStore = DataStoreUtilities::CreateListStore<T>(dataStructure, path, tupleShape, mode, dataFormat);
   NeighborList<T>* neighborList = NeighborList<T>::Create(dataStructure, name, listStore, dataObjectId);
 
@@ -191,11 +225,12 @@ Result<> CreateNeighbors(DataStructure& dataStructure, const ShapeType& tupleSha
 }
 
 /**
- * @brief
- * @tparam T
- * @param data
- * @param path
- * @return
+ * @brief Returns a typed array at a data path.
+ * @tparam T Array value type.
+ * @param dataStructure Data structure to search.
+ * @param path Array path.
+ * @return Reference to a DataArray<T> owned by dataStructure.
+ * @throws std::runtime_error If path does not identify DataArray<T>.
  */
 template <class T>
 DataArray<T>& ArrayRefFromPath(DataStructure& dataStructure, const DataPath& path)
@@ -210,17 +245,17 @@ DataArray<T>& ArrayRefFromPath(DataStructure& dataStructure, const DataPath& pat
 }
 
 /**
- * @brief Reads a binary file into a pre-allocated DataArray in bounded pages.
+ * @brief Reads a binary file into a preallocated array in bounded pages.
  *
  * Each page is optionally byte-swapped locally and committed with
  * copyFromBuffer(), so disk-backed destinations do not incur one write per value.
- * @tparam T The POD type. Only C++ native types are supported.
- * @param binaryFilePath The path to the input file
- * @param outputDataArray The DataArray<T> to store the data read from the file
- * @param startByte The byte offset into the file to start reading the data.
- * @param defaultBufferSize The buffer size that is used when reading.
- * @param swapEndian Whether each page should be byte-swapped before it is written.
- * @return A Result<> type that contains any warnings or errors that occurred.
+ * @tparam T Binary element type.
+ * @param binaryFilePath Input file path.
+ * @param outputDataArray Destination array.
+ * @param startByte Byte offset in the input file.
+ * @param defaultBufferSize Maximum elements in one page.
+ * @param swapEndian True to byte-swap each page before storage.
+ * @return Error if opening, seeking, reading, or storage fails.
  */
 template <typename T>
 Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataArray<T>& outputDataArray, usize startByte = 0, usize defaultBufferSize = 1000000, bool swapEndian = false)
@@ -231,7 +266,6 @@ Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataA
     return MakeErrorResult(-1000, fmt::format("Unable to open the specified file. '{}'", binaryFilePath.string()));
   }
 
-  // Skip some bytes if needed
   if(startByte > 0)
   {
     int result = FSEEK64(inputFilePtr, static_cast<int64>(startByte), SEEK_SET);
@@ -253,7 +287,6 @@ Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataA
     std::fclose(inputFilePtr);
     return MakeErrorResult(-1002, "The binary import buffer size must be greater than zero.");
   }
-  // Now start reading the data in chunkShape if needed.
   usize chunkSize = std::min(numElements, defaultBufferSize);
   auto buffer = std::make_unique<T[]>(chunkSize);
 
@@ -296,15 +329,16 @@ Result<> ImportFromBinaryFile(const std::filesystem::path& binaryFilePath, DataA
 }
 
 /**
- * @brief
- * @tparam T
- * @param filename
- * @param name
- * @param dataStructure
- * @param tupleShape
- * @param componentShape
- * @param parentId
- * @return
+ * @brief Imports a binary file into an in-memory array.
+ * @tparam T Binary element type.
+ * @param filename Input file path.
+ * @param name Array name.
+ * @param dataStructure Data structure that owns the array.
+ * @param tupleShape Tuple dimensions.
+ * @param componentShape Component dimensions.
+ * @param parentId Parent object identifier.
+ * @return Array owned by dataStructure, or nullptr if validation or import fails.
+ * @throws std::filesystem::filesystem_error If file status or size cannot be read.
  */
 template <typename T>
 DataArray<T>* ImportFromBinaryFile(const std::string& filename, const std::string& name, DataStructure& dataStructure, const ShapeType& tupleShape, const ShapeType& componentShape,
@@ -341,15 +375,14 @@ DataArray<T>* ImportFromBinaryFile(const std::string& filename, const std::strin
 }
 
 /**
- * @brief Creates a deep copy of an array into another location in the DataStructure.
- *
- * WARNING: If there is a DataObject already at the destination path then that data object
- * is removed from the DataStructure and replaced with the new copy
- * @tparam ArrayType The Type of DataArray to copy. IDataArray and StringArray are supported
- * @param dataStructure The DataStructure object
- * @param sourceDataPath The source path to copy from.
- * @param destDataPath The destination path to copy into.
- * @return Result<> object.
+ * @brief Replaces a destination object with an array deep copy.
+ * @tparam ArrayType Supported array type.
+ * @param dataStructure Data structure that owns both paths.
+ * @param sourceDataPath Source array path.
+ * @param destDataPath Destination array path.
+ * @return Error if destination removal fails.
+ * @throws std::out_of_range If sourceDataPath does not exist.
+ * @throws std::bad_cast If sourceDataPath does not identify ArrayType.
  */
 template <typename ArrayType>
 Result<> DeepCopy(DataStructure& dataStructure, const DataPath& sourceDataPath, const DataPath& destDataPath)
@@ -367,77 +400,120 @@ Result<> DeepCopy(DataStructure& dataStructure, const DataPath& sourceDataPath, 
 }
 
 /**
- * @brief This function will Resize a DataArray and then replace an existing DataArray in the DataStructure
- * @param dataStructure
- * @param dataPath The path of the target DataArray
- * @param tupleShape The tuple shape of the resized array
- * @param mode The mode: Preflight or Execute
- * @return
+ * @brief Resizes and replaces an array.
+ * @param dataStructure Data structure that owns the array.
+ * @param dataPath Target array path.
+ * @param tupleShape New tuple dimensions.
+ * @param mode Preflight or execute mode.
+ * @return Error if replacement fails.
+ *
+ * The function removes the original before it creates the replacement. A
+ * creation failure leaves dataPath absent.
  */
 SIMPLNX_EXPORT Result<> ResizeAndReplaceDataArray(DataStructure& dataStructure, const DataPath& dataPath, ShapeType& tupleShape, IDataAction::Mode mode);
 
 /**
- * @brief This method will ensure that all the arrays are of the same type
- * @param dataStructure DataStructure that contains the data arrays
- * @param dataArrayPaths  The Paths to check
- * @return
+ * @brief Checks whether arrays have the same data type.
+ * @param dataStructure Data structure that owns the arrays.
+ * @param dataArrayPaths Array paths to compare.
+ * @return True when all arrays have the same type.
+ * @pre dataArrayPaths identify IDataArray objects.
  */
 SIMPLNX_EXPORT bool CheckArraysAreSameType(const DataStructure& dataStructure, const std::vector<DataPath>& dataArrayPaths);
 
 /**
- * @brief This method will ensure that all the arrays have the same tuple count
- * @param dataStructure DataStructure that contains the data arrays
- * @param dataArrayPaths  The Paths to check
- * @return
+ * @brief Checks whether arrays have the same tuple count.
+ * @param dataStructure Data structure that owns the arrays.
+ * @param dataArrayPaths Array paths to compare.
+ * @return True when all arrays have the same tuple count.
+ * @pre dataArrayPaths identify IArray objects.
  */
 SIMPLNX_EXPORT bool CheckArraysHaveSameTupleCount(const DataStructure& dataStructure, const std::vector<DataPath>& dataArrayPaths);
 
 /**
- * @brief Validates that the number of features in the array are equivalent
- * @param dataStructure the DataStructure containing the array
- * @param sourceDataPath The DataPath to the AttributeMatrix or DataArray that the featureIds array indexes into
- * @param featureIds the ids for the array
- * @param ignoreNegativeValues Ignore negative values in the feature Ids array. This should be used carefully.
- * @param messageHandler Receives the validation progress message.
- * @return A Result containing -5355 for negative values, -5351 for out-of-range
- * feature IDs, or a propagated bulk-read error.
+ * @brief Validates feature identifiers against a source array.
+ * @param dataStructure Data structure that owns the source.
+ * @param sourceDataPath AttributeMatrix or array indexed by featureIds.
+ * @param featureIds Feature identifier array.
+ * @param ignoreNegativeValues True to ignore negative identifiers.
+ * @param messageHandler Receives validation progress.
+ * @return Error for negative, out-of-range, or unreadable identifiers.
  */
 SIMPLNX_EXPORT Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
                                                                            const IFilter::MessageHandler& messageHandler);
 /**
- * @brief Bulk-validates FeatureIds with cooperative cancellation.
- * @param shouldCancel Optional flag checked once per bounded validation batch. If set,
- * validation stops without reading another batch or modifying any output.
+ * @brief Validates feature identifiers with cancellation.
+ * @param dataStructure Data structure that owns the source.
+ * @param sourceDataPath AttributeMatrix or array indexed by featureIds.
+ * @param featureIds Feature identifier array.
+ * @param ignoreNegativeValues True to ignore negative identifiers.
+ * @param messageHandler Receives validation progress.
+ * @param shouldCancel Optional cancellation flag.
+ * @return Error for invalid identifiers or source reads.
+ *
+ * The routine checks cancellation between bounded batches and does not modify output.
+ * Cancellation returns a valid result without completing validation.
  */
 SIMPLNX_EXPORT Result<> ValidateFeatureIdsToFeatureAttributeMatrixIndexing(const DataStructure& dataStructure, const DataPath& sourceDataPath, const Int32Array& featureIds, bool ignoreNegativeValues,
                                                                            const IFilter::MessageHandler& messageHandler, const std::atomic_bool* shouldCancel);
 
 /**
- * @brief This function resize the outermost vector of the NeighborList's underlying data to the NeighborList's set
- * number of tuples and initializes each item in the vector to a (non-null) pointer to an empty vector
+ * @brief Ensures NeighborList storage reaches its declared tuple count.
+ * @param dataStructure Data structure that owns the list.
+ * @param neighborListPath NeighborList path.
+ * @pre neighborListPath identifies a nonempty INeighborList object.
  *
- * @param dataStructure
- * @param neighborListPath The path to the NeighborList to be initialized.
+ * The function sets the final tuple to an empty list. NeighborList::setList()
+ * grows missing preceding tuple slots through the list-store resize operation.
  */
 SIMPLNX_EXPORT void InitializeNeighborList(DataStructure& dataStructure, const DataPath& neighborListPath);
 
+/**
+ * @class CopyTupleUsingIndexList
+ * @brief Copies or initializes tuples from a destination-to-source map.
+ * @tparam T Array value type.
+ */
 template <typename T>
 class CopyTupleUsingIndexList
 {
 public:
+  /**
+   * @brief Creates a tuple remapper.
+   * @param oldCellArray Source array.
+   * @param newCellArray Destination array.
+   * @param newIndices Destination-to-source tuple map.
+   * @pre Referenced arrays and newIndices storage outlive this remapper.
+   */
   CopyTupleUsingIndexList(const IDataArray& oldCellArray, IDataArray& newCellArray, nonstd::span<const int64> newIndices)
   : m_OldCellArray(oldCellArray)
   , m_NewCellArray(newCellArray)
   , m_NewToOldIndices(newIndices)
   {
   }
+  /**
+   * @brief Destroys the tuple remapper.
+   */
   ~CopyTupleUsingIndexList() = default;
 
-  CopyTupleUsingIndexList(const CopyTupleUsingIndexList&) = default;
-  CopyTupleUsingIndexList(CopyTupleUsingIndexList&&) noexcept = default;
+  /**
+   * @brief Copies the tuple remapper.
+   * @param other Tuple remapper to copy.
+   */
+  CopyTupleUsingIndexList(const CopyTupleUsingIndexList& other) = default;
+
+  /**
+   * @brief Moves the tuple remapper.
+   * @param other Tuple remapper to move.
+   */
+  CopyTupleUsingIndexList(CopyTupleUsingIndexList&& other) noexcept = default;
   CopyTupleUsingIndexList& operator=(const CopyTupleUsingIndexList&) = delete;
   CopyTupleUsingIndexList& operator=(CopyTupleUsingIndexList&&) noexcept = delete;
 
+  /**
+   * @brief Copies a range of mapped destination tuples.
+   * @param start First destination tuple index.
+   * @param end One past the last destination tuple index.
+   */
   void convert(usize start, usize end) const
   {
     const auto& oldDataStore = m_OldCellArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
@@ -463,6 +539,9 @@ public:
     }
   }
 
+  /**
+   * @brief Copies every mapped destination tuple.
+   */
   void operator()() const
   {
     convert(0, m_NewToOldIndices.size());
@@ -474,13 +553,18 @@ private:
   nonstd::span<const int64> m_NewToOldIndices;
 };
 
+/**
+ * @namespace Indexing
+ * @brief Contains multidimensional index utilities.
+ */
 namespace Indexing
 {
 /**
- * @brief Flatten N-dimensional position to an array index.
- * @param position N-dimensional position
- * @param shape Shape of the array to index
- * @return usize
+ * @brief Flattens a position with the rightmost dimension fastest.
+ * @param position Multidimensional position.
+ * @param shape Dimensions of the indexed array.
+ * @return Flat array index.
+ * @throws std::runtime_error If position and shape dimensions differ.
  */
 inline usize Flatten(const std::vector<usize>& position, const std::vector<usize>& shape)
 {
@@ -506,10 +590,10 @@ inline usize Flatten(const std::vector<usize>& position, const std::vector<usize
 }
 
 /**
- * @brief Find N-dimensional position from an array index and shape.
- * @param index Array index
- * @param shape Shape of the array to index
- * @return std::vector<uint64>
+ * @brief Finds a position from a flat index with the rightmost dimension fastest.
+ * @param index Flat array index.
+ * @param shape Dimensions of the indexed array.
+ * @return Multidimensional position.
  */
 inline std::vector<uint64> FindPosition(uint64 index, const std::vector<uint64>& shape)
 {
@@ -528,24 +612,25 @@ inline std::vector<uint64> FindPosition(uint64 index, const std::vector<uint64>&
   return position;
 }
 
+/**
+ * @brief Advances a multidimensional index.
+ * @param idx Index to advance.
+ * @param extent Exclusive extent of each dimension.
+ */
 inline void IncrementLikeOdometer(std::vector<usize>& idx, const std::vector<usize>& extent)
 {
-  // Advance idx as if it were an odometer.
-  // Increment the fastest dimension; if it overflows, reset it to 0
-  // and propagate the carry toward the next slowest dimension.
+  // Carry proceeds from the fastest dimension to the slowest dimension.
   for(usize d = idx.size(); d > 0;)
   {
-    --d; // move to the next slowest dimension
+    --d;
     ++idx[d];
 
     if(idx[d] < extent[d])
     {
-      // Increment succeeded without overflow
       break;
     }
     else
     {
-      // Overflow: reset this dimension and continue carrying.
       idx[d] = 0;
     }
   }
@@ -553,20 +638,25 @@ inline void IncrementLikeOdometer(std::vector<usize>& idx, const std::vector<usi
 } // namespace Indexing
 
 /**
- * This method creates a new array in the destDataStructure using the given array and tupleShape, and initializes the new array to the
- * given defaultValue.  The new array has the same array type, data type (for data arrays and neighbor lists), and component shape
- * (for data arrays) as the input array.
- * @param destDataStructure The destination data structure that the new array will be created.
- * @param array The input array that will be used to the create the new array, using the same array type and other attributes.
- * @param newArrayName The name that will be used when creating the new array
- * @param tupleShape The tuple shape that is used to create the new array.
- * @param defaultValue The default value that the new array will be initialized with.  The default value is validated to verify that it
- * can be converted to the proper type needed for the new array, and an error result is returned otherwise.
- * @return
+ * @brief Creates an initialized array that matches another array type.
+ * @param destDataStructure Data structure that owns the new array.
+ * @param array Source array that supplies type and component shape.
+ * @param newArrayName New array name.
+ * @param tupleShape New tuple dimensions.
+ * @param defaultValue Text that supplies the initial value.
+ * @param parentId Optional parent object identifier.
+ * @return Array owned by destDataStructure, or an error if conversion or creation fails.
+ * @pre array is not null.
  */
 SIMPLNX_EXPORT Result<IArray*> CreateDefaultValueArrayFromArray(DataStructure& destDataStructure, IArray* array, const std::string& newArrayName, const ShapeType& tupleShape,
                                                                 const std::string& defaultValue, const std::optional<DataObject::IdType> parentId = {});
 
+/**
+ * @brief Computes minimum and maximum values for each component.
+ * @tparam T Array value type.
+ * @param dataArray Array to inspect.
+ * @return Minimum and maximum values for each component, or {{0, 0}} when dataArray is null.
+ */
 template <typename T>
 std::vector<std::array<T, 2>> GetComponentMinMax(std::shared_ptr<DataArray<T>> dataArray)
 {
@@ -596,30 +686,20 @@ std::vector<std::array<T, 2>> GetComponentMinMax(std::shared_ptr<DataArray<T>> d
 }
 
 /**
- * @brief The following functions and classes are meant to make copying data from one IArray into another easier for the developer.
- *
- * An example use of these functions would be the following (where newCellData is an AttributeMatrix in dataStructure ):
- *   ParallelTaskAlgorithm taskRunner;
- *   for (const auto& [dataId, dataObject] : *newCellData)
- *   {
- *     auto* inputDataArray = dataStructure.getDataAs<IArray>(inputCellDataPath.createChildPath(name));
- *     auto* destDataArray = dataStructure.getDataAs<IArray>(destCellDataPath.createChildPath(name));
- *     auto* newDataArray = dataStructure.getDataAs<IArray>(newCellDataPath.createChildPath(name));
- *     const IArray::ArrayType arrayType = destDataArray->getArrayType();
- *     CopyFromArray::RunParallel<CopyFromArray::Combine>(arrayType, destDataArray, taskRunner, inputDataArray, newDataArray);
- *   }
- *   taskRunner.wait();
- * @code
- *
- * @endcode
+ * @namespace CopyFromArray
+ * @brief Contains storage-aware array copy and append utilities.
  */
 namespace CopyFromArray
 {
 /**
- * @brief Appends all elements at the flat destination @p offset without bounds checking.
- * Numeric DataArrays move fixed-size pages through their bulk store APIs so
- * AppendImageGeometry remains efficient and bounded for OOC inputs/outputs;
- * variable-length arrays retain their element-wise interface.
+ * @brief Appends array values at a flat destination offset.
+ * @tparam K Array type.
+ * @param inputArray Source array.
+ * @param destArray Destination array.
+ * @param offset First destination value offset.
+ *
+ * Numeric DataArrays use bounded bulk pages. Variable-length arrays retain
+ * element-wise access because a fixed page cannot represent their tuples.
  */
 template <class K>
 void AppendData(const K& inputArray, K& destArray, usize offset)
@@ -627,7 +707,6 @@ void AppendData(const K& inputArray, K& destArray, usize offset)
   const usize numElements = inputArray.getNumberOfTuples() * inputArray.getNumberOfComponents();
   if constexpr(requires { inputArray.getDataStoreRef(); })
   {
-    // DataArray path: use bulk I/O for OOC efficiency
     using ValueType = typename std::remove_reference_t<decltype(inputArray.getDataStoreRef())>::value_type;
     constexpr usize k_ChunkSize = 65536;
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized I/O buffer; std::array cannot represent this extent.
@@ -651,9 +730,18 @@ void AppendData(const K& inputArray, K& destArray, usize offset)
 }
 
 /**
- * @brief Copies a validated tuple range between same-shaped arrays.
- * If either numeric DataArray is OOC, a fixed 65,536-element buffer replaces
- * iterator access; fully resident arrays keep the single std::copy fast path.
+ * @brief Copies a tuple range between arrays with the same component count.
+ * @tparam K Array type.
+ * @param inputArray Source array.
+ * @param destArray Destination array.
+ * @param destTupleOffset First destination tuple.
+ * @param srcTupleOffset First source tuple.
+ * @param totalSrcTuples Tuple count to copy.
+ * @return Error if the destination range or component count is not valid.
+ * @pre The source tuple range is valid.
+ *
+ * Out-of-core arrays use a fixed 65,536-element buffer. Resident arrays keep
+ * the single std::copy fast path.
  */
 template <class K>
 Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usize srcTupleOffset, usize totalSrcTuples)
@@ -687,7 +775,6 @@ Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usiz
     auto& dstStore = destArray.getDataStoreRef();
     if(srcStore.getStoreType() == IDataStore::StoreType::OutOfCore || dstStore.getStoreType() == IDataStore::StoreType::OutOfCore)
     {
-      // OOC path: chunked bulk I/O
       using ValueType = typename std::remove_reference_t<decltype(srcStore)>::value_type;
       constexpr usize k_ChunkSize = 65536;
       // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized I/O buffer; std::array cannot represent this extent.
@@ -703,7 +790,6 @@ Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usiz
     }
     else
     {
-      // In-core path: single std::copy (zero overhead)
       auto srcBegin = inputArray.begin() + (srcTupleOffset * sourceNumComponents);
       auto srcEnd = srcBegin + numElements;
       auto dstBegin = destArray.begin() + (destTupleOffset * numComponents);
@@ -722,8 +808,17 @@ Result<> CopyData(const K& inputArray, K& destArray, usize destTupleOffset, usiz
 }
 
 /**
- * @brief Copies a tuple range from resident vector storage into an array.
- * Numeric/store-aware destinations receive one contiguous bulk write.
+ * @brief Copies a tuple range from vector storage into an array.
+ * @tparam T Source value type.
+ * @tparam K Destination array type.
+ * @param src Source values.
+ * @param dst Destination array.
+ * @param dstTupleOffset First destination tuple.
+ * @param srcTupleOffset First source tuple.
+ * @param totalSrcTuples Tuple count to copy.
+ * @param srcNumComponents Source component count.
+ * @return Error if the destination range or component count is not valid.
+ * @pre The source tuple range is valid.
  */
 template <class T, class K>
 Result<> CopyData(const std::vector<T>& src, K& dst, usize dstTupleOffset, usize srcTupleOffset, usize totalSrcTuples, usize srcNumComponents)
@@ -776,13 +871,17 @@ Result<> CopyData(const std::vector<T>& src, K& dst, usize dstTupleOffset, usize
 }
 
 /**
- * @brief Copy a block of tuples from inputArray into destArray.
+ * @brief Copies a row-major multidimensional tuple block.
+ * @tparam K Array type.
+ * @param inputArray Source array.
+ * @param destArray Destination array.
+ * @param srcStart Source start tuple in each dimension.
+ * @param dstStart Destination start tuple in each dimension.
+ * @param extent Tuple count in each dimension.
+ * @return Error if ranks, ranges, or component counts are not valid.
+ * @pre destArray has the same tuple rank as inputArray.
  *
- * @param srcStart  first tuple to copy in each dimension
- * @param dstStart  first destination tuple in each dimension
- * @param extent    length of block (tuple count) in each dimension
- *
- * Layout is assumed row-major (last index fastest).
+ * The layout is row-major. The last index is fastest.
  */
 template <class K>
 Result<> CopyDataND(const K& inputArray, K& destArray, const std::vector<usize>& srcStart, const std::vector<usize>& dstStart, const std::vector<usize>& extent)
@@ -834,17 +933,9 @@ Result<> CopyDataND(const K& inputArray, K& destArray, const std::vector<usize>&
   usize dstOffset = 0;
   for(usize n = 0; n < tuplesToCopy; ++n)
   {
-    // Convert the current multidimensional offset (currentIdx) into a 1‑D linear
-    // tuple index inside the source array.  Adding `flatten(srcStart)` accounts
-    // for the absolute starting position of the copy‑from block.
     const usize srcLinearIdx = Indexing::Flatten(currentIdx, inputShape) + Indexing::Flatten(srcStart, inputShape);
-    // Do the same for the destination array, offset by `dstStart`.
     const usize dstLinearIdx = Indexing::Flatten(dstStart, destShape) + dstOffset;
 
-    // Copy a single tuple worth of data.
-    // StringArray: direct element assignment
-    // NeighborList: copy entire neighbor list for this tuple
-    // DataArray: use CopyData
     if constexpr(std::is_same_v<K, StringArray>)
     {
       destArray[dstLinearIdx] = inputArray[srcLinearIdx];
@@ -853,7 +944,7 @@ Result<> CopyDataND(const K& inputArray, K& destArray, const std::vector<usize>&
     {
       destArray.setList(static_cast<int32>(dstLinearIdx), inputArray.getList(static_cast<int32>(srcLinearIdx)));
     }
-    else // DataArray
+    else
     {
       auto copyResult = CopyData(inputArray, destArray, dstLinearIdx, srcLinearIdx, 1);
       if(copyResult.invalid())
@@ -862,7 +953,6 @@ Result<> CopyDataND(const K& inputArray, K& destArray, const std::vector<usize>&
       }
     }
 
-    // Advance currentIdx as if it were an odometer
     Indexing::IncrementLikeOdometer(currentIdx, extent);
 
     dstOffset++;
@@ -871,16 +961,26 @@ Result<> CopyDataND(const K& inputArray, K& destArray, const std::vector<usize>&
   return {};
 }
 
+/**
+ * @enum Direction
+ * @brief Identifies an array append axis.
+ */
 enum class Direction
 {
-  X,
-  Y,
-  Z
+  X, ///< Selects the X axis.
+  Y, ///< Selects the Y axis.
+  Z  ///< Selects the Z axis.
 };
 
 /**
- * @brief Shifts all of the existing data in the dataArray from its original, smaller location to its new, larger location in the X direction.
- * This function prepares the dataArray so that additional data can be appended in the X direction, and DOES NOT do any bounds checking!
+ * @brief Shifts data to make room along the X axis.
+ * @tparam K Array type.
+ * @param dataArray Array to shift.
+ * @param originalDestDims Existing destination dimensions.
+ * @param newDestDims Expanded destination dimensions.
+ * @return Error from the tuple copies.
+ *
+ * The caller validates dimensions and capacity.
  */
 template <class K>
 Result<> ShiftDataX(K& dataArray, const std::vector<usize>& originalDestDims, const std::vector<usize>& newDestDims)
@@ -913,8 +1013,14 @@ Result<> ShiftDataX(K& dataArray, const std::vector<usize>& originalDestDims, co
 }
 
 /**
- * @brief Shifts all of the existing data in the dataArray from its original, smaller location to its new, larger location in the Y direction.
- * This function prepares the dataArray so that additional data can be appended in the Y direction, and DOES NOT do any bounds checking!
+ * @brief Shifts data to make room along the Y axis.
+ * @tparam K Array type.
+ * @param dataArray Array to shift.
+ * @param originalDestDims Existing destination dimensions.
+ * @param newDestDims Expanded destination dimensions.
+ * @return Error from the tuple copies.
+ *
+ * The caller validates dimensions and capacity.
  */
 template <class K>
 Result<> ShiftDataY(K& dataArray, const std::vector<usize>& originalDestDims, const std::vector<usize>& newDestDims)
@@ -947,7 +1053,17 @@ Result<> ShiftDataY(K& dataArray, const std::vector<usize>& originalDestDims, co
 }
 
 /**
- * @brief Appends all of the data from the inputArrays into the destArray using the given inputTupleShapes and offset. This function DOES NOT do any bounds checking!
+ * @brief Appends arrays along the X axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param newDestDims Destination dimensions.
+ * @param offset First X offset.
+ * @param mirror True to mirror rows after append.
+ * @return Error from tuple copies.
+ *
+ * The caller validates dimensions and capacity.
  */
 template <class K>
 Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& newDestDims, usize offset,
@@ -957,7 +1073,6 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
   auto appendYDim = static_cast<int64>(newDestDims[1]);
   auto appendDestXDim = newDestDims[2];
 
-  // Copy the input arrays into the destination array
   for(int z = 0; z < appendZDim; ++z)
   {
     for(int y = 0; y < appendYDim; ++y)
@@ -977,7 +1092,6 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
         xOffset += inputTupleShapes[i][2];
       }
 
-      // Mirror the array along the X axis if the mirror flag is true
       if(mirror)
       {
         auto numComps = destArray.getNumberOfComponents();
@@ -985,7 +1099,7 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
         {
           if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
           {
-            // OOC path: read entire scanline, reverse tuples in-memory, write back
+            // The OOC path reverses one scanline in memory to avoid per-tuple storage I/O.
             using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
             usize scanlineElements = appendDestXDim * numComps;
             // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized scanline; std::array cannot represent this extent.
@@ -993,7 +1107,7 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
             auto& store = destArray.getDataStoreRef();
             usize rowStart = ((z * appendYDim * appendDestXDim) + (y * appendDestXDim)) * numComps;
             store.copyIntoBuffer(rowStart, nonstd::span<ValueType>(scanline.get(), scanlineElements));
-            // Reverse tuple order in the buffer
+            // Reverse complete tuples so component values remain together.
             for(usize x = 0; x < appendDestXDim / 2; ++x)
             {
               usize mirrorX = appendDestXDim - 1 - x;
@@ -1006,7 +1120,6 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
           }
           else
           {
-            // In-core path: original swap_ranges
             for(usize x = 0; x < appendDestXDim / 2; ++x)
             {
               usize tupleIdx = (z * appendYDim * appendDestXDim) + (y * appendDestXDim) + x;
@@ -1034,7 +1147,17 @@ Result<> AppendDataX(const std::vector<const K*>& inputArrays, const std::vector
 }
 
 /**
- * @brief Appends all of the data from the inputArrays into the destArray using the given inputTupleShapes and offset. This function DOES NOT do any bounds checking!
+ * @brief Appends arrays along the Y axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param newDestDims Destination dimensions.
+ * @param offset First Y offset.
+ * @param mirror True to mirror rows after append.
+ * @return Error from tuple copies.
+ *
+ * The caller validates dimensions and capacity.
  */
 template <class K>
 Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& newDestDims, usize offset,
@@ -1044,7 +1167,6 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
   auto appendDestYDim = newDestDims[1];
   auto appendXDim = static_cast<int64>(newDestDims[2]);
 
-  // Copy the input arrays into the destination array
   usize yOffset = offset;
   for(usize i = 0; i < inputArrays.size(); ++i)
   {
@@ -1066,7 +1188,6 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
     yOffset += inputTupleShapes[i][1];
   }
 
-  // Mirror the array along the Y axis if the mirror flag is true
   if(mirror)
   {
     auto numComps = destArray.getNumberOfComponents();
@@ -1074,9 +1195,7 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
     {
       if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
       {
-        // OOC path: swap entire rows (scanlines) at once to minimize I/O calls.
-        // Instead of per-tuple swaps (xDim * yDim/2 * zDim calls), this does
-        // yDim/2 * zDim row-sized bulk reads/writes.
+        // The OOC path exchanges row pairs in bulk to avoid per-tuple storage I/O.
         using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
         usize rowElements = static_cast<usize>(appendXDim) * numComps;
         // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
@@ -1100,7 +1219,6 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
       }
       else
       {
-        // In-core path: swap entire rows using swap_ranges for efficiency
         for(int64 z = 0; z < appendZDim; ++z)
         {
           for(usize y = 0; y < appendDestYDim / 2; ++y)
@@ -1116,7 +1234,6 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
     }
     else
     {
-      // Non-DataArray path: swap entire rows
       for(int64 z = 0; z < appendZDim; ++z)
       {
         for(usize y = 0; y < appendDestYDim / 2; ++y)
@@ -1134,6 +1251,19 @@ Result<> AppendDataY(const std::vector<const K*>& inputArrays, const std::vector
   return {};
 }
 
+/**
+ * @brief Appends arrays along the Z axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param newDestDims Destination dimensions.
+ * @param offset First Z offset.
+ * @param mirror True to mirror slices after append.
+ * @return Error from tuple copies.
+ *
+ * The caller validates dimensions and capacity.
+ */
 template <class K>
 Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& newDestDims, usize offset,
                      bool mirror = false)
@@ -1151,7 +1281,6 @@ Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector
     destOffset += totalInputTuples;
   }
 
-  // Mirror the array along the Z axis if the mirror flag is true
   if(mirror)
   {
     auto appendDestZDim = newDestDims[0];
@@ -1161,7 +1290,7 @@ Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector
     {
       if(destArray.getDataStoreRef().getStoreType() == IDataStore::StoreType::OutOfCore)
       {
-        // OOC path: bulk I/O swap of entire Z-slices
+        // The OOC path exchanges whole slices to avoid per-tuple storage I/O.
         using ValueType = typename std::remove_reference_t<decltype(destArray.getDataStoreRef())>::value_type;
         usize sliceElements = sliceTupleCount * numComps;
         // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized slice; std::array cannot represent this extent.
@@ -1181,7 +1310,6 @@ Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector
       }
       else
       {
-        // In-core path: original swap_ranges
         for(int i = 0; i < appendDestZDim / 2; ++i)
         {
           usize tupleIdx = i * sliceTupleCount;
@@ -1207,7 +1335,15 @@ Result<> AppendDataZ(const std::vector<const K*>& inputArrays, const std::vector
 }
 
 /**
- * @brief Shifts the existing data in the destArray and appends all of the data from the inputArrays into the destArray.  This function DOES NOT do any bounds checking!
+ * @brief Shifts and appends arrays along the X axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param originalDestDims Existing dimensions.
+ * @param newDestDims Expanded dimensions.
+ * @param mirror True to mirror rows after append.
+ * @return Error from shifting or appending.
  */
 template <class K>
 Result<> ShiftAndAppendDataX(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& originalDestDims,
@@ -1219,12 +1355,19 @@ Result<> ShiftAndAppendDataX(const std::vector<const K*>& inputArrays, const std
     return result;
   }
 
-  // Append the input arrays into the destination array
   return AppendDataX(inputArrays, inputTupleShapes, destArray, newDestDims, originalDestDims[2], mirror);
 }
 
 /**
- * @brief Shifts the existing data in the destArray and appends all of the data from the inputArrays into the destArray.  This function DOES NOT do any bounds checking!
+ * @brief Shifts and appends arrays along the Y axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param originalDestDims Existing dimensions.
+ * @param newDestDims Expanded dimensions.
+ * @param mirror True to mirror rows after append.
+ * @return Error from shifting or appending.
  */
 template <class K>
 Result<> ShiftAndAppendDataY(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& originalDestDims,
@@ -1236,18 +1379,25 @@ Result<> ShiftAndAppendDataY(const std::vector<const K*>& inputArrays, const std
     return result;
   }
 
-  // Append the input arrays into the destination array
   return AppendDataY(inputArrays, inputTupleShapes, destArray, newDestDims, originalDestDims[1], mirror);
 }
 
 /**
- * @brief Appends all of the data from the inputArray into the destination array starting at the given offset. This function DOES NOT do any bounds checking!
+ * @brief Appends arrays along a selected axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param originalDestDims Existing dimensions.
+ * @param newDestDims Expanded dimensions.
+ * @param direction Append axis.
+ * @param mirror True to mirror after append.
+ * @return Error from shifting or appending.
  */
 template <class K>
 Result<> AppendData(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& originalDestDims,
                     const std::vector<usize>& newDestDims, Direction direction = Direction::Z, bool mirror = false)
 {
-  // Use switch here because it is a bounded logic chain potentially allowing compiler to make jump table or similar optimizations
   switch(direction)
   {
   case Direction::X: {
@@ -1256,7 +1406,7 @@ Result<> AppendData(const std::vector<const K*>& inputArrays, const std::vector<
   case Direction::Y: {
     return ShiftAndAppendDataY(inputArrays, inputTupleShapes, destArray, originalDestDims, newDestDims, mirror);
   }
-  default: { // Z direction
+  default: {
     auto totalTuples = std::accumulate(originalDestDims.begin(), originalDestDims.end(), static_cast<usize>(1), std::multiplies<>());
     return AppendDataZ(inputArrays, inputTupleShapes, destArray, newDestDims, totalTuples, mirror);
   }
@@ -1264,7 +1414,15 @@ Result<> AppendData(const std::vector<const K*>& inputArrays, const std::vector<
 }
 
 /**
- * @brief Combines all of the data from the inputArray into the destination array starting at the given offset. This function DOES NOT do any bounds checking!
+ * @brief Combines arrays along a selected axis.
+ * @tparam K Array type.
+ * @param inputArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param destArray Destination array.
+ * @param newDestDims Destination dimensions.
+ * @param direction Combine axis.
+ * @param mirror True to mirror after combine.
+ * @return Error from appending.
  */
 template <class K>
 Result<> CombineData(const std::vector<const K*>& inputArrays, const std::vector<std::vector<usize>>& inputTupleShapes, K& destArray, const std::vector<usize>& newDestDims,
@@ -1278,20 +1436,32 @@ Result<> CombineData(const std::vector<const K*>& inputArrays, const std::vector
   case Direction::Y: {
     return AppendDataY(inputArrays, inputTupleShapes, destArray, newDestDims, 0, mirror);
   }
-  default: { // Z direction
+  default: {
     return AppendDataZ(inputArrays, inputTupleShapes, destArray, newDestDims, 0, mirror);
   }
   }
 }
 
 /**
- * @brief This class will append all of the data from the input array of any IArray type to the given destination array of the same IArray type starting at the given tupleOffset. This class DOES NOT
- * do any bounds checking and assumes that the destination array has already been properly resized to fit all of the data
+ * @class AppendArray
+ * @brief Dispatches append operations for a selected value type.
+ * @tparam T Array value type.
  */
 template <typename T>
 class AppendArray
 {
 public:
+  /**
+   * @brief Creates an append dispatcher.
+   * @param destCellArray Destination array.
+   * @param inputCellArrays Source arrays.
+   * @param inputTupleShapes Source tuple dimensions.
+   * @param originalDestDims Existing destination dimensions.
+   * @param newDestDims Expanded destination dimensions.
+   * @param direction Append axis.
+   * @param mirror True to mirror after append.
+   * @pre Source and destination arrays outlive this dispatcher.
+   */
   AppendArray(IArray& destCellArray, const std::vector<const IArray*>& inputCellArrays, const std::vector<std::vector<usize>>& inputTupleShapes, const std::vector<usize>& originalDestDims,
               const std::vector<usize>& newDestDims, Direction direction = Direction::Z, bool mirror = false)
   : m_ArrayType(destCellArray.getArrayType())
@@ -1305,21 +1475,35 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the append dispatcher.
+   */
   ~AppendArray() = default;
 
-  AppendArray(const AppendArray&) = default;
-  AppendArray(AppendArray&&) noexcept = default;
+  /**
+   * @brief Copies the append dispatcher.
+   * @param other Append dispatcher to copy.
+   */
+  AppendArray(const AppendArray& other) = default;
+
+  /**
+   * @brief Moves the append dispatcher.
+   * @param other Append dispatcher to move.
+   */
+  AppendArray(AppendArray&& other) noexcept = default;
   AppendArray& operator=(const AppendArray&) = delete;
   AppendArray& operator=(AppendArray&&) noexcept = delete;
 
+  /**
+   * @brief Appends the selected arrays.
+   */
   void operator()() const
   {
     if(m_ArrayType == IArray::ArrayType::NeighborListArray)
     {
       using NeighborListType = NeighborList<T>;
       auto* destArrayPtr = dynamic_cast<NeighborListType*>(m_DestCellArray);
-      // Make sure the destination array is allocated AND each tuple list is initialized so we can use the [] operator to copy over the data
-
+      // NeighborList copies need an initialized destination list.
       if(destArrayPtr->getNumberOfLists() == 0 || destArrayPtr->getList(0).size() == 0)
       {
         destArrayPtr->addEntry(destArrayPtr->getNumberOfTuples() - 1, 0);
@@ -1363,13 +1547,24 @@ private:
 };
 
 /**
- * @brief This class will copy over all of the data from the first input array of any IArray type, then the second input array of the same IArray type to the given destination array (of the same
- * IArray type). This class DOES NOT do any bounds checking and assumes that the destination array has already been properly sized to fit all of the data.
+ * @class CombineArrays
+ * @brief Dispatches combine operations for a selected value type.
+ * @tparam T Array value type.
  */
 template <typename T>
 class CombineArrays
 {
 public:
+  /**
+   * @brief Creates a combine dispatcher.
+   * @param destCellArray Destination array.
+   * @param inputCellArrays Source arrays.
+   * @param inputTupleShapes Source tuple dimensions.
+   * @param newDestDims Destination dimensions.
+   * @param direction Combine axis.
+   * @param mirror True to mirror after combine.
+   * @pre Source and destination arrays outlive this dispatcher.
+   */
   CombineArrays(IArray& destCellArray, const std::vector<const IArray*>& inputCellArrays, const std::vector<std::vector<usize>>& inputTupleShapes, const std::vector<usize>& newDestDims,
                 Direction direction = Direction::Z, bool mirror = false)
   : m_ArrayType(destCellArray.getArrayType())
@@ -1382,20 +1577,35 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the combine dispatcher.
+   */
   ~CombineArrays() = default;
 
-  CombineArrays(const CombineArrays&) = default;
-  CombineArrays(CombineArrays&&) noexcept = default;
+  /**
+   * @brief Copies the combine dispatcher.
+   * @param other Combine dispatcher to copy.
+   */
+  CombineArrays(const CombineArrays& other) = default;
+
+  /**
+   * @brief Moves the combine dispatcher.
+   * @param other Combine dispatcher to move.
+   */
+  CombineArrays(CombineArrays&& other) noexcept = default;
   CombineArrays& operator=(const CombineArrays&) = delete;
   CombineArrays& operator=(CombineArrays&&) noexcept = delete;
 
+  /**
+   * @brief Combines the selected arrays.
+   */
   void operator()() const
   {
     if(m_ArrayType == IArray::ArrayType::NeighborListArray)
     {
       using NeighborListT = NeighborList<T>;
       auto* destArray = dynamic_cast<NeighborListT*>(m_DestCellArray);
-      // Make sure the destination array is allocated AND each tuple list is initialized so we can use the [] operator to copy over the data
+      // NeighborList copies need an initialized destination list.
       if(destArray->getVectors().empty() || destArray->getList(0).empty())
       {
         destArray->addEntry(destArray->getNumberOfTuples() - 1, 0);
@@ -1436,15 +1646,23 @@ private:
 };
 
 /**
- * @brief This class will copy all of the data from the input array of any IArray type to the given destination array of the same IArray using the newToOldIndices list. This class DOES NOT
- * do any bounds checking and assumes that the destination array has already been properly resized to fit all of the data
+ * @class CopyUsingIndexList
+ * @brief Copies arrays through a destination-to-source index map.
+ * @tparam T Array value type.
  *
- * WARNING: This method can be very memory intensive for larger geometries. Use this method with caution!
+ * Large index maps require memory proportional to destination tuple count.
  */
 template <typename T>
 class CopyUsingIndexList
 {
 public:
+  /**
+   * @brief Creates an index-map copy dispatcher.
+   * @param destCellArray Destination array.
+   * @param inputCellArray Source array.
+   * @param newToOldIndices Destination-to-source index map.
+   * @pre Source and destination arrays and newToOldIndices storage outlive this dispatcher.
+   */
   CopyUsingIndexList(IArray& destCellArray, const IArray& inputCellArray, const nonstd::span<const int64>& newToOldIndices)
   : m_ArrayType(destCellArray.getArrayType())
   , m_InputCellArray(&inputCellArray)
@@ -1453,13 +1671,28 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the index-map copy dispatcher.
+   */
   ~CopyUsingIndexList() = default;
 
-  CopyUsingIndexList(const CopyUsingIndexList&) = default;
-  CopyUsingIndexList(CopyUsingIndexList&&) noexcept = default;
+  /**
+   * @brief Copies the index-map copy dispatcher.
+   * @param other Index-map copy dispatcher to copy.
+   */
+  CopyUsingIndexList(const CopyUsingIndexList& other) = default;
+
+  /**
+   * @brief Moves the index-map copy dispatcher.
+   * @param other Index-map copy dispatcher to move.
+   */
+  CopyUsingIndexList(CopyUsingIndexList&& other) noexcept = default;
   CopyUsingIndexList& operator=(const CopyUsingIndexList&) = delete;
   CopyUsingIndexList& operator=(CopyUsingIndexList&&) noexcept = delete;
 
+  /**
+   * @brief Copies mapped values and initializes invalid mappings.
+   */
   void operator()() const
   {
     for(usize i = 0; i < m_NewToOldIndices.size(); i++)
@@ -1470,7 +1703,7 @@ public:
       {
         using NeighborListT = NeighborList<T>;
         auto* destArray = dynamic_cast<NeighborListT*>(m_DestCellArray);
-        // Make sure the destination array is allocated AND each tuple list is initialized, so we can use the [] operator to copy over the data
+        // The destination list must be initialized before the tuple copy.
         destArray->setList(i, typename NeighborListT::SharedVectorType(new typename NeighborListT::VectorType));
         if(oldIndexI >= 0)
         {
@@ -1523,21 +1756,15 @@ private:
 namespace
 {
 /**
- * @brief Resolves, for every destination Image Geometry coordinate along a single axis, the RectGrid
- * bin index that coordinate falls into (nearest bin, half-open interval (gridValues[i-1], gridValues[i]]).
+ * @brief Maps ImageGeom coordinates to RectGrid bins on one axis.
+ * @param dimSize Destination coordinate count.
+ * @param originComp ImageGeom origin on this axis.
+ * @param spacingComp ImageGeom spacing on this axis.
+ * @param halfSpacingComp Half spacing for voxel-center sampling.
+ * @param gridValues Monotonic RectGrid bounds.
+ * @return One RectGrid bin index for each destination coordinate.
  *
- * WHY this is hoisted out of the voxel loop: the image/rect-grid geometries are axis-aligned, so the bin
- * a coordinate maps to depends only on that one axis - the same x position resolves to the same RectGrid
- * bin regardless of y or z. Resolving the mapping once per axis position (bounded by that axis'
- * dimension) replaces what was previously an O(total destination cells) search (the same search re-run
- * for every y/z combination sharing an x, and so on) with an O(dims[axis]) precomputation.
- *
- * @param dimSize Number of destination coordinates to resolve along this axis
- * @param originComp Image Geometry origin component for this axis
- * @param spacingComp Image Geometry spacing component for this axis
- * @param halfSpacingComp Half of spacingComp, added so each coordinate samples the voxel center
- * @param gridValues Monotonic increasing RectGrid bound values for this axis
- * @return A vector of length dimSize mapping each axis position to its RectGrid bin index (0 if no bin matched)
+ * Axis-aligned geometry lets the utility precompute one mapping per axis position.
  */
 std::vector<usize> ComputeAxisBinIndices(usize dimSize, float32 originComp, float32 spacingComp, float32 halfSpacingComp, const Float32Array& gridValues)
 {
@@ -1562,14 +1789,28 @@ std::vector<usize> ComputeAxisBinIndices(usize dimSize, float32 originComp, floa
 } // namespace
 
 /**
- * @brief This class will copy all of the data from the RectGrid geometry input array of any IArray type to the given Image geometry destination array of the same IArray type by calculating the mapped
- * RectGrid geometry index from the Image geometry dimensions/spacing. This class DOES NOT do any bounds checking and assumes that the destination array has already been properly resized to fit all of
- * the data
+ * @class MapRectGridDataToImageData
+ * @brief Maps RectGrid array values to ImageGeom cells.
+ * @tparam T Array value type.
  */
 template <typename T>
 class MapRectGridDataToImageData
 {
 public:
+  /**
+   * @brief Creates a RectGrid-to-ImageGeom mapper.
+   * @param destCellArray Destination array.
+   * @param inputCellArray Source array.
+   * @param origin ImageGeom origin.
+   * @param imageGeoDims ImageGeom dimensions.
+   * @param imageGeoSpacing ImageGeom spacing.
+   * @param rectGridDims RectGrid dimensions.
+   * @param xGridValues RectGrid X bounds.
+   * @param yGridValues RectGrid Y bounds.
+   * @param zGridValues RectGrid Z bounds.
+   * @pre Source and destination arrays and grid-value arrays outlive this mapper.
+   * @pre xGridValues, yGridValues, and zGridValues are not null.
+   */
   MapRectGridDataToImageData(IArray& destCellArray, const IArray& inputCellArray, const FloatVec3& origin, const SizeVec3& imageGeoDims, const std::vector<float32>& imageGeoSpacing,
                              const SizeVec3& rectGridDims, const Float32Array* xGridValues, const Float32Array* yGridValues, const Float32Array* zGridValues)
   : m_ArrayType(destCellArray.getArrayType())
@@ -1586,22 +1827,33 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the RectGrid-to-ImageGeom mapper.
+   */
   ~MapRectGridDataToImageData() = default;
 
-  MapRectGridDataToImageData(const MapRectGridDataToImageData&) = default;
-  MapRectGridDataToImageData(MapRectGridDataToImageData&&) noexcept = default;
+  /**
+   * @brief Copies the RectGrid-to-ImageGeom mapper.
+   * @param other RectGrid-to-ImageGeom mapper to copy.
+   */
+  MapRectGridDataToImageData(const MapRectGridDataToImageData& other) = default;
+
+  /**
+   * @brief Moves the RectGrid-to-ImageGeom mapper.
+   * @param other RectGrid-to-ImageGeom mapper to move.
+   */
+  MapRectGridDataToImageData(MapRectGridDataToImageData&& other) noexcept = default;
   MapRectGridDataToImageData& operator=(const MapRectGridDataToImageData&) = delete;
   MapRectGridDataToImageData& operator=(MapRectGridDataToImageData&&) noexcept = delete;
 
   /**
-   * @brief Maps every destination Image Geometry cell to its RectGrid source cell and copies the array
-   * data across, dispatching to a bulk-buffered path for DataArrays (the only array type that can be
-   * out-of-core) and a per-voxel path for NeighborList/StringArray tuples (variable-length or
-   * non-numeric, never out-of-core).
+   * @brief Maps and copies every destination cell.
+   *
+   * DataArrays use bulk buffers. Variable-length arrays use tuple copies.
    */
   void operator()() const
   {
-    // Precompute once: see ComputeAxisBinIndices for why this only needs to run per-axis, not per-voxel.
+    // Axis maps are reused across every row and slice.
     const std::vector<usize> zIndices = ComputeAxisBinIndices(m_ImageGeomDims[2], m_Origin[2], m_ImageGeomSpacing[2], m_HalfSpacing[2], *m_ZGridValues);
     const std::vector<usize> yIndices = ComputeAxisBinIndices(m_ImageGeomDims[1], m_Origin[1], m_ImageGeomSpacing[1], m_HalfSpacing[1], *m_YGridValues);
     const std::vector<usize> xIndices = ComputeAxisBinIndices(m_ImageGeomDims[0], m_Origin[0], m_ImageGeomSpacing[0], m_HalfSpacing[0], *m_XGridValues);
@@ -1618,17 +1870,13 @@ public:
 
 private:
   /**
-   * @brief DataArray path: bulk-copies one destination Image Geometry row (fixed y, z; varying x) per
-   * store access instead of one CopyData call per voxel.
+   * @brief Maps numeric arrays with bounded row buffers.
+   * @param zIndices Source Z index for each destination Z index.
+   * @param yIndices Source Y index for each destination Y index.
+   * @param xIndices Source X index for each destination X index.
    *
-   * WHY: destination cells sharing the same (y, z) are contiguous along x in the backing store, and the
-   * RectGrid bin a given x maps to is identical for every row (see ComputeAxisBinIndices). This lets the
-   * whole row be assembled in a small reusable buffer - gathering the mapped source values locally - and
-   * written out with a single copyFromBuffer call, instead of one heap allocation plus one chunk-cache
-   * round trip per voxel when either store is out-of-core. The source row needed for a given (y, z) is
-   * itself read once via copyIntoBuffer (and re-used across consecutive destination rows that map to the
-   * same RectGrid row, which is common when upsampling), rather than re-reading the source store per
-   * voxel. Both buffers are bounded by the axis dimensions, never by the total cell count.
+   * One source row can serve repeated destination rows. Row buffers avoid
+   * per-voxel cache access and remain bounded by axis dimensions.
    */
   void mapDataArray(const std::vector<usize>& zIndices, const std::vector<usize>& yIndices, const std::vector<usize>& xIndices) const
   {
@@ -1641,8 +1889,6 @@ private:
     const usize destRowLength = m_ImageGeomDims[0] * numComponents;
     const usize srcRowLength = m_RectGridDims[0] * numComponents;
 
-    // Reusable row buffers allocated ONCE for the whole array - bounded by an axis dimension, not by
-    // the total number of cells in either geometry.
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
     auto destRowBuffer = std::make_unique<T[]>(destRowLength);
     // NOLINTNEXTLINE(modernize-avoid-c-arrays) -- Runtime-sized row; std::array cannot represent this extent.
@@ -1659,8 +1905,7 @@ private:
       {
         const usize yIndex = yIndices[y];
 
-        // Bulk-read the RectGrid source row for this (yIndex, zIndex) once; skip the read if the
-        // previous destination row already pulled from the same source row.
+        // Reuse a source row when consecutive destination rows map to it.
         if(!haveCachedSrcRow || yIndex != cachedYIndex || zIndex != cachedZIndex)
         {
           const usize srcRowStart = ((m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex)) * numComponents;
@@ -1670,8 +1915,6 @@ private:
           haveCachedSrcRow = true;
         }
 
-        // Gather the mapped source values into the destination row buffer - local memory access
-        // against the two bounded buffers above, no store access per voxel.
         for(usize x = 0; x < m_ImageGeomDims[0]; x++)
         {
           const usize xIndex = xIndices[x];
@@ -1688,7 +1931,6 @@ private:
           }
         }
 
-        // Bulk-write the fully assembled destination row in a single store access.
         const usize destRowStart = ((z * m_ImageGeomDims[1] * m_ImageGeomDims[0]) + (y * m_ImageGeomDims[0])) * numComponents;
         destStore.copyFromBuffer(destRowStart, nonstd::span<const T>(destRowBuffer.get(), destRowLength));
       }
@@ -1696,10 +1938,13 @@ private:
   }
 
   /**
-   * @brief NeighborList/StringArray path: keeps the original per-voxel CopyData call (these tuple types
-   * are variable-length or non-numeric and are never backed by an out-of-core store, so a fixed-size row
-   * buffer cannot represent them) but reuses the precomputed per-axis bin indices instead of re-deriving
-   * them for every voxel.
+   * @brief Maps variable-length arrays with tuple copies.
+   * @param zIndices Source Z index for each destination Z index.
+   * @param yIndices Source Y index for each destination Y index.
+   * @param xIndices Source X index for each destination X index.
+   *
+   * Variable-length tuples cannot use fixed row buffers. Axis maps still avoid
+   * repeated geometry searches.
    */
   void mapVariableLengthArray(const std::vector<usize>& zIndices, const std::vector<usize>& yIndices, const std::vector<usize>& xIndices) const
   {
@@ -1714,16 +1959,14 @@ private:
         {
           const usize xIndex = xIndices[x];
 
-          // Compute the index into the RectGrid Data Array
           const int64 rectGridIndex = static_cast<int64>((m_RectGridDims[0] * m_RectGridDims[1] * zIndex) + (m_RectGridDims[0] * yIndex) + xIndex);
 
-          // Use the computed index to copy the data from the RectGrid to the Image Geometry
           Result<> copySucceeded;
           if(m_ArrayType == IArray::ArrayType::NeighborListArray)
           {
             using NeighborListT = NeighborList<T>;
             auto* destArrayPtr = dynamic_cast<NeighborListT*>(m_DestCellArray);
-            // Make sure the destination array is allocated AND each tuple list is initialized, so we can use the [] operator to copy over the data
+            // NeighborList tuple copies require an initialized destination list.
             destArrayPtr->setList(imageIndex, typename NeighborListT::SharedVectorType(new typename NeighborListT::VectorType));
             if(rectGridIndex >= 0)
             {
@@ -1770,8 +2013,14 @@ private:
 };
 
 /**
- * @brief This function will make use of the AppendData class with the bool data type only to append data from the input IArray to the destination IArray at the given tupleOffset. This function DOES
- * NOT do any bounds checking!
+ * @brief Appends bool arrays through the bool-specific path.
+ * @param destCellArray Destination bool array.
+ * @param inputCellArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param originalDestDims Existing destination dimensions.
+ * @param newDestDims Expanded destination dimensions.
+ * @param direction Append axis.
+ * @param mirror True to mirror after append.
  */
 inline void RunAppendBoolAppend(IArray& destCellArray, const std::vector<const IArray*>& inputCellArrays, const std::vector<std::vector<usize>>& inputTupleShapes,
                                 const std::vector<usize>& originalDestDims, const std::vector<usize>& newDestDims, Direction direction = Direction::Z, bool mirror = false)
@@ -1785,8 +2034,13 @@ inline void RunAppendBoolAppend(IArray& destCellArray, const std::vector<const I
 }
 
 /**
- * @brief This function will make use of the CombineData method with the bool data type only to combine data from the input IArrays to the destination IArray. This function DOES
- * NOT do any bounds checking!
+ * @brief Combines bool arrays through the bool-specific path.
+ * @param destCellArray Destination bool array.
+ * @param inputCellArrays Source arrays.
+ * @param inputTupleShapes Source tuple dimensions.
+ * @param newDestDims Destination dimensions.
+ * @param direction Combine axis.
+ * @param mirror True to mirror after combine.
  */
 inline void RunCombineBoolAppend(IArray& destCellArray, const std::vector<const IArray*>& inputCellArrays, const std::vector<std::vector<usize>>& inputTupleShapes,
                                  const std::vector<usize>& newDestDims, Direction direction = Direction::Z, bool mirror = false)
@@ -1800,8 +2054,12 @@ inline void RunCombineBoolAppend(IArray& destCellArray, const std::vector<const 
 }
 
 /**
- * @brief This function will make use of the CopyUsingIndexList class with the bool data type only to copy data from the input IArray to the destination IArray using the given index list. This
- * function DOES NOT do any bounds checking!
+ * @brief Creates a bool index-map copy dispatcher.
+ * @param destCellArray Destination bool array.
+ * @param inputCellArray Source bool array.
+ * @param newToOldIndices Destination-to-source index map.
+ * @pre destCellArray and inputCellArray identify DataArray<bool> objects.
+ * @note The function does not invoke the dispatcher.
  */
 inline void RunBoolCopyUsingIndexList(IArray& destCellArray, const IArray& inputCellArray, const nonstd::span<const int64>& newToOldIndices)
 {
@@ -1810,8 +2068,18 @@ inline void RunBoolCopyUsingIndexList(IArray& destCellArray, const IArray& input
 }
 
 /**
- * @brief This function will make use of the MapRectGridDataToImageData class with the bool data type only to copy data from the input IArray to the destination IArray using the given index list. This
- * function DOES NOT do any bounds checking!
+ * @brief Creates a bool RectGrid-to-ImageGeom mapper.
+ * @param destCellArray Destination bool array.
+ * @param inputCellArray Source bool array.
+ * @param origin ImageGeom origin.
+ * @param imageGeoDims ImageGeom dimensions.
+ * @param imageGeoSpacing ImageGeom spacing.
+ * @param rectGridDims RectGrid dimensions.
+ * @param xGridValues RectGrid X bounds.
+ * @param yGridValues RectGrid Y bounds.
+ * @param zGridValues RectGrid Z bounds.
+ * @pre destCellArray and inputCellArray identify DataArray<bool> objects.
+ * @note The function does not invoke the mapper.
  */
 inline void RunBoolMapRectToImage(IArray& destCellArray, const IArray& inputCellArray, const FloatVec3& origin, const SizeVec3& imageGeoDims, const std::vector<float32>& imageGeoSpacing,
                                   const SizeVec3& rectGridDims, const Float32Array* xGridValues, const Float32Array* yGridValues, const Float32Array* zGridValues)
@@ -1821,6 +2089,16 @@ inline void RunBoolMapRectToImage(IArray& destCellArray, const IArray& inputCell
                                             xGridValues, yGridValues, zGridValues);
 }
 
+/**
+ * @brief Selects an append dispatcher by destination array type.
+ * @tparam ParallelRunnerT Parallel runner type.
+ * @tparam ArgsT Forwarded append arguments.
+ * @param destArray Destination array.
+ * @param runner Parallel runner.
+ * @param args Forwarded append arguments.
+ *
+ * Boolean arrays run directly because their specialized path does not use runner.
+ */
 template <class ParallelRunnerT, class... ArgsT>
 void RunParallelAppend(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... args)
 {
@@ -1842,6 +2120,16 @@ void RunParallelAppend(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... a
   ExecuteParallelFunction<AppendArray, NoBooleanType>(dataType, std::forward<ParallelRunnerT>(runner), destArray, std::forward<ArgsT>(args)...);
 }
 
+/**
+ * @brief Selects a combine dispatcher by destination array type.
+ * @tparam ParallelRunnerT Parallel runner type.
+ * @tparam ArgsT Forwarded combine arguments.
+ * @param destArray Destination array.
+ * @param runner Parallel runner.
+ * @param args Forwarded combine arguments.
+ *
+ * Boolean arrays run directly because their specialized path does not use runner.
+ */
 template <class ParallelRunnerT, class... ArgsT>
 void RunParallelCombine(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... args)
 {
@@ -1864,7 +2152,15 @@ void RunParallelCombine(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... 
 }
 
 /**
- * WARNING: This method can be very memory intensive for larger geometries. Use this method with caution!
+ * @brief Selects an index-map copy dispatcher by destination array type.
+ * @tparam ParallelRunnerT Parallel runner type.
+ * @tparam ArgsT Forwarded copy arguments.
+ * @param destArray Destination array.
+ * @param runner Parallel runner.
+ * @param args Forwarded copy arguments.
+ *
+ * Large index maps require memory proportional to destination tuple count.
+ * For bool arrays, the specialized wrapper does not invoke the dispatcher.
  */
 template <class ParallelRunnerT, class... ArgsT>
 void RunParallelCopyUsingIndexList(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... args)
@@ -1887,6 +2183,16 @@ void RunParallelCopyUsingIndexList(IArray& destArray, ParallelRunnerT&& runner, 
   ExecuteParallelFunction<CopyUsingIndexList, NoBooleanType>(dataType, std::forward<ParallelRunnerT>(runner), destArray, std::forward<ArgsT>(args)...);
 }
 
+/**
+ * @brief Selects a RectGrid mapping dispatcher by destination array type.
+ * @tparam ParallelRunnerT Parallel runner type.
+ * @tparam ArgsT Forwarded mapping arguments.
+ * @param destArray Destination array.
+ * @param runner Parallel runner.
+ * @param args Forwarded mapping arguments.
+ *
+ * For bool arrays, the specialized wrapper does not invoke the mapper.
+ */
 template <class ParallelRunnerT, class... ArgsT>
 void RunParallelMapRectToImage(IArray& destArray, ParallelRunnerT&& runner, ArgsT&&... args)
 {
@@ -1910,16 +2216,30 @@ void RunParallelMapRectToImage(IArray& destArray, ParallelRunnerT&& runner, Args
 
 } // namespace CopyFromArray
 
+/**
+ * @namespace TransferGeometryElementData
+ * @brief Contains geometry element-data transfer utilities.
+ */
 namespace TransferGeometryElementData
 {
 /**
- * @brief
- * @tparam T
+ * @class CopyCellDataArray
+ * @brief Copies selected source cells to a destination array.
+ * @tparam T Array value type.
  */
 template <typename T>
 class CopyCellDataArray
 {
 public:
+  /**
+   * @brief Creates a cell-data copy operation.
+   * @param oldCellArray Source array.
+   * @param newCellArray Destination array.
+   * @param newEdgesIndex Source index for each destination tuple.
+   * @param shouldCancel Cancellation flag shared with transferElementData().
+   * @pre Referenced arrays, index map, and cancellation flag outlive this operation.
+   * @throws std::bad_cast If either array is not DataArray<T>.
+   */
   CopyCellDataArray(const IDataArray& oldCellArray, IDataArray& newCellArray, const std::vector<usize>& newEdgesIndex, const std::atomic_bool& shouldCancel)
   : m_OldCellArray(dynamic_cast<const DataArray<T>&>(oldCellArray))
   , m_NewCellArray(dynamic_cast<DataArray<T>&>(newCellArray))
@@ -1928,13 +2248,31 @@ public:
   {
   }
 
+  /**
+   * @brief Destroys the cell-data copy operation.
+   */
   ~CopyCellDataArray() = default;
 
-  CopyCellDataArray(const CopyCellDataArray&) = default;
-  CopyCellDataArray(CopyCellDataArray&&) noexcept = default;
+  /**
+   * @brief Copies the cell-data copy operation.
+   * @param other Cell-data copy operation to copy.
+   */
+  CopyCellDataArray(const CopyCellDataArray& other) = default;
+
+  /**
+   * @brief Moves the cell-data copy operation.
+   * @param other Cell-data copy operation to move.
+   */
+  CopyCellDataArray(CopyCellDataArray&& other) noexcept = default;
   CopyCellDataArray& operator=(const CopyCellDataArray&) = delete;
   CopyCellDataArray& operator=(CopyCellDataArray&&) noexcept = delete;
 
+  /**
+   * @brief Copies selected cell values.
+   *
+   * transferElementData() checks cancellation before it schedules each array.
+   * This operation does not check cancellation after it starts.
+   */
   void operator()() const
   {
     usize numComps = m_OldCellArray.getNumberOfComponents();
@@ -1962,17 +2300,28 @@ private:
 };
 
 /**
+ * @brief Transfers selected element arrays to a destination AttributeMatrix.
+ * @param m_DataStructure Data structure that owns the arrays.
+ * @param destCellDataAM Destination AttributeMatrix.
+ * @param sourceDataPaths Source array paths.
+ * @param newEdgesIndexList Destination-to-source index map.
+ * @param m_ShouldCancel Cancellation flag.
+ * @param m_MessageHandler Receives progress messages.
  *
- * @param m_DataStructure
- * @param destCellDataAM The destination Attribute Matrix
- * @param sourceDataPaths The source data array paths that are to be copied
- * @param newEdgesIndexList The index mapping
- * @param m_ShouldCancel Should the algorithm be canceled
- * @param m_MessageHandler The message handler to use for messages.
+ * The routine checks cancellation before it schedules each source array.
  */
 SIMPLNX_EXPORT void transferElementData(DataStructure& m_DataStructure, AttributeMatrix& destCellDataAM, const std::vector<DataPath>& sourceDataPaths, const std::vector<usize>& newEdgesIndexList,
                                         const std::atomic_bool& m_ShouldCancel, const IFilter::MessageHandler& m_MessageHandler);
 
+/**
+ * @brief Creates actions for selected data arrays.
+ * @param dataStructure Data structure that owns source arrays.
+ * @param sourceAttrMatPtr Source AttributeMatrix.
+ * @param selectedArrayPaths Selected source array paths.
+ * @param reducedGeometryPathAttrMatPath Destination AttributeMatrix path.
+ * @param resultOutputActions Receives created actions.
+ * @pre sourceAttrMatPtr is not null.
+ */
 SIMPLNX_EXPORT void CreateDataArrayActions(const DataStructure& dataStructure, const AttributeMatrix* sourceAttrMatPtr, const MultiArraySelectionParameter::ValueType& selectedArrayPaths,
                                            const DataPath& reducedGeometryPathAttrMatPath, Result<OutputActions>& resultOutputActions);
 } // namespace TransferGeometryElementData

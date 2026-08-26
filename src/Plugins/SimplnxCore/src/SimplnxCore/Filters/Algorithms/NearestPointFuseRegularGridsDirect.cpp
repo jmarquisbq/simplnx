@@ -14,6 +14,14 @@ namespace
 {
 /**
  * @brief Resamples one resident typed array through direct nearest-cell indexing.
+ * @tparam ArrayT Specifies the concrete DataArray type.
+ * @tparam T Specifies the array scalar type.
+ * @param inputArray Provides sampling-grid cell values.
+ * @param destArray Receives reference-grid cell values.
+ * @param sampleImageGeom Defines the sampling-grid origin, spacing, and dimensions.
+ * @param refImageGeom Defines the reference-grid origin, spacing, and dimensions.
+ * @param shouldCancel Stops before later reference Z slices when true.
+ * @param fillValue Supplies values outside the sampling extent.
  *
  * This path recomputes coordinates per destination cell so independent arrays can
  * run concurrently. That tradeoff is favorable for resident stores and avoided by
@@ -66,12 +74,24 @@ void CopyData(const ArrayT& inputArray, ArrayT& destArray, const ImageGeom& samp
   }
 }
 
-/** @brief Adapts runtime array-type dispatch to a task that resamples one resident array. */
+/**
+ * @class CopyArrayImpl
+ * @brief Adapts runtime type dispatch to one resident resampling task.
+ * @tparam T Specifies the array scalar type.
+ */
 template <typename T>
 class CopyArrayImpl
 {
 public:
-  /** @brief Captures borrowed source, destination, geometry, fill, and cancellation state for the task. */
+  /**
+   * @brief Creates one borrowed resident-array task.
+   * @param source Provides sampling-grid cell values.
+   * @param destination Receives reference-grid cell values.
+   * @param sampleGeom Defines sampling-grid coordinates.
+   * @param referenceGeom Defines reference-grid coordinates.
+   * @param fillValue Supplies values outside the sampling extent.
+   * @param shouldCancel Stops before later reference Z slices when true.
+   */
   CopyArrayImpl(const IArray& source, IArray& destination, const ImageGeom& sampleGeom, const ImageGeom& referenceGeom, float64 fillValue, const std::atomic_bool& shouldCancel)
   : m_Source(source)
   , m_Destination(destination)
@@ -82,7 +102,9 @@ public:
   {
   }
 
-  /** @brief Casts the arrays to the selected value type and executes direct resampling. */
+  /**
+   * @brief Casts both arrays and runs direct resampling.
+   */
   void operator()() const
   {
     using ArrayT = DataArray<T>;
@@ -113,7 +135,8 @@ Result<> NearestPointFuseRegularGridsDirect::operator()()
   const auto& sampleGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->SamplingGeometryPath);
   const auto& referenceGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->ReferenceGeometryPath);
   const auto& sampleAM = m_DataStructure.getDataRefAs<AttributeMatrix>(m_InputValues->SamplingCellAttributeMatrixPath);
-  // Each resident array is independent, so array-level tasks expose parallelism without synchronizing stores.
+  // Each task owns a separate source and destination pair. Array-level parallelism
+  // therefore needs no shared DataStore access.
   ParallelTaskAlgorithm taskRunner;
   for(const auto& source : sampleAM.findAllChildrenOfType<IArray>())
   {

@@ -11,12 +11,28 @@
 using namespace nx::core;
 namespace
 {
-/// Target values per transfer. The runtime batch is rounded down to complete tuples
-/// so every output write avoids an out-of-core read-modify-write of partial tuples.
+// The batch rounds down to whole tuples. This prevents out-of-core read-modify-write operations.
 constexpr usize k_TargetChunkValues = 65536;
 
+/**
+ * @struct ExecuteFindDifferenceMapFunctor
+ * @brief Computes differences for one selected element type.
+ */
 struct ExecuteFindDifferenceMapFunctor
 {
+  /**
+   * @brief Computes absolute differences in bounded chunks.
+   * @tparam DataType Specifies the array element type.
+   * @param firstArray Supplies the first source values.
+   * @param secondArray Supplies the second source values.
+   * @param differenceMap Receives absolute differences.
+   * @param shouldCancel Signals cancellation between chunks.
+   * @return Success, or a source or output bulk-I/O error.
+   * @pre All arrays have equal tuple and component shapes.
+   * @pre Each same-type absolute difference is representable. Signed integer subtraction can otherwise overflow.
+   *
+   * Cancellation returns success after completed output chunks. Later chunks are not written.
+   */
   template <typename DataType>
   Result<> operator()(const IDataArray& firstArray, const IDataArray& secondArray, IDataArray& differenceMap, const std::atomic_bool& shouldCancel) const
   {
@@ -74,7 +90,6 @@ struct ExecuteFindDifferenceMapFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeDifferencesMap::ComputeDifferencesMap(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                              ComputeDifferencesMapInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -84,10 +99,8 @@ ComputeDifferencesMap::ComputeDifferencesMap(DataStructure& dataStructure, const
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeDifferencesMap::~ComputeDifferencesMap() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeDifferencesMap::operator()()
 {
   const auto& firstInputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->FirstInputArrayPath);

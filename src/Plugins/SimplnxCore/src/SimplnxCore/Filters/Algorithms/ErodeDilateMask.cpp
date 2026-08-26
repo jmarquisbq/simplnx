@@ -1,40 +1,6 @@
 /**
  * @file ErodeDilateMask.cpp
- * @brief Iterative morphological erosion/dilation of a boolean mask array,
- *        optimized for out-of-core (OOC) data stores via Z-slice buffered I/O.
- *
- * ## High-Level Flow (per iteration)
- *
- * 1. **Initialize dual rolling windows** -- Load mask Z-slices 0 and 1 into
- *    both `maskSlices` (read buffer) and `maskCopySlices` (write buffer).
- *
- * 2. **Scan every voxel** (Z-major, then Y, then X):
- *    - For each false (unmasked) voxel, examine face neighbors using the
- *      read buffer (`maskSlices`).
- *    - **Dilate**: If any neighbor is true, set this voxel to true in the
- *      write buffer (`maskCopySlices[1]`).
- *    - **Erode**: If any neighbor is true, set that neighbor to false in
- *      the write buffer (`maskCopySlices[slot]`).
- *    - The dual-buffer approach prevents modifications from affecting
- *      neighbor reads within the same iteration.
- *
- * 3. **Deferred write-back** -- After processing Z-slice z, write the
- *    completed z-1 slice from the write buffer back to the data store
- *    using copyFromBuffer. This keeps writes sequential.
- *
- * 4. **Rotate windows** -- Swap both read and write buffer slots forward
- *    by one Z-layer. Load the next Z+1 slice.
- *
- * 5. **Flush remaining slices** -- After the Z-loop exits, write back the
- *    last slice (or the single slice for 1-deep volumes).
- *
- * ## Key Design Note: Why uint8 buffers?
- *
- * std::vector<bool> uses bit-packing, which means individual elements cannot
- * be addressed by pointer. Since the rolling window needs random element
- * access by index, uint8 buffers (0 or 1) are used instead. A separate
- * bool[] buffer is used for the copyIntoBuffer/copyFromBuffer calls which
- * require a contiguous bool array.
+ * @brief Applies synchronous mask morphology with dual slice windows.
  */
 
 #include "ErodeDilateMask.hpp"
@@ -85,9 +51,7 @@ Result<> ErodeDilateMask::operator()()
   const std::array<int64, k_NumFaceNeighbors> neighborVoxelIndexOffsets = initializeFaceNeighborOffsets(dims);
   constexpr std::array<FaceNeighborType, k_NumFaceNeighbors> faceNeighborInternalIdx = initializeFaceNeighborInternalIdx();
 
-  // ---- Z-slice buffering setup ----
-  // Maintain a rolling window of 3 adjacent Z-slices in memory to avoid
-  // random per-voxel access to the OOC data store during neighbor lookups.
+  // Three adjacent Z slices prevent random per-voxel store reads.
   const usize sliceSize = static_cast<usize>(dims[0]) * static_cast<usize>(dims[1]);
 
   // READ buffer: maskSlices holds the original mask state for this iteration.

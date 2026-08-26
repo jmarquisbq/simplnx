@@ -26,7 +26,7 @@ namespace fs = std::filesystem;
 
 namespace
 {
-// -----------------------------------------------------------------------------
+
 DataStructure CreateInvalidTestData()
 {
   DataStructure dataStructure;
@@ -78,7 +78,6 @@ DataStructure CreateInvalidTestData()
   return dataStructure;
 }
 
-// -----------------------------------------------------------------------------
 DataStructure CreateTestData()
 {
   DataStructure dataStructure;
@@ -141,12 +140,11 @@ TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: Valid Filter Execution"
   UnitTest::AlgorithmTestScope scope(scenario);
   UnitTest::LoadPlugins();
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeMomentInvariants2DFilter filter;
   DataStructure ds = CreateTestData();
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_ImageGeometryPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry})));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellData, k_FeatureIds})));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_FeatureRectArrayPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_FeatureData, k_RectCoords})));
@@ -157,11 +155,9 @@ TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: Valid Filter Execution"
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_SaveCentralMoments_Key, std::make_any<bool>(false));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_CentralMomentsArrayName_Key, std::make_any<std::string>(k_CentralMoments));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -181,12 +177,11 @@ TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: InValid Filter Executio
 {
   UnitTest::LoadPlugins();
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   ComputeMomentInvariants2DFilter filter;
   DataStructure ds = CreateInvalidTestData(); // create invalid data structure input with 3D Image geometry
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_ImageGeometryPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry})));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_FeatureIdsArrayPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_CellData, k_FeatureIds})));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_FeatureRectArrayPath_Key, std::make_any<DataPath>(DataPath({k_ImageGeometry, k_FeatureData, k_RectCoords})));
@@ -197,11 +192,9 @@ TEST_CASE("SimplnxCore::ComputeMomentInvariants2DFilter: InValid Filter Executio
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_SaveCentralMoments_Key, std::make_any<bool>(false));
   args.insertOrAssign(ComputeMomentInvariants2DFilter::k_CentralMomentsArrayName_Key, std::make_any<std::string>(k_CentralMoments));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(ds, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions)
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(ds, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
 

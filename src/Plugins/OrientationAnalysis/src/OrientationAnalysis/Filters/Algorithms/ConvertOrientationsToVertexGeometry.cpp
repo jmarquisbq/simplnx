@@ -18,11 +18,13 @@ using namespace nx::core;
 
 namespace
 {
-// Bounded chunk size (tuples) used for every bulk read/write in this algorithm. Fixed and
-// independent of the total tuple count, so the peak extra memory this algorithm uses is
-// O(k_ChunkSize), not O(numTuples).
+// Fixed chunks bound local conversion memory.
 constexpr usize k_ChunkSize = 4096;
 
+/**
+ * @struct CopyDataFunctor
+ * @brief Copies one selected array to the vertex attribute matrix.
+ */
 struct CopyDataFunctor
 {
   template <typename T>
@@ -34,13 +36,7 @@ struct CopyDataFunctor
   }
 };
 
-/**
- * @brief Converts one chunk of orientation tuples (already normalized to float32) into
- * quaternion tuples using EbsdLib's per-representation ::toQuaternion() conversion.
- * Templated on the EbsdLib representation wrapper (e.g. ebsdlib::EulerFType) so the same
- * loop body serves every representation, including Quaternion itself -- Quaternion::toQuaternion()
- * is an identity conversion, so no special case is needed for that representation.
- */
+// Converts a float32 orientation chunk to quaternions.
 template <class InputFType>
 void ConvertChunkToQuaternion(const float32* inBuffer, usize chunkTuples, usize inNumComps, float32* outQuatBuffer)
 {
@@ -61,12 +57,7 @@ void ConvertChunkToQuaternion(const float32* inBuffer, usize chunkTuples, usize 
   }
 }
 
-/**
- * @brief Dispatches to the EbsdLib representation type matching `inputType` and converts a
- * single chunk of orientation tuples to quaternions. Mirrors the per-representation switch
- * that ConvertOrientations::operator() uses, but scoped to one bounded chunk buffer instead
- * of a full DataStructure array, so no full-size intermediate array is ever created.
- */
+// Selects the EbsdLib representation for one bounded conversion chunk.
 void ConvertChunkToQuaternionByType(ebsdlib::orientations::Type inputType, const float32* inBuffer, usize chunkTuples, usize inNumComps, float32* outQuatBuffer)
 {
   switch(inputType)
@@ -101,7 +92,6 @@ void ConvertChunkToQuaternionByType(ebsdlib::orientations::Type inputType, const
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ConvertOrientationsToVertexGeometry::ConvertOrientationsToVertexGeometry(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                          ConvertOrientationsToVertexGeometryInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -111,25 +101,6 @@ ConvertOrientationsToVertexGeometry::ConvertOrientationsToVertexGeometry(DataStr
 {
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Converts a cell-level orientation array (in any of the 8 EbsdLib representations) into
- * quaternions, optionally rotates each quaternion into its Laue-class fundamental zone, then
- * projects it to stereographic (x, y, z) coordinates that become the vertex positions of the
- * output VertexGeom.
- *
- * OOC strategy: the input orientation array and the Cell Phases array both live on the source
- * Image/RectilinearGrid geometry and can therefore be out-of-core. This algorithm streams both
- * arrays in bounded k_ChunkSize-tuple chunks via copyIntoBuffer()/copyFromBuffer(), so the peak
- * extra memory used is O(k_ChunkSize), independent of the total tuple count. Each chunk is cast
- * to float32 (if needed), converted to quaternions, optionally rotated into the fundamental zone,
- * projected to stereographic coordinates, and written directly into the chunk's vertex positions.
- * The Crystal Structures array is ensemble-level (one entry per phase, a handful of entries) and
- * is cached wholesale into a local buffer up front, so the per-tuple fundamental-zone lookup never
- * touches the DataStore. The output VertexGeom's vertex array is always an in-core store (simplnx
- * only supports OOC stores for Image/RectilinearGrid geometries), so bulk-writing into it via
- * copyFromBuffer is at least as fast as per-element writes while keeping one uniform code path.
- */
 Result<> ConvertOrientationsToVertexGeometry::operator()()
 {
   if(m_ShouldCancel)
@@ -149,8 +120,7 @@ Result<> ConvertOrientationsToVertexGeometry::operator()()
   Float32Array& vertices = outputVertexGeom.getVerticesRef();
   auto& verticesStoreRef = vertices.getDataStoreRef();
 
-  // Ensemble-level cache (indexed by phase, typically only a handful of entries): bulk-read once
-  // so the per-tuple fundamental-zone lookup below never goes through DataStore virtual dispatch.
+  // The local ensemble cache avoids per-tuple phase access.
   std::vector<uint32> crystalStructuresCache;
   if(m_InputValues->ConvertToFundamentalZone)
   {

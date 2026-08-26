@@ -11,31 +11,29 @@ struct RemoveFlaggedFeaturesInputValues;
 
 /**
  * @class RemoveFlaggedFeaturesDirect
- * @brief In-core (direct memory access) algorithm for removing/extracting flagged Features.
+ * @brief Extracts or removes flagged features through resident direct access.
  *
- * This is the original algorithm that reads and writes the FeatureIds array (and any
- * companion cell-level arrays) through operator[] on the DataStore. It repeatedly scans
- * the full volume with a 6-face-neighbor stencil (IdentifyNeighbors) and then propagates
- * the winning neighbor's data into every removed voxel (FindVoxelArrays), looping until no
- * removed voxel remains unresolved.
+ * Gap filling repeats a six-face-neighbor vote until no removed voxel remains.
+ * Direct tuple access suits resident arrays. Disk-backed arrays use the scanline variant.
  *
- * **When this variant is selected**: DispatchAlgorithm selects this class when the
- * FeatureIds array is backed by contiguous in-memory DataStore (i.e., not chunked/OOC).
- * With in-memory data, operator[] is a simple pointer dereference, so the repeated
- * full-volume, random-neighbor-offset scans are inexpensive.
- *
- * **Why a separate OOC variant exists**: When FeatureIds is stored out-of-core in chunked
- * format, every operator[] call may trigger a chunk load from disk, and the +/-Z neighbor
- * offset (a full Z-slice away) makes this especially costly. RemoveFlaggedFeaturesScanline
- * avoids this by reading/writing Z-slices sequentially via copyIntoBuffer/copyFromBuffer.
- *
- * @see RemoveFlaggedFeaturesScanline for the OOC-optimized variant.
- * @see RemoveFlaggedFeatures for the dispatcher.
+ * @see RemoveFlaggedFeaturesScanline
+ * @see RemoveFlaggedFeatures
  */
 class SIMPLNXCORE_EXPORT RemoveFlaggedFeaturesDirect
 {
 public:
+  /**
+   * @brief Creates a direct flagged-feature algorithm.
+   * @param dataStructure Provides source geometry, feature data, and outputs.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later extraction or removal work when true.
+   * @param inputValues Specifies validated settings and paths. The caller must keep
+   * this object alive for the algorithm lifetime.
+   */
   RemoveFlaggedFeaturesDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const RemoveFlaggedFeaturesInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning algorithm.
+   */
   ~RemoveFlaggedFeaturesDirect() noexcept;
 
   RemoveFlaggedFeaturesDirect(const RemoveFlaggedFeaturesDirect&) = delete;
@@ -44,8 +42,11 @@ public:
   RemoveFlaggedFeaturesDirect& operator=(RemoveFlaggedFeaturesDirect&&) noexcept = delete;
 
   /**
-   * @brief Executes the in-core remove/extract flagged features algorithm.
-   * @return Result<> indicating success or errors.
+   * @brief Extracts or removes selected features through direct access.
+   * @return First reported removal error, or success after cancellation.
+   *
+   * Delegated preflight failures throw. Delegated execute failures are not inspected.
+   * Cancellation and errors can retain extracted geometries or modified source arrays.
    */
   Result<> operator()();
 

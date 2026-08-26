@@ -14,118 +14,98 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the ComputeAvgOrientations algorithm.
+ * @struct ComputeAvgOrientationsInputValues
+ * @brief Identifies average-orientation inputs.
  *
- * All DataPath members are validated by the filter's preflight. Cell-level
- * arrays (featureIds, phases, quats) may contain millions of tuples and are
- * accessed through chunked bulk I/O in the optimized Rodrigues path.
- * Feature- and ensemble-level arrays are small enough to cache entirely in
- * local memory.
+ * RandomSeed fixes EM initialization. NumEMIterations and NumIterations set
+ * the vMF and Watson estimate limits.
  */
 struct ORIENTATIONANALYSIS_EXPORT ComputeAvgOrientationsInputValues
 {
-  DataPath cellFeatureIdsArrayPath;    ///< Cell-level Int32 array mapping each voxel to its feature
-  DataPath cellPhasesArrayPath;        ///< Cell-level Int32 array of phase indices
-  DataPath cellQuatsArrayPath;         ///< Cell-level Float32 array of quaternions (4 components)
-  DataPath crystalStructuresArrayPath; ///< Ensemble-level UInt32 array of crystal structure Laue classes
+  DataPath cellFeatureIdsArrayPath;
+  DataPath cellPhasesArrayPath;
+  DataPath cellQuatsArrayPath;
+  DataPath crystalStructuresArrayPath;
 
-  bool useRodriguesAverage;         ///< Enable the Rodrigues (running-sum) averaging method
-  bool useVonMisesAverage;          ///< Enable the von Mises-Fisher EM averaging method
-  bool useWatsonAverage;            ///< Enable the Watson EM averaging method
-  DataPath avgQuatsArrayPath;       ///< Output: Rodrigues average quaternions (feature-level)
-  DataPath avgEulerAnglesArrayPath; ///< Output: Rodrigues average Euler angles (feature-level)
+  bool useRodriguesAverage;
+  bool useVonMisesAverage;
+  bool useWatsonAverage;
+  DataPath avgQuatsArrayPath;
+  DataPath avgEulerAnglesArrayPath;
 
-  DataPath VMFQuatsArrayPath;       ///< Output: vMF average quaternions (feature-level)
-  DataPath VMFEulerAnglesArrayPath; ///< Output: vMF average Euler angles (feature-level)
-  DataPath VMFKappaArrayPath;       ///< Output: vMF kappa concentration values (feature-level)
+  DataPath VMFQuatsArrayPath;
+  DataPath VMFEulerAnglesArrayPath;
+  DataPath VMFKappaArrayPath;
 
-  DataPath WatsonQuatsArrayPath;       ///< Output: Watson average quaternions (feature-level)
-  DataPath WatsonEulerAnglesArrayPath; ///< Output: Watson average Euler angles (feature-level)
-  DataPath WatsonKappaArrayPath;       ///< Output: Watson kappa concentration values (feature-level)
+  DataPath WatsonQuatsArrayPath;
+  DataPath WatsonEulerAnglesArrayPath;
+  DataPath WatsonKappaArrayPath;
 
-  uint32 RandomSeed = 43514; ///< Fixed seed for EM reproducibility
-  int32 NumEMIterations = 5; ///< Number of outer EM iterations
-  int32 NumIterations = 10;  ///< Number of inner iterations per EM cycle
+  uint32 RandomSeed = 43514;
+  int32 NumEMIterations = 5;
+  int32 NumIterations = 10;
 };
 
 /**
  * @class ComputeAvgOrientations
- * @brief Computes the average orientation of each Feature from its constituent
- *        voxel quaternions, using one or more averaging methods.
+ * @brief Computes feature-average orientations from cell quaternions.
  *
- * Three independent methods are available (each can be toggled on/off):
- *   1. **Rodrigues average** -- running quaternion sum with nearest-quat selection
- *   2. **Von Mises-Fisher (vMF) average** -- EM-based estimation on the unit quaternion sphere
- *   3. **Watson average** -- EM-based estimation with antipodal symmetry
+ * Rodrigues uses a running quaternion average. vMF and Watson use EbsdLib EM
+ * estimators. The selected methods write independent feature outputs.
  *
- * ## OOC Optimization
- *
- * The Rodrigues path iterates over every voxel to accumulate quaternion sums
- * per feature. In the original implementation each voxel accessed cell-level
- * DataArrays via `operator[]`, which triggers a virtual dispatch per element.
- * When the DataStore is backed by an out-of-core (OOC) chunked store this
- * causes a chunk load/evict cycle on every access, making the algorithm
- * orders of magnitude slower.
- *
- * The Scanline implementation:
- *   - Caches ensemble-level crystal structures into a local `std::vector`
- *     (tiny -- one entry per phase).
- *   - Accumulates running quaternion averages in a local `std::vector`
- *     (feature-level -- one quaternion per feature, manageable).
- *   - Reads cell-level arrays (featureIds, phases, quats) in fixed-size
- *     chunks of 65536 tuples via `copyIntoBuffer()`, processing each chunk
- *     from contiguous local memory.
- *   - Writes feature-level results (avgQuats, avgEuler) back to the
- *     DataStore in a single `copyFromBuffer()` call.
- *
- * The vMF and Watson paths also use checked bulk scans and deterministic
- * external grouping when that storage-neutral capability is available. They
- * still materialize one feature's quaternion vector at a time because the
- * current EbsdLib DirectionalStats API accepts only a complete vector. Peak
- * cell-derived memory for those methods is therefore O(size of largest
- * feature), pending EBSD-OOC-001 through EBSD-OOC-003.
+ * The scanline path reads cells in 65,536-tuple chunks and holds feature
+ * accumulators locally. It uses deterministic external grouping for vMF and
+ * Watson. EbsdLib still requires one full feature vector, so their peak cell
+ * memory is the largest feature.
  */
 class ORIENTATIONANALYSIS_EXPORT ComputeAvgOrientations
 {
 public:
   /**
-   * @brief Creates the average-orientation dispatcher and borrows its execution context.
-   * @param dataStructure Data structure containing all cell, feature, and ensemble arrays.
-   * @param msgHandler Receives feature-level progress messages.
-   * @param shouldCancel Cancellation flag checked between bulk transfers and directional estimates.
-   * @param inputValues Non-owning parameter bundle that must remain valid through operator()().
+   * @brief Initializes average-orientation computation.
+   * @param dataStructure Provides selected arrays.
+   * @param msgHandler Supplies progress messages.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Identifies selected arrays and averaging methods.
+   * @pre dataStructure, msgHandler, shouldCancel, and inputValues outlive this
+   *      executor.
    */
   ComputeAvgOrientations(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ComputeAvgOrientationsInputValues* inputValues);
+  /**
+   * @brief Destroys the average-orientation executor.
+   */
   ~ComputeAvgOrientations() noexcept;
 
-  ComputeAvgOrientations(const ComputeAvgOrientations&) = delete;            // Copy Constructor Not Implemented
-  ComputeAvgOrientations(ComputeAvgOrientations&&) = delete;                 // Move Constructor Not Implemented
-  ComputeAvgOrientations& operator=(const ComputeAvgOrientations&) = delete; // Copy Assignment Not Implemented
-  ComputeAvgOrientations& operator=(ComputeAvgOrientations&&) = delete;      // Move Assignment Not Implemented
+  ComputeAvgOrientations(const ComputeAvgOrientations&) = delete;
+  ComputeAvgOrientations(ComputeAvgOrientations&&) = delete;
+  ComputeAvgOrientations& operator=(const ComputeAvgOrientations&) = delete;
+  ComputeAvgOrientations& operator=(ComputeAvgOrientations&&) = delete;
 
   /**
-   * @brief Executes the enabled averaging methods and populates the output arrays.
-   * @return Result<> with any errors or warnings encountered during execution.
+   * @brief Executes selected averaging methods.
+   * @return Result from the selected direct or scanline path.
    */
   Result<> operator()();
 
   /**
-   * @brief Thread-safe progress message emitter used while processing vMF/Watson features.
-   * @param counter Number of features processed since last call.
+   * @brief Sends a throttled progress message.
+   * @param counter Specifies completed feature estimates.
+   *
+   * The mutex serializes counter and time updates from vMF and Watson workers.
    */
   void sendThreadSafeProgressMessage(usize counter);
 
-  /** @brief Returns the current cancellation state for worker and progress helpers. */
+  /**
+   * @brief Returns the current cancellation state.
+   * @return True if cancellation has been requested.
+   */
   bool getCancel() const
   {
     return m_ShouldCancel;
   }
 
-protected:
 private:
-  /** @brief Thin adapter that invokes the preserved resident-array implementation. */
   class DirectAlgorithm;
-  /** @brief Thin adapter that invokes the checked bulk-I/O implementation. */
   class ScanlineAlgorithm;
 
   DataStructure& m_DataStructure;
@@ -133,39 +113,37 @@ private:
   const std::atomic_bool& m_ShouldCancel;
   const ComputeAvgOrientationsInputValues* m_InputValues = nullptr;
 
-  /** @brief Executes the enabled averaging methods with direct resident-array access. */
+  /**
+   * @brief Executes the direct averaging path.
+   * @return Result from selected averaging methods.
+   */
   Result<> executeDirect();
   /**
-   * @brief Validates all selected arrays and executes the enabled methods through bounded cell-data transfers.
-   * @return A valid result or the first validation, provider, EbsdLib, I/O, or cancellation failure.
+   * @brief Executes the checked scanline averaging path.
+   * @return Result from validation, bulk I/O, or selected averaging methods.
    */
   Result<> executeScanline();
 
   /**
-   * @brief Computes the Rodrigues (running-sum) average orientation per feature.
-   *
-   * Uses chunked bulk I/O for cell-level arrays and local buffers for
-   * feature-level accumulation to avoid per-element OOC overhead.
+   * @brief Computes direct Rodrigues averages.
+   * @return Result from Rodrigues averaging.
    */
   Result<> computeRodriguesAverage();
 
   /**
-   * @brief Computes von Mises-Fisher and/or Watson average orientations per feature
-   *        using an Expectation-Maximization algorithm.
+   * @brief Computes direct vMF and Watson averages.
+   * @return Result from directional estimation.
    */
   Result<> computeVmfWatsonAverage();
 
   /**
-   * @brief Computes Rodrigues averages with chunked cell reads and feature-scale accumulation.
-   * @return A valid result or the first array validation, I/O, phase, or cancellation failure.
+   * @brief Computes scanline Rodrigues averages.
+   * @return Result from validation, bulk I/O, or phase checks.
    */
   Result<> computeRodriguesAverageScanline();
   /**
-   * @brief Groups cell quaternions deterministically and delegates each feature estimate to EbsdLib.
-   *
-   * External sorting keeps grouping state bounded; the current EbsdLib API still
-   * requires one complete feature quaternion vector, which is the documented
-   * remaining OOC limitation.
+   * @brief Computes scanline vMF and Watson averages.
+   * @return Result from external grouping, bulk I/O, or directional estimation.
    */
   Result<> computeVmfWatsonAverageScanline();
 

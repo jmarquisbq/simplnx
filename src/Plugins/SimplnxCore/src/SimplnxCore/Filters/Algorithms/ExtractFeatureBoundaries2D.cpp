@@ -16,9 +16,18 @@ namespace
 {
 /**
  * @brief Counts both boundary orientations with one sequential pass over the feature IDs.
+ * @tparam T Feature ID value type.
+ * @param featureIds Supplies scalar Feature IDs.
+ * @param dimX Number of cells in X.
+ * @param dimY Number of cells in Y.
+ * @param verticalEdgeCount Receives X-neighbor boundary count.
+ * @param horizontalEdgeCount Receives Y-neighbor boundary count.
+ * @param previousRow Supplies one row buffer.
+ * @param currentRow Supplies the other row buffer.
+ * @param shouldCancel Signals cancellation between rows.
+ * @return Success, or a bulk-read error.
  *
- * Two rolling rows replace repeated per-cell datastore reads while keeping scratch memory
- * bounded by the image width rather than the total cell count.
+ * Two rolling rows keep input scratch proportional to image width.
  */
 template <typename T>
 Result<> CountEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, usize& verticalEdgeCount, usize& horizontalEdgeCount, nonstd::span<T> previousRow, nonstd::span<T> currentRow,
@@ -63,14 +72,22 @@ Result<> CountEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize di
 }
 
 /**
- * @brief Creates vertices and edges for vertical boundaries
- *
- * For each boundary found between horizontally adjacent cells, this creates:
- * - Two vertices at the top and bottom of the cell interface
- * - One edge connecting those two vertices
- *
- * Uses atomic counter (m_CurrentEdge) to allocate unique edge indices.
- * Each edge gets 2 vertices stored consecutively (v0, v1) in the vertex array.
+ * @brief Creates vertical edges between cells that differ in X.
+ * @tparam T Feature ID value type.
+ * @param featureIds Supplies scalar Feature IDs.
+ * @param dimX Number of cells in X.
+ * @param dimY Number of cells in Y.
+ * @param originX Image origin in X.
+ * @param originY Image origin in Y.
+ * @param originZ Common output Z coordinate.
+ * @param spacingX Cell spacing in X.
+ * @param spacingY Cell spacing in Y.
+ * @param vertices Receives two initial vertices for each edge.
+ * @param edges Receives edge connectivity.
+ * @param currentEdge Supplies and receives the next sequential edge index.
+ * @param rowBuffer Supplies one Feature ID row buffer.
+ * @param shouldCancel Signals cancellation between rows.
+ * @return Success, or a bulk-read error.
  */
 template <typename T>
 Result<> PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
@@ -124,14 +141,23 @@ Result<> PopulateVerticalEdges(const AbstractDataStore<T>& featureIds, usize dim
 }
 
 /**
- * @brief Creates vertices and edges for horizontal boundaries
- *
- * For each boundary found between vertically adjacent cells, this creates:
- * - Two vertices at the left and right of the cell interface
- * - One edge connecting those two vertices
- *
- * Uses atomic counter (m_CurrentEdge) to allocate unique edge indices.
- * Each edge gets 2 vertices stored consecutively (v0, v1) in the vertex array.
+ * @brief Creates horizontal edges between cells that differ in Y.
+ * @tparam T Feature ID value type.
+ * @param featureIds Supplies scalar Feature IDs.
+ * @param dimX Number of cells in X.
+ * @param dimY Number of cells in Y.
+ * @param originX Image origin in X.
+ * @param originY Image origin in Y.
+ * @param originZ Common output Z coordinate.
+ * @param spacingX Cell spacing in X.
+ * @param spacingY Cell spacing in Y.
+ * @param vertices Receives two initial vertices for each edge.
+ * @param edges Receives edge connectivity.
+ * @param currentEdge Supplies and receives the next sequential edge index.
+ * @param currentRow Supplies the current Feature ID row.
+ * @param nextRow Supplies the next Feature ID row.
+ * @param shouldCancel Signals cancellation between rows.
+ * @return Success, or a bulk-read error.
  */
 template <typename T>
 Result<> PopulateHorizontalEdges(const AbstractDataStore<T>& featureIds, usize dimX, usize dimY, float32 originX, float32 originY, float32 originZ, float32 spacingX, float32 spacingY,
@@ -193,22 +219,13 @@ Result<> PopulateHorizontalEdges(const AbstractDataStore<T>& featureIds, usize d
   return {};
 }
 
-// =============================================================================
-// MAIN ALGORITHM FUNCTOR
-// =============================================================================
 /**
- * @brief Functor that implements the core boundary extraction algorithm
+ * @struct ExtractFeatureBoundariesFunctor
+ * @brief Dispatches two-pass boundary extraction by Feature ID type.
  *
- * This functor is called via ExecuteDataFunction, which handles type dispatching
- * based on the FeatureIds array data type. The algorithm:
- *
- * 1. Extracts geometry parameters (dimensions, origin, spacing)
- * 2. Determines Z value for all vertices based on user preference
- * 3. PASS 1 - COUNT: Counts all boundary edges
- * 4. Allocates vertex and edge arrays based on count
- * 5. PASS 2 - POPULATE: Creates vertices and edges
- * 6. Optionally adds outer boundary edges around the entire grid
- * 7. Eliminates duplicate vertices to create a clean edge network
+ * The first pass counts exact output edges. The second pass writes internal
+ * boundaries and an optional perimeter. Deduplication then connects shared
+ * endpoints.
  */
 struct ExtractFeatureBoundariesFunctor
 {
@@ -217,9 +234,6 @@ struct ExtractFeatureBoundariesFunctor
   Result<> operator()(const DataStructure& dataStructure, const DataPath& featureIdsPath, const ImageGeom& imageGeom, EdgeGeom& edgeGeom, const std::atomic_bool& shouldCancel,
                       ExtractFeatureBoundaries2DInputValues::ZValueChoiceType zValueChoice, float32 customZValue, bool extractVirtualSampleEdges)
   {
-    // =========================================================================
-    // SETUP: Extract geometry parameters and feature IDs
-    // =========================================================================
     const auto& featureIdsStoreRef = dataStructure.getDataRefAs<DataArray<T>>(featureIdsPath).getDataStoreRef();
 
     const SizeVec3 dims = imageGeom.getDimensions();
@@ -237,9 +251,7 @@ struct ExtractFeatureBoundariesFunctor
     auto firstRow = std::make_unique<T[]>(dimX);
     auto secondRow = std::make_unique<T[]>(dimX);
 
-    // =========================================================================
-    // Z VALUE CALCULATION: Determine the Z coordinate for all generated vertices
-    // =========================================================================
+    // Select one Z coordinate for all output vertices.
     float32 zValue = 0.0f;
     switch(zValueChoice)
     {
@@ -254,11 +266,7 @@ struct ExtractFeatureBoundariesFunctor
       break;
     }
 
-    // =========================================================================
-    // PASS 1 - COUNT: Count all boundary edges to determine memory allocation
-    // =========================================================================
-    // This two-pass approach (count then populate) allows us to allocate the
-    // exact amount of memory needed upfront, avoiding dynamic resizing.
+    // Count first so output storage can be allocated exactly once.
     usize verticalEdgeCount = 0;
     usize horizontalEdgeCount = 0;
 
@@ -285,9 +293,6 @@ struct ExtractFeatureBoundariesFunctor
 
     const usize totalEdgeCount = verticalEdgeCount + horizontalEdgeCount + outerEdgeCount;
 
-    // =========================================================================
-    // EARLY EXIT: Handle case where no boundaries exist
-    // =========================================================================
     if(totalEdgeCount == 0)
     {
       edgeGeom.resizeVertexList(0);
@@ -297,10 +302,7 @@ struct ExtractFeatureBoundariesFunctor
       return {};
     }
 
-    // =========================================================================
-    // MEMORY ALLOCATION: Resize geometry arrays based on counted edges
-    // =========================================================================
-    // Initially allocate 2 vertices per edge (duplicates will be removed later).
+    // Allocate two endpoints per edge. Deduplication removes shared copies later.
     const usize numVertices = totalEdgeCount * 2;
     edgeGeom.resizeVertexList(numVertices);
     edgeGeom.resizeEdgeList(totalEdgeCount);
@@ -308,9 +310,6 @@ struct ExtractFeatureBoundariesFunctor
     INodeGeometry0D::SharedVertexList& verticesRef = edgeGeom.getVerticesRef();
     INodeGeometry1D::SharedEdgeList& edgesRef = edgeGeom.getEdgesRef();
 
-    // =========================================================================
-    // PASS 2 - POPULATE: Create vertices and edge connectivity
-    // =========================================================================
     usize currentEdge = 0;
 
     // Populate vertical edges
@@ -337,12 +336,7 @@ struct ExtractFeatureBoundariesFunctor
       return {};
     }
 
-    // =========================================================================
-    // OUTER BOUNDARY EDGES: Add edges around the perimeter of the grid
-    // =========================================================================
-    // When extractVirtualSampleEdges is true, we add edges around the entire
-    // grid boundary. This creates a complete outline even if all cells have
-    // the same feature ID.
+    // The optional perimeter creates an outline for a uniform sample.
     if(extractVirtualSampleEdges)
     {
       // Left boundary (x = 0): vertical edges along the left side
@@ -446,15 +440,7 @@ struct ExtractFeatureBoundariesFunctor
     edgeGeom.getVertexAttributeMatrix()->resizeTuples({numVertices});
     edgeGeom.getEdgeAttributeMatrix()->resizeTuples({totalEdgeCount});
 
-    // =========================================================================
-    // VERTEX DEDUPLICATION: Merge coincident vertices
-    // =========================================================================
-    // Each edge creates its own pair of vertices, resulting in many duplicate
-    // vertices at shared corners. For example, where 4 cells meet, all 4
-    // boundary edges would create a vertex at that intersection. EliminateDuplicateNodes
-    // merges these duplicates and updates the edge connectivity to reference
-    // the unique vertices, creating a clean connected edge network suitable
-    // for visualization and analysis.
+    // Merge shared endpoints and update edge connectivity.
     Result<> result = GeometryUtilities::EliminateDuplicateNodes<EdgeGeom>(edgeGeom);
 
     return result;
@@ -462,14 +448,6 @@ struct ExtractFeatureBoundariesFunctor
 };
 
 } // namespace
-
-// =============================================================================
-// ALGORITHM CLASS IMPLEMENTATION
-// =============================================================================
-// The ExtractFeatureBoundaries2D class is the public interface called by the
-// filter's executeImpl() method. It holds references to the DataStructure and
-// input values, then delegates to the type-templated functor via ExecuteDataFunction.
-// =============================================================================
 
 // -----------------------------------------------------------------------------
 ExtractFeatureBoundaries2D::ExtractFeatureBoundaries2D(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
@@ -493,18 +471,15 @@ const std::atomic_bool& ExtractFeatureBoundaries2D::getCancel() const
 // -----------------------------------------------------------------------------
 Result<> ExtractFeatureBoundaries2D::operator()()
 {
-  // Get references to the input/output geometries and feature IDs array
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->InputImageGeometryPath);
   auto& edgeGeom = m_DataStructure.getDataRefAs<EdgeGeom>(m_InputValues->OutputEdgeGeometryPath);
   const auto& featureIdsArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->FeatureIdsArrayPath);
 
-  // Get the data type to dispatch to the correct template instantiation
   const DataType dataType = featureIdsArray.getDataType();
 
   m_MessageHandler(IFilter::Message::Type::Info, "Extracting feature boundaries...");
 
-  // Normally FeatureIds are int32 values, but this filter allows the use of any integer types.
-  // Due to this, we need to use the `ExecuteDataFunction` design.
+  // Dispatch because the filter accepts every integral Feature ID type.
   return ExecuteDataFunction(ExtractFeatureBoundariesFunctor{}, dataType, m_DataStructure, m_InputValues->FeatureIdsArrayPath, imageGeom, edgeGeom, m_ShouldCancel, m_InputValues->ZValueChoice,
                              m_InputValues->CustomZValue, m_InputValues->ExtractVirtualSampleEdges);
 }

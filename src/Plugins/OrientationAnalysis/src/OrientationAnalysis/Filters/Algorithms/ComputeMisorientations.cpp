@@ -16,7 +16,7 @@ using namespace nx::core;
 
 namespace
 {
-/// Maximum cell count per transfer keeps memory bounded while amortizing datastore I/O.
+/// Maximum tuple count per transfer bounds local memory.
 constexpr usize k_MaxChunkTuples = 65536;
 constexpr usize k_EulerComponents = 3;
 constexpr usize k_OutputComponents = 4;
@@ -30,8 +30,7 @@ usize CalculateChunkTuples(const AbstractDataStore<float32>& inputOrientationsRe
     return std::max<usize>(1, std::min(k_MaxChunkTuples, totalTuples));
   }
 
-  // Whole trailing-dimension slabs use the OOC backend's rectangular hyperslab fast path.
-  // The cap prevents a large row/slice from turning into cell-count-sized scratch memory.
+  // Whole slabs use the OOC rectangular-hyperslab path without unbounded scratch.
   const usize slabTuples = totalTuples / tupleShape.front();
   if(slabTuples == 0 || slabTuples > k_MaxChunkTuples)
   {
@@ -53,6 +52,10 @@ void ComputeMisorientation(const ebsdlib::QuatD& q1, const ebsdlib::QuatD& q2, f
   outputMisorientations[outputOffset + 3] = axisAngle[3] * nx::core::Constants::k_180OverPiD;
 }
 
+/**
+ * @class ArraysSecondOrientationProvider
+ * @brief Provides a second orientation from local Euler buffers.
+ */
 class ArraysSecondOrientationProvider
 {
 public:
@@ -79,6 +82,10 @@ private:
   std::unique_ptr<float32[]> m_EulersBuffer;
 };
 
+/**
+ * @class ReferenceSecondOrientationProvider
+ * @brief Provides one fixed second orientation.
+ */
 class ReferenceSecondOrientationProvider
 {
 public:
@@ -101,6 +108,16 @@ private:
   ebsdlib::QuatD m_ReferenceOrientation;
 };
 
+/**
+ * @brief Computes misorientations through bounded chunks.
+ * @tparam SecondOrientationProvider Provides the second orientation.
+ * @param dataStructure Provides selected arrays.
+ * @param inputValues Identifies selected arrays and mode.
+ * @param secondOrientationProvider Provides second orientations.
+ * @param chunkTuples Specifies tuples per transfer.
+ * @param shouldCancel Signals cancellation.
+ * @return Success, or a bulk-I/O error.
+ */
 template <typename SecondOrientationProvider>
 Result<> ComputeMisorientationChunks(DataStructure& dataStructure, const ComputeMisorientationsInputValues& inputValues, SecondOrientationProvider& secondOrientationProvider, usize chunkTuples,
                                      const std::atomic_bool& shouldCancel)
@@ -188,7 +205,6 @@ Result<> ComputeMisorientationChunks(DataStructure& dataStructure, const Compute
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeMisorientations::ComputeMisorientations(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel,
                                                ComputeMisorientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -198,10 +214,8 @@ ComputeMisorientations::ComputeMisorientations(DataStructure& dataStructure, con
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeMisorientations::~ComputeMisorientations() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeMisorientations::operator()()
 {
   if(m_InputValues->ComputationType == compute_misorientations_constants::k_UseArraysIndex)

@@ -11,35 +11,11 @@ struct ComputeSurfaceFeaturesInputValues;
 
 /**
  * @class ComputeSurfaceFeaturesScanline
- * @brief Out-of-core (OOC) optimized algorithm for identifying surface features using
- * Z-slice sequential bulk I/O with a 3-slice rolling window.
+ * @brief Identifies surface features with a three-slice Feature Id window.
  *
- * **The problem this solves**: When the FeatureIds array is stored out-of-core in
- * chunked format, the Direct variant's operator[] access to check face neighbors
- * triggers chunk thrashing -- especially the +/-Z neighbor lookups that are
- * dimX*dimY elements apart in flat index space. This makes the algorithm orders
- * of magnitude slower on OOC data.
- *
- * **How the rolling window solves it**: This variant reads the FeatureIds array one
- * native Z-slice at a time using copyIntoBuffer(), maintaining three in-memory
- * buffers (prevSlice, curSlice, nextSlice). All neighbor lookups are performed on
- * these in-memory buffers:
- *   - X and Y neighbors: simple index arithmetic within curSlice.
- *   - Z neighbors: same position in prevSlice (-Z) or nextSlice (+Z).
- *
- * **2D geometry support**: For geometries with one degenerate dimension (size == 1),
- * the algorithm still iterates the native Z-Y-X grid but remaps coordinates to
- * the 2D plane for boundary and neighbor checks. This unified approach avoids
- * separate 2D/3D code paths while maintaining sequential I/O.
- *
- * **Output caching**: The SurfaceFeatures output is a small feature-level array
- * (one element per feature, not per voxel). To avoid per-voxel OOC writes, the
- * results are accumulated in a local std::vector and bulk-written once at the end
- * via copyFromBuffer().
- *
- * **Memory overhead**: 3 input buffers of size (dimX * dimY * 4 bytes) for the
- * rolling window, plus a local vector of size (numFeatures * 1 byte) for the
- * cached output. For typical datasets this is a few MB.
+ * The window converts disk-backed neighbor reads to sequential slice I/O. A
+ * unified loop remaps 2D geometry coordinates without losing sequential access.
+ * Memory is three cell-scale slices plus a feature-scale output cache.
  *
  * @see ComputeSurfaceFeaturesDirect for the in-core variant.
  * @see ComputeSurfaceFeatures for the dispatcher.
@@ -49,13 +25,17 @@ class SIMPLNXCORE_EXPORT ComputeSurfaceFeaturesScanline
 {
 public:
   /**
-   * @brief Constructs the OOC-optimized surface feature identifier.
-   * @param dataStructure The DataStructure containing FeatureIds and SurfaceFeatures arrays.
-   * @param mesgHandler Handler for progress/info messages.
-   * @param shouldCancel Atomic flag for cooperative cancellation.
-   * @param inputValues Algorithm parameters (geometry path, array paths, flags).
+   * @brief Creates a bulk-I/O surface-feature algorithm.
+   * @param dataStructure Provides the selected arrays and geometry.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later slices when true.
+   * @param inputValues Specifies validated paths and options. The caller must
+   * keep this object alive for the algorithm lifetime.
    */
   ComputeSurfaceFeaturesScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, const ComputeSurfaceFeaturesInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning bulk-I/O algorithm.
+   */
   ~ComputeSurfaceFeaturesScanline() noexcept;
 
   ComputeSurfaceFeaturesScanline(const ComputeSurfaceFeaturesScanline&) = delete;
@@ -64,21 +44,19 @@ public:
   ComputeSurfaceFeaturesScanline& operator=(ComputeSurfaceFeaturesScanline&&) noexcept = delete;
 
   /**
-   * @brief Executes the OOC-optimized surface feature identification using a
-   * 3-slice rolling window with copyIntoBuffer bulk I/O.
+   * @brief Labels surface features with bulk I/O.
+   * @return Error from validation or unsupported dimensionality, or success after cancellation.
    *
-   * Handles both 3D and 2D geometries within a single Z-iteration loop,
-   * using coordinate remapping for 2D cases.
-   *
-   * @return Result<> indicating success, errors, or unsupported dimensionality.
+   * Cancellation leaves the output unchanged because write-back follows the cell
+   * scan. Current bulk-I/O Result values are not inspected.
    */
   Result<> operator()();
 
 private:
-  DataStructure& m_DataStructure;                                   ///< Reference to the DataStructure containing all data.
-  const ComputeSurfaceFeaturesInputValues* m_InputValues = nullptr; ///< Algorithm parameters.
-  const std::atomic_bool& m_ShouldCancel;                           ///< Cooperative cancellation flag.
-  const IFilter::MessageHandler& m_MessageHandler;                  ///< Progress message handler.
+  DataStructure& m_DataStructure;
+  const ComputeSurfaceFeaturesInputValues* m_InputValues = nullptr;
+  const std::atomic_bool& m_ShouldCancel;
+  const IFilter::MessageHandler& m_MessageHandler;
 };
 
 } // namespace nx::core

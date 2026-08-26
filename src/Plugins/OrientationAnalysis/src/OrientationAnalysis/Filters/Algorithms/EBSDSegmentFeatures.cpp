@@ -9,7 +9,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 EBSDSegmentFeatures::EBSDSegmentFeatures(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, EBSDSegmentFeaturesInputValues* inputValues)
 : SegmentFeatures(dataStructure, shouldCancel, mesgHandler)
 , m_InputValues(inputValues)
@@ -18,32 +17,8 @@ EBSDSegmentFeatures::EBSDSegmentFeatures(DataStructure& dataStructure, const IFi
   m_IsPeriodic = inputValues->IsPeriodic;
 }
 
-// -----------------------------------------------------------------------------
 EBSDSegmentFeatures::~EBSDSegmentFeatures() noexcept = default;
 
-// -----------------------------------------------------------------------------
-// Segments an EBSD dataset into crystallographic features (grains) by grouping
-// contiguous voxels whose crystal orientations are within a user-specified
-// misorientation tolerance. Two voxels are grouped into the same feature only
-// if they share the same phase and their misorientation (computed via the
-// appropriate LaueOps symmetry operator) is below the threshold.
-//
-// Segmentation:
-//   The base-class connected-component labeling algorithm (executeCCL()) walks
-//   the volume one Z-slice at a time. Slice buffers are allocated first so the
-//   comparison overrides can read pre-loaded input data, then released once the
-//   algorithm completes.
-//
-// Post-processing:
-//   1. Validate that at least one feature was found (error if not).
-//   2. Resize the Feature AttributeMatrix to (m_FoundFeatures + 1) tuples so
-//      that all per-feature arrays (Active, etc.) have the correct size.
-//      Index 0 is reserved as an invalid/background feature.
-//   3. Initialize the Active array: fill with 1 (active), then set index 0
-//      to 0 to mark it as the reserved background slot.
-//   4. Optionally randomize FeatureIds so that spatially adjacent grains get
-//      non-sequential IDs, improving visual contrast in color-mapped renders.
-// -----------------------------------------------------------------------------
 Result<> EBSDSegmentFeatures::operator()()
 {
   this->m_NeighborScheme = m_InputValues->NeighborScheme;
@@ -58,8 +33,7 @@ Result<> EBSDSegmentFeatures::operator()()
       m_GoodVoxelsArray = MaskCompareUtilities::InstantiateMaskCompare(m_DataStructure, m_InputValues->MaskArrayPath);
     } catch(const std::out_of_range& exception)
     {
-      // This really should NOT be happening as the path was verified during preflight BUT we may be calling this from
-      // somewhere else that is NOT going through the normal nx::core::IFilter API of Preflight and Execute
+      // This fallback supports callers that bypass parameter preflight.
       std::string message = fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->MaskArrayPath.toString());
       return MakeErrorResult(-485090, message);
     }
@@ -67,7 +41,7 @@ Result<> EBSDSegmentFeatures::operator()()
   m_CrystalStructures = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath);
 
   m_FeatureIdsArray = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
-  m_FeatureIdsArray->fill(0); // initialize the output array with zeros
+  m_FeatureIdsArray->fill(0);
 
   SizeVec3 udims = gridGeom->getDimensions();
   auto allocateResult = allocateSliceBuffers(static_cast<int64>(udims[0]), static_cast<int64>(udims[1]));
@@ -92,25 +66,21 @@ Result<> EBSDSegmentFeatures::operator()()
     return {};
   }
 
-  // Sanity check the result.
   if(m_FoundFeatures < 1)
   {
     return MakeErrorResult(-87000, "No Features were detected: no Cell was eligible to seed a Feature. Every Cell is either excluded by the Mask or has a Phase value of 0 (unindexed).");
   }
 
-  // Resize the Feature Attribute Matrix
+  // Feature tuple zero remains reserved for background cells.
   ShapeType tDims = {static_cast<usize>(m_FoundFeatures + 1)};
   auto& cellFeaturesAM = m_DataStructure.getDataRefAs<AttributeMatrix>(m_InputValues->CellFeatureAttributeMatrixPath);
-  cellFeaturesAM.resizeTuples(tDims); // This will resize the active array
+  cellFeaturesAM.resizeTuples(tDims);
 
-  // make sure all values are initialized and "re-reserve" index 0
   auto* activeArray = m_DataStructure.getDataAs<UInt8Array>(m_InputValues->ActiveArrayPath);
   activeArray->getDataStore()->fill(1);
   (*activeArray)[0] = 0;
 
-  // Randomize the feature Ids for purely visual clarify. Having random Feature Ids
-  // allows users visualizing the data to better discern each grain otherwise the coloring
-  // would look like a smooth gradient. This is a user input parameter
+  // Random IDs improve visual distinction between adjacent features.
   if(m_InputValues->RandomizeFeatureIds)
   {
     randomizeFeatureIds(m_FeatureIdsArray, m_FoundFeatures + 1);
@@ -119,20 +89,6 @@ Result<> EBSDSegmentFeatures::operator()()
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// Checks whether a single voxel is eligible for segmentation. A voxel is valid
-// if it passes the mask and has a crystallographic phase > 0.
-//
-// Slice buffer fast path:
-//   When m_UseSliceBuffers is true, the method first checks whether the voxel's
-//   Z-slice is currently loaded in either LRU slot. If it is resident, mask
-//   and phase values are read directly from the in-memory
-//   m_MaskBuffer and m_PhaseBuffer arrays, avoiding an on-disk I/O round-trip.
-//
-// Inactive-buffer fallback:
-//   Direct access is retained for callers outside executeCCL. During CCL,
-//   missing slice state is rejected instead of issuing a DataStore read.
-// -----------------------------------------------------------------------------
 bool EBSDSegmentFeatures::isValidVoxel(int64 point) const
 {
   if(m_UseSliceBuffers)
@@ -156,7 +112,6 @@ bool EBSDSegmentFeatures::isValidVoxel(int64 point) const
     return false;
   }
 
-  // In-core fallback used only when slice buffering is inactive.
   if(m_InputValues->UseMask && !m_GoodVoxelsArray->isTrue(point))
   {
     return false;
@@ -169,28 +124,6 @@ bool EBSDSegmentFeatures::isValidVoxel(int64 point) const
   return true;
 }
 
-// -----------------------------------------------------------------------------
-// Determines whether two neighboring voxels are crystallographically similar
-// enough to belong to the same feature.
-//
-// Slice buffer fast path:
-//   When both voxels' Z-slices are present in the rolling 2-slot buffer, all
-//   data is read from the in-memory buffers (m_QuatBuffer, m_PhaseBuffer,
-//   m_MaskBuffer). The buffer offset for each point is computed as:
-//     slot * sliceSize + (point - iz * sliceSize)
-//   For quaternions, an additional x4 factor accounts for the 4 components
-//   per voxel. The method then:
-//     1. Checks point2's mask validity.
-//     2. Checks that point2's phase > 0 and both phases match.
-//     3. Looks up the Laue class and verifies it is in range.
-//     4. Constructs QuatD objects from the buffered quaternion components.
-//     5. Computes misorientation via LaueOps::calculateMisorientation().
-//     6. Returns true if the misorientation angle < MisorientationTolerance.
-//
-// Inactive-buffer fallback:
-//   Direct comparison is retained for callers outside executeCCL. Periodic CCL
-//   explicitly loads both required slices and never takes this path.
-// -----------------------------------------------------------------------------
 bool EBSDSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
 {
   if(m_UseSliceBuffers)
@@ -206,7 +139,6 @@ bool EBSDSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
       const usize off1 = static_cast<usize>(slot1) * sliceSize + static_cast<usize>(point1 - iz1 * m_BufSliceSize);
       const usize off2 = static_cast<usize>(slot2) * sliceSize + static_cast<usize>(point2 - iz2 * m_BufSliceSize);
 
-      // Check point2 validity
       if(m_InputValues->UseMask && m_MaskBuffer[off2] == 0)
       {
         return false;
@@ -252,7 +184,6 @@ bool EBSDSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
     return false;
   }
 
-  // In-core fallback used only when slice buffering is inactive.
   if(!isValidVoxel(point2))
   {
     return false;
@@ -286,23 +217,6 @@ bool EBSDSegmentFeatures::areNeighborsSimilar(int64 point1, int64 point2) const
   return w < m_InputValues->MisorientationTolerance;
 }
 
-// -----------------------------------------------------------------------------
-// Allocates the rolling 2-slot slice buffers used by the CCL algorithm.
-// Called once in operator(), before executeCCL().
-//
-// Each slot holds one full XY slice (dimX * dimY voxels). Two slots are needed
-// because the CCL algorithm compares the current slice (iz) with the previous
-// slice (iz-1), so both must be in memory simultaneously.
-//
-// Buffers allocated:
-//   - m_QuatBuffer  : 2 * sliceSize * 4 floats  (quaternion: 4 components/voxel)
-//   - m_PhaseBuffer : 2 * sliceSize int32 values (one phase ID per voxel)
-//   - m_MaskBuffer  : 2 * sliceSize uint8 values (one mask flag per voxel)
-//
-// Both m_BufferedSliceZ slots are initialized to -1 (no slice loaded).
-// m_UseSliceBuffers is set to true so that isValidVoxel() and
-// areNeighborsSimilar() will use the fast buffer path.
-// -----------------------------------------------------------------------------
 Result<> EBSDSegmentFeatures::allocateSliceBuffers(int64 dimX, int64 dimY)
 {
   m_BufSliceSize = dimX * dimY;
@@ -316,10 +230,7 @@ Result<> EBSDSegmentFeatures::allocateSliceBuffers(int64 dimX, int64 dimY)
   m_NextBufferUseSequence = 1;
   m_UseSliceBuffers = true;
 
-  // Cache crystal structures locally to avoid per-voxel OOC access.
-  // This array is tiny (one entry per phase) but gets accessed ~24M times
-  // during the CCL inner loop; going through an OOC DataStore each time is
-  // the dominant bottleneck.
+  // The local crystal cache avoids inner-loop OOC access.
   const usize numPhases = m_CrystalStructures->getNumberOfTuples();
   m_CrystalStructuresCache.resize(numPhases);
   auto readResult = m_CrystalStructures->getDataStoreRef().copyIntoBuffer(0, nonstd::span<uint32>(m_CrystalStructuresCache.data(), numPhases));
@@ -330,13 +241,6 @@ Result<> EBSDSegmentFeatures::allocateSliceBuffers(int64 dimX, int64 dimY)
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// Releases the slice buffers after executeCCL() completes, freeing the memory
-// back to the system. Called in operator() after the CCL algorithm finishes.
-// Resets m_UseSliceBuffers to false and both
-// m_BufferedSliceZ slots to -1. The vectors are replaced with default-
-// constructed (empty) instances to guarantee memory deallocation.
-// -----------------------------------------------------------------------------
 void EBSDSegmentFeatures::deallocateSliceBuffers()
 {
   m_UseSliceBuffers = false;
@@ -350,21 +254,6 @@ void EBSDSegmentFeatures::deallocateSliceBuffers()
   m_NextBufferUseSequence = 1;
 }
 
-// -----------------------------------------------------------------------------
-// Pre-loads voxel data for a single Z-slice into the rolling 2-slot buffer,
-// called by executeCCL() before processing each slice.
-//
-// Rolling buffer design:
-//   Two LRU slots retain the current/previous forward-pass slices and any pair
-//   explicitly requested by periodic-boundary merging. Resident slices are not
-//   re-read.
-//
-// Data loaded per slice:
-//   - Quaternions (4 float32 per voxel) into m_QuatBuffer
-//   - Phase IDs (1 int32 per voxel) into m_PhaseBuffer
-//   - Mask flags (1 uint8 per voxel) into m_MaskBuffer; if masking is disabled,
-//     all mask values are set to 1 (valid)
-// -----------------------------------------------------------------------------
 Result<> EBSDSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ)
 {
   if(iz < 0)
@@ -402,7 +291,6 @@ Result<> EBSDSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY, 
   const usize quatSlotOffset = slotOffset * 4;
   const int64 baseIndex = iz * m_BufSliceSize;
 
-  // Bulk-read quaternions (4 components per voxel) for this slice
   AbstractDataStore<float32>& quatStore = m_QuatsArray->getDataStoreRef();
   auto quatReadResult = quatStore.copyIntoBuffer(static_cast<usize>(baseIndex) * 4, nonstd::span<float32>(m_QuatBuffer.data() + quatSlotOffset, sliceSize * 4));
   if(quatReadResult.invalid())
@@ -410,7 +298,6 @@ Result<> EBSDSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY, 
     return quatReadResult;
   }
 
-  // Bulk-read phase IDs for this slice
   AbstractDataStore<int32>& phaseStore = m_CellPhases->getDataStoreRef();
   auto phaseReadResult = phaseStore.copyIntoBuffer(static_cast<usize>(baseIndex), nonstd::span<int32>(m_PhaseBuffer.data() + slotOffset, sliceSize));
   if(phaseReadResult.invalid())
@@ -418,7 +305,6 @@ Result<> EBSDSegmentFeatures::prepareForSlice(int64 iz, int64 dimX, int64 dimY, 
     return phaseReadResult;
   }
 
-  // Bulk-read mask flags for this slice
   if(m_InputValues->UseMask && m_GoodVoxelsArray != nullptr)
   {
     auto& maskArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->MaskArrayPath);

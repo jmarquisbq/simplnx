@@ -210,9 +210,7 @@ Result<> NeighborOrientationCorrelation::operator()()
           {
             const std::array<bool, k_NumFaceNeighbors> isValidFaceNeighbor = computeValidFaceNeighbors(xIdx, yIdx, zIdx, dims);
 
-            // Pre-read all valid neighbor quats and phases into local arrays.
-            // Neighbor buffer slots: 0=-Z, 1=-Y(same z), 2=-X(same z), 3=+X(same z), 4=+Y(same z), 5=+Z
-            // slot mapping: -Z→0, same-z→1, +Z→2
+            // Local slots map the six face neighbors to three Z-slice buffers.
             constexpr std::array<usize, k_NumFaceNeighbors> k_NeighborSlot = {0, 1, 1, 1, 1, 2};
             const std::array<int64, k_NumFaceNeighbors> neighborBufX = {xIdx, xIdx, xIdx - 1, xIdx + 1, xIdx, xIdx};
             const std::array<int64, k_NumFaceNeighbors> neighborBufY = {yIdx, yIdx - 1, yIdx, yIdx, yIdx + 1, yIdx};

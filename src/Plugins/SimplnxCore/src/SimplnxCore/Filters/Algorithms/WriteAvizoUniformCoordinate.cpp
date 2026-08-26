@@ -7,23 +7,19 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 WriteAvizoUniformCoordinate::WriteAvizoUniformCoordinate(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          AvizoWriterInputValues* inputValues)
 : AvizoWriter(dataStructure, mesgHandler, shouldCancel, inputValues)
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteAvizoUniformCoordinate::~WriteAvizoUniformCoordinate() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> WriteAvizoUniformCoordinate::operator()()
 {
   return AvizoWriter::execute();
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteAvizoUniformCoordinate::generateHeader(FILE* outputFile) const
 {
   const auto& geom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->GeometryPath);
@@ -55,7 +51,8 @@ Result<> WriteAvizoUniformCoordinate::generateHeader(FILE* outputFile) const
 
   const std::time_t currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   const std::string timeString = std::ctime(&currentTime);
-  fprintf(outputFile, "         DateTime \"%s\"\n", timeString.substr(0, timeString.length() - 1).c_str()); // remove the \n character from the time string
+  // ctime() includes a final newline that is not part of the quoted value.
+  fprintf(outputFile, "         DateTime \"%s\"\n", timeString.substr(0, timeString.length() - 1).c_str());
   fprintf(outputFile, "         FeatureIds Path \"%s\"\n", m_InputValues->FeatureIdsArrayPath.toString().c_str());
   fprintf(outputFile, "     }\n");
 
@@ -81,19 +78,6 @@ Result<> WriteAvizoUniformCoordinate::generateHeader(FILE* outputFile) const
   return {};
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Writes the FeatureIds data to the Avizo uniform coordinate output file.
- *
- * @section ooc_strategy OOC Strategy
- * Same chunked copyIntoBuffer() approach as WriteAvizoRectilinearCoordinate::writeData().
- * The FeatureIds array is read in 64K-tuple chunks to avoid per-element OOC access,
- * and each chunk is written to the output file in one fwrite (binary) or formatted
- * fprintf loop (ASCII).
- *
- * @param outputFile FILE pointer to the open Avizo output file.
- * @return Result<> indicating success.
- */
 Result<> WriteAvizoUniformCoordinate::writeData(FILE* outputFile) const
 {
   fprintf(outputFile, "@1\n");
@@ -101,7 +85,7 @@ Result<> WriteAvizoUniformCoordinate::writeData(FILE* outputFile) const
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
   const usize totalPoints = featureIds.getNumberOfTuples();
 
-  // Chunked OOC-safe read + file write pattern (see WriteAvizoRectilinearCoordinate for details)
+  // Source and file-write results are currently discarded.
   constexpr usize k_ChunkSize = 65536;
   std::vector<int32> buffer(k_ChunkSize);
   const auto& featureIdsStore = featureIds.getDataStoreRef();
@@ -120,7 +104,7 @@ Result<> WriteAvizoUniformCoordinate::writeData(FILE* outputFile) const
   }
   else
   {
-    // The "20 Items" is purely arbitrary and is put in to try and save some space in the ASCII file
+    // Current counter placement inserts a newline after 21 ASCII values.
     int itemCount = 0;
     for(usize offset = 0; offset < totalPoints; offset += k_ChunkSize)
     {

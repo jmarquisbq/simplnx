@@ -150,11 +150,10 @@ std::optional<T> FindTwinBoundaryIncoherence(const Eigen::Vector3d& xstl_norm, c
 }
 
 /**
- * @brief Parallel worker that identifies twin boundaries and computes their
- * incoherence. All input arrays are passed as local std::vector references
- * (pre-cached from DataStores), eliminating OOC virtual dispatch in the hot
- * loop. Output is written to local uint8/float32 vectors that are later
- * bulk-copied back to DataStores.
+ * @class CalculateTwinBoundaryWithIncoherenceImpl
+ * @brief Identifies twin boundaries and their incoherence.
+ *
+ * The worker reads and writes local vectors only.
  */
 class CalculateTwinBoundaryWithIncoherenceImpl
 {
@@ -243,10 +242,10 @@ private:
 };
 
 /**
- * @brief Parallel worker that identifies twin boundaries (without computing
- * incoherence). All input arrays are local std::vector references, avoiding
- * OOC DataStore access during parallel execution. Output flags are written to
- * a local uint8 vector.
+ * @class CalculateTwinBoundaryImpl
+ * @brief Identifies twin boundaries without incoherence.
+ *
+ * The worker reads and writes local vectors only.
  */
 class CalculateTwinBoundaryImpl
 {
@@ -313,7 +312,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeTwinBoundaries::ComputeTwinBoundaries(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                              ComputeTwinBoundariesInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -323,32 +321,15 @@ ComputeTwinBoundaries::ComputeTwinBoundaries(DataStructure& dataStructure, const
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeTwinBoundaries::~ComputeTwinBoundaries() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ComputeTwinBoundaries::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Identifies twin boundaries on a triangle surface mesh by checking
- * misorientation between adjacent grains against the 60-degree <111> twin
- * relationship. Optionally computes the boundary incoherence angle.
- *
- * OOC strategy: All arrays (ensemble, feature, and face level) are bulk-read
- * into local std::vectors via copyIntoBuffer before the parallel computation
- * begins. The parallel workers operate entirely on these local caches with
- * zero OOC virtual dispatch. After parallel execution, results are bulk-written
- * back to DataStores via copyFromBuffer.
- */
 Result<> ComputeTwinBoundaries::operator()()
 {
-  // -------------------------------------------------------------------------
-  // Bulk-read ensemble-level crystalStructures into local memory (tiny array).
-  // -------------------------------------------------------------------------
   const auto& crystalStructuresStore = m_DataStructure.getDataAs<UInt32Array>(m_InputValues->CrystalStructuresArrayPath)->getDataStoreRef();
   const usize numCrystalStructures = crystalStructuresStore.getNumberOfTuples();
   std::vector<uint32> crystalStructures(numCrystalStructures);
@@ -375,10 +356,7 @@ Result<> ComputeTwinBoundaries::operator()()
     result.warnings().push_back({-93211, "Finding the twin boundaries requires Cubic-Low m-3 or Cubic-High m-3m type crystal structures. Calculations for non Cubic phases will be skipped."});
   }
 
-  // -------------------------------------------------------------------------
-  // Bulk-read feature-level arrays into local vectors (O(features)). These are
-  // accessed randomly by feature ID during the parallel face loop.
-  // -------------------------------------------------------------------------
+  // Feature buffers support random face-to-feature lookup.
   const auto& featurePhasesStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FeaturePhasesArrayPath)->getDataStoreRef();
   const usize numFeatures = featurePhasesStore.getNumberOfTuples();
   std::vector<int32> featurePhases(numFeatures);
@@ -388,11 +366,7 @@ Result<> ComputeTwinBoundaries::operator()()
   std::vector<float32> avgQuats(numFeatures * 4);
   avgQuatsStore.copyIntoBuffer(0, nonstd::span<float32>(avgQuats.data(), numFeatures * 4));
 
-  // -------------------------------------------------------------------------
-  // Bulk-read face-level arrays into local vectors (O(faces), scales with
-  // surface area rather than volume). This is the largest cache but still
-  // much smaller than cell-level data in a typical EBSD dataset.
-  // -------------------------------------------------------------------------
+  // Face buffers keep workers outside DataStore access.
   const auto& faceLabelsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->FaceLabelsArrayPath)->getDataStoreRef();
   const usize numFaces = faceLabelsStore.getNumberOfTuples();
 
@@ -407,10 +381,6 @@ Result<> ComputeTwinBoundaries::operator()()
     faceNormalsStore.copyIntoBuffer(0, nonstd::span<float64>(faceNormals.data(), numFaces * 3));
   }
 
-  // -------------------------------------------------------------------------
-  // Output buffers — parallel workers write directly into these local vectors.
-  // After execution completes, results are bulk-copied to the output DataStores.
-  // -------------------------------------------------------------------------
   std::vector<uint8> twinBoundariesOut(numFaces, 0);
   std::vector<float32> twinBoundaryIncoherenceOut;
   if(m_InputValues->FindCoherence)
@@ -421,10 +391,6 @@ Result<> ComputeTwinBoundaries::operator()()
   const float32 angtol = m_InputValues->AngleTolerance;
   const float32 axistol = m_InputValues->AxisTolerance * Constants::k_PiF / 180.0f;
 
-  // -------------------------------------------------------------------------
-  // Parallel execution over all faces. The workers index only into local
-  // vectors, so there is zero OOC DataStore access during computation.
-  // -------------------------------------------------------------------------
   ParallelDataAlgorithm dataAlg;
   dataAlg.setRange(0, numFaces);
 
@@ -439,11 +405,7 @@ Result<> ComputeTwinBoundaries::operator()()
     dataAlg.execute(CalculateTwinBoundaryImpl(angtol, axistol, faceLabels, avgQuats, featurePhases, crystalStructures, twinBoundariesOut, m_ShouldCancel));
   }
 
-  // -------------------------------------------------------------------------
-  // Write results from local buffers back to DataStores via bulk I/O.
-  // TwinBoundaries uses a MaskCompare interface (no bulk copy API), so it
-  // must be written element-by-element. The incoherence array uses copyFromBuffer.
-  // -------------------------------------------------------------------------
+  // MaskCompare has no bulk write API for twin-boundary flags.
   std::unique_ptr<MaskCompareUtilities::MaskCompare> twinBoundaries;
   try
   {
@@ -453,7 +415,6 @@ Result<> ComputeTwinBoundaries::operator()()
     return MakeErrorResult(-93212, fmt::format("Mask Array DataPath does not exist or is not of the correct type (Bool | UInt8) {}", m_InputValues->TwinBoundariesArrayPath.toString()));
   }
 
-  // TwinBoundaries is a MaskCompare — must write per-element (no bulk API)
   for(usize i = 0; i < numFaces; i++)
   {
     if(twinBoundariesOut[i])

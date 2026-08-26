@@ -22,7 +22,6 @@ const Eigen::Vector3f k_ZAxis = Eigen::Vector3f::UnitZ();
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 RotateSampleRefFrame::RotateSampleRefFrame(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, RotateSampleRefFrameInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -31,22 +30,18 @@ RotateSampleRefFrame::RotateSampleRefFrame(DataStructure& dataStructure, const I
 {
 }
 
-// -----------------------------------------------------------------------------
 RotateSampleRefFrame::~RotateSampleRefFrame() noexcept = default;
 
-// -----------------------------------------------------------------------------
 void RotateSampleRefFrame::updateProgress(const std::string& message)
 {
   m_MessageHandler(IFilter::Message::Type::Info, message);
 }
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& RotateSampleRefFrame::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> RotateSampleRefFrame::operator()()
 {
   auto& srcImageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->SourceGeometryPath);
@@ -70,17 +65,15 @@ Result<> RotateSampleRefFrame::operator()()
 
   ImageRotationUtilities::FilterProgressCallback filterProgressCallback(m_MessageHandler, m_ShouldCancel);
 
-  // The actual rotating of the dataStructure arrays is done in parallel where parallel here
-  // refers to the cropping of each DataArray being done on a separate thread.
+  // Resident cell arrays rotate as independent tasks.
   ParallelTaskAlgorithm taskRunner;
   const DataPath srcCellDataAMPath = srcImageGeom.getCellDataPath();
   const auto& srcCellDataAM = srcImageGeom.getCellDataRef();
 
   const DataPath destCellDataAMPath = destImageGeom.getCellDataPath();
 
-  // The shared rotation workers use bounded source pages for OOC stores. Keep
-  // per-array tasks serial in that mode so several independent page windows do
-  // not compete for RAM or the backing-store chunk cache.
+  // Serialize all array tasks when one store needs bounded pages. This prevents
+  // independent page windows from competing for RAM and the disk chunk cache.
   bool usesOutOfCoreStore = false;
   for(const auto& [dataId, srcDataObject] : srcCellDataAM)
   {
@@ -107,13 +100,13 @@ Result<> RotateSampleRefFrame::operator()()
                                                                                             m_InputValues->SliceBySlice, &filterProgressCallback);
   }
 
-  taskRunner.wait(); // This will spill over if the number of DataArrays to process does not divide evenly by the number of threads.
+  taskRunner.wait();
 
   if(m_InputValues->KeepInputGeometryOrigin)
   {
     destImageGeom.setOrigin(srcImageGeom.getOrigin());
   }
 
-  // Surface any error/warning a parallel resample task reported through the shared callback.
+  // Publish errors and warnings after all array tasks join.
   return filterProgressCallback.takeResult();
 }

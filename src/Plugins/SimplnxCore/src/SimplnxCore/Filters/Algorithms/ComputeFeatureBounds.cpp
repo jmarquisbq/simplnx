@@ -8,7 +8,6 @@
 
 using namespace nx::core;
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBounds::ComputeFeatureBounds(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ComputeFeatureBoundsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -17,10 +16,8 @@ ComputeFeatureBounds::ComputeFeatureBounds(DataStructure& dataStructure, const I
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeFeatureBounds::~ComputeFeatureBounds() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeFeatureBounds::operator()()
 {
   const auto& featureIds = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);

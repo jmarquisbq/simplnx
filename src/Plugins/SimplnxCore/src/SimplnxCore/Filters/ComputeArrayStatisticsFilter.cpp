@@ -25,8 +25,17 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @struct IsIntegerType
+ * @brief Tests whether a dispatched type supports mode calculation.
+ */
 struct IsIntegerType
 {
+  /**
+   * @brief Tests the dispatched type.
+   * @tparam T Specifies the candidate element type.
+   * @return True for non-boolean integral types.
+   */
   template <typename T>
   bool operator()()
   {
@@ -34,6 +43,16 @@ struct IsIntegerType
   }
 };
 
+/**
+ * @brief Creates output actions for selected statistics.
+ * @param dataStructure Resolves the selected input array.
+ * @param filterArgs Selects statistics and output names.
+ * @param tupleDims Specifies output tuple dimensions.
+ * @return Actions for the destination group and selected output arrays.
+ *
+ * Per-index output uses the supplied tuple dimensions. Standardized output
+ * retains the input tuple count.
+ */
 OutputActions CreateCompatibleArrays(const DataStructure& dataStructure, const Arguments& filterArgs, ShapeType tupleDims)
 {
   auto findLength = filterArgs.value<bool>(ComputeArrayStatisticsFilter::k_FindLength_Key);
@@ -180,7 +199,6 @@ Parameters ComputeArrayStatisticsFilter::parameters() const
 {
   Parameters params;
 
-  // Create the parameter descriptors that are needed for this filter
   params.insertSeparator(Parameters::Separator{"Input Data"});
   params.insert(std::make_unique<ArraySelectionParameter>(k_SelectedArrayPath_Key, "Attribute Array to Compute Statistics", "Input Attribute Array for which to compute statistics", DataPath{},
                                                           nx::core::GetAllDataTypes(), ArraySelectionParameter::AllowedComponentShapes{{1}}));
@@ -247,7 +265,6 @@ Parameters ComputeArrayStatisticsFilter::parameters() const
   params.insert(std::make_unique<DataObjectNameParameter>(k_NumUniqueValuesName_Key, "Number of Unique Values Array Name", "The name of the array which stores the calculated number of unique values",
                                                           "NumUniqueValues"));
 
-  // Associate the Linkable Parameter(s) to the children parameters that they control
   params.linkParameters(k_FindLength_Key, k_LengthArrayName_Key, true);
   params.linkParameters(k_FindMin_Key, k_MinimumArrayName_Key, true);
   params.linkParameters(k_FindMax_Key, k_MaximumArrayName_Key, true);

@@ -19,25 +19,63 @@ using namespace nx::core;
 
 namespace
 {
-/// Scanline transfers target one MiB while always containing complete tuples.
+// Bulk transfers target one MiB but always retain one complete tuple.
 constexpr usize k_TargetChunkBytes = 1024 * 1024;
 
+/**
+ * @brief Multiplies a half-open range of tuple-shape extents.
+ * @param shape Supplies tuple extents.
+ * @param first First extent index.
+ * @param last Exclusive final extent index.
+ * @return Product, or one for an empty range.
+ * @pre first is not greater than last, and last is not greater than shape size.
+ * @pre The product fits usize.
+ */
 usize CalculateProduct(const ShapeType& shape, usize first, usize last)
 {
   return std::accumulate(shape.begin() + first, shape.begin() + last, usize{1}, std::multiplies<>());
 }
 
+/**
+ * @brief Splits numeric tuple blocks through checked bulk transfers.
+ * @tparam T Specifies the source and output value type.
+ * @param dataStructure Contains source and output arrays.
+ * @param inputArrayPath Identifies the source array.
+ * @param outputArrayPaths Identifies ordered output blocks.
+ * @param splitDimension Selects the partitioned tuple dimension.
+ * @param messageHandler Receives one message per output.
+ * @param shouldCancel Signals cancellation between chunks.
+ * @return Component-count or bulk-I/O result.
+ * @pre Output extents form an ordered partition of the source dimension.
+ *
+ * The transfer target is one MiB, but a wider tuple produces a larger buffer.
+ * Completed output blocks are not restored after cancellation or error.
+ */
 template <typename T>
 Result<> SplitDataArraysScanlineTyped(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                                       const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel);
 
 /**
+ * @class CopySplitDataArrayDirectTask
  * @brief Copies one N-D output block through maximal contiguous row-major scanlines.
+ * @tparam T Specifies the source and output value type.
  */
 template <typename T>
 class CopySplitDataArrayDirectTask
 {
 public:
+  /**
+   * @brief Initializes one direct output task.
+   * @param inputValues Supplies source values.
+   * @param outputValues Receives one output block.
+   * @param inputScanlineTuples Number of source tuples in one outer scanline.
+   * @param outputScanlineTuples Number of output tuples in one outer scanline.
+   * @param inputSplitOffset First source tuple within each scanline.
+   * @param outerCount Number of outer scanlines.
+   * @param numComponents Number of values per tuple.
+   * @param shouldCancel Signals cancellation between outer scanlines.
+   * @pre Pointers and calculated ranges remain valid through task completion.
+   */
   CopySplitDataArrayDirectTask(const T* inputValues, T* outputValues, usize inputScanlineTuples, usize outputScanlineTuples, usize inputSplitOffset, usize outerCount, usize numComponents,
                                const std::atomic_bool& shouldCancel)
   : m_InputValues(inputValues)
@@ -51,6 +89,9 @@ public:
   {
   }
 
+  /**
+   * @brief Copies all outer scanlines for this output block.
+   */
   void operator()() const
   {
     const usize outputScanlineValues = m_OutputScanlineTuples * m_NumComponents;
@@ -78,6 +119,21 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Splits numeric tuple blocks through parallel raw-pointer tasks.
+ * @tparam T Specifies the source and output value type.
+ * @param dataStructure Contains source and output arrays.
+ * @param inputArrayPath Identifies the source array.
+ * @param outputArrayPaths Identifies ordered output blocks.
+ * @param splitDimension Selects the partitioned tuple dimension.
+ * @param messageHandler Receives one message per output.
+ * @param shouldCancel Signals cancellation during scheduling and scanlines.
+ * @return Component-count or bulk-fallback result.
+ * @pre Output extents form an ordered partition of the source dimension.
+ *
+ * If any store is not a concrete DataStore, all outputs use the checked bulk
+ * implementation. This prevents mixed direct and bulk output state.
+ */
 template <typename T>
 Result<> SplitDataArraysDirectTyped(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                                     const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
@@ -171,7 +227,7 @@ Result<> SplitDataArraysScanlineTyped(DataStructure& dataStructure, const DataPa
     messageHandler({IFilter::Message::Type::Info, fmt::format("Splitting data array '{}' by tuple ({}/{})", inputArrayPath.toString(), outputIndex + 1, outputArrayPaths.size())});
   }
 
-  // Visit each outer scanline first so the source is read in ascending row-major order.
+  // Outer-first traversal keeps source reads in ascending row-major order.
   for(usize outerIndex = 0; outerIndex < outerCount; outerIndex++)
   {
     usize splitStart = 0;
@@ -212,8 +268,23 @@ Result<> SplitDataArraysScanlineTyped(DataStructure& dataStructure, const DataPa
   return {};
 }
 
+/**
+ * @struct SplitDataArraysDirectTemplateImpl
+ * @brief Adapts runtime value dispatch to the direct numeric split.
+ */
 struct SplitDataArraysDirectTemplateImpl
 {
+  /**
+   * @brief Runs one typed direct split and stores its result.
+   * @tparam T Specifies the numeric value type.
+   * @param dataStructure Contains source and output arrays.
+   * @param inputArrayPath Identifies the source array.
+   * @param outputArrayPaths Identifies ordered outputs.
+   * @param splitDimension Selects the partitioned tuple dimension.
+   * @param messageHandler Receives output messages.
+   * @param shouldCancel Signals cancellation.
+   * @param result Receives the typed split result.
+   */
   template <typename T>
   void operator()(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension, const IFilter::MessageHandler& messageHandler,
                   const std::atomic_bool& shouldCancel, Result<>& result) const
@@ -222,8 +293,23 @@ struct SplitDataArraysDirectTemplateImpl
   }
 };
 
+/**
+ * @struct SplitDataArraysScanlineTemplateImpl
+ * @brief Adapts runtime value dispatch to the bulk numeric split.
+ */
 struct SplitDataArraysScanlineTemplateImpl
 {
+  /**
+   * @brief Runs one typed bulk split and stores its result.
+   * @tparam T Specifies the numeric value type.
+   * @param dataStructure Contains source and output arrays.
+   * @param inputArrayPath Identifies the source array.
+   * @param outputArrayPaths Identifies ordered outputs.
+   * @param splitDimension Selects the partitioned tuple dimension.
+   * @param messageHandler Receives output messages.
+   * @param shouldCancel Signals cancellation.
+   * @param result Receives the typed split result.
+   */
   template <typename T>
   void operator()(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension, const IFilter::MessageHandler& messageHandler,
                   const std::atomic_bool& shouldCancel, Result<>& result) const
@@ -233,11 +319,22 @@ struct SplitDataArraysScanlineTemplateImpl
 };
 
 /**
+ * @class SplitDataArraysDirect
  * @brief Dispatch target for parallel contiguous copies between in-memory DataStores.
  */
 class SplitDataArraysDirect
 {
 public:
+  /**
+   * @brief Initializes the direct numeric dispatch target.
+   * @param dataStructure Contains source and output arrays.
+   * @param inputArrayPath Identifies the source array.
+   * @param outputArrayPaths Identifies ordered outputs.
+   * @param splitDimension Selects the partitioned tuple dimension.
+   * @param messageHandler Receives output messages.
+   * @param shouldCancel Signals cancellation.
+   * @pre All arguments outlive this target.
+   */
   SplitDataArraysDirect(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                         const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
   : m_DataStructure(dataStructure)
@@ -249,6 +346,10 @@ public:
   {
   }
 
+  /**
+   * @brief Runs runtime value dispatch for the direct split.
+   * @return Typed direct or fallback result.
+   */
   Result<> operator()() const
   {
     const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputArrayPath);
@@ -268,11 +369,22 @@ private:
 };
 
 /**
+ * @class SplitDataArraysScanline
  * @brief Streams N-D output blocks in bounded contiguous chunks for disk-backed stores.
  */
 class SplitDataArraysScanline
 {
 public:
+  /**
+   * @brief Initializes the bulk numeric dispatch target.
+   * @param dataStructure Contains source and output arrays.
+   * @param inputArrayPath Identifies the source array.
+   * @param outputArrayPaths Identifies ordered outputs.
+   * @param splitDimension Selects the partitioned tuple dimension.
+   * @param messageHandler Receives output messages.
+   * @param shouldCancel Signals cancellation.
+   * @pre All arguments outlive this target.
+   */
   SplitDataArraysScanline(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                           const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
   : m_DataStructure(dataStructure)
@@ -284,6 +396,10 @@ public:
   {
   }
 
+  /**
+   * @brief Runs runtime value dispatch for the bulk split.
+   * @return Typed bulk-I/O result.
+   */
   Result<> operator()() const
   {
     const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputArrayPath);
@@ -302,10 +418,26 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class SplitDataArrayByTupleImpl
+ * @brief Copies one complete generic array output block.
+ * @tparam ArrayType Specifies DataArray or StringArray storage behavior.
+ *
+ * CopyDataND validates and copies the complete block after one cancellation
+ * check. This task discards its Result.
+ */
 template <typename ArrayType>
 class SplitDataArrayByTupleImpl
 {
 public:
+  /**
+   * @brief Initializes one generic array output task.
+   * @param inputArray Supplies source tuples.
+   * @param outputArray Receives one output block.
+   * @param inputTupleShapeOffsets First source tuple in each dimension.
+   * @param shouldCancel Signals cancellation before the complete copy.
+   * @pre All arguments outlive this task.
+   */
   SplitDataArrayByTupleImpl(const ArrayType& inputArray, ArrayType& outputArray, const std::vector<usize> inputTupleShapeOffsets, const std::atomic_bool& shouldCancel)
   : m_InputArray(inputArray)
   , m_OutputArray(outputArray)
@@ -321,12 +453,20 @@ public:
   SplitDataArrayByTupleImpl& operator=(const SplitDataArrayByTupleImpl&) = delete;
   SplitDataArrayByTupleImpl& operator=(SplitDataArrayByTupleImpl&&) noexcept = delete;
 
+  /**
+   * @brief Copies the output block when cancellation is not set.
+   */
   void operator()() const
   {
     convert();
   }
 
 protected:
+  /**
+   * @brief Invokes CopyDataND for the complete output shape.
+   *
+   * The current implementation discards the copy Result.
+   */
   void convert() const
   {
     if(m_ShouldCancel)
@@ -347,10 +487,26 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @class SplitNeighborListByTupleImpl
+ * @brief Copies one complete NeighborList output range.
+ * @tparam T Specifies the NeighborList value type.
+ *
+ * CopyDataND validates and copies the complete range after one cancellation
+ * check. This task discards its Result.
+ */
 template <typename T>
 class SplitNeighborListByTupleImpl
 {
 public:
+  /**
+   * @brief Initializes one NeighborList output task.
+   * @param inputNL Supplies source lists.
+   * @param outputNL Receives one output range.
+   * @param inputTupleOffset First source list.
+   * @param shouldCancel Signals cancellation before the complete copy.
+   * @pre All arguments outlive this task.
+   */
   SplitNeighborListByTupleImpl(const NeighborList<T>& inputNL, NeighborList<T>& outputNL, usize inputTupleOffset, const std::atomic_bool& shouldCancel)
   : m_InputNL(inputNL)
   , m_OutputNL(outputNL)
@@ -366,12 +522,20 @@ public:
   SplitNeighborListByTupleImpl& operator=(const SplitNeighborListByTupleImpl&) = delete;
   SplitNeighborListByTupleImpl& operator=(SplitNeighborListByTupleImpl&&) noexcept = delete;
 
+  /**
+   * @brief Copies the output range when cancellation is not set.
+   */
   void operator()() const
   {
     convert();
   }
 
 protected:
+  /**
+   * @brief Invokes CopyDataND for the complete output list range.
+   *
+   * The current implementation discards the copy Result.
+   */
   void convert() const
   {
     if(m_ShouldCancel)
@@ -406,13 +570,27 @@ struct is_allowed_array_type<StringArray> : std::true_type
 {
 };
 
+/**
+ * @brief Schedules one complete output task for each generic array block.
+ * @tparam ArrayType Specifies DataArray or StringArray behavior.
+ * @param dataStructure Contains source and output arrays.
+ * @param inputArrayPath Identifies the source array.
+ * @param outputArrayPaths Identifies ordered outputs.
+ * @param splitDimension Selects the partitioned tuple dimension.
+ * @param messageHandler Receives output messages.
+ * @param shouldCancel Signals cancellation during scheduling and task start.
+ * @return Success after all tasks join.
+ * @pre Output extents form an ordered partition of the source dimension.
+ *
+ * Each task copies one output without further cancellation checks and discards
+ * its CopyDataND Result. Outputs can complete in a different order.
+ */
 template <typename ArrayType>
 typename std::enable_if<is_allowed_array_type<ArrayType>::value, Result<>>::type SplitArraysByTupleImpl(DataStructure& dataStructure, const DataPath& inputArrayPath,
                                                                                                         const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                                                                                                         const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
 {
-  // The actual splitting of the dataStructure array is done in parallel where parallel here
-  // refers to the splitting of the DataArray into each output array being done on a separate thread.
+  // Independent output blocks run as separate tasks.
   ParallelTaskAlgorithm taskRunner;
   auto& inputArray = dataStructure.getDataRefAs<ArrayType>(inputArrayPath);
   auto inputTupleShape = inputArray.getTupleShape();
@@ -428,16 +606,28 @@ typename std::enable_if<is_allowed_array_type<ArrayType>::value, Result<>>::type
 
     messageHandler({IFilter::Message::Type::Info, fmt::format("Splitting data array '{}' by tuple ({}/{})", inputArrayPath.toString(), i + 1, outputArrayPaths.size())});
 
-    // Run this directly since ArrayType is the template parameter
     taskRunner.execute(SplitDataArrayByTupleImpl<ArrayType>(inputArray, outputArray, inputTupleShapeOffset, shouldCancel));
 
     inputTupleShapeOffset[splitDimension] += outputArray.getTupleShape()[splitDimension];
   }
-  taskRunner.wait(); // This will spill over if the number of DataArrays to process does not divide evenly by the number of threads.
+  taskRunner.wait();
 
   return {};
 }
 
+/**
+ * @brief Schedules one complete output task for each NeighborList range.
+ * @tparam T Specifies the NeighborList value type.
+ * @param dataStructure Contains source and output lists.
+ * @param inputArrayPath Identifies the source NeighborList.
+ * @param outputArrayPaths Identifies ordered outputs.
+ * @param messageHandler Receives output messages.
+ * @param shouldCancel Signals cancellation during scheduling and task start.
+ * @return Success after task-runner destruction joins all tasks.
+ *
+ * Each task discards its CopyDataND Result. Output tuple counts define sequential
+ * source ranges because NeighborList tuple shapes are one-dimensional.
+ */
 template <typename T>
 Result<> SplitNeighborListsByTupleImpl(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, const IFilter::MessageHandler& messageHandler,
                                        const std::atomic_bool& shouldCancel)
@@ -463,8 +653,22 @@ Result<> SplitNeighborListsByTupleImpl(DataStructure& dataStructure, const DataP
   return {};
 }
 
+/**
+ * @struct SplitNeighborListsTemplateImpl
+ * @brief Adapts runtime NeighborList value dispatch to typed splitting.
+ */
 struct SplitNeighborListsTemplateImpl
 {
+  /**
+   * @brief Runs one typed NeighborList split and stores its result.
+   * @tparam T Specifies the NeighborList value type.
+   * @param dataStructure Contains source and output lists.
+   * @param inputArrayPath Identifies the source NeighborList.
+   * @param outputArrayPaths Identifies ordered outputs.
+   * @param messageHandler Receives output messages.
+   * @param shouldCancel Signals cancellation.
+   * @param result Receives the typed split result.
+   */
   template <typename T>
   void operator()(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, const IFilter::MessageHandler& messageHandler,
                   const std::atomic_bool& shouldCancel, Result<>& result)
@@ -473,6 +677,19 @@ struct SplitNeighborListsTemplateImpl
   }
 };
 
+/**
+ * @brief Dispatches numeric splitting from all participating store types.
+ * @param dataStructure Contains source and output arrays.
+ * @param inputArrayPath Identifies the source DataArray.
+ * @param outputArrayPaths Identifies ordered outputs.
+ * @param splitDimension Selects the partitioned tuple dimension.
+ * @param messageHandler Receives output messages.
+ * @param shouldCancel Signals cancellation.
+ * @return Direct or bulk numeric split result.
+ *
+ * One out-of-core output is sufficient to select bulk I/O for every output.
+ * This prevents a mixed-path partial split.
+ */
 Result<> SplitArraysByTuple(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, usize splitDimension,
                             const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel)
 {
@@ -495,6 +712,15 @@ Result<> SplitArraysByTuple(DataStructure& dataStructure, const DataPath& inputA
                                                                            messageHandler, shouldCancel);
 }
 
+/**
+ * @brief Dispatches NeighborList splitting by list value type.
+ * @param dataStructure Contains source and output lists.
+ * @param inputArrayPath Identifies the source NeighborList.
+ * @param outputArrayPaths Identifies ordered outputs.
+ * @param messageHandler Receives output messages.
+ * @param shouldCancel Signals cancellation.
+ * @return Typed scheduling result.
+ */
 Result<> SplitNeighborLists(DataStructure& dataStructure, const DataPath& inputArrayPath, const std::vector<DataPath>& outputArrayPaths, const IFilter::MessageHandler& messageHandler,
                             const std::atomic_bool& shouldCancel)
 {
@@ -505,7 +731,6 @@ Result<> SplitNeighborLists(DataStructure& dataStructure, const DataPath& inputA
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 SplitDataArrayByTuple::SplitDataArrayByTuple(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                              SplitDataArrayByTupleInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -515,16 +740,13 @@ SplitDataArrayByTuple::SplitDataArrayByTuple(DataStructure& dataStructure, const
 {
 }
 
-// -----------------------------------------------------------------------------
 SplitDataArrayByTuple::~SplitDataArrayByTuple() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& SplitDataArrayByTuple::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> SplitDataArrayByTuple::operator()()
 {
   const auto& inputDataArray = m_DataStructure.getDataRefAs<IArray>(m_InputValues->InputArrayPath);

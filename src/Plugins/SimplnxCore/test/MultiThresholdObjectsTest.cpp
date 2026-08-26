@@ -39,10 +39,22 @@ const DataPath k_ThresholdArrayPath = k_ImageCellDataName.createChildPath(k_Thre
 const DataPath k_MismatchingComponentsArrayPath = k_ImageCellDataName.createChildPath("MismatchingComponentsArray");
 const DataPath k_MismatchingTuplesArrayPath({"MismatchingTuplesArray"});
 
+/**
+ * @class MultiThresholdFailingReadStore
+ * @brief Injects a selected error into every bulk read.
+ * @tparam T Specifies the store element type.
+ */
 template <typename T>
 class MultiThresholdFailingReadStore : public DataStore<T>
 {
 public:
+  /**
+   * @brief Creates an in-memory store with a selected read error.
+   * @param tupleShape Store tuple shape.
+   * @param componentShape Store component shape.
+   * @param initValue Optional initialization value.
+   * @param errorCode Error code returned by bulk reads.
+   */
   MultiThresholdFailingReadStore(const ShapeType& tupleShape, const ShapeType& componentShape, std::optional<T> initValue, int32 errorCode)
   : DataStore<T>(tupleShape, componentShape, initValue)
   , m_ErrorCode(errorCode)
@@ -58,10 +70,22 @@ private:
   int32 m_ErrorCode = 0;
 };
 
+/**
+ * @class MultiThresholdFailingWriteStore
+ * @brief Injects a selected error into every bulk write.
+ * @tparam T Specifies the store element type.
+ */
 template <typename T>
 class MultiThresholdFailingWriteStore : public DataStore<T>
 {
 public:
+  /**
+   * @brief Creates an in-memory store with a selected write error.
+   * @param tupleShape Store tuple shape.
+   * @param componentShape Store component shape.
+   * @param initValue Optional initialization value.
+   * @param errorCode Error code returned by bulk writes.
+   */
   MultiThresholdFailingWriteStore(const ShapeType& tupleShape, const ShapeType& componentShape, std::optional<T> initValue, int32 errorCode)
   : DataStore<T>(tupleShape, componentShape, initValue)
   , m_ErrorCode(errorCode)
@@ -77,16 +101,34 @@ private:
   int32 m_ErrorCode = 0;
 };
 
+/**
+ * @class MultiThresholdCancelAfterReadStore
+ * @brief Requests cancellation after the first successful bulk read.
+ * @tparam T Specifies the store element type.
+ */
 template <typename T>
 class MultiThresholdCancelAfterReadStore : public DataStore<T>
 {
 public:
+  /**
+   * @brief Creates an in-memory store that updates a caller-owned cancel flag.
+   * @param tupleShape Store tuple shape.
+   * @param componentShape Store component shape.
+   * @param initValue Optional initialization value.
+   * @param shouldCancel Cancel flag that must outlive this store.
+   */
   MultiThresholdCancelAfterReadStore(const ShapeType& tupleShape, const ShapeType& componentShape, std::optional<T> initValue, std::atomic_bool& shouldCancel)
   : DataStore<T>(tupleShape, componentShape, initValue)
   , m_ShouldCancel(shouldCancel)
   {
   }
 
+  /**
+   * @brief Performs a bulk read and requests cancellation if the read succeeds.
+   * @param startIndex Zero-based first source element.
+   * @param buffer Receives the selected values.
+   * @return The underlying DataStore read result.
+   */
   Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
   {
     Result<> result = DataStore<T>::copyIntoBuffer(startIndex, buffer);
@@ -101,11 +143,14 @@ private:
   std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @brief Creates scalar and three-component arrays for threshold tests.
+ * @return The populated 20-tuple DataStructure.
+ */
 DataStructure CreateTestDataStructure()
 {
   DataStructure dataStructure;
-  // Create two test arrays, a float array and a int array
-  // Set up geometry for tuples, a cuboid with dimensions 20, 10, 1
+  // The one-dimensional geometry supplies 20 tuples for predictable thresholds.
   ImageGeom* image = ImageGeom::Create(dataStructure, k_ImageGeometry);
   std::vector<usize> dims = {20, 1, 1};
   image->setDimensions(dims);
@@ -128,14 +173,13 @@ DataStructure CreateTestDataStructure()
   usize numComponents = multiComponentData->getNumberOfComponents();
   int32 sign = 1;
 
-  // Fill the float array with {.01,.02,.03,.04,.05,.06,.07,.08,.09,.10,.11,.12,.13,.14,.15.,16,.17,.18,.19,.20}
-  // Fill the int array with { 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 }
-  // Fill multi-component array with {{0, 0, 0}, {1, -1, 1}, {-2, 2, -2}, ..., {17, -17, 17}, {-18, 18, -18}, {19, -19, 19}}
+  // The scalar arrays increase with the tuple index. The three-component array
+  // alternates signs so component thresholds can select different tuples.
   for(usize i = 0; i < 20; i++)
   {
     fnum += 0.01f;
-    (*data)[i] = fnum;  // float array
-    (*data1)[i] = inum; // int array
+    (*data)[i] = fnum;
+    (*data1)[i] = inum;
     multiComponentData->setComponent(i, 0, i * -sign);
     multiComponentData->setComponent(i, 1, i * sign);
     multiComponentData->setComponent(i, 2, i * -sign);
@@ -145,6 +189,11 @@ DataStructure CreateTestDataStructure()
   return dataStructure;
 }
 
+/**
+ * @brief Produces a value below the representable range of T.
+ * @tparam T Specifies the tested numeric type.
+ * @return A lower out-of-range value represented as float64.
+ */
 template <typename T>
 float64 GetOutOfBoundsMinimumValue()
 {
@@ -160,6 +209,11 @@ float64 GetOutOfBoundsMinimumValue()
   return static_cast<float64>(std::numeric_limits<T>::min()) * 2;
 }
 
+/**
+ * @brief Produces a value above the representable range of T.
+ * @tparam T Specifies the tested numeric type.
+ * @return An upper out-of-range value represented as float64.
+ */
 template <typename T>
 float64 GetOutOfBoundsMaximumValue()
 {
@@ -192,19 +246,15 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution", "[SimplnxCore][
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::boolean));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     auto* thresholdArray = dataStructure.getDataAs<BoolArray>(k_ThresholdArrayPath);
     REQUIRE(thresholdArray != nullptr);
 
-    // For the comparison value of 0.1, the threshold array elements 0 to 9 should be false and 10 through 19 should be true
+    // A 0.1 threshold rejects indices 0 through 9 and selects indices 10 through 19.
     for(usize i = 0; i < 20; i++)
     {
       if(i < 10)
@@ -233,19 +283,15 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution", "[SimplnxCore][
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::boolean));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     auto* thresholdArray = dataStructure.getDataAs<BoolArray>(k_ThresholdArrayPath);
     REQUIRE(thresholdArray != nullptr);
 
-    // For the comparison value of 0.1, the threshold array elements 0 to 9 should be false and 10 through 19 should be true
+    // A 0.1 threshold rejects indices 0 through 9 and selects indices 10 through 19.
     for(usize i = 0; i < 20; i++)
     {
       if(i <= 15)
@@ -548,19 +594,15 @@ TEMPLATE_TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution - Custom
   args.insertOrAssign(MultiThresholdObjectsFilter::k_UseCustomFalseValue, std::make_any<bool>(true));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CustomFalseValue, std::make_any<float64>(falseValue));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(GetDataType<TestType>()));
-
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
   auto* thresholdArray = dataStructure.getDataAs<DataArray<TestType>>(k_ThresholdArrayPath);
   REQUIRE(thresholdArray != nullptr);
 
-  // For the comparison value of 0.1, the threshold array elements 0 to 9 should be false and 10 through 19 should be true
+  // A 0.1 threshold rejects indices 0 through 9 and selects indices 10 through 19.
   for(usize i = 0; i < 20; i++)
   {
     if(i <= 15)
@@ -641,12 +683,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Invalid Execution", "[SimplnxCore
 
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
   }
-
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions)
-
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(executeResult.result)
 
@@ -708,8 +746,6 @@ TEMPLATE_TEST_CASE("SimplnxCore::MultiThresholdObjects: Invalid Execution - Out 
   args.insertOrAssign(MultiThresholdObjectsFilter::k_UseCustomFalseValue, std::make_any<bool>(true));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CustomFalseValue, std::make_any<float64>(falseValue));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(GetDataType<TestType>()));
-
-  // Preflight the filter
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions);
   REQUIRE(preflightResult.outputActions.errors().size() == 1);
@@ -748,8 +784,6 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Invalid Execution - Boolean Custo
   args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::boolean));
-
-  // Preflight the filter
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_INVALID(preflightResult.outputActions);
   REQUIRE(preflightResult.outputActions.errors().size() == 1);
@@ -758,6 +792,12 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Invalid Execution - Boolean Custo
   UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
+/**
+ * @brief Requires a threshold mask to select tuple indices 10 through 19.
+ * @tparam T Specifies the Boolean or uint8 mask type.
+ * @param dataStructure Contains the threshold mask.
+ * @param thresholdArrayPath Threshold mask path.
+ */
 template <typename T>
 void checkMaskValues(const DataStructure& dataStructure, const DataPath& thresholdArrayPath)
 {
@@ -766,7 +806,7 @@ void checkMaskValues(const DataStructure& dataStructure, const DataPath& thresho
 
   auto& thresholdArray = (*thresholdArrayPtr);
 
-  // For the comparison value of 0.1, the threshold array elements 0 to 9 should be false and 10 through 19 should be true
+  // A 0.1 threshold rejects indices 0 through 9 and selects indices 10 through 19.
   for(usize i = 0; i < 20; i++)
   {
     if(i < 10)
@@ -790,7 +830,7 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
 
   DataStructure dataStructure = CreateTestDataStructure();
 
-  // Signed
+  // Verify each supported signed integer output type.
   SECTION("Int8 Threshold")
   {
     MultiThresholdObjectsFilter filter;
@@ -806,12 +846,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::int8));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -833,12 +869,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::int16));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -860,12 +892,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::int32));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -887,19 +915,15 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::int64));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     checkMaskValues<int64>(dataStructure, k_ThresholdArrayPath);
   }
 
-  // Unsigned
+  // Verify each supported unsigned integer output type.
   SECTION("UInt8 Threshold")
   {
     MultiThresholdObjectsFilter filter;
@@ -915,12 +939,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::uint8));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -942,12 +962,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::uint16));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -969,12 +985,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::uint32));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -996,19 +1008,15 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::uint64));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
     checkMaskValues<uint64>(dataStructure, k_ThresholdArrayPath);
   }
 
-  // Floating Point
+  // Verify each supported floating-point output type.
   SECTION("Float32 Threshold")
   {
     MultiThresholdObjectsFilter filter;
@@ -1024,12 +1032,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::float32));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -1051,12 +1055,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution, DataType", "[Sim
     args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
     args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::float64));
-
-    // Preflight the filter and check result
     auto preflightResult = filter.preflight(dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-    // Execute the filter and check the result
     auto executeResult = scope.executeFilter(filter, dataStructure, args);
     SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -1088,12 +1088,8 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution - Multicomponent"
   args.insertOrAssign(MultiThresholdObjectsFilter::k_ArrayThresholdsObject_Key, std::make_any<ArrayThresholdSet>(thresholdSet));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedDataName_Key, std::make_any<std::string>(k_ThresholdArrayName));
   args.insertOrAssign(MultiThresholdObjectsFilter::k_CreatedMaskType_Key, std::make_any<DataType>(DataType::boolean));
-
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions)
-
-  // Execute the filter and check the result
   auto executeResult = scope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
@@ -1102,9 +1098,7 @@ TEST_CASE("SimplnxCore::MultiThresholdObjects: Valid Execution - Multicomponent"
 
   usize numTuples = thresholdArray->getNumberOfTuples();
 
-  // (x, y, z)
-  // y > 0
-  // even tuple indices should be true except 0
+  // The threshold selects positive Y components at even tuple indices, except index 0.
   REQUIRE_FALSE((*thresholdArray)[0]);
   for(usize i = 1; i < numTuples; i++)
   {

@@ -105,12 +105,11 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Basic Valid Executio
   const CreateImageGeometryAction::OriginType refOrigin = {2.5f, 2.5f, 0.0f};
   const CreateImageGeometryAction::SpacingType refSpacing = {1.0f, 1.0f, 1.0f};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_FillValue_Key, std::make_any<float64>(9.8));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(sampleImageGeomPath));
@@ -118,12 +117,10 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Basic Valid Executio
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(refImageGeomPath));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(refCellDataPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
   REQUIRE(dataStructure.getData(copiedNeighborListPath) == nullptr);
 
-  // Execute the filter and check the result
   algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(sampleDataArrayPath));
   auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
@@ -178,12 +175,11 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: No Overlap Valid Exe
   const CreateImageGeometryAction::OriginType refOrigin = {10.0f, 10.0f, 3.0f};
   const CreateImageGeometryAction::SpacingType refSpacing = {1.0f, 1.0f, 1.0f};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_FillValue_Key, std::make_any<float64>(9.8));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(sampleImageGeomPath));
@@ -191,11 +187,9 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: No Overlap Valid Exe
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(refImageGeomPath));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(refCellDataPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(sampleDataArrayPath));
   auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
@@ -220,12 +214,11 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Nested Valid Executi
   const CreateImageGeometryAction::OriginType refOrigin = {1.0f, 1.0f, 0.0f};
   const CreateImageGeometryAction::SpacingType refSpacing = {0.25f, 0.25f, 0.25f};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_FillValue_Key, std::make_any<float64>(9.8));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(sampleImageGeomPath));
@@ -233,11 +226,9 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Nested Valid Executi
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(refImageGeomPath));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(refCellDataPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(sampleDataArrayPath));
   auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
@@ -283,12 +274,11 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Encompassing Valid E
   const CreateImageGeometryAction::OriginType refOrigin = {-2.0f, -2.0f, 0.0f};
   const CreateImageGeometryAction::SpacingType refSpacing = {2.0f, 2.0f, 2.0f};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_FillValue_Key, std::make_any<float64>(9.8));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(sampleImageGeomPath));
@@ -296,11 +286,9 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Encompassing Valid E
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(refImageGeomPath));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(refCellDataPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   algorithmTestScope.requireExpectedStore(dataStructure.getDataRefAs<IDataArray>(sampleDataArrayPath));
   auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
@@ -343,7 +331,7 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Invalid Execution", 
   const CreateImageGeometryAction::OriginType refOrigin = {0.0f, 0.0f, 0.0f};
   const CreateImageGeometryAction::SpacingType refSpacing = {1.0f, 1.0f, 1.0f};
 
-  // Instantiate the filter, a DataStructure object and an Arguments Object
+  // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
 
@@ -351,7 +339,6 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Invalid Execution", 
 
   Arguments args;
 
-  // Create default Parameters for the filter.
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_FillValue_Key, std::make_any<float64>(9.8));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(sampleImageGeomPath));
@@ -359,11 +346,9 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Invalid Execution", 
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(refImageGeomPath));
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(refCellDataPath));
 
-  // Preflight the filter and check result
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
 
-  // Execute the filter and check the result
   auto executeResult = filter.execute(dataStructure, args);
   REQUIRE(!executeResult.result.valid());
 

@@ -11,12 +11,35 @@
 
 namespace nx::core
 {
+/**
+ * @namespace nx::core::detail
+ * @brief Contains checked bounded tuple-transfer implementations.
+ */
 namespace detail
 {
+// Bounded transfers use four 65,536-value pages and 4,096-face destination runs.
 constexpr usize kTransferPageValues = 65536;
 constexpr usize kTransferPageCount = 4;
 constexpr usize kTransferFaceRun = 4096;
 
+/**
+ * @brief Copies cell tuples to two-sided face tuples with bounded pages.
+ * @tparam T Specifies source and destination value type.
+ * @tparam Record Specifies one face-transfer record.
+ * @tparam SourceIndices Maps a record to two source tuple indexes.
+ * @param source Supplies cell tuples.
+ * @param destination Receives two source tuples per face.
+ * @param numComps Number of components in one source tuple.
+ * @param records Supplies contiguous destination face records.
+ * @param sourceIndices Returns two source indexes or usize max for an exterior side.
+ * @return Allocation, shape, range, ordering, or bulk-I/O result.
+ *
+ * Four 65,536-value LRU pages serve sparse source indexes. Destination runs
+ * target 4,096 faces and 65,536 values but retain at least one complete face.
+ * A wide face can exceed that target. A tuple wider than one page streams one
+ * side and component range at a time. The function does not inspect cancellation.
+ * An all-exterior batch is a no-op. An error does not restore prior writes.
+ */
 template <typename T, typename Record, typename SourceIndices>
 Result<> TransferBoundedCellTuples(AbstractDataStore<T>& source, AbstractDataStore<T>& destination, usize numComps, nonstd::span<const Record> records, SourceIndices sourceIndices)
 {
@@ -52,9 +75,7 @@ Result<> TransferBoundedCellTuples(AbstractDataStore<T>& source, AbstractDataSto
     return {};
   }
 
-  // A tuple may legitimately contain more values than one bounded source page.
-  // In that case, stream one face-side/component range at a time instead of
-  // rejecting the array or allocating a tuple-sized buffer.
+  // A tuple wider than one page streams component ranges without tuple-sized scratch.
   if(numComps > kTransferPageValues)
   {
     std::unique_ptr<T[]> values;
@@ -234,6 +255,26 @@ Result<> TransferBoundedCellTuples(AbstractDataStore<T>& source, AbstractDataSto
   return {};
 }
 
+/**
+ * @brief Copies feature tuples to two-sided faces through Feature ID indirection.
+ * @tparam T Specifies feature and destination value type.
+ * @tparam K Specifies the Feature ID value type.
+ * @tparam Record Specifies one face-transfer record.
+ * @tparam SourceIndices Maps a record to two cell indexes.
+ * @param featureIds Maps source cells to feature tuples.
+ * @param featureData Supplies feature tuples.
+ * @param destination Receives two feature tuples per face.
+ * @param numComps Number of components in one feature tuple.
+ * @param records Supplies contiguous destination face records.
+ * @param sourceIndices Returns two cell indexes or usize max for an exterior side.
+ * @return Allocation, shape, ID, range, ordering, or bulk-I/O result.
+ *
+ * Independent four-page caches serve Feature IDs and feature tuples. Destination
+ * runs retain complete two-sided faces and can exceed their value target. A
+ * feature tuple wider than one page streams side and component ranges. This
+ * function does not inspect cancellation. An all-exterior batch is a no-op.
+ * Earlier writes remain after error.
+ */
 template <typename T, typename K, typename Record, typename SourceIndices>
 Result<> TransferBoundedFeatureTuples(AbstractDataStore<K>& featureIds, AbstractDataStore<T>& featureData, AbstractDataStore<T>& destination, usize numComps, nonstd::span<const Record> records,
                                       SourceIndices sourceIndices)
@@ -494,59 +535,54 @@ Result<> TransferBoundedFeatureTuples(AbstractDataStore<K>& featureIds, Abstract
 } // namespace detail
 
 /**
- * @brief Record holding all data needed to perform one QuickSurfaceMesh face transfer.
+ * @struct QuickSurfaceTransferData
+ * @brief Stores one QuickSurfaceMesh face transfer.
  *
- * Batching many of these records into a single quickSurfaceTransferBatch() call
- * lets the OOC implementation process ordered face runs through fixed source
- * pages and a fixed destination buffer, avoiding singleton accesses and sparse
- * source-span allocation.
+ * A -1 label marks an exterior side. Batch calls require ascending contiguous
+ * faceIndex values so one destination run can publish all records.
  */
 struct QuickSurfaceTransferData
 {
-  usize faceIndex = 0;    ///< Index of the triangle face in the destination (face-level) array.
-  usize firstcIndex = 0;  ///< Cell index on side 0 of the face (used when faceLabel0 != -1).
-  usize secondcIndex = 0; ///< Cell index on side 1 of the face (used when faceLabel1 != -1).
-  int32 faceLabel0 = 0;   ///< Face label for side 0; -1 indicates exterior (skip copy).
-  int32 faceLabel1 = 0;   ///< Face label for side 1; -1 indicates exterior (skip copy).
+  usize faceIndex = 0;
+  usize firstcIndex = 0;
+  usize secondcIndex = 0;
+  int32 faceLabel0 = 0;
+  int32 faceLabel1 = 0;
 };
 
 /**
- * @brief Record holding all data needed to perform one SurfaceNets face transfer.
+ * @struct SurfaceNetsTransferData
+ * @brief Stores one Surface Nets face transfer.
  *
- * Similar to QuickSurfaceTransferData but uses the SurfaceNets convention where
- * each face has two associated NX-array indices (or max sentinel if exterior).
+ * usize max marks an exterior side. Batch calls require ascending contiguous
+ * faceIndex values so one destination run can publish all records.
  */
 struct SurfaceNetsTransferData
 {
-  usize faceIndex = 0; ///< Index of the quad face in the destination (face-level) array.
-  /// Pair of NX-array cell indices for the two sides of the quad face.
-  /// A value of std::numeric_limits<usize>::max() indicates an exterior face (skip).
+  usize faceIndex = 0;
   std::array<usize, 2> quadNxArrayIndices = {std::numeric_limits<usize>::max(), std::numeric_limits<usize>::max()};
 };
 
 /**
- * @brief Abstract base class for transferring tuple data from cell-level DataArrays
- * to face-level DataArrays during surface mesh generation.
+ * @class AbstractTupleTransfer
+ * @brief Defines cell-to-face and feature-to-face tuple transfer operations.
  *
- * @section overview Overview
- * When QuickSurfaceMesh or SurfaceNets generates a triangle/quad mesh from a
- * voxelized volume, each face sits between two cells. The face-level output
- * arrays need to store the data from both adjacent cells (stored interleaved:
- * [side0_comp0, side0_comp1, ..., side1_comp0, side1_comp1, ...]).
+ * Each destination face stores side zero components followed by side one
+ * components. Direct methods use unchecked per-value store access and cannot
+ * report storage failures. Exterior sides remain unchanged in direct output.
  *
- * @section ooc_optimization OOC Optimization: Batch Transfer Methods
- * The original per-element transfer methods (quickSurfaceTransfer, surfaceNetsTransfer)
- * use operator[] on the source and destination DataStore references. When the DataStore
- * is backed by OOC chunked storage, each operator[] call may trigger a chunk load/evict
- * cycle, making mesh generation extremely slow on large datasets.
- *
- * The batch methods use fixed source pages and fixed contiguous destination-face
- * runs. Page misses use bulk I/O; sparse source indices never expand a resident
- * range. Callers flush fixed-size face chunks and every I/O failure is propagated.
+ * Batch methods use checked source pages and contiguous destination runs. A
+ * mixed batch writes zeros for exterior sides. An all-exterior batch is a no-op.
+ * Base batch implementations are no-ops; typed subclasses perform transfers.
+ * Transfers do not synchronize shared stores. Concurrent calls must not write
+ * overlapping destination ranges.
  */
 class SIMPLNXCORE_EXPORT AbstractTupleTransfer
 {
 public:
+  /**
+   * @brief Destroys a typed transfer through the base interface.
+   */
   virtual ~AbstractTupleTransfer() = default;
 
   AbstractTupleTransfer(const AbstractTupleTransfer&) = delete;
@@ -555,54 +591,32 @@ public:
   AbstractTupleTransfer& operator=(AbstractTupleTransfer&&) noexcept = delete;
 
   /**
-   * @brief Transfers one tuple from a source cell to a destination face (point sampling).
-   *
-   * Used by PointSampleTriangleGeom. Copies m_NumComps values from cellRef[firstcIndex...]
-   * to faceRef[faceIndex...].
-   *
-   * @param faceIndex Starting value index in the destination face array.
-   * @param firstcIndex Starting value index in the source cell array.
+   * @brief Copies one tuple for point-sampled triangle output.
+   * @param faceIndex First destination value index.
+   * @param firstcIndex First source value index or source cell index, by subclass.
    */
   virtual void pointSampleTransfer(size_t faceIndex, size_t firstcIndex) = 0;
 
   /**
-   * @brief Transfers cell data to both sides of a triangle face (per-element, non-batched).
-   *
-   * Copies cell data for side 0 and side 1 of a face, checking faceLabels to skip
-   * exterior faces (label == -1). The destination layout is interleaved:
-   * [face * numComps * 2 + 0..numComps-1] = side 0, [+ numComps..2*numComps-1] = side 1.
-   *
-   * @note This method uses per-element operator[] access. For OOC data, prefer
-   *   accumulating QuickSurfaceTransferData records and calling quickSurfaceTransferBatch().
-   *
-   * @param faceIndex Index of the face.
-   * @param firstcIndex Cell index for side 0 of the face.
-   * @param secondcIndex Cell index for side 1 of the face.
-   * @param faceLabels FaceLabels array; exterior faces have label -1.
+   * @brief Copies adjacent tuples to one QuickSurfaceMesh face by value access.
+   * @param faceIndex Destination face index.
+   * @param firstcIndex Side-zero cell index.
+   * @param secondcIndex Side-one cell index.
+   * @param faceLabels Supplies -1 for exterior sides.
    */
   virtual void quickSurfaceTransfer(size_t faceIndex, size_t firstcIndex, size_t secondcIndex, AbstractDataStore<int32>& faceLabels) = 0;
 
   /**
-   * @brief Transfers cell data to both sides of a quad face for SurfaceNets (per-element).
-   *
-   * Same interleaved layout as quickSurfaceTransfer. Exterior sides are indicated
-   * by quadNxArrayIndices[i] == std::numeric_limits<usize>::max().
-   *
-   * @note For OOC data, prefer accumulating SurfaceNetsTransferData records and
-   *   calling surfaceNetsTransferBatch().
-   *
-   * @param faceIndex Index of the quad face.
-   * @param quadNxArrayIndices Cell indices for the two sides of the quad; max sentinel = exterior.
+   * @brief Copies adjacent tuples to one Surface Nets face by value access.
+   * @param faceIndex Destination face index.
+   * @param quadNxArrayIndices Supplies cell indexes or usize max for exterior sides.
    */
   virtual void surfaceNetsTransfer(size_t faceIndex, const std::array<usize, 2>& quadNxArrayIndices) = 0;
 
   /**
-   * @brief OOC-optimized batch transfer for QuickSurfaceMesh faces.
-   *
-   * Processes a span of QuickSurfaceTransferData records in one bulk I/O round-trip.
-   * Default implementation is a no-op; subclasses override with typed bulk copy logic.
-   *
-   * @param records Span of transfer records to process in one batch.
+   * @brief Handles one QuickSurfaceMesh record batch.
+   * @param records Ordered contiguous face records.
+   * @return Success from the base no-op implementation.
    */
   virtual Result<> quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData> /*records*/)
   {
@@ -610,12 +624,9 @@ public:
   }
 
   /**
-   * @brief OOC-optimized batch transfer for SurfaceNets faces.
-   *
-   * Processes a span of SurfaceNetsTransferData records in one bulk I/O round-trip.
-   * Default implementation is a no-op; subclasses override with typed bulk copy logic.
-   *
-   * @param records Span of transfer records to process in one batch.
+   * @brief Handles one Surface Nets record batch.
+   * @param records Ordered contiguous face records.
+   * @return Success from the base no-op implementation.
    */
   virtual Result<> surfaceNetsTransferBatch(nonstd::span<const SurfaceNetsTransferData> /*records*/)
   {
@@ -623,39 +634,44 @@ public:
   }
 
 protected:
+  /**
+   * @brief Initializes empty transfer metadata for a typed subclass.
+   */
   AbstractTupleTransfer() = default;
 
-  DataPath m_SourceDataPath;      ///< Path to the source (cell-level) DataArray in the DataStructure.
-  DataPath m_DestinationDataPath; ///< Path to the destination (face-level) DataArray in the DataStructure.
-  size_t m_NumComps = 0;          ///< Number of components per tuple in both source and destination arrays.
+  DataPath m_SourceDataPath;
+  DataPath m_DestinationDataPath;
+  size_t m_NumComps = 0;
 };
 
 /**
- * @brief Typed implementation of AbstractTupleTransfer for direct cell-to-face data transfer.
+ * @class TransferTuple
+ * @brief Transfers typed cell tuples to two-sided face tuples.
+ * @tparam T Specifies source and destination value type.
  *
- * Copies data directly from cell-level DataArrays to face-level DataArrays.
- * The source array is indexed by cell index and the destination array stores two
- * sides per face in interleaved layout.
- *
- * @section ooc_batch OOC Batch Methods
- * The quickSurfaceTransferBatch() and surfaceNetsTransferBatch() overrides implement
- * the bounded-page strategy described in AbstractTupleTransfer: source tuples are
- * read through fixed pages while destination faces are emitted in fixed-size runs.
- *
- * @tparam T The element type of both the source cell DataArray and destination face DataArray.
+ * Direct methods use unchecked per-value access. Batch methods validate source
+ * indexes, destination runs, and component shapes before checked bulk I/O.
  */
 template <typename T>
 class TransferTuple : public AbstractTupleTransfer
 {
 public:
+  /**
+   * @brief Defines the typed DataArray.
+   */
   using DataArrayType = DataArray<T>;
+  /**
+   * @brief Defines the typed abstract store.
+   */
   using DataStoreType = AbstractDataStore<T>;
 
   /**
-   * @brief Constructs a TransferTuple for direct cell-to-face data transfer.
-   * @param dataStructure Current DataStructure containing both arrays.
-   * @param selectedDataPath Path to the source (cell-level) DataArray.
-   * @param createdArrayPath Path to the destination (face-level) DataArray.
+   * @brief Initializes a cell-to-face transfer.
+   * @param dataStructure Contains source and destination arrays.
+   * @param selectedDataPath Identifies the cell source.
+   * @param createdArrayPath Identifies the two-sided face destination.
+   * @pre Source and destination have type T and outlive this transfer.
+   * @pre Destination components equal two times source components for face transfers.
    */
   TransferTuple(DataStructure& dataStructure, const DataPath& selectedDataPath, const DataPath& createdArrayPath)
   : m_CellRef(dataStructure.template getDataRefAs<DataArrayType>(selectedDataPath).getDataStoreRef())
@@ -668,6 +684,9 @@ public:
     m_NumComps = cellArrayPtr->getNumberOfComponents();
   }
 
+  /**
+   * @brief Destroys the typed cell transfer.
+   */
   ~TransferTuple() override = default;
   TransferTuple(const TransferTuple&) = delete;
   TransferTuple(TransferTuple&&) noexcept = delete;
@@ -675,9 +694,10 @@ public:
   TransferTuple& operator=(TransferTuple&&) noexcept = delete;
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param firstcIndex
+   * @brief Copies one source value range to a destination value range.
+   * @param faceIndex First destination value index.
+   * @param firstcIndex First source value index.
+   * @pre Both value ranges contain m_NumComps values.
    */
   void pointSampleTransfer(size_t faceIndex, size_t firstcIndex) override
   {
@@ -688,15 +708,16 @@ public:
   }
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param firstcIndex
-   * @param secondcIndex
-   * @param faceLabels
+   * @brief Copies non-exterior cell tuples to one QuickSurfaceMesh face.
+   * @param faceIndex Destination face index.
+   * @param firstcIndex Side-zero source cell.
+   * @param secondcIndex Side-one source cell.
+   * @param faceLabels Supplies -1 for an exterior side.
+   * @pre Non-exterior source and destination ranges are valid.
    */
   void quickSurfaceTransfer(size_t faceIndex, size_t firstcIndex, size_t secondcIndex, AbstractDataStore<int32>& faceLabels) override
   {
-    // Only copy the data if the FaceLabel is NOT -1, indicating that the data is NOT on the exterior
+    // Leave exterior destination sides unchanged.
     if(faceLabels[faceIndex * 2] != -1)
     {
       for(size_t i = 0; i < m_NumComps; i++)
@@ -716,13 +737,14 @@ public:
   }
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param quadNxArrayIndices
+   * @brief Copies non-exterior cell tuples to one Surface Nets face.
+   * @param faceIndex Destination face index.
+   * @param quadNxArrayIndices Supplies source cells or usize max for exterior sides.
+   * @pre Non-exterior source and destination ranges are valid.
    */
   void surfaceNetsTransfer(size_t faceIndex, const std::array<usize, 2>& quadNxArrayIndices) override
   {
-    // Only copy the data if the quadNxArrayIndices is NOT UINT64_MAX, indicating that the data is NOT on the exterior
+    // Leave exterior destination sides unchanged.
     if(quadNxArrayIndices[0] != std::numeric_limits<usize>::max())
     {
       for(size_t i = 0; i < m_NumComps; i++)
@@ -742,15 +764,9 @@ public:
   }
 
   /**
-   * @brief OOC-optimized batch transfer for QuickSurfaceMesh.
-   *
-   * Replaces per-element access with bounded source pages and fixed-size
-   * destination face runs.
-   *
-   * All tuple copies happen in-memory between heap-allocated local buffers.
-   * Exterior faces (faceLabel == -1) are skipped during the copy phase.
-   *
-   * @param records Span of QuickSurfaceTransferData records for this batch.
+   * @brief Transfers one QuickSurfaceMesh batch with bounded pages.
+   * @param records Ordered contiguous face records.
+   * @return Allocation, shape, range, ordering, or bulk-I/O result.
    */
   Result<> quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData> records) override
   {
@@ -760,12 +776,9 @@ public:
   }
 
   /**
-   * @brief OOC-optimized batch transfer for SurfaceNets.
-   *
-   * Same bulk I/O strategy as quickSurfaceTransferBatch but using SurfaceNets
-   * conventions: exterior sides are indicated by quadNxArrayIndices[i] == max sentinel.
-   *
-   * @param records Span of SurfaceNetsTransferData records for this batch.
+   * @brief Transfers one Surface Nets batch with bounded pages.
+   * @param records Ordered contiguous face records.
+   * @return Allocation, shape, range, ordering, or bulk-I/O result.
    */
   Result<> surfaceNetsTransferBatch(nonstd::span<const SurfaceNetsTransferData> records) override
   {
@@ -773,42 +786,49 @@ public:
   }
 
 private:
-  DataStoreType& m_CellRef; ///< Reference to the source (cell-level) DataStore.
-  DataStoreType& m_FaceRef; ///< Reference to the destination (face-level) DataStore.
+  DataStoreType& m_CellRef;
+  DataStoreType& m_FaceRef;
 };
 
 /**
- * @brief Typed implementation of AbstractTupleTransfer for feature-level to face-level transfer.
+ * @class TransferFeatureTuple
+ * @brief Transfers typed feature tuples to two-sided face tuples.
+ * @tparam T Specifies feature and destination value type.
+ * @tparam K Specifies the Feature ID value type.
  *
- * Unlike TransferTuple which copies cell data directly, this class performs an indirection
- * through a FeatureIds array: cell index -> featureId -> feature-level data -> face output.
- * This is used when surface mesh faces need feature-level attributes (e.g., average
- * orientations, average C-axis values) rather than raw cell-level data.
- *
- * @section ooc_batch OOC Batch Methods
- * The batch methods add independent, fixed FeatureIds and feature-data page
- * caches to the direct tuple-transfer strategy. Destination face tuples are
- * emitted in fixed contiguous runs, so sparse feature IDs cannot expand a
- * resident feature-sized or cell-sized range.
- *
- * @tparam T The element type of the feature-level source and face-level destination DataArrays.
- * @tparam K The element type of the FeatureIds array (typically int32).
+ * Face transfers resolve cell index to Feature ID to feature data. Direct
+ * methods use unchecked per-value access. Batch methods validate cell indexes,
+ * Feature IDs, destination runs, and component shapes before checked bulk I/O.
  */
 template <typename T, typename K>
 class TransferFeatureTuple : public AbstractTupleTransfer
 {
 public:
+  /**
+   * @brief Defines the feature and destination DataArray type.
+   */
   using DataArrayType = DataArray<T>;
+  /**
+   * @brief Defines the Feature ID DataArray type.
+   */
   using FeatureIdsArrayType = DataArray<K>;
+  /**
+   * @brief Defines the feature and destination abstract store type.
+   */
   using DataStoreType = AbstractDataStore<T>;
+  /**
+   * @brief Defines the Feature ID abstract store type.
+   */
   using FeatureIdsStoreType = AbstractDataStore<K>;
 
   /**
-   * @brief Constructs a TransferFeatureTuple for feature-level to face-level transfer.
-   * @param dataStructure Current DataStructure containing all arrays.
-   * @param selectedDataPath Path to the source (feature-level) DataArray.
-   * @param createdArrayPath Path to the destination (face-level) DataArray.
-   * @param featureIdsArrayPath Path to the FeatureIds array that maps cell index -> feature ID.
+   * @brief Initializes a feature-to-face transfer.
+   * @param dataStructure Contains feature, Feature ID, and destination arrays.
+   * @param selectedDataPath Identifies feature data.
+   * @param createdArrayPath Identifies the two-sided face destination.
+   * @param featureIdsArrayPath Identifies the cell-to-feature map.
+   * @pre Arrays have types T, T, and K and outlive this transfer.
+   * @pre Feature IDs are scalar. Face destination components are twice the feature components.
    */
   TransferFeatureTuple(DataStructure& dataStructure, const DataPath& selectedDataPath, const DataPath& createdArrayPath, const DataPath& featureIdsArrayPath)
   : m_FeatureDataRef(dataStructure.template getDataRefAs<DataArrayType>(selectedDataPath).getDataStoreRef())
@@ -822,6 +842,9 @@ public:
     m_NumComps = cellArrayPtr->getNumberOfComponents();
   }
 
+  /**
+   * @brief Destroys the typed feature transfer.
+   */
   ~TransferFeatureTuple() override = default;
   TransferFeatureTuple(const TransferFeatureTuple&) = delete;
   TransferFeatureTuple(TransferFeatureTuple&&) noexcept = delete;
@@ -829,13 +852,17 @@ public:
   TransferFeatureTuple& operator=(TransferFeatureTuple&&) noexcept = delete;
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param firstcIndex
+   * @brief Copies feature values through the current flat-offset point-sample rule.
+   * @param faceIndex First destination value index.
+   * @param firstcIndex Source cell index.
+   * @pre The resolved Feature ID and destination range are valid.
+   *
+   * This method uses Feature ID as the first flat feature-data value. It does not
+   * multiply by m_NumComps. Multi-component input therefore does not select the
+   * complete tuple at that Feature ID.
    */
   void pointSampleTransfer(size_t faceIndex, size_t firstcIndex) override
   {
-    // FeatureIds is assumed to be an Int32 array with a single component.
     K firstFeatureId = m_FeatureIdsRef[firstcIndex];
     for(size_t i = 0; i < m_NumComps; i++)
     {
@@ -844,16 +871,16 @@ public:
   }
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param firstcIndex
-   * @param secondcIndex
-   * @param faceLabels
+   * @brief Copies non-exterior feature tuples to one QuickSurfaceMesh face.
+   * @param faceIndex Destination face index.
+   * @param firstcIndex Side-zero source cell.
+   * @param secondcIndex Side-one source cell.
+   * @param faceLabels Supplies -1 for an exterior side.
+   * @pre Resolved Feature IDs and destination ranges are valid.
    */
   void quickSurfaceTransfer(size_t faceIndex, size_t firstcIndex, size_t secondcIndex, AbstractDataStore<int32>& faceLabels) override
   {
-    // FeatureIds is assumed to be an Int32 array with a single component.
-    // Only copy the data if the FaceLabel is NOT -1, indicating that the data is NOT on the exterior
+    // Leave exterior destination sides unchanged.
     if(faceLabels[faceIndex * 2] != -1)
     {
       K firstFeatureId = m_FeatureIdsRef[firstcIndex];
@@ -875,14 +902,14 @@ public:
   }
 
   /**
-   * @brief
-   * @param faceIndex
-   * @param quadNxArrayIndices
+   * @brief Copies non-exterior feature tuples to one Surface Nets face.
+   * @param faceIndex Destination face index.
+   * @param quadNxArrayIndices Supplies source cells or usize max for exterior sides.
+   * @pre Resolved Feature IDs and destination ranges are valid.
    */
   void surfaceNetsTransfer(size_t faceIndex, const std::array<usize, 2>& quadNxArrayIndices) override
   {
-    // FeatureIds is assumed to be an Int32 array with a single component.
-    // Only copy the data if the quadNxArrayIndices is NOT UINT64_MAX, indicating that the data is NOT on the exterior
+    // Leave exterior destination sides unchanged.
     if(quadNxArrayIndices[0] != std::numeric_limits<usize>::max())
     {
       usize firstcIndex = quadNxArrayIndices[0];
@@ -906,13 +933,9 @@ public:
   }
 
   /**
-   * @brief OOC-optimized batch transfer for QuickSurfaceMesh (feature-level variant).
-   *
-   * Unlike the TransferTuple version, this performs a two-level indirection
-   * through independent fixed FeatureIds and feature-data page caches. The
-   * resulting face tuples are written in bounded contiguous runs.
-   *
-   * @param records Span of QuickSurfaceTransferData records for this batch.
+   * @brief Transfers one QuickSurfaceMesh batch through bounded ID and value pages.
+   * @param records Ordered contiguous face records.
+   * @return Allocation, shape, ID, range, ordering, or bulk-I/O result.
    */
   Result<> quickSurfaceTransferBatch(nonstd::span<const QuickSurfaceTransferData> records) override
   {
@@ -923,12 +946,9 @@ public:
   }
 
   /**
-   * @brief OOC-optimized batch transfer for SurfaceNets (feature-level variant).
-   *
-   * Same two-level indirection as quickSurfaceTransferBatch (cell -> featureId -> feature data)
-   * but using SurfaceNets conventions for exterior-face detection.
-   *
-   * @param records Span of SurfaceNetsTransferData records for this batch.
+   * @brief Transfers one Surface Nets batch through bounded ID and value pages.
+   * @param records Ordered contiguous face records.
+   * @return Allocation, shape, ID, range, ordering, or bulk-I/O result.
    */
   Result<> surfaceNetsTransferBatch(nonstd::span<const SurfaceNetsTransferData> records) override
   {
@@ -937,39 +957,30 @@ public:
   }
 
 private:
-  DataStoreType& m_FeatureDataRef;      ///< Reference to the source (feature-level) DataStore.
-  DataStoreType& m_FaceRef;             ///< Reference to the destination (face-level) DataStore.
-  FeatureIdsStoreType& m_FeatureIdsRef; ///< Reference to the FeatureIds DataStore (cell index -> feature ID).
+  DataStoreType& m_FeatureDataRef;
+  DataStoreType& m_FaceRef;
+  FeatureIdsStoreType& m_FeatureIdsRef;
 };
 
 /**
- * @brief Factory function that creates a type-appropriate TransferTuple instance and appends it
- * to the provided vector of tuple transfer functions.
- *
- * Inspects the DataType of the selected DataArray and instantiates TransferTuple<T> with
- * the matching type. This is the primary way callers set up direct cell-to-face transfers.
- *
- * @param dataStructure Current DataStructure.
- * @param selectedDataPath Path to the source (cell-level) DataArray.
- * @param createdDataPath Path to the destination (face-level) DataArray.
- * @param tupleTransferFunctions Vector to append the new instance to.
+ * @brief Appends a typed cell-to-face transfer for a runtime DataType.
+ * @param dataStructure Contains source and destination arrays.
+ * @param selectedDataPath Identifies the cell source.
+ * @param createdDataPath Identifies the face destination.
+ * @param tupleTransferFunctions Receives the new transfer.
+ * @pre Paths identify compatible DataArrays.
  */
 SIMPLNXCORE_EXPORT void AddTupleTransferInstance(DataStructure& dataStructure, const DataPath& selectedDataPath, const DataPath& createdDataPath,
                                                  std::vector<std::shared_ptr<AbstractTupleTransfer>>& tupleTransferFunctions);
 
 /**
- * @brief Factory function that creates a type-appropriate TransferFeatureTuple instance and
- * appends it to the provided vector of tuple transfer functions.
- *
- * Inspects the DataType of the selected DataArray and the FeatureIds array, then
- * instantiates TransferFeatureTuple<T,K> with the matching types. This sets up
- * the two-level indirection path: cell -> featureId -> feature data -> face output.
- *
- * @param dataStructure Current DataStructure.
- * @param selectedDataPath Path to the source (feature-level) DataArray.
- * @param createdDataPath Path to the destination (face-level) DataArray.
- * @param featureIdsArrayPath Path to the FeatureIds array (cell index -> feature ID).
- * @param tupleTransferFunctions Vector to append the new instance to.
+ * @brief Appends a typed feature-to-face transfer for runtime DataTypes.
+ * @param dataStructure Contains feature, Feature ID, and destination arrays.
+ * @param selectedDataPath Identifies feature data.
+ * @param createdDataPath Identifies the face destination.
+ * @param featureIdsArrayPath Identifies the cell-to-feature map.
+ * @param tupleTransferFunctions Receives the new transfer.
+ * @pre Paths identify compatible DataArrays and Feature IDs are Int32.
  */
 SIMPLNXCORE_EXPORT void AddFeatureTupleTransferInstance(DataStructure& dataStructure, const DataPath& selectedDataPath, const DataPath& createdDataPath, const DataPath& featureIdsArrayPath,
                                                         std::vector<std::shared_ptr<AbstractTupleTransfer>>& tupleTransferFunctions);

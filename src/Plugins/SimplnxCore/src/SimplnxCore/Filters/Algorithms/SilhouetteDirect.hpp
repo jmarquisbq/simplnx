@@ -11,30 +11,34 @@ struct SilhouetteInputValues;
 
 /**
  * @class SilhouetteDirect
- * @brief Computes per-tuple silhouette scores by directly indexing resident arrays.
+ * @brief Computes silhouette scores with resident direct array access.
  *
- * This implementation preserves the original all-pairs calculation for in-memory
- * data. Direct indexing is inexpensive when the input, feature IDs, mask, and
- * output are resident, but its tuple-sized distance workspaces and random access
- * pattern are not appropriate for disk-backed stores. Silhouette dispatches here
- * only when every participating array can use the in-core path.
+ * The algorithm retains N by (K + 1) distance values, where N is tuple count and
+ * K is the number of distinct Feature IDs. It also retains three N-value vectors.
+ * Direct indexing is efficient for resident arrays but causes random access when
+ * a storage override forces this path on disk-backed data.
  *
- * The object borrows the DataStructure and input-values bundle for its lifetime;
- * it neither owns nor outlives them.
+ * Feature IDs index the distance table directly. They must be nonnegative, and
+ * the maximum ID must not exceed the number of distinct IDs. The implementation
+ * does not validate this condition. It does not inspect cancellation.
  *
- * @see SilhouetteScanline for the bounded-memory OOC implementation.
+ * @see SilhouetteScanline for sparse-ID support and bounded tuple tiles.
  */
 class SIMPLNXCORE_EXPORT SilhouetteDirect
 {
 public:
   /**
-   * @brief Creates the in-core silhouette implementation.
-   * @param dataStructure Data structure containing the clustering input, feature IDs, optional mask, and output.
-   * @param messageHandler Unused by this direct implementation; accepted to keep both dispatched implementations interchangeable.
-   * @param shouldCancel Unused by the preserved direct calculation; accepted as part of the common algorithm interface.
-   * @param inputValues Non-owning pointer to the filter arguments. It must remain valid through operator()().
+   * @brief Initializes the resident silhouette implementation.
+   * @param dataStructure Contains input, Feature ID, mask, and output arrays.
+   * @param messageHandler Preserves the common dispatcher constructor signature.
+   * @param shouldCancel Preserves the common interface but is not inspected.
+   * @param inputValues Selects metric and array paths.
+   * @pre dataStructure and inputValues outlive this executor.
    */
   SilhouetteDirect(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel, const SilhouetteInputValues* inputValues);
+  /**
+   * @brief Destroys the resident silhouette implementation.
+   */
   ~SilhouetteDirect() noexcept;
 
   SilhouetteDirect(const SilhouetteDirect&) = delete;
@@ -43,8 +47,12 @@ public:
   SilhouetteDirect& operator=(SilhouetteDirect&&) noexcept = delete;
 
   /**
-   * @brief Computes each enabled tuple's within-cluster and nearest-other-cluster mean distances.
-   * @return A valid result on completion, or an error when the optional mask cannot be instantiated.
+   * @brief Computes all enabled tuple scores with a resident distance table.
+   * @return Mask-instantiation result, or success.
+   * @pre Participating arrays have equal tuple counts.
+   * @pre Feature IDs are nonnegative and their maximum does not exceed the distinct-ID count.
+   *
+   * Masked tuples receive zero. The method runs to completion after it starts.
    */
   Result<> operator()();
 

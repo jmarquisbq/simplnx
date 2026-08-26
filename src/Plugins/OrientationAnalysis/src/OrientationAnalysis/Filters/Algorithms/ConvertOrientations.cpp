@@ -32,16 +32,7 @@ namespace
 // Human-readable representation names, indexed by ebsdlib::orientations::Type.
 constexpr std::array<std::string_view, 8> k_TypeNames = {"Euler", "Orientation Matrix", "Quaternion", "Axis Angle", "Rodrigues", "Homochoric", "Cubochoric", "Stereographic"};
 
-/**
- * Macro-generated parallel convertor classes (one per target representation).
- * Each class reads from an input DataStore and writes to an output DataStore,
- * converting orientation representations (Euler, OM, Quat, etc.) tuple by tuple.
- *
- * OOC strategy: The operator() processes the assigned Range in 4096-tuple chunks.
- * Each chunk bulk-reads input data via copyIntoBuffer, converts all tuples locally,
- * then bulk-writes output via copyFromBuffer. This replaces per-element operator[]
- * access, which would cause O(N) virtual dispatch calls into the OOC storage layer.
- */
+// Macro-generated workers convert 4,096-tuple local buffers through bulk I/O.
 #define OC_TBB_IMPL(TO_REP)                                                                                                                                                                            \
   template <typename T, typename K, class InputType, class OutputType>                                                                                                                                 \
   class TO_REP##Convertor                                                                                                                                                                              \
@@ -118,7 +109,6 @@ OC_TBB_IMPL(Stereographic)
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 ConvertOrientations::ConvertOrientations(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, ConvertOrientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -127,16 +117,13 @@ ConvertOrientations::ConvertOrientations(DataStructure& dataStructure, const IFi
 {
 }
 
-// -----------------------------------------------------------------------------
 ConvertOrientations::~ConvertOrientations() noexcept = default;
 
-// -----------------------------------------------------------------------------
 bool ConvertOrientations::shouldCancel() const
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 void ConvertOrientations::sendThreadSafeProgressMessage(usize counter)
 {
   std::lock_guard<std::mutex> guard(m_ProgressMessage_Mutex);
@@ -153,13 +140,6 @@ void ConvertOrientations::sendThreadSafeProgressMessage(usize counter)
   m_InitialPoint = now;
 }
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Converts an array of orientation representations from one type to
- * another (e.g., Euler angles to quaternions). Supports all 8 EbsdLib
- * orientation types. Parallelized via ParallelDataAlgorithm with macro-
- * generated convertor classes that use chunked bulk I/O internally.
- */
 Result<> ConvertOrientations::operator()()
 {
   DataPath outputDataPath = m_InputValues->InputOrientationArrayPath.replaceName(m_InputValues->OutputOrientationArrayName);
@@ -171,7 +151,6 @@ Result<> ConvertOrientations::operator()()
   m_MessageHandler(IFilter::Message::Type::Info, fmt::format("Converting {} orientations from {} to {}", totalPoints, k_TypeNames[static_cast<usize>(m_InputValues->InputType)],
                                                              k_TypeNames[static_cast<usize>(m_InputValues->OutputType)]));
 
-  // Allow data-based parallelization
   ParallelDataAlgorithm parallelAlgorithm;
   parallelAlgorithm.setRange(0, totalPoints);
 

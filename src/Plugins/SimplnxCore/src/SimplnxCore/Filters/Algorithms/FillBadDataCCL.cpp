@@ -1,63 +1,3 @@
-// -----------------------------------------------------------------------------
-// FillBadDataCCL.cpp -- Out-of-core CCL algorithm for filling bad data
-// -----------------------------------------------------------------------------
-//
-// This file implements the out-of-core optimized variant of the FillBadData
-// algorithm. It replaces the BFS flood-fill approach (see FillBadDataBFS.cpp)
-// with a four-phase pipeline built on scanline Connected Component Labeling
-// (CCL) and externally backed equivalence state, designed to process data in strict Z-slice sequential
-// order to avoid chunk thrashing in OOC storage.
-//
-// ## The Chunk Thrashing Problem
-//
-// When data is stored in compressed HDF5 chunks (e.g., 64x64x64 voxels per
-// chunk), each random access to a voxel may trigger decompression of an entire
-// chunk. BFS flood-fill visits neighbors in a wavefront pattern that crosses
-// chunk boundaries unpredictably, causing the same chunks to be loaded and
-// evicted thousands of times. For a 300x300x300 volume, this can turn a
-// ~1-second in-core operation into a multi-hour ordeal.
-//
-// ## How CCL Avoids Thrashing
-//
-// The CCL approach processes voxels in a fixed Z-Y-X scan order, reading each
-// Z-slice exactly once via bulk copyIntoBuffer/copyFromBuffer calls. Cross-slice
-// connectivity is resolved symbolically through temporary records rather than
-// a resident Union-Find. A rolling 2-slice
-// label buffer provides backward neighbor lookups using O(dimX * dimY) memory.
-//
-// ## Four-Phase Pipeline
-//
-// Phase 1: Z-Slice Sequential CCL
-//   Scans Z-slices sequentially, assigning provisional labels to bad-data voxels
-//   (FeatureId == 0). Uses a 2-slice rolling label buffer for backward neighbor
-//   reads. Records equivalences externally. Accumulates per-label voxel counts.
-//   Writes provisional labels to the FeatureIds store for Phase 3 to read.
-//
-// Phase 2: Global Resolution
-//   Resolves roots through bounded external-equivalence cache pages. Sizes are
-//   accumulated at roots as equivalences are joined.
-//
-// Phase 3: Region Classification and Relabeling
-//   Reads provisional labels from FeatureIds (one Z-slice at a time), resolves
-//   each to its root, and classifies by total component size:
-//   - Small regions (< threshold): relabeled to -1 for filling in Phase 4
-//   - Large regions (>= threshold): relabeled to 0 (optionally new phase)
-//
-// Phase 4: Iterative Morphological Fill (External-Record Deferred)
-//   Each iteration has two passes:
-//   - Pass 1 (Vote): 3-slice rolling window scan. For each -1 voxel, majority
-//     vote among face neighbors. Write (dest, src) pairs to a temporary record store.
-//   - Pass 2 (Apply): Read bounded pair batches back and apply fills via 3-slice buffered bulk I/O.
-//   No O(N) memory allocations. Uses O(features) vote counters plus externally backed records.
-//   Repeats until no -1 voxels remain.
-//
-// ## Result Equivalence
-//
-// This algorithm produces identical results to FillBadDataBFS for the same inputs.
-// The four-phase decomposition is purely an optimization of the data access pattern.
-//
-// -----------------------------------------------------------------------------
-
 #include "FillBadDataCCL.hpp"
 
 #include "FillBadData.hpp"
@@ -86,7 +26,10 @@ constexpr uint64 k_EquivalenceRecordsPerPage = 4096;
 constexpr usize k_EquivalenceMaxPages = 16;
 constexpr uint64 k_FillPairBatchRecords = 4096;
 
-/** @brief Fixed-width deferred copy from one face-neighbor source tuple to one bad destination tuple. */
+/**
+ * @struct FillPair
+ * @brief Stores one deferred destination and face-neighbor source.
+ */
 struct FillPair
 {
   int64 destination = 0;
@@ -95,9 +38,13 @@ struct FillPair
 
 /**
  * @brief Creates bounded fixed-record storage for one fill iteration's destination/source pairs.
+ * @param maximumPairs Maximum record capacity.
+ * @param allowInMemoryFallback Permits a resident provider fallback when true.
+ * @param shouldCancel Signals cancellation during provider resize.
+ * @return Pair store, or a configuration, provider, allocation, or cancellation error.
  *
- * Genuine OOC execution disallows the resident fallback so a dense defect cannot
- * silently allocate one pair per cell in RAM.
+ * Genuine OOC execution disallows resident fallback. The store still reserves
+ * capacity for one pair per cell.
  */
 Result<std::unique_ptr<ITemporaryRecordStore>> CreateFillPairStore(uint64 maximumPairs, bool allowInMemoryFallback, const std::atomic_bool& shouldCancel)
 {
@@ -135,7 +82,12 @@ Result<std::unique_ptr<ITemporaryRecordStore>> CreateFillPairStore(uint64 maximu
   return result;
 }
 
-/** @brief Creates externally backed CCL parent/rank/size state for every possible provisional label. */
+/**
+ * @brief Creates parent, rank, and size state for provisional labels.
+ * @param maximumLabel Maximum provisional label capacity.
+ * @param allowInMemoryFallback Permits a resident provider fallback when true.
+ * @return External equivalence state, or an overflow, provider, or allocation error.
+ */
 Result<std::unique_ptr<ExternalEquivalence>> CreateExternalEquivalence(uint64 maximumLabel, bool allowInMemoryFallback)
 {
   if(maximumLabel == std::numeric_limits<uint64>::max())
@@ -168,18 +120,26 @@ Result<std::unique_ptr<ExternalEquivalence>> CreateExternalEquivalence(uint64 ma
 }
 
 /**
- * @brief Applies deferred fill pairs to one typed cell array through a three-slice rolling window.
+ * @struct SliceBufferedCopyFunctor
+ * @brief Applies deferred fill pairs through a three-slice array window.
  *
- * A source is always face-adjacent to its destination, so previous/current/next
- * slices contain every possible copy. Pairs are emitted in Z/Y/X order; the
- * window therefore advances sequentially and each destination slice is flushed
- * once instead of issuing two random OOC tuple accesses per pair.
+ * Each source is face-adjacent, so three slices contain every possible copy.
+ * Pairs use Z-Y-X order. The window advances sequentially and flushes each
+ * destination slice once.
  */
 struct SliceBufferedCopyFunctor
 {
   /**
    * @brief Reads deferred pairs in fixed batches and copies every tuple component through the rolling window.
-   * @return A valid result or the first pair-store, DataStore, adjacency, overflow, or cancellation error.
+   * @tparam T Cell-array value type.
+   * @param dataArray Receives deferred tuple copies.
+   * @param pairStore Supplies destination/source records.
+   * @param pairCount Number of valid records.
+   * @param sliceTuples Number of tuples in one XY slice.
+   * @param sliceStride Signed slice stride for record validation.
+   * @param dimZ Number of Z slices.
+   * @param shouldCancel Signals cancellation between record batches.
+   * @return Success, or a record, store, adjacency, overflow, or cancellation error.
    */
   template <typename T>
   Result<> operator()(IDataArray* dataArray, ITemporaryRecordStore& pairStore, uint64 pairCount, usize sliceTuples, int64 sliceStride, int64 dimZ, const std::atomic_bool& shouldCancel) const
@@ -294,42 +254,8 @@ const std::atomic_bool& FillBadDataCCL::getCancel() const
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
-// PHASE 1: Z-Slice Sequential Connected Component Labeling (CCL)
-// -----------------------------------------------------------------------------
-//
-// This phase performs connected component labeling on bad-data voxels
-// (FeatureId == 0) using a Z-slice sequential scanline algorithm. The key
-// insight that makes this OOC-friendly is that scanline CCL only needs to
-// check three BACKWARD neighbors (x-1, y-1, z-1), all of which have already
-// been processed. This means we can process voxels in strict Z-Y-X order,
-// reading each Z-slice exactly once with a bulk copyIntoBuffer call.
-//
-// Data structures:
-// - labelBuffer: Rolling 2-slice buffer (2 * dimX * dimY int32 values).
-//   Alternates between even/odd Z indices via (z % 2) to store provisional
-//   labels for the current and previous Z-slice. This provides O(1) backward
-//   neighbor lookups without storing labels for the entire volume.
-// - unionFind: Tracks equivalences between provisional labels assigned to
-//   different parts of the same connected component. When a voxel has multiple
-//   differently-labeled backward neighbors, their labels are united.
-// - featureIdsSlice: Temporary buffer for reading/writing one Z-slice of
-//   FeatureIds. Provisional labels are written back to the FeatureIds store
-//   so that Phase 3 can read them without needing a separate label volume.
-//
-// Label assignment:
-// - Each bad-data voxel with no labeled backward neighbor gets a new
-//   provisional label (nextLabel++).
-// - Each bad-data voxel with one or more labeled backward neighbors inherits
-//   the smallest label. If multiple differently-labeled neighbors exist,
-//   they are united in the Union-Find.
-// - Good-data voxels (FeatureId != 0) are skipped and retain their original
-//   FeatureId values.
-//
-// Provisional labels start at (maxExistingFeatureId + 1) to avoid collision
-// with existing good-feature IDs. This allows Phase 3 to distinguish between
-// original feature IDs and CCL-assigned labels using a simple threshold check.
-// -----------------------------------------------------------------------------
+// Assign provisional labels with -X, -Y, and -Z neighbors. A two-slice label
+// window supports the forward scan, and FeatureIds stores labels for classification.
 Result<> FillBadDataCCL::phaseOneCCL(Int32AbstractDataStore& featureIdsStore, ExternalEquivalence& equivalences, int32& nextLabel, const std::array<int64, 3>& dims) const
 {
   const usize sliceSize = static_cast<usize>(dims[0]) * static_cast<usize>(dims[1]);
@@ -433,15 +359,11 @@ Result<> FillBadDataCCL::phaseOneCCL(Int32AbstractDataStore& featureIdsStore, Ex
           nextLabel++;
         }
 
-        // Write the provisional label to both the rolling buffer (for
-        // backward neighbor reads by subsequent voxels) and the featureIds
-        // slice buffer (persisted for Phases 2-3 to read back).
+        // Retain the label for later neighbors and persist it for classification.
         labelBuffer[curOff + inSlice] = assignedLabel;
         featureIdsSlice[inSlice] = assignedLabel;
 
-        // Accumulate region size: each voxel contributes 1 to its label.
-        // After Phase 2 flattening, sizes are aggregated to root labels
-        // so we can classify regions by total voxel count.
+        // Add this voxel to the provisional component size.
         auto sizeResult = equivalences.addSize(static_cast<uint64>(assignedLabel), 1, m_ShouldCancel);
         if(sizeResult.invalid())
           return sizeResult;
@@ -457,29 +379,14 @@ Result<> FillBadDataCCL::phaseOneCCL(Int32AbstractDataStore& featureIdsStore, Ex
   return equivalences.flush(m_ShouldCancel);
 }
 
-// -----------------------------------------------------------------------------
-// PHASE 2: Global Resolution of Equivalences
-// -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// PHASE 3: Region Classification and Relabeling
-// -----------------------------------------------------------------------------
-//
-// Classifies bad data regions as "small" or "large" based on size threshold:
-// - Small regions (< minAllowedDefectSize): marked with -1 for filling in Phase 4
-// - Large regions (>= minAllowedDefectSize): kept as 0 (or assigned new phase)
-// -----------------------------------------------------------------------------
+// Resolve component roots lazily and classify each provisional label by size.
 Result<> FillBadDataCCL::phaseThreeRelabeling(Int32AbstractDataStore& featureIdsStore, Int32Array* cellPhasesPtr, int32 startLabel, int32 nextLabel, ExternalEquivalence& equivalences,
                                               usize maxPhase) const
 {
   const auto& selectedImageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->inputImageGeometry);
   const SizeVec3 udims = selectedImageGeom.getDimensions();
 
-  // The startLabel boundary is critical: provisional CCL labels were assigned
-  // starting at (maxExistingFeatureId + 1) during Phase 1, so labels in the
-  // range [1, startLabel) are original good feature IDs that must NOT be
-  // touched. Only labels in [startLabel, nextLabel) are CCL-assigned bad-data
-  // region labels that need classification and relabeling.
-  // Temporary buffer for reading/writing featureIds one Z-slice at a time
+  // Values below startLabel are original features and remain unchanged.
   std::vector<int32> sliceData(static_cast<usize>(udims[0]) * static_cast<usize>(udims[1]));
   const usize sliceSize = sliceData.size();
 
@@ -562,17 +469,7 @@ Result<> FillBadDataCCL::phaseThreeRelabeling(Int32AbstractDataStore& featureIds
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// PHASE 4: Iterative Morphological Fill (External-Record Deferred)
-// -----------------------------------------------------------------------------
-//
-// Uses a temporary record store to avoid O(N) memory allocations. Each iteration:
-//   Pass 1 (Vote): Scan voxels using a 3-slice rolling window. For each -1 voxel,
-//     find the best positive-featureId neighbor via majority vote. Write (dest, src)
-//     pairs to external records. featureIds is read-only during this pass.
-//   Pass 2 (Apply): Read bounded record batches back. Copy all cell data array
-//     components from src to dest. Update featureIds last.
-// -----------------------------------------------------------------------------
+// Freeze vote results as ordered pairs, then replay Feature IDs and sibling arrays.
 Result<> FillBadDataCCL::phaseFourIterativeFill(Int32AbstractDataStore& featureIdsStore, const std::array<int64, 3>& dims, usize numFeatures, bool allowInMemoryFallback) const
 {
   const auto& selectedImageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->inputImageGeometry);
@@ -738,12 +635,7 @@ Result<> FillBadDataCCL::phaseFourIterativeFill(Int32AbstractDataStore& featureI
               }
             }
 
-            // Reset vote counters by re-visiting only the neighbors that
-            // were actually incremented above. This sets featureNumber[feature]
-            // back to 0 for each neighbor's feature, avoiding the need to zero
-            // the entire featureNumber vector (which would be O(numFeatures)
-            // per voxel). Since at most 6 neighbors are visited, this reset
-            // is O(1) per voxel.
+            // Reset only feature counters touched by this six-neighbor vote.
             if(x > 0)
             {
               int32 f = curSlice[inSlice - 1];
@@ -848,10 +740,8 @@ Result<> FillBadDataCCL::phaseFourIterativeFill(Int32AbstractDataStore& featureI
       break;
     }
 
-    // Pass 2 (Apply): replay the bounded temporary-record batches separately
-    // for FeatureIds and each sibling cell array.  Every replay sees the exact
-    // original Z-Y-X candidate order, while keeping only three slices and one
-    // 4,096-record batch resident.
+    // Replay Feature IDs first, then each sibling array in the same pair order.
+    // Three slices and one 4,096-record batch remain resident per replay.
     const int64 sliceStride = dims[0] * dims[1];
     const usize sliceTuples = sliceSize;
     auto featureIdsResult = ExecuteDataFunction(SliceBufferedCopyFunctor{}, m_DataStructure.getDataAs<IDataArray>(m_InputValues->featureIdsArrayPath)->getDataType(),
@@ -886,15 +776,6 @@ Result<> FillBadDataCCL::phaseFourIterativeFill(Int32AbstractDataStore& featureI
   return {};
 }
 
-// -----------------------------------------------------------------------------
-// Main Algorithm Entry Point -- Orchestrates Phases 1-4
-// -----------------------------------------------------------------------------
-// This method performs the initial setup (finding max feature ID and max phase
-// via chunked bulk scans), initializes external equivalence state, and then calls each
-// phase method sequentially. The chunked scans use a Z-slice-sized buffer
-// (dimX * dimY) to read feature IDs and phases in bulk, avoiding per-element
-// OOC access during the setup phase.
-// -----------------------------------------------------------------------------
 Result<> FillBadDataCCL::operator()()
 {
   auto& featureIdsStore = m_DataStructure.getDataAs<Int32Array>(m_InputValues->featureIdsArrayPath)->getDataStoreRef();
@@ -922,7 +803,7 @@ Result<> FillBadDataCCL::operator()()
     cellPhasesPtr = m_DataStructure.getDataAs<Int32Array>(m_InputValues->cellPhasesArrayPath);
   }
 
-  // Chunked scan: find max feature ID and optionally max phase using bulk reads
+  // Find maximum Feature ID and phase in fixed chunks. These scans do not check cancellation.
   usize numFeatures = 0;
   constexpr usize k_ScanBatchSize = 65536;
   std::vector<int32> scanBuffer(k_ScanBatchSize);
@@ -998,9 +879,7 @@ Result<> FillBadDataCCL::operator()()
     return ConvertResult(std::move(equivalencesResult));
   }
 
-  // Phase 1: Z-Slice Sequential Connected Component Labeling
-  // Uses a 2-slice rolling buffer (O(slice) memory) for backward neighbor reads.
-  // Writes provisional labels to featureIds store for Phases 2-3.
+  // Phase 1 writes provisional labels for root resolution and classification.
   m_MessageHandler({IFilter::Message::Type::Info, "Phase 1/4: Labeling connected components..."});
   auto phaseOneResult = phaseOneCCL(featureIdsStore, *equivalencesResult.value(), nextLabel, dims);
   if(phaseOneResult.invalid())

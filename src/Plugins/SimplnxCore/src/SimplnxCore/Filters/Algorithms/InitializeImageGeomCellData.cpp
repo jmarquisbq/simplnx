@@ -21,17 +21,26 @@ using namespace nx::core;
 namespace
 {
 using RangeType = std::pair<float64, float64>;
+// Row writes target 65,536 values and retain at least one complete tuple.
 constexpr usize k_InitializationChunkValues = 65536;
 
-/** @brief Internal initialization mode used after validating the user-facing choice index. */
+/**
+ * @enum InitType
+ * @brief Specifies internal image-cell initialization modes.
+ */
 enum class InitType : uint64
 {
-  Manual = 0,
-  Random = 1,
-  RandomWithRange = 2
+  Manual = 0,         ///< Uses the configured constant value.
+  Random = 1,         ///< Uses default scalar bounds.
+  RandomWithRange = 2 ///< Uses configured scalar bounds.
 };
 
-/** @brief Converts the persisted choice index to an initialization mode and rejects unknown values. */
+/**
+ * @brief Converts a persisted choice index to an initialization mode.
+ * @param index Specifies the persisted choice index.
+ * @return Corresponding initialization mode.
+ * @throws std::runtime_error when index does not identify a supported mode.
+ */
 InitType ConvertIndexToInitType(uint64 index)
 {
   switch(index)
@@ -51,12 +60,22 @@ InitType ConvertIndexToInitType(uint64 index)
   }
 }
 
-/** @brief Creates the seeded integral or floating distribution used by one typed target array. */
+/**
+ * @brief Creates a seeded distribution and generator for one target array.
+ * @tparam T Specifies the target scalar type.
+ * @param rangeMin Distribution lower bound.
+ * @param rangeMax Inclusive integral or excluded floating upper bound.
+ * @param seed Specifies the generator seed.
+ * @return Distribution and generator pair for T.
+ *
+ * Integral types use uniform_int_distribution<int>. Bounds outside int cannot
+ * be represented by that distribution.
+ */
 template <class T>
 auto CreateRandomGenerator(T rangeMin, T rangeMax, uint64 seed)
 {
-  std::random_device randomDevice;           // Will be used to obtain a seed for the random number engine
-  std::mt19937_64 generator(randomDevice()); // Standard mersenne_twister_engine seeded with rd()
+  std::random_device randomDevice;
+  std::mt19937_64 generator(randomDevice());
   generator.seed(seed);
 
   if constexpr(std::is_integral_v<T>)
@@ -72,15 +91,34 @@ auto CreateRandomGenerator(T rangeMin, T rangeMax, uint64 seed)
 }
 
 /**
+ * @struct InitializeArrayFunctor
  * @brief Initializes one typed image-cell subvolume through bounded contiguous row segments.
  *
- * Values are generated in the original X/Y/Z and component order so seeded
- * random output remains reproducible. Each row segment is written once rather
- * than mutating individual values in a potentially disk-backed store.
+ * Values follow X, Y, and Z order so seeded output remains reproducible. One
+ * generated value fills all components of a tuple. Each row segment writes once.
  */
 struct InitializeArrayFunctor
 {
-  /** @brief Generates and writes the selected inclusive subvolume for one runtime value type. */
+  /**
+   * @brief Generates and writes one inclusive image-cell subvolume.
+   * @tparam T Specifies the target scalar type.
+   * @param dataArray Receives initialized values.
+   * @param dims Specifies X, Y, and Z cell dimensions.
+   * @param xMin Specifies the inclusive X lower bound.
+   * @param xMax Specifies the inclusive X upper bound.
+   * @param yMin Specifies the inclusive Y lower bound.
+   * @param yMax Specifies the inclusive Y upper bound.
+   * @param zMin Specifies the inclusive Z lower bound.
+   * @param zMax Specifies the inclusive Z upper bound.
+   * @param initType Specifies constant or random initialization.
+   * @param initValue Specifies the constant initialization value.
+   * @param initRange Specifies random lower and upper bounds.
+   * @param seed Specifies the random generator seed.
+   * @param shouldCancel Stops before later row segments when true.
+   * @return Dimension, offset, or bulk-write error, or success after cancellation.
+   *
+   * The buffer target is not a hard cap when one tuple has more components.
+   */
   template <class T>
   Result<> operator()(IDataArray& dataArray, const std::array<usize, 3>& dims, uint64 xMin, uint64 xMax, uint64 yMin, uint64 yMax, uint64 zMin, uint64 zMax, InitType initType, float64 initValue,
                       const RangeType& initRange, uint64 seed, const std::atomic_bool& shouldCancel)
@@ -171,7 +209,6 @@ struct InitializeArrayFunctor
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 InitializeImageGeomCellData::InitializeImageGeomCellData(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                          InitializeImageGeomCellDataInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -181,10 +218,8 @@ InitializeImageGeomCellData::InitializeImageGeomCellData(DataStructure& dataStru
 {
 }
 
-// -----------------------------------------------------------------------------
 InitializeImageGeomCellData::~InitializeImageGeomCellData() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> InitializeImageGeomCellData::operator()()
 {
   auto cellArrayPaths = m_InputValues->CellArrays;
@@ -201,7 +236,7 @@ Result<> InitializeImageGeomCellData::operator()()
     seed = static_cast<std::mt19937_64::result_type>(std::chrono::steady_clock::now().time_since_epoch().count());
   }
 
-  // Store Seed Value in Top Level Array
+  // Store the effective seed so random output can be reproduced.
   m_DataStructure.getDataRefAs<UInt64Array>(DataPath({m_InputValues->SeedArrayName}))[0] = seed;
 
   uint64 xMin = minPoint.at(0);
@@ -218,6 +253,7 @@ Result<> InitializeImageGeomCellData::operator()()
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(imageGeomPath);
 
   std::array<usize, 3> dims = imageGeom.getDimensions().toArray();
+  // Every selected cell array participates because mixed storage is valid.
   std::vector<const IArray*> arrayTargets;
   arrayTargets.reserve(cellArrayPaths.size());
   for(const DataPath& path : cellArrayPaths)
@@ -239,13 +275,13 @@ Result<> InitializeImageGeomCellData::operator()()
     auto& iDataArray = m_DataStructure.getDataRefAs<IDataArray>(path);
 
     auto initializeResult = ExecuteNeighborFunction(InitializeArrayFunctor{}, iDataArray.getDataType(), iDataArray, dims, xMin, xMax, yMin, yMax, zMin, zMax, initType, initValue, initRange, seed,
-                                                    m_ShouldCancel); // NO BOOL
+                                                    m_ShouldCancel); // ExecuteNeighborFunction excludes Boolean arrays.
     if(initializeResult.invalid())
     {
       return initializeResult;
     }
 
-    // Avoid the exact same seeding for each array
+    // Advance the seed so separate selected arrays do not repeat a sequence.
     seed++;
   }
 

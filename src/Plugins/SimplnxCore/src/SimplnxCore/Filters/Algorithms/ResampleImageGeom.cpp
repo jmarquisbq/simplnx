@@ -17,31 +17,23 @@ using namespace nx::core;
 
 namespace
 {
-// Sentinel marking a destination axis position that falls outside the source Image Geometry's bounds
-// along that axis (no source cell to copy from - the destination voxel is filled with zero instead).
+// Marks a destination axis position outside the source geometry.
 constexpr usize k_InvalidAxisIndex = std::numeric_limits<usize>::max();
 
 /**
- * @brief Resolves, for every destination Image Geometry coordinate along a single axis, the source
- * Image Geometry cell index that coordinate's min-corner falls into (or k_InvalidAxisIndex if that
- * destination position lies outside the source geometry's bounds along this axis).
+ * @brief Maps destination minimum corners to containing source cells on one axis.
+ * @param destDimSize Number of destination positions.
+ * @param destOriginComp Destination origin coordinate.
+ * @param destSpacingComp Destination cell spacing.
+ * @param srcDimSize Number of source cells.
+ * @param srcOriginComp Source origin coordinate.
+ * @param srcSpacingComp Source cell spacing.
+ * @return Source indexes or k_InvalidAxisIndex for positions outside source bounds.
+ * @pre destSpacingComp and srcSpacingComp are positive.
  *
- * WHY this is hoisted out of the voxel loop: both geometries are axis-aligned regular grids, so
- * ImageGeom::getIndex()'s bounds check and floor-divide are each fully separable per axis - the source
- * index (or out-of-bounds result) for a given destination x position is the same regardless of the y or
- * z position, and likewise for y and z. This function reproduces that exact per-axis test (same bounds
- * comparison, same floor-divide, same float64 promotion of the underlying float32 origin/spacing) once
- * per axis position - bounded by that axis' destination dimension - instead of re-deriving it for every
- * voxel that shares the position along this axis.
- *
- * @param destDimSize Number of destination coordinates to resolve along this axis
- * @param destOriginComp Destination Image Geometry origin component for this axis
- * @param destSpacingComp Destination Image Geometry spacing component for this axis
- * @param srcDimSize Source Image Geometry dimension for this axis
- * @param srcOriginComp Source Image Geometry origin component for this axis
- * @param srcSpacingComp Source Image Geometry spacing component for this axis
- * @return A vector of length destDimSize mapping each destination axis position to its source axis
- * index, or k_InvalidAxisIndex if the destination position falls outside the source geometry
+ * Regular-grid lookup is separable by axis. Precomputation replaces a bounds
+ * check and floor division in every destination-cell iteration. float64
+ * arithmetic preserves the ImageGeom lookup promotion of float32 geometry data.
  */
 std::vector<usize> ComputeAxisSrcIndices(usize destDimSize, float64 destOriginComp, float64 destSpacingComp, usize srcDimSize, float64 srcOriginComp, float64 srcSpacingComp)
 {
@@ -64,23 +56,30 @@ std::vector<usize> ComputeAxisSrcIndices(usize destDimSize, float64 destOriginCo
 }
 
 /**
- * @brief Copies one cell-data array from the source Image Geometry to the resampled destination Image
- * Geometry by nearest-source-cell lookup.
+ * @class ResampleImageGeomArrayImpl
+ * @brief Resamples one typed cell array through reusable row buffers.
+ * @tparam T Specifies the cell-array value type.
  *
- * WHY buffered row I/O instead of per-voxel copyFrom: destination cells sharing the same (y, z) are
- * contiguous along x in the backing store, and (per ComputeAxisSrcIndices) the source cell a given
- * destination x maps to is identical for every row. This lets a whole destination row be assembled in a
- * bounded, reusable buffer - gathering the mapped source values locally - and written out with a single
- * copyFromBuffer call, instead of one CopyData call (a chunk-cache round trip per voxel when either store
- * is out-of-core) for every destination cell. The source row needed for a given (y, z) is itself read once
- * via copyIntoBuffer (and reused across consecutive destination rows mapping to the same source row, which
- * is common when upsampling) rather than re-read per voxel. Both buffers are bounded by an axis dimension,
- * never by the total cell count of either geometry.
+ * X-contiguous rows make destination writes sequential. Consecutive destination
+ * rows that map to the same source row reuse one bulk read. Working memory is
+ * proportional to source and destination X dimensions, not total cell count.
+ * Bulk-I/O results are discarded.
  */
 template <typename T>
 class ResampleImageGeomArrayImpl
 {
 public:
+  /**
+   * @brief Initializes one array resampling task.
+   * @param algorithm Receives thread-safe progress messages.
+   * @param srcArray Supplies source cell tuples.
+   * @param destArray Receives destination cell tuples.
+   * @param srcImageGeom Supplies source grid coordinates.
+   * @param destImageGeom Supplies destination grid coordinates.
+   * @param shouldCancel Signals cancellation between destination Z slices.
+   * @pre algorithm is not null.
+   * @pre All arguments outlive this task.
+   */
   ResampleImageGeomArrayImpl(ResampleImageGeom* algorithm, const IDataArray& srcArray, IDataArray& destArray, const ImageGeom& srcImageGeom, const ImageGeom& destImageGeom,
                              const std::atomic_bool& shouldCancel)
   : m_AlgorithmPtr(algorithm)
@@ -92,6 +91,12 @@ public:
   {
   }
 
+  /**
+   * @brief Copies mapped source tuples to destination rows.
+   *
+   * An out-of-bounds axis position writes zeros. Cancellation stops before a
+   * later Z slice and keeps completed destination rows.
+   */
   void operator()() const
   {
     const auto& srcDataStore = m_SrcArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
@@ -104,8 +109,7 @@ public:
     const FloatVec3 destOrigin = m_DestImageGeom.getOrigin();
     const FloatVec3 destSpacing = m_DestImageGeom.getSpacing();
 
-    // Precompute, once per axis, which source cell (if any) each destination coordinate along that
-    // axis maps to - see ComputeAxisSrcIndices for why this only needs to run per-axis, not per-voxel.
+    // Precompute separable source-cell lookup for each destination axis.
     const std::vector<usize> xIndices = ComputeAxisSrcIndices(destDims[0], destOrigin[0], destSpacing[0], srcDims[0], srcOrigin[0], srcSpacing[0]);
     const std::vector<usize> yIndices = ComputeAxisSrcIndices(destDims[1], destOrigin[1], destSpacing[1], srcDims[1], srcOrigin[1], srcSpacing[1]);
     const std::vector<usize> zIndices = ComputeAxisSrcIndices(destDims[2], destOrigin[2], destSpacing[2], srcDims[2], srcOrigin[2], srcSpacing[2]);
@@ -114,8 +118,7 @@ public:
     const usize destRowLength = destDims[0] * numComponents;
     const usize srcRowLength = srcDims[0] * numComponents;
 
-    // Reusable row buffers allocated ONCE for the whole array - bounded by an axis dimension, not by
-    // the total number of cells in either geometry.
+    // Reuse one source and one destination row for the complete array.
     auto destRowBuffer = std::make_unique<T[]>(destRowLength);
     auto srcRowBuffer = std::make_unique<T[]>(srcRowLength);
 
@@ -143,8 +146,7 @@ public:
 
         if(rowHasSource)
         {
-          // Bulk-read the source row for this (yIndex, zIndex) once; skip the read if the previous
-          // destination row already pulled from the same source row (common when upsampling).
+          // Reuse a source row when consecutive destination rows map to it.
           if(!haveCachedSrcRow || yIndex != cachedYIndex || zIndex != cachedZIndex)
           {
             const usize srcRowStart = ((srcDims[0] * srcDims[1] * zIndex) + (srcDims[0] * yIndex)) * numComponents;
@@ -154,8 +156,7 @@ public:
             haveCachedSrcRow = true;
           }
 
-          // Gather the mapped source values into the destination row buffer - local memory access
-          // against the two bounded buffers above, no store access per voxel.
+          // Gather X positions locally without per-cell store access.
           for(usize x = 0; x < destDims[0]; x++)
           {
             const usize xIndex = xIndices[x];
@@ -173,12 +174,11 @@ public:
         }
         else
         {
-          // The whole row falls outside the source geometry along y or z - matches the original
-          // per-voxel fillTuple(0) fallback for an out-of-bounds source lookup.
+          // A row outside source Y or Z bounds receives zero tuples.
           std::fill_n(destRowBuffer.get(), destRowLength, static_cast<T>(0));
         }
 
-        // Bulk-write the fully assembled destination row in a single store access.
+        // Publish the complete destination row with one store operation.
         const usize destRowStart = ((z * destDims[1] * destDims[0]) + (y * destDims[0])) * numComponents;
         destDataStore.copyFromBuffer(destRowStart, nonstd::span<const T>(destRowBuffer.get(), destRowLength));
 
@@ -205,7 +205,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 ResampleImageGeom::ResampleImageGeom(DataStructure& dataStructure, const IFilter::MessageHandler& msgHandler, const std::atomic_bool& shouldCancel, ResampleImageGeomInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -214,16 +213,13 @@ ResampleImageGeom::ResampleImageGeom(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 ResampleImageGeom::~ResampleImageGeom() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& ResampleImageGeom::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> ResampleImageGeom::operator()()
 {
   MessageHelper messageHelper(m_MessageHandler);
@@ -258,17 +254,14 @@ Result<> ResampleImageGeom::operator()()
     ExecuteParallelFunction<ResampleImageGeomArrayImpl>(oldDataArray.getDataType(), taskRunner, this, oldDataArray, newDataArray, selectedImageGeom, destImageGeom, m_ShouldCancel);
   }
 
-  taskRunner.wait(); // This will spill over if the number of geometries to process does not divide evenly by the number of threads.
+  taskRunner.wait();
 
   if(m_ShouldCancel)
   {
     return {};
   }
 
-  // Careful with this next section. We purposefully copy in the original dataStructure arrays
-  // into the destination feature attribute matrix so that we have somewhere to start.
-  // During the renumbering phase is when those copied arrays will get potentially resized
-  // to their proper number of tuples.
+  // Feature renumbering needs independent arrays because compaction resizes them.
   DataPath cellFeatureAMPath = m_InputValues->CellFeatureAttributeMatrix;
   auto destImagePath = m_InputValues->CreatedImageGeometryPath;
   DataPath featureIdsArrayPath = m_InputValues->FeatureIdsArrayPath;
@@ -296,10 +289,7 @@ Result<> ResampleImageGeom::operator()()
       dataPath = destCellFeatureAMPath.createChildPath(dataPath.getTargetName());
     }
 
-    // Loop over all the DataPaths and do a deep copy on each DataArray|StringArray
-    // so that the updating of the Feature level data can happen. We do a bit of
-    // under-the-covers where we actually remove the existing array that preflight
-    // created, so we can use the convenience of the DataArray.deepCopy() function.
+    // Replace preflight placeholders with deep copies before feature compaction.
     for(size_t index = 0; index < sourceFeatureDataPaths.size(); index++)
     {
       DataObject* dataObject = m_DataStructure.getData(sourceFeatureDataPaths[index]);
@@ -321,7 +311,6 @@ Result<> ResampleImageGeom::operator()()
       }
     }
 
-    // NOW DO THE ACTUAL RENUMBERING and updating.
     DataPath destFeatureIdsPath = destImagePath.createChildPath(srcCellDataAM.getName()).createChildPath(featureIdsArrayPath.getTargetName());
     return Sampling::RenumberFeatures(m_DataStructure, destImagePath, destCellFeatureAMPath, featureIdsArrayPath, destFeatureIdsPath, m_MessageHandler, m_ShouldCancel);
   }

@@ -12,6 +12,10 @@
 namespace nx::core
 {
 
+/**
+ * @struct CopyFeatureArrayToElementArrayInputValues
+ * @brief Stores selected feature-array paths and output naming.
+ */
 struct SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArrayInputValues
 {
   StringParameter::ValueType CreatedArraySuffix;
@@ -21,31 +25,29 @@ struct SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArrayInputValues
 
 /**
  * @class CopyFeatureArrayToElementArray
- * @brief Dispatcher that selects between the in-core (Direct) and out-of-core (Scanline)
- * algorithms for broadcasting feature data down to element (cell) data.
+ * @brief Dispatches feature-to-cell array broadcasts by storage.
  *
- * This class contains no algorithm logic itself. Its operator()() inspects the storage backing
- * of the FeatureIds array and calls
- * `DispatchAlgorithm<CopyFeatureArrayToElementArrayDirect, CopyFeatureArrayToElementArrayScanline>(...)`.
- *
- * **Algorithm overview**: For each selected feature-level array, create a cell-level array where
- * every cell receives the value of the feature it belongs to
- * (created[cell] = selectedFeature[featureIds[cell]]).
- *
- * **Dispatch rules** (see AlgorithmDispatch.hpp):
- * - If the FeatureIds array is backed by in-memory DataStore, the Direct (parallel) variant is used.
- * - If it uses out-of-core (chunked) storage, the Scanline variant is used to avoid unsafe parallel
- *   chunk-cache access and per-element chunk lookups.
- * - Global test-override flags (ForceOocAlgorithm, ForceInCoreAlgorithm) can override the automatic
- *   detection for unit testing.
+ * Every cell receives the tuple of its Feature Id. Feature Id, selected feature,
+ * and created cell arrays all drive dispatch because mixed storage is valid.
  *
  * @see CopyFeatureArrayToElementArrayDirect, CopyFeatureArrayToElementArrayScanline, DispatchAlgorithm
  */
 class SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArray
 {
 public:
+  /**
+   * @brief Creates a feature-to-cell dispatcher.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later arrays or chunks when true.
+   * @param inputValues Specifies validated paths and naming. The caller must
+   * keep this object alive for the dispatcher lifetime.
+   */
   CopyFeatureArrayToElementArray(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                  const CopyFeatureArrayToElementArrayInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning dispatcher.
+   */
   ~CopyFeatureArrayToElementArray() noexcept;
 
   CopyFeatureArrayToElementArray(const CopyFeatureArrayToElementArray&) = delete;
@@ -54,8 +56,10 @@ public:
   CopyFeatureArrayToElementArray& operator=(CopyFeatureArrayToElementArray&&) noexcept = delete;
 
   /**
-   * @brief Runs the copy for every selected feature array.
-   * @return Invalid Result on FeatureIds range-validation failure (-5355 / -5351).
+   * @brief Broadcasts every selected feature array.
+   * @return Error from Feature Id validation or the selected implementation.
+   *
+   * Cancellation can retain output from completed arrays or chunks.
    */
   Result<> operator()();
 

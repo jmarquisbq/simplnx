@@ -15,7 +15,13 @@ using namespace nx::core;
 namespace
 {
 
-/** @brief Writes the SPPARKS geometry and site-count header from small geometry metadata. */
+/**
+ * @brief Writes the SPPARKS geometry and site-count header.
+ * @param dataStructure Provides image dimensions and Feature-ID tuple count.
+ * @param inputValues Specifies source paths.
+ * @param outfile Receives formatted header text.
+ * @return Success. Stream status is not inspected.
+ */
 Result<> WriteHeader(const DataStructure& dataStructure, const WriteSPParksSitesInputValues* inputValues, std::ofstream& outfile)
 {
   SizeVec3 dims = dataStructure.getDataAs<ImageGeom>(inputValues->ImageGeomPath)->getDimensions();
@@ -47,9 +53,15 @@ Result<> WriteHeader(const DataStructure& dataStructure, const WriteSPParksSites
 
 /**
  * @brief Streams site IDs and Feature IDs to SPPARKS from fixed DataStore pages.
+ * @param dataStructure Provides source geometry and Feature IDs.
+ * @param inputValues Specifies source paths.
+ * @param outfile Receives formatted site lines.
+ * @param messageHandler Receives periodic progress.
+ * @param shouldCancel Stops before later site lines when true.
+ * @return Feature-ID read error, or success after completion or cancellation.
  *
  * Only formatting remains per-site; the potentially disk-backed Feature-ID
- * source is loaded sequentially in approximately one-megabyte buffers.
+ * source is loaded sequentially in approximately 1 MiB buffers. Stream status is not inspected.
  */
 Result<> WriteFile(const DataStructure& dataStructure, const WriteSPParksSitesInputValues* inputValues, std::ofstream& outfile, const IFilter::MessageHandler& messageHandler,
                    const std::atomic_bool& shouldCancel)
@@ -98,7 +110,6 @@ Result<> WriteFile(const DataStructure& dataStructure, const WriteSPParksSitesIn
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 WriteSPParksSites::WriteSPParksSites(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, WriteSPParksSitesInputValues* inputValues)
 : m_DataStructure(dataStructure)
 , m_InputValues(inputValues)
@@ -107,20 +118,16 @@ WriteSPParksSites::WriteSPParksSites(DataStructure& dataStructure, const IFilter
 {
 }
 
-// -----------------------------------------------------------------------------
 WriteSPParksSites::~WriteSPParksSites() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& WriteSPParksSites::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> WriteSPParksSites::operator()()
 {
-  // Make sure any directory path is also available as the user may have just typed
-  // in a path without actually creating the full path
+  // Create parent directories before opening the requested output path.
   Result<> createDirectoriesResult = nx::core::CreateOutputDirectories(m_InputValues->OutputFile.parent_path());
   if(createDirectoriesResult.invalid())
   {

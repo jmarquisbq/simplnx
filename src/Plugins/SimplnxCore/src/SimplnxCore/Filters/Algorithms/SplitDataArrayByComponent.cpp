@@ -18,16 +18,35 @@ using namespace nx::core;
 
 namespace
 {
-// Target input values per bulk transfer. The actual tuple count is rounded down
-// to complete tuples, so scratch remains independent of the total tuple count.
+// Target input values per transfer. One complete tuple can exceed this target.
 constexpr usize k_TargetChunkValues = 65536;
 
+/**
+ * @brief Builds the output path for one selected component.
+ * @param inputValues Supplies the source path and suffix.
+ * @param component Source component index.
+ * @return Source sibling path with suffix and component index appended.
+ */
 DataPath GetOutputArrayPath(const SplitDataArrayByComponentInputValues& inputValues, usize component)
 {
   const std::string arrayName = inputValues.InputArrayPath.getTargetName() + inputValues.SplitArraysSuffix + StringUtilities::number(component);
   return inputValues.InputArrayPath.replaceName(arrayName);
 }
 
+/**
+ * @brief Splits selected components through complete-tuple bulk buffers.
+ * @tparam T Specifies the source and output value type.
+ * @param dataStructure Contains input and output arrays.
+ * @param inputIDataArray Supplies interleaved source tuples.
+ * @param inputValues Selects suffix and component indexes.
+ * @param shouldCancel Signals cancellation between chunks and component writes.
+ * @return Input or output bulk-I/O result.
+ * @pre Selected components and output paths are valid.
+ *
+ * One input buffer is reused for all selected components in a chunk. One scalar
+ * output buffer is reused sequentially. Cancellation can leave earlier component
+ * outputs ahead of later outputs for the same chunk.
+ */
 template <typename T>
 Result<> SplitArraysInChunks(DataStructure& dataStructure, const IDataArray& inputIDataArray, const SplitDataArrayByComponentInputValues& inputValues, const std::atomic_bool& shouldCancel)
 {
@@ -94,10 +113,24 @@ Result<> SplitArraysInChunks(DataStructure& dataStructure, const IDataArray& inp
   return {};
 }
 
+/**
+ * @class SplitContiguousData
+ * @brief Copies selected components through disjoint raw-pointer ranges.
+ * @tparam T Specifies the source and output value type.
+ */
 template <typename T>
 class SplitContiguousData
 {
 public:
+  /**
+   * @brief Initializes one parallel direct worker.
+   * @param inputData Supplies interleaved source values.
+   * @param outputData Supplies one scalar destination pointer per component.
+   * @param components Supplies source component indexes.
+   * @param numComponents Number of source components per tuple.
+   * @param shouldCancel Signals cancellation between 65,536-tuple blocks.
+   * @pre All pointers and spans remain valid through worker completion.
+   */
   SplitContiguousData(const T* inputData, nonstd::span<T*> outputData, nonstd::span<const usize> components, usize numComponents, const std::atomic_bool& shouldCancel)
   : m_InputData(inputData)
   , m_OutputData(outputData)
@@ -107,6 +140,10 @@ public:
   {
   }
 
+  /**
+   * @brief Copies selected components for one tuple range.
+   * @param range Half-open tuple range.
+   */
   void operator()(const Range& range) const
   {
     usize blockStart = range.min();
@@ -138,8 +175,21 @@ private:
   const std::atomic_bool& m_ShouldCancel;
 };
 
+/**
+ * @struct SplitArraysDirectFunctor
+ * @brief Selects raw-pointer splitting or the checked bulk fallback.
+ */
 struct SplitArraysDirectFunctor
 {
+  /**
+   * @brief Splits one runtime-selected value type.
+   * @tparam T Specifies the source and output value type.
+   * @param dataStructure Contains input and output arrays.
+   * @param inputIDataArray Supplies source tuples.
+   * @param inputValues Selects suffix and components.
+   * @param shouldCancel Signals cancellation.
+   * @return Bulk fallback result, or success after direct work.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray& inputIDataArray, const SplitDataArrayByComponentInputValues& inputValues, const std::atomic_bool& shouldCancel) const
   {
@@ -184,8 +234,21 @@ struct SplitArraysDirectFunctor
   }
 };
 
+/**
+ * @struct SplitArraysScanlineFunctor
+ * @brief Adapts runtime value types to bulk component splitting.
+ */
 struct SplitArraysScanlineFunctor
 {
+  /**
+   * @brief Splits one runtime-selected value type through bulk buffers.
+   * @tparam T Specifies the source and output value type.
+   * @param dataStructure Contains input and output arrays.
+   * @param inputIDataArray Supplies source tuples.
+   * @param inputValues Selects suffix and components.
+   * @param shouldCancel Signals cancellation.
+   * @return Input or output bulk-I/O result.
+   */
   template <typename T>
   Result<> operator()(DataStructure& dataStructure, const IDataArray& inputIDataArray, const SplitDataArrayByComponentInputValues& inputValues, const std::atomic_bool& shouldCancel) const
   {
@@ -193,9 +256,20 @@ struct SplitArraysScanlineFunctor
   }
 };
 
+/**
+ * @class SplitDataArrayByComponentDirect
+ * @brief Dispatches the resident component-split implementation.
+ */
 class SplitDataArrayByComponentDirect
 {
 public:
+  /**
+   * @brief Initializes the resident dispatch target.
+   * @param dataStructure Contains input and output arrays.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects source and components.
+   * @pre All arguments outlive this target.
+   */
   SplitDataArrayByComponentDirect(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const SplitDataArrayByComponentInputValues* inputValues)
   : m_DataStructure(dataStructure)
   , m_ShouldCancel(shouldCancel)
@@ -203,6 +277,10 @@ public:
   {
   }
 
+  /**
+   * @brief Runs the typed resident split.
+   * @return Typed split result.
+   */
   Result<> operator()() const
   {
     const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->InputArrayPath);
@@ -215,9 +293,20 @@ private:
   const SplitDataArrayByComponentInputValues* m_InputValues = nullptr;
 };
 
+/**
+ * @class SplitDataArrayByComponentScanline
+ * @brief Dispatches the bulk-I/O component-split implementation.
+ */
 class SplitDataArrayByComponentScanline
 {
 public:
+  /**
+   * @brief Initializes the bulk-I/O dispatch target.
+   * @param dataStructure Contains input and output arrays.
+   * @param shouldCancel Signals cancellation.
+   * @param inputValues Selects source and components.
+   * @pre All arguments outlive this target.
+   */
   SplitDataArrayByComponentScanline(DataStructure& dataStructure, const std::atomic_bool& shouldCancel, const SplitDataArrayByComponentInputValues* inputValues)
   : m_DataStructure(dataStructure)
   , m_ShouldCancel(shouldCancel)
@@ -225,6 +314,10 @@ public:
   {
   }
 
+  /**
+   * @brief Runs the typed bulk split.
+   * @return Typed split result.
+   */
   Result<> operator()() const
   {
     const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->InputArrayPath);
@@ -238,7 +331,6 @@ private:
 };
 } // namespace
 
-// -----------------------------------------------------------------------------
 SplitDataArrayByComponent::SplitDataArrayByComponent(DataStructure& dataStructure, const IFilter::MessageHandler& messageHandler, const std::atomic_bool& shouldCancel,
                                                      SplitDataArrayByComponentInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -248,16 +340,13 @@ SplitDataArrayByComponent::SplitDataArrayByComponent(DataStructure& dataStructur
 {
 }
 
-// -----------------------------------------------------------------------------
 SplitDataArrayByComponent::~SplitDataArrayByComponent() noexcept = default;
 
-// -----------------------------------------------------------------------------
 const std::atomic_bool& SplitDataArrayByComponent::getCancel()
 {
   return m_ShouldCancel;
 }
 
-// -----------------------------------------------------------------------------
 Result<> SplitDataArrayByComponent::operator()()
 {
   const auto& inputArray = m_DataStructure.getDataRefAs<IDataArray>(m_InputValues->InputArrayPath);

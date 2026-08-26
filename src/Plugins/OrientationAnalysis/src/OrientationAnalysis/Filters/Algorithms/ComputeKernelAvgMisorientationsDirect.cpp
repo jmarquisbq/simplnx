@@ -18,9 +18,25 @@ using namespace nx::core;
 
 namespace
 {
+/**
+ * @class FindKernelAvgMisorientationsImpl
+ * @brief Calculates direct KAM values for a three-dimensional range.
+ *
+ * ParallelData3DAlgorithm copies this body for its ranges. The caller disables
+ * parallel scheduling when a selected array is out-of-core. This worker does
+ * not provide a general DataStructure or DataStore thread-safety guarantee.
+ */
 class FindKernelAvgMisorientationsImpl
 {
 public:
+  /**
+   * @brief Initializes a direct KAM range worker.
+   * @param progressMessenger Creates range-local progress messengers.
+   * @param dataStructure Provides the selected arrays and Image Geometry.
+   * @param inputValues Identifies the selected arrays and KAM settings.
+   * @param shouldCancel Signals cancellation.
+   * @pre Each argument remains valid while the parallel algorithm executes.
+   */
   FindKernelAvgMisorientationsImpl(ProgressMessageHelper& progressMessenger, DataStructure& dataStructure, const ComputeKernelAvgMisorientationsInputValues* inputValues,
                                    const std::atomic_bool& shouldCancel)
   : m_ProgressMessageHelper(progressMessenger)
@@ -31,12 +47,20 @@ public:
     m_OrientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
   }
 
-  // For each valid focal cell in the chunk: walk the (2rx+1)x(2ry+1)x(2rz+1) kernel, admit
-  // neighbors per the Use Feature Ids mode, accumulate symmetry-reduced misorientation via
-  // LaueOps, and store the average (degrees) at the focal cell. Invalid focal cells get 0.
+  /**
+   * @brief Calculates KAM values for one half-open three-dimensional range.
+   * @param zStart Identifies the first Z plane.
+   * @param zEnd Identifies the plane after the last Z plane.
+   * @param yStart Identifies the first Y row.
+   * @param yEnd Identifies the row after the last Y row.
+   * @param xStart Identifies the first X column.
+   * @param xEnd Identifies the column after the last X column.
+   *
+   * Valid focal cells average their admitted kernel neighbors in degrees.
+   * Invalid focal cells receive zero.
+   */
   void convert(size_t zStart, size_t zEnd, size_t yStart, size_t yEnd, size_t xStart, size_t xEnd) const
   {
-    // Input Arrays / Parameter Data
     const auto& cellPhasesArray = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->CellPhasesArrayPath);
     const auto& cellPhases = cellPhasesArray.getDataStoreRef();
     const auto& featureIdsArray = m_DataStructure.getDataRefAs<Int32Array>(m_InputValues->FeatureIdsArrayPath);
@@ -48,7 +72,6 @@ public:
     const auto kernelSize = m_InputValues->KernelSize;
     const bool useFeatureIds = m_InputValues->UseFeatureIds;
 
-    // Output Arrays
     auto& kernelAvgMisorientationsArray = m_DataStructure.getDataRefAs<Float32Array>(m_InputValues->KernelAverageMisorientationsArrayName);
     auto& kernelAvgMisorientations = kernelAvgMisorientationsArray.getDataStoreRef();
 
@@ -58,7 +81,6 @@ public:
     ebsdlib::QuatD q1;
     ebsdlib::QuatD q2;
 
-    // messenger values
     usize counter = 0;
     usize increment = std::max(static_cast<usize>(1), (zEnd - zStart) / 100);
 
@@ -106,9 +128,8 @@ public:
             const usize neighborZMin = plane - std::min(plane, kernelZ);
             const usize neighborZMax = plane + std::min(kernelZ, (zPoints - 1) - plane);
 
-            // Clamp the neighborhood to the geometry before iterating. Besides avoiding work
-            // outside the image, this keeps INT32_MAX kernel radii from overflowing when the
-            // inclusive upper bound is formed.
+            // The clamped bounds keep maximum valid kernel radii from
+            // overflowing when they form the inclusive upper bounds.
             for(usize zIdx = neighborZMin;; zIdx++)
             {
               for(usize yIdx = neighborYMin;; yIdx++)
@@ -116,9 +137,8 @@ public:
                 for(usize xIdx = neighborXMin;; xIdx++)
                 {
                   const usize neighborIdx = (zIdx * xPoints * yPoints) + (yIdx * xPoints) + xIdx;
-                  // Per-grain mode: neighbor must belong to the same feature as the central cell.
-                  // Per-voxel mode (use_feature_ids == false): neighbor must be a valid cell
-                  // (featureId > 0) of the same phase as the central cell.
+                  // Same-feature mode admits the focal feature. Same-phase mode
+                  // admits positive feature IDs in the focal phase.
                   const bool neighborContributes = useFeatureIds ? (featureIds[point] == featureIds[neighborIdx]) : (featureIds[neighborIdx] > 0 && cellPhases[neighborIdx] == cellPhases[point]);
                   if(neighborContributes)
                   {
@@ -150,8 +170,7 @@ public:
                 break;
               }
             }
-            // numVoxel is always >= 1 here: the focal cell lies inside the clamped neighborhood,
-            // passes both neighbor gates, and contributes a self-misorientation of 0 degrees.
+            // The focal cell contributes itself, so the denominator is nonzero.
             kernelAvgMisorientations[point] = totalMisorientation / static_cast<float>(numVoxel);
           }
           else
@@ -166,6 +185,10 @@ public:
     progressMessenger.sendProgressMessage(counter);
   }
 
+  /**
+   * @brief Calculates KAM values for a parallel range.
+   * @param range Identifies the half-open X, Y, Z range.
+   */
   void operator()(const Range3D& range) const
   {
     convert(range[4], range[5], range[2], range[3], range[0], range[1]);
@@ -181,7 +204,6 @@ private:
 
 } // namespace
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientationsDirect::ComputeKernelAvgMisorientationsDirect(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                              const ComputeKernelAvgMisorientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -191,10 +213,8 @@ ComputeKernelAvgMisorientationsDirect::ComputeKernelAvgMisorientationsDirect(Dat
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientationsDirect::~ComputeKernelAvgMisorientationsDirect() noexcept = default;
 
-// -----------------------------------------------------------------------------
 Result<> ComputeKernelAvgMisorientationsDirect::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->InputImageGeometry);

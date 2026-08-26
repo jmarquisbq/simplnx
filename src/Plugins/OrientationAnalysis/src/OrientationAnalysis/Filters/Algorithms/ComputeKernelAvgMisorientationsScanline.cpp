@@ -33,6 +33,14 @@ constexpr usize k_TargetBlockTuples = 65536;
 constexpr int32 k_WorkingSetOverflowError = -67200;
 constexpr int32 k_WorkingSetInputError = -67202;
 
+/**
+ * @brief Multiplies values without an unsigned overflow.
+ * @tparam ValueT Specifies the unsigned value type.
+ * @param lhs Identifies the first factor.
+ * @param rhs Identifies the second factor.
+ * @param product Receives the product when multiplication succeeds.
+ * @return True when multiplication succeeds.
+ */
 template <typename ValueT>
 bool CheckedMultiply(ValueT lhs, ValueT rhs, ValueT& product)
 {
@@ -45,6 +53,14 @@ bool CheckedMultiply(ValueT lhs, ValueT rhs, ValueT& product)
   return true;
 }
 
+/**
+ * @brief Adds values without an unsigned overflow.
+ * @tparam ValueT Specifies the unsigned value type.
+ * @param lhs Identifies the first addend.
+ * @param rhs Identifies the second addend.
+ * @param sum Receives the sum when addition succeeds.
+ * @return True when addition succeeds.
+ */
 template <typename ValueT>
 bool CheckedAdd(ValueT lhs, ValueT rhs, ValueT& sum)
 {
@@ -57,6 +73,15 @@ bool CheckedAdd(ValueT lhs, ValueT rhs, ValueT& sum)
   return true;
 }
 
+/**
+ * @brief Creates a KAM working-set overflow error.
+ * @param dimensions Identifies the Image Geometry dimensions in X, Y, Z order.
+ * @param kernelSize Identifies the kernel radii in X, Y, Z order.
+ * @param cacheBudgetBytes Specifies the cache budget in bytes.
+ * @param imageGeometryPath Identifies the Image Geometry in the error message.
+ * @param overflowedQuantity Identifies the quantity that overflowed.
+ * @return A working-set overflow error with the affected input context.
+ */
 Result<ComputeKernelAvgMisorientationsWorkingSet> MakeWorkingSetOverflowResult(const SizeVec3& dimensions, const VectorInt32Parameter::ValueType& kernelSize, uint64 cacheBudgetBytes,
                                                                                const DataPath& imageGeometryPath, std::string_view overflowedQuantity)
 {
@@ -68,7 +93,6 @@ Result<ComputeKernelAvgMisorientationsWorkingSet> MakeWorkingSetOverflowResult(c
 }
 } // namespace
 
-// -----------------------------------------------------------------------------
 Result<ComputeKernelAvgMisorientationsWorkingSet> CreateComputeKernelAvgMisorientationsWorkingSet(const SizeVec3& dimensions, const VectorInt32Parameter::ValueType& kernelSize,
                                                                                                   uint64 cacheBudgetBytes, uint64 cacheUsedBytes, const DataPath& imageGeometryPath)
 {
@@ -181,9 +205,8 @@ Result<ComputeKernelAvgMisorientationsWorkingSet> CreateComputeKernelAvgMisorien
   const uint64 bytesForInputSlots = plan.CapBytes > focalAndOutputBytes ? plan.CapBytes - focalAndOutputBytes : 0;
   plan.CacheSlots = std::max<usize>(1, static_cast<usize>(bytesForInputSlots / bytesPerInputSlot));
 
-  // When a whole X row fits, keep bounded blocks row-aligned and shrink them
-  // until the cache can retain the clamped Z/Y neighbor rows. This avoids
-  // repeatedly evicting an input block while evaluating adjacent focal tuples.
+  // Whole-row blocks align to X rows. The planner shrinks such blocks until the
+  // cache retains the clamped Z/Y neighbor rows and avoids repeated eviction.
   if(plan.BlockTuples >= xPoints)
   {
     plan.BlockTuples = std::max(xPoints, (plan.BlockTuples / xPoints) * xPoints);
@@ -241,6 +264,13 @@ constexpr usize k_UnloadedSlice = std::numeric_limits<usize>::max();
 constexpr usize k_UnloadedBlock = std::numeric_limits<usize>::max();
 constexpr usize k_FullyAssociativeCacheSlotLimit = 16;
 
+/**
+ * @struct SliceSlot
+ * @brief Stores one loaded Z slice in the rolling window.
+ *
+ * Z is k_UnloadedSlice until the slot contains matching feature ID, Cell
+ * Phase, and quaternion values.
+ */
 struct SliceSlot
 {
   usize Z = k_UnloadedSlice;
@@ -249,6 +279,13 @@ struct SliceSlot
   std::vector<float32> Quats;
 };
 
+/**
+ * @struct InputBlock
+ * @brief Stores one cached input range for the fallback traversal.
+ *
+ * Each slot holds matching feature ID, Cell Phase, and quaternion ranges. The
+ * cache replaces the least recently used block in the selected set.
+ */
 struct InputBlock
 {
   usize BlockIndex = k_UnloadedBlock;
@@ -260,9 +297,28 @@ struct InputBlock
   std::vector<float32> Quats;
 };
 
+/**
+ * @class InputBlockCache
+ * @brief Caches source tuple blocks for the sequential KAM fallback.
+ *
+ * ExecuteBlockCache() owns this cache on one thread. A cache miss reads all
+ * three input stores before the block becomes resident. The cache propagates
+ * every bulk-I/O error to stop the traversal.
+ */
 class InputBlockCache
 {
 public:
+  /**
+   * @brief Initializes the bounded source-block cache.
+   * @param featureIdsStore Provides source feature IDs.
+   * @param cellPhasesStore Provides source Cell Phases.
+   * @param quatsStore Provides source quaternions.
+   * @param plan Specifies the block size and slot count.
+   * @param totalTuples Specifies the number of source tuples.
+   * @pre The source stores contain totalTuples values and matching quaternion
+   *      components.
+   * @pre plan.BlockTuples and plan.CacheSlots are greater than zero.
+   */
   InputBlockCache(const AbstractDataStore<int32>& featureIdsStore, const AbstractDataStore<int32>& cellPhasesStore, const AbstractDataStore<float32>& quatsStore,
                   const ComputeKernelAvgMisorientationsWorkingSet& plan, usize totalTuples)
   : m_FeatureIdsStore(featureIdsStore)
@@ -286,14 +342,22 @@ public:
     }
   }
 
+  /**
+   * @brief Returns the cached block that contains one tuple.
+   * @param tupleIndex Identifies a source tuple.
+   * @pre tupleIndex is less than the source tuple count.
+   * @return The resident block, or a source bulk-I/O error.
+   *
+   * A later cache miss can replace the returned block.
+   */
   Result<const InputBlock*> getBlock(usize tupleIndex)
   {
     assert(tupleIndex < m_TotalTuples);
     const usize blockIndex = tupleIndex / m_BlockTuples;
     const usize setIndex = blockIndex % m_SetCount;
     const usize firstWay = setIndex * 4;
-    // The final set may contain fewer than its nominal ways because only the
-    // planned CacheSlots are allocated.
+    // The final set can have fewer ways because the plan allocates only
+    // CacheSlots entries.
     const usize endWay = std::min(firstWay + m_WaysPerSet, m_Slots.size());
 
     InputBlock* replacement = nullptr;
@@ -352,9 +416,36 @@ private:
   uint64 m_NextUse = 1;
 };
 
+/**
+ * @class RollingPlaneWorker
+ * @brief Calculates one KAM plane from local rolling-window buffers.
+ *
+ * ExecuteRollingWindow() fills every slice before it starts the parallel
+ * algorithm. Each worker range reads immutable local buffers and writes a
+ * disjoint part of the local output slice. The worker does not access a
+ * DataStore.
+ */
 class RollingPlaneWorker
 {
 public:
+  /**
+   * @brief Initializes a rolling-window plane worker.
+   * @param xPoints Specifies the X dimension.
+   * @param yPoints Specifies the Y dimension.
+   * @param zPoints Specifies the Z dimension.
+   * @param plane Identifies the focal Z plane.
+   * @param kernelX Specifies the X kernel radius.
+   * @param kernelY Specifies the Y kernel radius.
+   * @param kernelZ Specifies the Z kernel radius.
+   * @param sliceTuples Specifies the number of tuples in one slice.
+   * @param sliceSlots Provides the loaded rolling-window slices.
+   * @param windowSlices Specifies the number of rolling-window slices.
+   * @param useFeatureIds Selects same-feature neighbor admission.
+   * @param crystalStructures Provides local crystal structures.
+   * @param output Receives local KAM values.
+   * @pre sliceSlots contains windowSlices loaded slices.
+   * @pre output contains sliceTuples elements.
+   */
   RollingPlaneWorker(usize xPoints, usize yPoints, usize zPoints, usize plane, int32 kernelX, int32 kernelY, int32 kernelZ, usize sliceTuples, const std::vector<SliceSlot>& sliceSlots,
                      usize windowSlices, bool useFeatureIds, nonstd::span<const uint32> crystalStructures, nonstd::span<float32> output)
   : m_XPoints(xPoints)
@@ -373,12 +464,20 @@ public:
   {
   }
 
+  /**
+   * @brief Calculates a half-open local output range.
+   * @param range Identifies the local row and column range.
+   */
   void operator()(const Range2D& range) const
   {
     compute(range.minRow(), range.maxRow(), range.minCol(), range.maxCol());
   }
 
 #ifdef SIMPLNX_ENABLE_MULTICORE
+  /**
+   * @brief Calculates a TBB local output range.
+   * @param range Identifies the local TBB row and column range.
+   */
   void operator()(const tbb::blocked_range2d<size_t, size_t>& range) const
   {
     compute(range.rows().begin(), range.rows().end(), range.cols().begin(), range.cols().end());
@@ -399,8 +498,8 @@ private:
     assert(m_WindowSlices > 0);
     assert(m_SliceSlots.size() == m_WindowSlices);
 
-    // Each invocation owns its orientation-operation objects. TBB may invoke
-    // the same worker body concurrently for disjoint row/column ranges.
+    // Each concurrent invocation creates orientation operations for its
+    // disjoint local row and column range.
     std::vector<ebsdlib::LaueOps::Pointer> orientationOps = ebsdlib::LaueOps::GetAllOrientationOps();
 
     const usize kernelX = static_cast<usize>(m_KernelX);
@@ -443,8 +542,8 @@ private:
         const usize neighborXMin = col - std::min(col, kernelX);
         const usize neighborXMax = col + std::min(kernelX, (m_XPoints - 1) - col);
 
-        // Preserve the established ascending Z/Y/X traversal and therefore
-        // the floating-point accumulation order for each focal voxel.
+        // Ascending Z/Y/X traversal preserves the established floating-point
+        // accumulation order for each focal cell.
         for(usize nz = windowZMin;; nz++)
         {
           const SliceSlot& neighborSlice = m_SliceSlots[nz % m_WindowSlices];
@@ -509,6 +608,19 @@ private:
   nonstd::span<float32> m_Output;
 };
 
+/**
+ * @brief Executes KAM with a local rolling Z window.
+ * @param dataStructure Provides the selected arrays and Image Geometry.
+ * @param inputValues Identifies the selected arrays and KAM settings.
+ * @param plan Specifies the rolling-window buffer sizes.
+ * @param shouldCancel Signals cancellation.
+ * @pre plan.UseRollingWindow is true.
+ * @return Success, or a crystal-structure, input, or output bulk-I/O error.
+ *
+ * The function reads source slices before parallel workers access local
+ * buffers. It writes each output slice after the parallel work completes.
+ * Cancellation is checked before each plane and returns success.
+ */
 Result<> ExecuteRollingWindow(DataStructure& dataStructure, const ComputeKernelAvgMisorientationsInputValues& inputValues, const ComputeKernelAvgMisorientationsWorkingSet& plan,
                               const std::atomic_bool& shouldCancel)
 {
@@ -518,8 +630,8 @@ Result<> ExecuteRollingWindow(DataStructure& dataStructure, const ComputeKernelA
   const usize yPoints = dimensions[1];
   const usize zPoints = dimensions[2];
 
-  // Empty Image Geometries are valid no-ops. Return before fetching any DataStore,
-  // creating orientation operators, or allocating the rolling window.
+  // An empty Image Geometry produces no output. Return before DataStore access,
+  // orientation-operation creation, or rolling-window allocation.
   if(xPoints == 0 || yPoints == 0 || zPoints == 0)
   {
     return {};
@@ -581,9 +693,8 @@ Result<> ExecuteRollingWindow(DataStructure& dataStructure, const ComputeKernelA
     const usize windowZMin = plane - std::min(plane, kZ);
     const usize windowZMax = plane + std::min(kZ, (zPoints - 1) - plane);
 
-    // Loads advance monotonically from Z=0. A slice maps to Z % WindowSlices,
-    // and the full ring is 2*kZ+1 slices (or the entire volume), so a reused
-    // slot can only contain a slice below the current clamped window.
+    // Monotonic Z loads reuse only slots below the clamped window. The ring
+    // holds 2*kZ+1 slices or the entire volume when it is shorter.
     while(nextSliceToLoad <= windowZMax)
     {
       SliceSlot& slot = sliceSlots[nextSliceToLoad % plan.WindowSlices];
@@ -611,6 +722,18 @@ Result<> ExecuteRollingWindow(DataStructure& dataStructure, const ComputeKernelA
   return {};
 }
 
+/**
+ * @brief Executes KAM with a bounded source-block cache.
+ * @param dataStructure Provides the selected arrays and Image Geometry.
+ * @param inputValues Identifies the selected arrays and KAM settings.
+ * @param plan Specifies the fallback block and cache sizes.
+ * @param shouldCancel Signals cancellation.
+ * @pre plan.UseRollingWindow is false.
+ * @return Success, or a crystal-structure, input, or output bulk-I/O error.
+ *
+ * One thread owns the cache and output block. Cancellation is checked before
+ * each plane and focal block and returns success.
+ */
 Result<> ExecuteBlockCache(DataStructure& dataStructure, const ComputeKernelAvgMisorientationsInputValues& inputValues, const ComputeKernelAvgMisorientationsWorkingSet& plan,
                            const std::atomic_bool& shouldCancel)
 {
@@ -620,8 +743,8 @@ Result<> ExecuteBlockCache(DataStructure& dataStructure, const ComputeKernelAvgM
   const usize yPoints = dimensions[1];
   const usize zPoints = dimensions[2];
 
-  // Empty Image Geometries are valid no-ops. Return before fetching any DataStore,
-  // creating orientation operators, or allocating the bounded cache.
+  // An empty Image Geometry produces no output. Return before DataStore access,
+  // orientation-operation creation, or bounded-cache allocation.
   if(xPoints == 0 || yPoints == 0 || zPoints == 0)
   {
     return {};
@@ -785,7 +908,6 @@ Result<> ExecuteBlockCache(DataStructure& dataStructure, const ComputeKernelAvgM
 } // namespace
 } // namespace nx::core
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientationsScanline::ComputeKernelAvgMisorientationsScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                                                                  const ComputeKernelAvgMisorientationsInputValues* inputValues)
 : m_DataStructure(dataStructure)
@@ -795,19 +917,8 @@ ComputeKernelAvgMisorientationsScanline::ComputeKernelAvgMisorientationsScanline
 {
 }
 
-// -----------------------------------------------------------------------------
 ComputeKernelAvgMisorientationsScanline::~ComputeKernelAvgMisorientationsScanline() noexcept = default;
 
-// -----------------------------------------------------------------------------
-/**
- * @brief Computes the average misorientation between each voxel and its
- * neighbors within a user-specified kernel (kX x kY x kZ). Neighbor admission
- * follows the Use Feature Ids mode.
- *
- * OOC strategy: Keep the clamped Z-neighborhood in a rolling slice window when
- * it fits the cache-derived memory cap. Otherwise use a fixed-capacity input
- * block cache with block-sequential focal reads and writes.
- */
 Result<> ComputeKernelAvgMisorientationsScanline::operator()()
 {
   const auto& imageGeom = m_DataStructure.getDataRefAs<ImageGeom>(m_InputValues->InputImageGeometry);

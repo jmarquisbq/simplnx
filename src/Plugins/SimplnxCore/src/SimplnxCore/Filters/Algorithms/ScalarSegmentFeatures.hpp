@@ -20,64 +20,76 @@ namespace nx::core
 
 /**
  * @struct ScalarSegmentFeaturesInputValues
- * @brief Holds all user-configured parameters for the ScalarSegmentFeatures algorithm.
+ * @brief Stores tolerance, connectivity, mask, periodic, and output selections.
  */
 struct SIMPLNXCORE_EXPORT ScalarSegmentFeaturesInputValues
 {
-  int ScalarTolerance = 0;                        ///< Maximum absolute difference between neighboring voxels for grouping.
-  bool UseMask;                                   ///< If true, only voxels flagged as "good" in the mask participate.
-  bool RandomizeFeatureIds;                       ///< If true, randomize Feature IDs post-segmentation for visual contrast.
-  bool IsPeriodic = false;                        ///< If true, treat geometry boundaries as periodic (tileable).
-  SegmentFeatures::NeighborScheme NeighborScheme; ///< 6-face or 26-connected neighbor scheme.
-  DataPath ImageGeometryPath;                     ///< Path to the ImageGeom / IGridGeometry being segmented.
-  DataPath InputDataPath;                         ///< Path to the scalar array used for comparison (any numeric type).
-  DataPath MaskArrayPath;                         ///< Path to the boolean/uint8 mask array (used when UseMask is true).
-  DataPath FeatureIdsArrayPath;                   ///< Output: per-cell Feature ID array (int32).
-  DataPath CellFeatureAttributeMatrixPath;        ///< Output: Attribute Matrix for per-feature arrays.
-  DataPath ActiveArrayPath;                       ///< Output: boolean array marking active features.
+  int ScalarTolerance = 0;
+  bool UseMask;
+  bool RandomizeFeatureIds;
+  bool IsPeriodic = false;
+  SegmentFeatures::NeighborScheme NeighborScheme;
+  DataPath ImageGeometryPath;
+  DataPath InputDataPath;
+  DataPath MaskArrayPath;
+  DataPath FeatureIdsArrayPath;
+  DataPath CellFeatureAttributeMatrixPath;
+  DataPath ActiveArrayPath;
 };
 
 /**
  * @class ScalarSegmentFeatures
- * @brief Segments an ImageGeom into features by grouping contiguous voxels
- * whose scalar values differ by no more than a user-specified tolerance.
+ * @brief Labels connected grid cells whose scalar difference is within a tolerance.
  *
- * This is a general-purpose segmentation algorithm that works on any single-component
- * scalar array (int8 through float64, plus boolean), unlike orientation-based
- * segmentation filters (EBSD, CAxis). The tolerance defines the maximum absolute
- * difference between neighboring voxels for them to be grouped into the same feature.
+ * Face or 26-neighbor connectivity can wrap at periodic boundaries. A selected
+ * Bool or UInt8 mask excludes cells from labels. The connected-component
+ * labeling (CCL) engine writes provisional Feature IDs before it resolves dense
+ * final IDs. Cancellation or an error can therefore leave provisional or partly
+ * resolved output. Feature data is resized only after CCL completes.
  *
- * @section algorithm Connected-Component Labeling
- * Segmentation is performed by the base-class connected-component labeling
- * algorithm (executeCCL()), which processes data one Z-slice at a time to keep
- * memory usage bounded. The subclass supplies the per-voxel comparison logic by
- * overriding isValidVoxel() and areNeighborsSimilar().
+ * Two LRU slots retain scalar and mask Z slices. Scalar values widen to float64
+ * so one comparison path serves all input types. Distinct int64 or uint64 values
+ * above exact float64 precision can compare as equal. Buffered Boolean values use
+ * numeric difference, so a tolerance of one or more joins false and true. The
+ * direct fallback instead compares Boolean values for exact equality. A
+ * negative tolerance prevents every finite buffered neighbor match.
  *
- * @section slice_buffers Slice-Buffer Optimization
- * isValidVoxel() and areNeighborsSimilar() are called for every voxel and its
- * neighbors. To avoid per-element virtual dispatch through the DataStore,
- * prepareForSlice() bulk-reads the scalar input and mask arrays for each Z-slice
- * into contiguous in-memory buffers via copyIntoBuffer(); the override methods
- * then read from these buffers. Two slots are needed because the algorithm
- * compares the current slice with the previous slice (iz and iz-1).
+ * Input slice buffers use 18 bytes per XY cell. The base engine also keeps label
+ * slices. Resident equivalence and final-label tables can grow with provisional
+ * feature count. A genuine out-of-core participating store moves that
+ * worst-case state to temporary records behind bounded page caches. Storage
+ * overrides can force either policy.
  *
- * All scalar types are converted to float64 in the buffer for uniform comparison,
- * and the tolerance is also cast to float64.
+ * Optional ID randomization uses bounded Feature ID transfers after all feature
+ * output is initialized. It has no cancellation check and discards bulk-I/O
+ * results. The permutation improves visual contrast but does not change feature
+ * membership.
  */
 class SIMPLNXCORE_EXPORT ScalarSegmentFeatures : public SegmentFeatures
 {
 public:
+  /**
+   * @brief Defines the per-cell Feature ID array type.
+   */
   using FeatureIdsArrayType = Int32Array;
+  /**
+   * @brief Defines the Boolean mask array type.
+   */
   using GoodVoxelsArrayType = BoolArray;
 
   /**
-   * @brief Creates scalar segmentation and borrows the arrays and execution controls it uses.
-   * @param dataStructure Data structure containing the scalar input, optional mask, geometry, and outputs.
-   * @param inputValues Non-owning parameter bundle that must remain valid through operator()().
-   * @param shouldCancel Cancellation flag checked by the CCL and slice-loading phases.
+   * @brief Initializes the scalar-segmentation algorithm.
+   * @param dataStructure Contains scalar, mask, geometry, and output data.
+   * @param inputValues Selects segmentation and output behavior.
+   * @param shouldCancel Signals cancellation between CCL slices and phases.
    * @param mesgHandler Receives connected-component progress messages.
+   * @pre inputValues is not null.
+   * @pre All arguments outlive this executor.
    */
   ScalarSegmentFeatures(DataStructure& dataStructure, ScalarSegmentFeaturesInputValues* inputValues, const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& mesgHandler);
+  /**
+   * @brief Destroys the scalar-segmentation algorithm.
+   */
   ~ScalarSegmentFeatures() noexcept override;
 
   ScalarSegmentFeatures(const ScalarSegmentFeatures&) = delete;
@@ -86,53 +98,60 @@ public:
   ScalarSegmentFeatures& operator=(ScalarSegmentFeatures&&) noexcept = delete;
 
   /**
-   * @brief Executes the segmentation: sets up the comparator, runs connected-
-   * component labeling, then post-processes (resize AM, fill Active array,
-   * optionally randomize IDs).
-   * @return Result<> indicating success or error.
+   * @brief Labels features and initializes feature-level output.
+   * @return Mask, scalar-I/O, CCL storage, or no-feature result.
+   * @pre InputDataPath is a scalar array that matches the grid cell dimensions.
+   * @pre MaskArrayPath is scalar Bool or UInt8 when UseMask is true.
+   *
+   * Cancellation returns success without rollback. After CCL, the method resizes
+   * feature output, marks positive features active, and reserves feature zero.
+   * These postprocessing steps do not inspect cancellation.
    */
   Result<> operator()();
 
 protected:
   /**
-   * @brief Checks whether a voxel can participate in segmentation.
-   * Uses the slice buffer fast path when available; falls back to direct MaskCompare access.
-   * @param point Linear voxel index.
-   * @return true if the voxel passes the mask check (or no mask is used).
+   * @brief Tests whether one cell can receive a feature label.
+   * @param point Flat cell index.
+   * @return True when the mask permits the cell.
+   *
+   * Active buffering treats a request for an unloaded slice as invalid instead
+   * of reading the store. Inactive buffering uses the mask comparator directly.
    */
   bool isValidVoxel(int64 point) const override;
 
   /**
-   * @brief Determines whether two neighboring voxels have similar enough scalar values
-   * to belong to the same feature. Uses the slice buffer fast path when
-   * both voxels' Z-slices are buffered; falls back to CompareFunctor otherwise.
-   * @param point1 First voxel index.
-   * @param point2 Second (neighbor) voxel index.
-   * @return true if both voxels are valid and their scalar values are within tolerance.
+   * @brief Tests whether two cells can share one feature.
+   * @param point1 Flat index of the labeled cell.
+   * @param point2 Flat index of its neighbor.
+   * @return True when point2 is valid and the scalar difference is within tolerance.
+   *
+   * Active buffering compares widened float64 values and rejects unloaded
+   * slices. Inactive buffering uses the native typed comparator. Signed native
+   * subtraction requires a representable difference.
    */
   bool areNeighborsSimilar(int64 point1, int64 point2) const override;
 
   /**
-   * @brief Pre-loads input scalar and mask data for the given Z-slice into the
-   * rolling 2-slot buffer, eliminating per-element OOC overhead during CCL.
+   * @brief Loads one scalar and mask Z slice into two-slot LRU buffers.
+   * @param iz Z-slice index, or a negative value to disable buffering.
+   * @param dimX Grid X dimension.
+   * @param dimY Grid Y dimension.
+   * @param dimZ Grid Z dimension.
+   * @return Scalar or mask bulk-read result.
+   * @pre A nonnegative iz is less than dimZ.
    *
-   * Slot assignment: even slices go to slot 0, odd to slot 1. This ensures that
-   * both the current slice and the previous slice are always in memory.
-   * Passing iz = -1 disables buffering (used after the slice sweep for Phase 1b).
-   *
-   * @param iz Current Z-slice index, or -1 to disable buffering.
-   * @param dimX X dimension of the grid.
-   * @param dimY Y dimension of the grid.
-   * @param dimZ Z dimension of the grid.
+   * LRU replacement retains ordinary adjacent slices and explicit periodic
+   * boundary pairs without rereading a resident slice.
    */
   Result<> prepareForSlice(int64 iz, int64 dimX, int64 dimY, int64 dimZ) override;
 
 private:
   /**
-   * @brief Allocates the rolling 2-slot buffers for scalar and mask data.
-   * Each slot holds dimX * dimY elements (one full XY slice).
-   * @param dimX X dimension of the grid.
-   * @param dimY Y dimension of the grid.
+   * @brief Allocates two scalar and mask XY-slice slots.
+   * @param dimX Grid X dimension.
+   * @param dimY Grid Y dimension.
+   * @pre dimX times dimY fits int64 and usize.
    */
   void allocateSliceBuffers(int64 dimX, int64 dimY);
 
@@ -141,20 +160,19 @@ private:
    */
   void deallocateSliceBuffers();
 
-  const ScalarSegmentFeaturesInputValues* m_InputValues = nullptr;           ///< User-configured parameters.
-  FeatureIdsArrayType* m_FeatureIdsArray = nullptr;                          ///< Output Feature IDs array.
-  GoodVoxelsArrayType* m_GoodVoxelsArray = nullptr;                          ///< Good voxels mask (if used).
-  std::shared_ptr<SegmentFeatures::CompareFunctor> m_CompareFunctor;         ///< Typed comparator used by the CCL neighbor-comparison fallback.
-  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxels = nullptr; ///< Mask comparator.
-  IDataArray* m_InputDataArray = nullptr;                                    ///< Raw pointer to the input scalar array (for type dispatch).
+  const ScalarSegmentFeaturesInputValues* m_InputValues = nullptr;
+  FeatureIdsArrayType* m_FeatureIdsArray = nullptr;
+  GoodVoxelsArrayType* m_GoodVoxelsArray = nullptr;
+  std::shared_ptr<SegmentFeatures::CompareFunctor> m_CompareFunctor;
+  std::unique_ptr<MaskCompareUtilities::MaskCompare> m_GoodVoxels = nullptr;
+  IDataArray* m_InputDataArray = nullptr;
 
-  // --- Rolling 2-slot input buffers for OOC optimization ---
-  std::vector<float64> m_ScalarBuffer;                ///< Scalar values as float64 for uniform comparison (2 * sliceSize elements).
-  std::vector<uint8> m_MaskBuffer;                    ///< Mask flags as uint8 (2 * sliceSize elements; 0 = masked out, 1 = valid).
-  int64 m_BufSliceSize = 0;                           ///< Number of voxels per XY slice (dimX * dimY).
-  std::array<int64, 2> m_BufferedSliceZ = {-1, -1};   ///< Z-index currently loaded in each slot (-1 = empty).
-  std::array<uint64, 2> m_BufferUseSequence = {0, 0}; ///< LRU sequence number for each slot.
-  uint64 m_NextBufferUseSequence = 1;                 ///< Next sequence number assigned on a prepare call.
-  bool m_UseSliceBuffers = false;                     ///< True when the CCL path has activated slice buffering.
+  std::vector<float64> m_ScalarBuffer;
+  std::vector<uint8> m_MaskBuffer;
+  int64 m_BufSliceSize = 0;
+  std::array<int64, 2> m_BufferedSliceZ = {-1, -1};
+  std::array<uint64, 2> m_BufferUseSequence = {0, 0};
+  uint64 m_NextBufferUseSequence = 1;
+  bool m_UseSliceBuffers = false;
 };
 } // namespace nx::core

@@ -57,7 +57,6 @@ Parameters ComputeArrayHistogramByFeatureFilter::parameters() const
 {
   Parameters params;
 
-  // Create the parameter descriptors that are needed for this filter
   params.insertSeparator(Parameters::Separator{"Input Parameter(s)"});
   params.insert(std::make_unique<Int32Parameter>(k_NumberOfBins_Key, "Number of Bins", "Specifies number of histogram bins (greater than zero)", 10));
   params.insertLinkableParameter(
@@ -90,7 +89,6 @@ Parameters ComputeArrayHistogramByFeatureFilter::parameters() const
   params.insert(std::make_unique<DataObjectNameParameter>(k_HistoModalBinRangesName_Key, "Modal Bin Ranges Array Name", "Name of the created \"Modal Bin Ranges\" array for each input array.",
                                                           "Modal Bin Ranges"));
 
-  // Associate the Linkable Parameter(s) to the children parameters that they control
   params.linkParameters(k_UserDefinedRange_Key, k_MinRange_Key, true);
   params.linkParameters(k_UserDefinedRange_Key, k_MaxRange_Key, true);
   params.linkParameters(k_CreateNewDataGroup_Key, k_NewDataGroupPath_Key, true);

@@ -72,7 +72,7 @@ DataObject* RectGridGeom::shallowCopy()
 std::shared_ptr<DataObject> RectGridGeom::deepCopy(const DataPath& copyPath)
 {
   auto& dataStruct = getDataStructureRef();
-  // Don't construct with identifier since it will get created when inserting into data structure
+  // The non-import constructor generates an identifier for the copied geometry.
   auto copy = std::shared_ptr<RectGridGeom>(new RectGridGeom(dataStruct, copyPath.getTargetName()));
   copy->setDimensions(m_Dimensions);
   if(!dataStruct.containsData(copyPath) && dataStruct.insert(copy, copyPath.getParent()))
@@ -82,7 +82,7 @@ std::shared_ptr<DataObject> RectGridGeom::deepCopy(const DataPath& copyPath)
     if(m_CellDataId.has_value())
     {
       const DataPath copiedCellDataPath = copyPath.createChildPath(getCellData()->getName());
-      // if this is not a parent of the cell data object, make a deep copy and insert it here
+      // Copy cell data only when this geometry does not already parent it.
       if(!isParentOf(getCellData()))
       {
         const auto cellDataCopy = getCellData()->deepCopy(copiedCellDataPath);
@@ -93,7 +93,7 @@ std::shared_ptr<DataObject> RectGridGeom::deepCopy(const DataPath& copyPath)
     if(m_xBoundsId.has_value())
     {
       const DataPath copiedDataPath = copyPath.createChildPath(getXBounds()->getName());
-      // if this is not a parent of the data object, make a deep copy and insert it here
+      // Copy the X-bounds array only when this geometry does not already parent it.
       if(!isParentOf(getXBounds()))
       {
         const auto dataObjCopy = getXBounds()->deepCopy(copiedDataPath);
@@ -103,7 +103,7 @@ std::shared_ptr<DataObject> RectGridGeom::deepCopy(const DataPath& copyPath)
     if(m_yBoundsId.has_value())
     {
       const DataPath copiedDataPath = copyPath.createChildPath(getYBounds()->getName());
-      // if this is not a parent of the data object, make a deep copy and insert it here
+      // Copy the Y-bounds array only when this geometry does not already parent it.
       if(!isParentOf(getYBounds()))
       {
         const auto dataObjCopy = getYBounds()->deepCopy(copiedDataPath);
@@ -113,7 +113,7 @@ std::shared_ptr<DataObject> RectGridGeom::deepCopy(const DataPath& copyPath)
     if(m_zBoundsId.has_value())
     {
       const DataPath copiedDataPath = copyPath.createChildPath(getZBounds()->getName());
-      // if this is not a parent of the data object, make a deep copy and insert it here
+      // Copy the Z-bounds array only when this geometry does not already parent it.
       if(!isParentOf(getZBounds()))
       {
         const auto dataObjCopy = getZBounds()->deepCopy(copiedDataPath);
@@ -318,8 +318,8 @@ Result<> RectGridGeom::findElementSizes(bool recalculate)
 
   if(sizeArray == nullptr)
   {
-    // Route through the format resolver so very large RectGrids get an OOC
-    // store when the OOC plugin is loaded and the array exceeds the threshold.
+    // The resolver selects a disk-backed store for a large grid when a compatible
+    // OOC manager is registered.
     std::vector<DataPath> geomPaths = getDataPaths();
     DataPath sizesPath = geomPaths.empty() ? DataPath({getName(), k_VoxelSizes}) : geomPaths.front().createChildPath(k_VoxelSizes);
     auto dataStore = DataStoreUtilities::CreateDataStore<float32>(*getDataStructure(), sizesPath, std::vector<usize>{getNumberOfCells()}, std::vector<usize>{1}, IDataAction::Mode::Execute);
@@ -327,7 +327,6 @@ Result<> RectGridGeom::findElementSizes(bool recalculate)
     if(sizeArray == nullptr)
     {
       m_ElementSizesId.reset();
-      // Used to be error code `-1`
       return MakeErrorResult(-1834, "RectGridGeom Error: Unable to find or create a valid element sizes array or data store.");
     }
   }
@@ -335,25 +334,23 @@ Result<> RectGridGeom::findElementSizes(bool recalculate)
   const auto* xBnds = getXBounds();
   if(xBnds == nullptr)
   {
-    // Used to be error code `-1`
     return MakeErrorResult(-1830, "RectGridGeom Error: No valid X Bounds Array");
   }
   const auto* yBnds = getYBounds();
   if(yBnds == nullptr)
   {
-    // Used to be error code `-1`
     return MakeErrorResult(-1831, "RectGridGeom Error: No valid Y Bounds Array");
   }
   const auto* zBnds = getZBounds();
   if(zBnds == nullptr)
   {
-    // Used to be error code `-1`
     return MakeErrorResult(-1832, "RectGridGeom Error: No valid Z Bounds Array");
   }
 
-  // Bulk-load each per-axis bounds array once (small: O(dim+1) floats per axis)
-  // and precompute per-axis spacings. This avoids per-voxel virtual dispatch
-  // through xBnds->at(), which would be catastrophic for OOC stores.
+  // Copy each bounds array once and calculate axis spacings in memory. This
+  // avoids per-voxel virtual and cache access for out-of-core stores. The
+  // current implementation does not inspect bulk-I/O Results from these reads
+  // or the slice writes below.
   const usize dimX = m_Dimensions[0];
   const usize dimY = m_Dimensions[1];
   const usize dimZ = m_Dimensions[2];
@@ -396,8 +393,8 @@ Result<> RectGridGeom::findElementSizes(bool recalculate)
     }
   }
 
-  // Fill the size array Z-slice at a time using bulk I/O. For OOC backends
-  // this collapses N per-voxel chunk ops into dimZ slice-sized writes.
+  // Build one Z slice and write it with bulk I/O. This bounds the temporary
+  // voxel-size buffer and avoids per-voxel out-of-core writes.
   auto& sizeStoreRef = sizeArray->getDataStoreRef();
   const usize sliceSize = dimX * dimY;
   std::vector<float32> sliceBuf(sliceSize);
@@ -416,7 +413,6 @@ Result<> RectGridGeom::findElementSizes(bool recalculate)
 
   m_ElementSizesId = sizeArray->getId();
 
-  // Used to be error code `1`
   return {};
 }
 
@@ -435,7 +431,7 @@ void RectGridGeom::getShapeFunctions(const Point3D<float64>& pCoords, float64* s
   sm = 1.0 - pCoords[1];
   tm = 1.0 - pCoords[2];
 
-  // r derivatives
+  // Derivatives with respect to r.
   shape[0] = -sm * tm;
   shape[1] = sm * tm;
   shape[2] = -pCoords[1] * tm;
@@ -445,7 +441,7 @@ void RectGridGeom::getShapeFunctions(const Point3D<float64>& pCoords, float64* s
   shape[6] = -pCoords[1] * pCoords[2];
   shape[7] = pCoords[1] * pCoords[2];
 
-  // s derivatives
+  // Derivatives with respect to s.
   shape[8] = -rm * tm;
   shape[9] = -pCoords[0] * tm;
   shape[10] = rm * tm;
@@ -455,7 +451,7 @@ void RectGridGeom::getShapeFunctions(const Point3D<float64>& pCoords, float64* s
   shape[14] = rm * pCoords[2];
   shape[15] = pCoords[0] * pCoords[2];
 
-  // t derivatives
+  // Derivatives with respect to t.
   shape[16] = -rm * sm;
   shape[17] = -pCoords[0] * sm;
   shape[18] = -rm * pCoords[1];
@@ -757,7 +753,6 @@ std::optional<usize> RectGridGeom::getIndex(float64 xCoord, float64 yCoord, floa
     return {};
   }
 
-  // Use standard distance to get the index of the returned iterator from adjacent_find
   usize x = std::distance(xBnds.begin(), std::adjacent_find(xBnds.begin(), xBnds.end(), [xCoord](const float32 a, const float32 b) { return (xCoord >= a && xCoord < b); }));
   usize y = std::distance(yBnds.begin(), std::adjacent_find(yBnds.begin(), yBnds.end(), [yCoord](const float32 a, const float32 b) { return (yCoord >= a && yCoord < b); }));
   usize z = std::distance(zBnds.begin(), std::adjacent_find(zBnds.begin(), zBnds.end(), [zCoord](const float32 a, const float32 b) { return (zCoord >= a && zCoord < b); }));

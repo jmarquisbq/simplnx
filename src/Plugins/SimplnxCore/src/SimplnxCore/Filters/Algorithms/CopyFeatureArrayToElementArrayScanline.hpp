@@ -11,22 +11,11 @@ struct CopyFeatureArrayToElementArrayInputValues;
 
 /**
  * @class CopyFeatureArrayToElementArrayScanline
- * @brief Out-of-core (chunk-sequential) algorithm for broadcasting feature data to element data.
+ * @brief Broadcasts feature tuples through bounded bulk I/O.
  *
- * Produces the same output as CopyFeatureArrayToElementArrayDirect: for every cell, the value of
- * the feature that the cell belongs to is copied into a new cell-level array
- * (created[cell] = selectedFeature[featureIds[cell]]).
- *
- * **When this variant is selected**: DispatchAlgorithm selects this class when the FeatureIds
- * array is backed by chunked/OOC storage (or ForceOocAlgorithm() is set in tests).
- *
- * **Why a separate OOC variant exists**: The Direct variant parallelizes per-cell operator[]
- * access across worker threads. For OOC data that is doubly problematic: (1) DataStore/chunk-cache
- * access is not thread-safe, and (2) each operator[] on a chunked store pays virtual-dispatch and
- * chunk-cache lookup overhead. This variant runs single-threaded and reads FeatureIds / writes the
- * created array in bounded sequential chunks via copyIntoBuffer()/copyFromBuffer(). The (small)
- * feature-level source array is cached once into a local buffer. Memory use is bounded by the chunk
- * size plus the feature count -- never proportional to the cell count.
+ * The algorithm caches one feature-scale source and streams 65,536 cell tuples.
+ * This avoids per-cell disk access and partial-tuple writes. The feature cache can
+ * be large when the feature count approaches the cell count.
  *
  * @see CopyFeatureArrayToElementArrayDirect for the in-core variant.
  * @see CopyFeatureArrayToElementArray for the dispatcher.
@@ -34,8 +23,19 @@ struct CopyFeatureArrayToElementArrayInputValues;
 class SIMPLNXCORE_EXPORT CopyFeatureArrayToElementArrayScanline
 {
 public:
+  /**
+   * @brief Creates a bulk-I/O feature broadcast algorithm.
+   * @param dataStructure Provides selected arrays.
+   * @param mesgHandler Receives progress messages.
+   * @param shouldCancel Stops later chunks when true.
+   * @param inputValues Specifies validated paths and naming. The caller must
+   * keep this object alive for the algorithm lifetime.
+   */
   CopyFeatureArrayToElementArrayScanline(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel,
                                          const CopyFeatureArrayToElementArrayInputValues* inputValues);
+  /**
+   * @brief Destroys the non-owning bulk-I/O algorithm.
+   */
   ~CopyFeatureArrayToElementArrayScanline() noexcept;
 
   CopyFeatureArrayToElementArrayScanline(const CopyFeatureArrayToElementArrayScanline&) = delete;
@@ -43,6 +43,12 @@ public:
   CopyFeatureArrayToElementArrayScanline& operator=(const CopyFeatureArrayToElementArrayScanline&) = delete;
   CopyFeatureArrayToElementArrayScanline& operator=(CopyFeatureArrayToElementArrayScanline&&) noexcept = delete;
 
+  /**
+   * @brief Broadcasts every selected feature array.
+   * @return Error from validation or bulk I/O, or success after cancellation.
+   *
+   * Cancellation after a Feature Id read does not write that chunk.
+   */
   Result<> operator()();
 
 private:

@@ -9,12 +9,13 @@ namespace nx::core
 {
 
 /**
- * @brief Input values for the RotateEulerRefFrame algorithm.
+ * @struct RotateEulerRefFrameInputValues
+ * @brief Identifies the axis-angle rotation and in-place Euler array.
  */
 struct ORIENTATIONANALYSIS_EXPORT RotateEulerRefFrameInputValues
 {
-  std::vector<float> rotationAxis; ///< Rotation axis {x, y, z, angle_degrees}
-  DataPath eulerAngleDataPath;     ///< Cell-level Float32 Euler angles (3 components, radians)
+  std::vector<float> rotationAxis; ///< Axis {x, y, z} followed by an angle in degrees.
+  DataPath eulerAngleDataPath;     ///< Three-component Float32 Euler angles in radians.
 };
 
 /**
@@ -26,40 +27,40 @@ struct ORIENTATIONANALYSIS_EXPORT RotateEulerRefFrameInputValues
  * converted to an orientation matrix, multiplied by the rotation matrix, and
  * converted back to Euler angles.
  *
- * ## OOC Optimization (Major Rewrite)
+ * The sequential implementation reads, rotates, and writes at most 65,536
+ * tuples per page. This bounds staging memory and gives out-of-core stores
+ * contiguous access. Concurrent access to the same Euler array is not supported.
  *
- * The original implementation used `ParallelDataAlgorithm` with a threaded
- * worker that accessed the Euler angle array via `operator[]`. This caused
- * severe performance degradation with OOC storage due to per-element virtual
- * dispatch and random chunk access from multiple threads.
- *
- * The optimized implementation uses sequential chunked bulk I/O:
- *   - Euler angles are read in chunks of 65536 tuples via `copyIntoBuffer()`.
- *   - The rotation is applied to each tuple in the local buffer.
- *   - The modified buffer is written back via `copyFromBuffer()`.
- *
- * This in-place read-modify-write pattern is inherently sequential but
- * provides excellent OOC throughput since each chunk is a single contiguous
- * I/O operation.
+ * Cancellation is checked between pages. It returns success and preserves
+ * pages written before cancellation.
  */
 class ORIENTATIONANALYSIS_EXPORT RotateEulerRefFrame
 {
 public:
+  /**
+   * @brief Initializes an in-place Euler reference-frame rotation.
+   * @param dataStructure Provides the Euler array.
+   * @param mesgHandler Supplies the filter message handler.
+   * @param shouldCancel Signals cancellation between pages.
+   * @param inputValues Identifies the rotation and Euler array.
+   * @pre All arguments outlive this executor.
+   */
   RotateEulerRefFrame(DataStructure& dataStructure, const IFilter::MessageHandler& mesgHandler, const std::atomic_bool& shouldCancel, RotateEulerRefFrameInputValues* inputValues);
   ~RotateEulerRefFrame() noexcept;
 
-  RotateEulerRefFrame(const RotateEulerRefFrame&) = delete;            // Copy Constructor Not Implemented
-  RotateEulerRefFrame(RotateEulerRefFrame&&) = delete;                 // Move Constructor Not Implemented
-  RotateEulerRefFrame& operator=(const RotateEulerRefFrame&) = delete; // Copy Assignment Not Implemented
-  RotateEulerRefFrame& operator=(RotateEulerRefFrame&&) = delete;      // Move Assignment Not Implemented
+  RotateEulerRefFrame(const RotateEulerRefFrame&) = delete;
+  RotateEulerRefFrame(RotateEulerRefFrame&&) = delete;
+  RotateEulerRefFrame& operator=(const RotateEulerRefFrame&) = delete;
+  RotateEulerRefFrame& operator=(RotateEulerRefFrame&&) = delete;
 
   /**
-   * @brief Executes the Euler angle rotation using chunked read-modify-write I/O.
-   * @return Result<> with any errors encountered during execution.
+   * @brief Rotates the Euler array in bounded read-modify-write pages.
+   * @return Error for a zero axis or a failed bulk transfer.
+   * @pre rotationAxis contains x, y, z, and an angle in degrees.
+   * @pre The Euler array has three components per tuple.
    */
   Result<> operator()();
 
-  /** @brief Returns whether the algorithm should cancel. */
   bool shouldCancel() const;
 
 private:
