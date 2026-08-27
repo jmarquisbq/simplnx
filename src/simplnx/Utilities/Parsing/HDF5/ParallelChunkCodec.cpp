@@ -257,15 +257,16 @@ std::vector<std::byte> ParallelChunkCodec::inflateChunkFromInfo(uint64 flatChunk
   {
     offset[dimension] = static_cast<hsize_t>(bounds.min[dimension]);
   }
-  uint32 readFilterMask = 0;
+  uint32 ignoredReadFilterMask = 0;
   {
     std::lock_guard<std::mutex> hdf5Lock(Support::ApiLock());
-    if(H5Dread_chunk(m_DatasetId, H5P_DEFAULT, offset.data(), &readFilterMask, stored.data()) < 0)
+    if(H5Dread_chunk(m_DatasetId, H5P_DEFAULT, offset.data(), &ignoredReadFilterMask, stored.data()) < 0)
     {
       throw std::runtime_error(fmt::format("ParallelChunkCodec: H5Dread_chunk failed on chunk {} of '{}:{}'", flatChunkIndex, m_FilePath.string(), m_DatasetPath));
     }
   }
-  filterMask = readFilterMask;
+  // Keep the H5Dget_chunk_info_by_coord metadata snapshot. On Windows, H5Dread_chunk
+  // can report a stale filter mask after a live writable chunk is rewritten.
   static_cast<void>(storedAddress);
 #else
   // POSIX workers reuse one positional descriptor. Recovery flushes only after

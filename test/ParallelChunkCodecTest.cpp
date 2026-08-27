@@ -1,4 +1,5 @@
 #include "simplnx/Utilities/Parsing/HDF5/ParallelChunkCodec.hpp"
+#include "simplnx/Common/ScopeGuard.hpp"
 #include "simplnx/Utilities/Parsing/HDF5/ChunkIndex.hpp"
 #include "simplnx/Utilities/Parsing/HDF5/ChunkShapePolicy.hpp"
 #include "simplnx/Utilities/Parsing/HDF5/IO/DatasetIO.hpp"
@@ -880,6 +881,60 @@ TEST_CASE("ParallelChunkCodec skips deflate only for incompressible chunks", "[P
 
   H5Dclose(dataset);
   H5Fclose(fileId);
+}
+
+TEST_CASE("ParallelChunkCodec preserves rewritten skipped-deflate metadata for live writable datasets", "[ParallelChunkCodec]")
+{
+  constexpr usize k_ChunkBytes = 256 * 1024;
+  const std::vector<uint64> tupleShape = {1, k_ChunkBytes};
+  const std::vector<uint64> componentShape = {1};
+  const std::vector<uint64> chunkShape = tupleShape;
+
+  std::vector<std::byte> source(k_ChunkBytes);
+  std::mt19937_64 rng(0xA11CE5C0FFEEULL);
+  std::uniform_int_distribution<uint32> distribution(0, 255);
+  for(std::byte& value : source)
+  {
+    value = static_cast<std::byte>(distribution(rng));
+  }
+
+  const fs::path filePath = testFilePath("ParallelChunkCodec_live_skipped_deflate.h5");
+  hid_t fileId = H5I_INVALID_HID;
+  hid_t dataset = H5I_INVALID_HID;
+  createEmptyChunkedDeflateDataset(filePath, tupleShape, componentShape, chunkShape, H5T_NATIVE_UINT8, fileId, dataset, /*deflateLevel=*/1);
+  auto fileGuard = MakeScopeGuard([&fileId]() noexcept { H5Fclose(fileId); });
+  auto datasetGuard = MakeScopeGuard([&dataset]() noexcept { H5Dclose(dataset); });
+
+  {
+    ParallelChunkCodec codec(filePath, k_DatasetName, tupleShape, chunkShape, componentShape, sizeof(uint8), dataset);
+    REQUIRE(codec.isEligible());
+    const std::vector<uint64> chunkIndices = {0};
+    const std::vector<std::byte> initial(k_ChunkBytes, std::byte{0});
+    REQUIRE(codec.deflateSpanIntoChunks(initial, chunkIndices));
+
+    unsigned int initialFilterMask = 0;
+    haddr_t initialStoredAddress = HADDR_UNDEF;
+    hsize_t initialStoredSize = 0;
+    const std::vector<hsize_t> offset = {0, 0, 0};
+    REQUIRE(H5Dget_chunk_info_by_coord(dataset, offset.data(), &initialFilterMask, &initialStoredAddress, &initialStoredSize) >= 0);
+    REQUIRE(initialStoredAddress != HADDR_UNDEF);
+    REQUIRE((initialFilterMask & 0x1U) == 0U);
+    REQUIRE(initialStoredSize < k_ChunkBytes);
+
+    REQUIRE(codec.deflateSpanIntoChunks(source, chunkIndices));
+    unsigned int filterMask = 0;
+    haddr_t storedAddress = HADDR_UNDEF;
+    hsize_t storedSize = 0;
+    REQUIRE(H5Dget_chunk_info_by_coord(dataset, offset.data(), &filterMask, &storedAddress, &storedSize) >= 0);
+    REQUIRE(storedAddress != HADDR_UNDEF);
+    REQUIRE((filterMask & 0x1U) != 0U);
+    REQUIRE(storedSize == k_ChunkBytes);
+
+    // The writable dataset remains open and unflushed after replacing a compressed
+    // chunk with skipped-deflate bytes. The metadata filter mask is authoritative even
+    // if the raw-read API reports a stale mask for this live chunk.
+    REQUIRE(codec.inflateChunk(0) == source);
+  }
 }
 
 TEST_CASE("ParallelChunkCodec per-chunk compress + write primitives", "[ParallelChunkCodec]")
