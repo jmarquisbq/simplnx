@@ -4,6 +4,7 @@
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Common/Types.hpp"
 #include "simplnx/DataStructure/AbstractDataStore.hpp"
+#include "simplnx/DataStructure/DataStore.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
 #include "simplnx/Filter/IFilter.hpp"
@@ -11,6 +12,7 @@
 #include "simplnx/Utilities/DataStoreUtilities.hpp"
 #include "simplnx/Utilities/ImageProcessing/SweepTemporaryStore.hpp"
 #include "simplnx/Utilities/ImageProcessing/WorkingMemory.hpp"
+#include "simplnx/Utilities/ParallelDataAlgorithm.hpp"
 #include "simplnx/Utilities/StringUtilities.hpp"
 
 #include <nonstd/span.hpp>
@@ -501,24 +503,25 @@ Result<usize> CalculateDanielssonResidentWorkingMemoryBytes(const SizeVec3& dims
   usize volumeValues = 0;
   usize volumeStateBytes = 0;
   usize inputPlaneBytes = 0;
+  usize outputPlaneBytes = 0;
   usize xVisitCount = 0;
   usize yVisitCount = 0;
   usize zVisitCount = 0;
   usize visitCount = 0;
   usize visitBytes = 0;
   usize requiredBytes = 0;
-  constexpr usize k_ResidentBytesPerValue = 3 * sizeof(int32) + sizeof(uint8) + sizeof(float32);
+  constexpr usize k_ResidentBytesPerValue = 3 * sizeof(int32) + sizeof(uint8);
+  // Reserve both transfer planes conservatively, although the input and output transfer phases do not overlap.
   if(!DanielssonCheckedMultiply(dims[0], dims[1], sliceValues) || !DanielssonCheckedMultiply(sliceValues, dims[2], volumeValues) ||
      !DanielssonCheckedMultiply(volumeValues, k_ResidentBytesPerValue, volumeStateBytes) || !DanielssonCheckedMultiply(sliceValues, sizeof(T), inputPlaneBytes) ||
-     !calculateVisitCount(dims[0], xVisitCount) || !calculateVisitCount(dims[1], yVisitCount) || !calculateVisitCount(dims[2], zVisitCount) ||
-     !DanielssonCheckedAdd(xVisitCount, yVisitCount, visitCount) || !DanielssonCheckedAdd(visitCount, zVisitCount, visitCount) ||
+     !DanielssonCheckedMultiply(sliceValues, sizeof(float32), outputPlaneBytes) || !calculateVisitCount(dims[0], xVisitCount) || !calculateVisitCount(dims[1], yVisitCount) ||
+     !calculateVisitCount(dims[2], zVisitCount) || !DanielssonCheckedAdd(xVisitCount, yVisitCount, visitCount) || !DanielssonCheckedAdd(visitCount, zVisitCount, visitCount) ||
      !DanielssonCheckedMultiply(visitCount, sizeof(AxisVisit), visitBytes) || !DanielssonCheckedAdd(volumeStateBytes, inputPlaneBytes, requiredBytes) ||
-     !DanielssonCheckedAdd(requiredBytes, visitBytes, requiredBytes))
+     !DanielssonCheckedAdd(requiredBytes, outputPlaneBytes, requiredBytes) || !DanielssonCheckedAdd(requiredBytes, visitBytes, requiredBytes))
   {
-    return MakeErrorResult<usize>(
-        -8389,
-        fmt::format("Danielsson distance-map dimensions ({}) and input element size ({} bytes) overflow while sizing the resident vector map, feature mask, output, input plane, and axis visits.",
-                    StringUtilities::formatDimensions3D(dims), sizeof(T)));
+    return MakeErrorResult<usize>(-8389, fmt::format("Danielsson distance-map dimensions ({}) and input element size ({} bytes) overflow while sizing the resident vector map, feature mask, input "
+                                                     "transfer plane, output transfer plane, and axis visits.",
+                                                     StringUtilities::formatDimensions3D(dims), sizeof(T)));
   }
   return {requiredBytes};
 }
@@ -629,35 +632,53 @@ inline bool DanielssonVisitArraysFit(int64 nx, int64 ny, int64 nz, usize visitAr
 }
 
 /**
- * @brief itk::DanielssonDistanceMapImageFilter::UpdateLocalDistance on two 3-component offset vectors. @p hereV points
- * to the current voxel's offset components; @p thereV to the neighbor's. The candidate offset is @c thereV + (offX,
- * offY,offZ). Overwrites @c hereV with the candidate iff the candidate's (optionally spacing-weighted) squared
- * magnitude is strictly smaller, matching ITK's `if (norm1 > norm2)`. Norms are computed in double throughout (ITK
- * casts each component to double); this is bit-identical to ITK for every realistic image size and avoids
- * signed-overflow UB on the integer products. @p hereV and @p thereV may live in the same or different buffers (the
- * OOC z-update pulls from a separate neighbor-plane buffer).
+ * @brief Computes the squared norm of a three-component Danielsson offset vector.
+ * @param vector Three offset components.
+ * @param useSpacing Applies spacing when true.
+ * @param spacing Spacing for each component.
+ * @return Squared norm in double precision.
+ *
+ * The expression uses the same casts and association as each Danielsson candidate comparison.
+ */
+inline float64 DanielssonVectorNorm(const int32* vector, bool useSpacing, const float64 spacing[3])
+{
+  if(useSpacing)
+  {
+    const float64 h0 = static_cast<float64>(vector[0]) * spacing[0];
+    const float64 h1 = static_cast<float64>(vector[1]) * spacing[1];
+    const float64 h2 = static_cast<float64>(vector[2]) * spacing[2];
+    return h0 * h0 + h1 * h1 + h2 * h2;
+  }
+  return static_cast<float64>(vector[0]) * vector[0] + static_cast<float64>(vector[1]) * vector[1] + static_cast<float64>(vector[2]) * vector[2];
+}
+
+/**
+ * @brief Updates a Danielsson offset vector when a neighbor gives a smaller squared norm.
+ * @param hereV Mutable current offset vector.
+ * @param thereV Neighbor offset vector.
+ * @param offX Candidate X offset from the neighbor.
+ * @param offY Candidate Y offset from the neighbor.
+ * @param offZ Candidate Z offset from the neighbor.
+ * @param useSpacing Applies spacing when true.
+ * @param sp Spacing for each component.
+ *
+ * Double-precision component products match ITK and avoid signed integer overflow. The input vectors can share a buffer.
  */
 inline void DanielssonUpdateCore(int32* hereV, const int32* thereV, int32 offX, int32 offY, int32 offZ, bool useSpacing, const float64 sp[3])
 {
-  const int32 hx = hereV[0];
-  const int32 hy = hereV[1];
-  const int32 hz = hereV[2];
   const int32 tx = thereV[0] + offX;
   const int32 ty = thereV[1] + offY;
   const int32 tz = thereV[2] + offZ;
 
-  float64 norm1 = 0.0;
+  const float64 norm1 = DanielssonVectorNorm(hereV, useSpacing, sp);
   float64 norm2 = 0.0;
   if(useSpacing)
   {
-    const float64 h0 = static_cast<float64>(hx) * sp[0], h1 = static_cast<float64>(hy) * sp[1], h2 = static_cast<float64>(hz) * sp[2];
     const float64 t0 = static_cast<float64>(tx) * sp[0], t1 = static_cast<float64>(ty) * sp[1], t2 = static_cast<float64>(tz) * sp[2];
-    norm1 = h0 * h0 + h1 * h1 + h2 * h2;
     norm2 = t0 * t0 + t1 * t1 + t2 * t2;
   }
   else
   {
-    norm1 = static_cast<float64>(hx) * hx + static_cast<float64>(hy) * hy + static_cast<float64>(hz) * hz;
     norm2 = static_cast<float64>(tx) * tx + static_cast<float64>(ty) * ty + static_cast<float64>(tz) * tz;
   }
 
@@ -666,6 +687,45 @@ inline void DanielssonUpdateCore(int32* hereV, const int32* thereV, int32 offX, 
     hereV[0] = tx;
     hereV[1] = ty;
     hereV[2] = tz;
+  }
+}
+
+/**
+ * @brief Updates a Danielsson offset vector and its tracked squared norm.
+ * @param hereV Mutable current offset vector.
+ * @param hereNorm Mutable squared norm of the current vector.
+ * @param thereV Neighbor offset vector.
+ * @param offX Candidate X offset from the neighbor.
+ * @param offY Candidate Y offset from the neighbor.
+ * @param offZ Candidate Z offset from the neighbor.
+ * @param useSpacing Applies spacing when true.
+ * @param sp Spacing for each component.
+ *
+ * An accepted candidate uses its calculated norm. The tracked value is exact because recomputation uses the same operands, casts, and association.
+ */
+inline void DanielssonUpdateCoreTracked(int32* hereV, float64& hereNorm, const int32* thereV, int32 offX, int32 offY, int32 offZ, bool useSpacing, const float64 sp[3])
+{
+  const int32 tx = thereV[0] + offX;
+  const int32 ty = thereV[1] + offY;
+  const int32 tz = thereV[2] + offZ;
+
+  float64 norm2 = 0.0;
+  if(useSpacing)
+  {
+    const float64 t0 = static_cast<float64>(tx) * sp[0], t1 = static_cast<float64>(ty) * sp[1], t2 = static_cast<float64>(tz) * sp[2];
+    norm2 = t0 * t0 + t1 * t1 + t2 * t2;
+  }
+  else
+  {
+    norm2 = static_cast<float64>(tx) * tx + static_cast<float64>(ty) * ty + static_cast<float64>(tz) * tz;
+  }
+
+  if(hereNorm > norm2)
+  {
+    hereV[0] = tx;
+    hereV[1] = ty;
+    hereV[2] = tz;
+    hereNorm = norm2;
   }
 }
 
@@ -685,17 +745,18 @@ inline void DanielssonRowPassGenerated(int32* rowVec, const int32* yNeighborVec,
     {
       return;
     }
+    float64 hereNorm = DanielssonVectorNorm(here, useSpacing, sp);
     if(xPull != 0)
     {
-      DanielssonUpdateCore(here, rowVec + static_cast<usize>(coordinate + xPull) * 3, xPull, 0, 0, useSpacing, sp);
+      DanielssonUpdateCoreTracked(here, hereNorm, rowVec + static_cast<usize>(coordinate + xPull) * 3, xPull, 0, 0, useSpacing, sp);
     }
     if(ypull != 0)
     {
-      DanielssonUpdateCore(here, yNeighborVec + x * 3, 0, ypull, 0, useSpacing, sp);
+      DanielssonUpdateCoreTracked(here, hereNorm, yNeighborVec + x * 3, 0, ypull, 0, useSpacing, sp);
     }
     if(zpull != 0)
     {
-      DanielssonUpdateCore(here, zNeighborVec + x * 3, 0, 0, zpull, useSpacing, sp);
+      DanielssonUpdateCoreTracked(here, hereNorm, zNeighborVec + x * 3, 0, 0, zpull, useSpacing, sp);
     }
   };
   if(nX <= 1)
@@ -771,17 +832,18 @@ void DanielssonPlanePass(int32* planeVec, const int32* neighVec, const uint8* fe
           continue;
         }
       }
+      float64 hereNorm = DanielssonVectorNorm(hereV, useSpacing, sp);
       if(xv.pull != 0)
       {
-        DanielssonUpdateCore(hereV, planeVec + (here2d + xv.pull) * 3, xv.pull, 0, 0, useSpacing, sp);
+        DanielssonUpdateCoreTracked(hereV, hereNorm, planeVec + (here2d + xv.pull) * 3, xv.pull, 0, 0, useSpacing, sp);
       }
       if(yv.pull != 0)
       {
-        DanielssonUpdateCore(hereV, planeVec + (here2d + static_cast<int64>(yv.pull) * nX) * 3, 0, yv.pull, 0, useSpacing, sp);
+        DanielssonUpdateCoreTracked(hereV, hereNorm, planeVec + (here2d + static_cast<int64>(yv.pull) * nX) * 3, 0, yv.pull, 0, useSpacing, sp);
       }
       if(zpull != 0)
       {
-        DanielssonUpdateCore(hereV, neighVec + here2d * 3, 0, 0, zpull, useSpacing, sp);
+        DanielssonUpdateCoreTracked(hereV, hereNorm, neighVec + here2d * 3, 0, 0, zpull, useSpacing, sp);
       }
     }
   }
@@ -840,13 +902,15 @@ inline std::string SelectDanielssonWorkingDataFormat(IDataStore::StoreType input
 } // namespace detail
 
 /**
- * @brief Resident-state Danielsson distance transform (itk's 4SED vector propagation). Holds the whole 3-component int32
- * vector map in RAM, replicates ITK's ReflectiveImageRegionConstIterator odometer exactly (z outermost via
- * @ref detail::DanielssonPlanePass per z-visit, x innermost; each axis swept forward then reflected backward),
- * updating only ZERO-input "foreground" voxels, then derives the fixed float32 distance. NONZERO input voxels are the
- * seed features (vector offset 0). Output is float32 regardless of input type @p T.
+ * @class DanielssonDistanceInCore
+ * @brief Computes the resident Danielsson 4SED distance transform.
+ * @tparam T Specifies the scalar input type.
  *
- * @pre in/out shapes match dims; identical constructor signature to @ref DanielssonDistanceSlab (DispatchAlgorithm).
+ * The seed phase reads a resident span when available and otherwise reads one plane at a time. Each seed range runs in parallel.
+ * The reflective vector propagation is serial and matches ITK's visit order. The distance phase runs in parallel on resident data.
+ * A nonzero input value is a seed with a zero offset. The output type is float32.
+ * The constructor contract matches DanielssonDistanceSlab so runtime dispatch can select either implementation.
+ * @pre The input and output store shapes match the image dimensions.
  */
 template <class T>
 class DanielssonDistanceInCore
@@ -886,13 +950,34 @@ public:
       return {};
     }
 
-    // ---- PrepareData: seed the vector map (features = 0 offset; non-features = the "unreached" init) ----
+    // Prepare the vector map and feature mask before the serial reflective propagation.
     int32 maxV[3];
     detail::DanielssonInitMaxValue(nX, nY, nZ, maxV);
-    std::vector<int32> vec(vol * 3);
-    std::vector<uint8> feature(vol); // 1 where the input is a seed feature (nonzero) -> never updated
+    auto vec = std::make_unique_for_overwrite<int32[]>(vol * 3);
+    auto feature = std::make_unique_for_overwrite<uint8[]>(vol);
+    const auto prepareData = [vectorValuesPtr = vec.get(), featureValuesPtr = feature.get(), maxX = maxV[0], maxY = maxV[1], maxZ = maxV[2]](const T* inputValuesPtr, usize valueOffset, usize count) {
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, count);
+      parallelAlgorithm.execute([=](const Range& range) {
+        for(usize localIndex = range.min(); localIndex < range.max(); ++localIndex)
+        {
+          const usize valueIndex = valueOffset + localIndex;
+          const bool isFeature = inputValuesPtr[localIndex] != static_cast<T>(0);
+          featureValuesPtr[valueIndex] = isFeature ? uint8{1} : uint8{0};
+          vectorValuesPtr[valueIndex * 3] = isFeature ? 0 : maxX;
+          vectorValuesPtr[valueIndex * 3 + 1] = isFeature ? 0 : maxY;
+          vectorValuesPtr[valueIndex * 3 + 2] = isFeature ? 0 : maxZ;
+        }
+      });
+    };
+    if(const auto* residentInputStorePtr = dynamic_cast<const DataStore<T>*>(&m_In); residentInputStorePtr != nullptr)
     {
-      std::vector<T> inputPlane(slice);
+      const auto inputValues = residentInputStorePtr->createSpan();
+      prepareData(inputValues.data(), 0, vol);
+    }
+    else
+    {
+      auto inputPlane = std::make_unique_for_overwrite<T[]>(slice);
       for(int64 z = 0; z < nZ; ++z)
       {
         if(m_ShouldCancel)
@@ -900,23 +985,15 @@ public:
           return {};
         }
         const usize planeOffset = static_cast<usize>(z) * slice;
-        if(Result<> result = m_In.copyIntoBuffer(planeOffset, nonstd::span<T>(inputPlane.data(), slice)); result.invalid())
+        if(Result<> result = m_In.copyIntoBuffer(planeOffset, nonstd::span<T>(inputPlane.get(), slice)); result.invalid())
         {
           return result;
         }
-        for(usize planeIndex = 0; planeIndex < slice; ++planeIndex)
-        {
-          const usize valueIndex = planeOffset + planeIndex;
-          const bool isFeature = inputPlane[planeIndex] != static_cast<T>(0);
-          feature[valueIndex] = isFeature ? uint8{1} : uint8{0};
-          vec[valueIndex * 3 + 0] = isFeature ? 0 : maxV[0];
-          vec[valueIndex * 3 + 1] = isFeature ? 0 : maxV[1];
-          vec[valueIndex * 3 + 2] = isFeature ? 0 : maxV[2];
-        }
+        prepareData(inputPlane.get(), planeOffset, slice);
       }
     }
 
-    // ---- 4SED propagation via the reflective odometer (z outer, plane pass does y,x) ----
+    // Propagate vectors with the serial reflective odometer in Z, Y, and X order.
     const float64 sp[3] = {static_cast<float64>(m_Spacing[0]), static_cast<float64>(m_Spacing[1]), static_cast<float64>(m_Spacing[2])};
     const std::vector<detail::AxisVisit> xVisits = detail::BuildAxisVisits(nX);
     const std::vector<detail::AxisVisit> yVisits = detail::BuildAxisVisits(nY);
@@ -929,19 +1006,50 @@ public:
         return {};
       }
       const usize zBase = static_cast<usize>(zv.coord) * slice;
-      int32* planeVec = vec.data() + zBase * 3;
-      const int32* neighVec = (zv.pull != 0) ? (vec.data() + (static_cast<usize>(zv.coord + zv.pull) * slice) * 3) : nullptr;
-      const uint8* featurePlane = feature.data() + zBase;
+      int32* planeVec = vec.get() + zBase * 3;
+      const int32* neighVec = (zv.pull != 0) ? (vec.get() + (static_cast<usize>(zv.coord + zv.pull) * slice) * 3) : nullptr;
+      const uint8* featurePlane = feature.get() + zBase;
       detail::DanielssonPlanePass<true>(planeVec, neighVec, featurePlane, xVisits, yVisits, zv.pull, nX, m_UseSpacing, sp);
     }
 
-    // ---- ComputeVoronoiMap: derive the float32 distance ----
-    std::vector<float32> out(vol);
-    for(usize p = 0; p < vol; ++p)
+    const auto computeDistances = [vectorsPtr = vec.get(), squared = m_Squared, useSpacing = m_UseSpacing, spacingPtr = sp](float32* outputValuesPtr, usize vectorOffset, usize count) {
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, count);
+      parallelAlgorithm.execute([=](const Range& range) {
+        for(usize localIndex = range.min(); localIndex < range.max(); ++localIndex)
+        {
+          outputValuesPtr[localIndex] = detail::DanielssonDistance(vectorsPtr + (vectorOffset + localIndex) * 3, squared, useSpacing, spacingPtr);
+        }
+      });
+    };
+
+    // Convert final vectors directly into a resident output or through one bounded output plane.
+    if(auto* residentOutputStorePtr = dynamic_cast<DataStore<float32>*>(&m_Out); residentOutputStorePtr != nullptr)
     {
-      out[p] = detail::DanielssonDistance(&vec[p * 3], m_Squared, m_UseSpacing, sp);
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      auto outputValues = residentOutputStorePtr->createSpan();
+      computeDistances(outputValues.data(), 0, vol);
+      return {};
     }
-    return m_Out.copyFromBuffer(0, nonstd::span<const float32>(out.data(), vol));
+
+    auto outputPlane = std::make_unique_for_overwrite<float32[]>(slice);
+    for(int64 z = 0; z < nZ; ++z)
+    {
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+      const usize planeOffset = static_cast<usize>(z) * slice;
+      computeDistances(outputPlane.get(), planeOffset, slice);
+      if(Result<> result = m_Out.copyFromBuffer(planeOffset, nonstd::span<const float32>(outputPlane.get(), slice)); result.invalid())
+      {
+        return result;
+      }
+    }
+    return {};
   }
 
 private:
@@ -1731,13 +1839,22 @@ public:
       {
         return result;
       }
-      for(usize p = 0; p < slice; ++p)
-      {
-        const bool isFeature = inPlane[p] != static_cast<T>(0);
-        vecPlane[p * 3] = isFeature ? 0 : maxV[0];
-        vecPlane[p * 3 + 1] = isFeature ? 0 : maxV[1];
-        vecPlane[p * 3 + 2] = isFeature ? 0 : maxV[2];
-      }
+      const T* const inputValuesPtr = inPlane.data();
+      int32* const vectorValuesPtr = vecPlane.data();
+      const int32 maxX = maxV[0];
+      const int32 maxY = maxV[1];
+      const int32 maxZ = maxV[2];
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, slice);
+      parallelAlgorithm.execute([=](const Range& range) {
+        for(usize planeIndex = range.min(); planeIndex < range.max(); ++planeIndex)
+        {
+          const bool isFeature = inputValuesPtr[planeIndex] != static_cast<T>(0);
+          vectorValuesPtr[planeIndex * 3] = isFeature ? 0 : maxX;
+          vectorValuesPtr[planeIndex * 3 + 1] = isFeature ? 0 : maxY;
+          vectorValuesPtr[planeIndex * 3 + 2] = isFeature ? 0 : maxZ;
+        }
+      });
       return {};
     };
     const auto passPlane = [&](int32* current, const int32* neighbor, int32 zPull) {
@@ -1751,10 +1868,19 @@ public:
       }
     };
     const auto writeDistances = [&](int64 z, nonstd::span<const int32> vectors) -> Result<> {
-      for(usize p = 0; p < slice; ++p)
-      {
-        outPlane[p] = detail::DanielssonDistance(vectors.data() + p * 3, m_Squared, m_UseSpacing, sp);
-      }
+      const int32* const vectorValuesPtr = vectors.data();
+      float32* const outputValuesPtr = outPlane.data();
+      const bool squared = m_Squared;
+      const bool useSpacing = m_UseSpacing;
+      const float64* const spacingPtr = sp;
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, slice);
+      parallelAlgorithm.execute([=](const Range& range) {
+        for(usize planeIndex = range.min(); planeIndex < range.max(); ++planeIndex)
+        {
+          outputValuesPtr[planeIndex] = detail::DanielssonDistance(vectorValuesPtr + planeIndex * 3, squared, useSpacing, spacingPtr);
+        }
+      });
       return m_Out.copyFromBuffer(static_cast<usize>(z) * slice, nonstd::span<const float32>(outPlane.data(), slice));
     };
 

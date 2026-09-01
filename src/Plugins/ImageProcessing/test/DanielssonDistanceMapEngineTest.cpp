@@ -48,6 +48,39 @@ private:
   mutable usize m_ReadCount = 0;
 };
 
+template <class T>
+class TransferCountingDataStore : public DataStore<T>
+{
+public:
+  using DataStore<T>::DataStore;
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
+  {
+    m_ReadValues += buffer.size();
+    return DataStore<T>::copyIntoBuffer(startIndex, buffer);
+  }
+
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
+  {
+    m_WrittenValues += buffer.size();
+    return DataStore<T>::copyFromBuffer(startIndex, buffer);
+  }
+
+  [[nodiscard]] usize readValues() const noexcept
+  {
+    return m_ReadValues;
+  }
+
+  [[nodiscard]] usize writtenValues() const noexcept
+  {
+    return m_WrittenValues;
+  }
+
+private:
+  mutable usize m_ReadValues = 0;
+  usize m_WrittenValues = 0;
+};
+
 class VectorScratchCountingDataStore : public DataStore<int32>
 {
 public:
@@ -251,6 +284,103 @@ std::vector<int32> MakePattern(usize dx, usize dy, usize dz)
   return v;
 }
 } // namespace
+
+TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: tracked update keeps the vector norm exact", "[ImageProcessing][DanielssonDistanceMapEngine]")
+{
+  constexpr std::array<int32, 5> k_HereComponents{-3, -1, 0, 2, 5};
+  constexpr std::array<int32, 4> k_ThereComponents{-4, 0, 1, 3};
+  constexpr std::array<std::array<int32, 3>, 6> k_Offsets{{{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}}};
+  constexpr std::array<std::array<int32, 3>, 3> k_ChainOffsets{{{-1, 0, 0}, {0, -1, 0}, {0, 0, -1}}};
+
+  for(const bool useSpacing : {false, true})
+  {
+    const std::array<float64, 3> spacing = useSpacing ? std::array<float64, 3>{1.5, 2.0, 0.5} : std::array<float64, 3>{1.0, 1.0, 1.0};
+    for(const int32 hereX : k_HereComponents)
+    {
+      for(const int32 hereY : k_HereComponents)
+      {
+        for(const int32 hereZ : k_HereComponents)
+        {
+          for(const int32 thereX : k_ThereComponents)
+          {
+            for(const int32 thereY : k_ThereComponents)
+            {
+              for(const int32 thereZ : k_ThereComponents)
+              {
+                const std::array<int32, 3> initialHere{hereX, hereY, hereZ};
+                const std::array<int32, 3> there{thereX, thereY, thereZ};
+                for(const std::array<int32, 3>& offset : k_Offsets)
+                {
+                  std::array<int32, 3> plainHere = initialHere;
+                  std::array<int32, 3> trackedHere = initialHere;
+                  float64 hereNorm = ImageProcessing::detail::DanielssonVectorNorm(trackedHere.data(), useSpacing, spacing.data());
+
+                  ImageProcessing::detail::DanielssonUpdateCore(plainHere.data(), there.data(), offset[0], offset[1], offset[2], useSpacing, spacing.data());
+                  ImageProcessing::detail::DanielssonUpdateCoreTracked(trackedHere.data(), hereNorm, there.data(), offset[0], offset[1], offset[2], useSpacing, spacing.data());
+
+                  CAPTURE(useSpacing, hereX, hereY, hereZ, thereX, thereY, thereZ, offset[0], offset[1], offset[2]);
+                  REQUIRE(trackedHere == plainHere);
+                  REQUIRE(hereNorm == ImageProcessing::detail::DanielssonVectorNorm(trackedHere.data(), useSpacing, spacing.data()));
+                }
+
+                std::array<int32, 3> plainChain = initialHere;
+                std::array<int32, 3> trackedChain = initialHere;
+                float64 chainNorm = ImageProcessing::detail::DanielssonVectorNorm(trackedChain.data(), useSpacing, spacing.data());
+                for(const std::array<int32, 3>& offset : k_ChainOffsets)
+                {
+                  ImageProcessing::detail::DanielssonUpdateCore(plainChain.data(), there.data(), offset[0], offset[1], offset[2], useSpacing, spacing.data());
+                  ImageProcessing::detail::DanielssonUpdateCoreTracked(trackedChain.data(), chainNorm, there.data(), offset[0], offset[1], offset[2], useSpacing, spacing.data());
+                }
+
+                CAPTURE(useSpacing, hereX, hereY, hereZ, thereX, thereY, thereZ);
+                REQUIRE(trackedChain == plainChain);
+                REQUIRE(chainNorm == ImageProcessing::detail::DanielssonVectorNorm(trackedChain.data(), useSpacing, spacing.data()));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: in-core engine matches through a transfer-counting input", "[ImageProcessing][DanielssonDistanceMapEngine]")
+{
+  constexpr usize k_DimX = 37;
+  constexpr usize k_DimY = 29;
+  constexpr usize k_DimZ = 11;
+  constexpr usize k_Volume = k_DimX * k_DimY * k_DimZ;
+  const SizeVec3 dims{k_DimX, k_DimY, k_DimZ};
+  const FloatVec3 spacing{1.25f, 2.0f, 0.75f};
+  const std::vector<int32> pattern = MakePattern(k_DimX, k_DimY, k_DimZ);
+  DataStore<int32> plainInputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, int32{0});
+  TransferCountingDataStore<int32> countingInputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, int32{0});
+  for(usize index = 0; index < pattern.size(); ++index)
+  {
+    plainInputStore.setValue(index, pattern[index]);
+    countingInputStore.setValue(index, pattern[index]);
+  }
+  DataStore<float32> plainOutputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, 0.0f);
+  TransferCountingDataStore<float32> countingOutputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, 0.0f);
+  std::atomic_bool shouldCancel{false};
+  IFilter::MessageHandler messageHandler{};
+
+  DanielssonDistanceInCore<int32> plainEngine(plainInputStore, plainOutputStore, dims, /*squaredDistance=*/false, /*useSpacing=*/true, spacing, shouldCancel, messageHandler);
+  DanielssonDistanceInCore<int32> countingEngine(countingInputStore, countingOutputStore, dims, /*squaredDistance=*/false, /*useSpacing=*/true, spacing, shouldCancel, messageHandler);
+  REQUIRE(plainEngine().valid());
+  REQUIRE(countingEngine().valid());
+
+  std::vector<float32> plainOutput(k_Volume);
+  std::vector<float32> countingOutput(k_Volume);
+  for(usize index = 0; index < k_Volume; ++index)
+  {
+    plainOutput[index] = plainOutputStore.getValue(index);
+    countingOutput[index] = countingOutputStore.getValue(index);
+  }
+  REQUIRE(countingOutput == plainOutput);
+  REQUIRE(countingInputStore.readValues() == 0);
+  REQUIRE(countingOutputStore.writtenValues() == 0);
+}
 
 // A full seed plane on one axis makes the transform purely 1D along that axis -- Danielsson's 4SED is EXACT there, so
 // this pins down each axis's forward/backward propagation and the spacing weighting against the exact EDT. Exercises
@@ -456,6 +586,27 @@ TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: pre-cancel preserves po
   }
 }
 
+TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: in-core pre-cancel preserves poison output", "[ImageProcessing][DanielssonDistanceMapEngine]")
+{
+  constexpr usize k_DimX = 5;
+  constexpr usize k_DimY = 4;
+  constexpr usize k_DimZ = 3;
+  constexpr float32 k_Poison = -12345.0f;
+  DataStore<int32> inputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, int32{0});
+  DataStore<float32> outputStore(ShapeType{k_DimZ, k_DimY, k_DimX}, ShapeType{1}, k_Poison);
+  std::atomic_bool shouldCancel{true};
+  IFilter::MessageHandler messageHandler{};
+
+  DanielssonDistanceInCore<int32> engine(inputStore, outputStore, SizeVec3{k_DimX, k_DimY, k_DimZ}, /*squaredDistance=*/true, /*useSpacing=*/false, FloatVec3{1.0f, 1.0f, 1.0f}, shouldCancel,
+                                         messageHandler);
+  const Result<> result = engine();
+  REQUIRE(result.valid());
+  for(const float32 value : outputStore)
+  {
+    REQUIRE(value == k_Poison);
+  }
+}
+
 TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: mixed storage selects an OOC working format", "[ImageProcessing][DanielssonDistanceMapEngine]")
 {
   constexpr const char* kInputOocFormat = "HDF5-OOC-Input";
@@ -498,7 +649,8 @@ TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: resident state requires
   constexpr usize sliceValues = dimX * dimY;
   constexpr usize valueCount = sliceValues * dimZ;
   constexpr usize visitCount = (2 * dimX - 2) + (2 * dimY - 2) + (2 * dimZ - 2);
-  constexpr usize expectedBytes = valueCount * (3 * sizeof(int32) + sizeof(uint8) + sizeof(float32)) + sliceValues * sizeof(uint8) + visitCount * sizeof(ImageProcessing::detail::AxisVisit);
+  constexpr usize expectedBytes =
+      valueCount * (3 * sizeof(int32) + sizeof(uint8)) + sliceValues * sizeof(uint8) + sliceValues * sizeof(float32) + visitCount * sizeof(ImageProcessing::detail::AxisVisit);
   constexpr uint64 k_GiB = 1024ULL * 1024ULL * 1024ULL;
   const SizeVec3 dims{dimX, dimY, dimZ};
 
@@ -513,16 +665,16 @@ TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: resident state requires
   auto& manager = CacheMemoryBudgetManager::instance();
   const uint64 previousBudget = manager.budgetBytes();
   manager.clear();
-  manager.setBudgetBytes(2 * k_GiB);
+  manager.setBudgetBytes(k_GiB);
   {
     auto allocationResult = ImageProcessing::detail::ReserveDanielssonResidentWorkingMemory<uint8>(dims);
     SIMPLNX_RESULT_REQUIRE_VALID(allocationResult);
     REQUIRE_FALSE(allocationResult.value().holdsCompleteState());
-    REQUIRE(allocationResult.value().reservation.sizeBytes() == 512ULL * 1024ULL * 1024ULL);
+    REQUIRE(allocationResult.value().reservation.sizeBytes() == 256ULL * 1024ULL * 1024ULL);
   }
   REQUIRE(manager.reservedWorkingMemoryBytes() == 0);
 
-  manager.setBudgetBytes(4 * k_GiB);
+  manager.setBudgetBytes(2 * k_GiB);
   {
     auto allocationResult = ImageProcessing::detail::ReserveDanielssonResidentWorkingMemory<uint8>(dims);
     SIMPLNX_RESULT_REQUIRE_VALID(allocationResult);
@@ -533,17 +685,26 @@ TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: resident state requires
   manager.setBudgetBytes(previousBudget);
 }
 
-TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: both working-memory paths read each input plane once", "[ImageProcessing][DanielssonDistanceMapEngine][WorkingMemory]")
+TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: the slab path reads each input plane once and the resident path reads the span",
+          "[ImageProcessing][DanielssonDistanceMapEngine][WorkingMemory]")
 {
   constexpr usize dimX = 5;
   constexpr usize dimY = 6;
   constexpr usize dimZ = 7;
+  constexpr usize sliceValues = dimX * dimY;
+  constexpr usize valueCount = sliceValues * dimZ;
+  constexpr usize visitCount = (2 * dimX - 2) + (2 * dimY - 2) + (2 * dimZ - 2);
+  constexpr uint64 k_RequiredBytes =
+      valueCount * (3 * sizeof(int32) + sizeof(uint8)) + sliceValues * sizeof(uint8) + sliceValues * sizeof(float32) + visitCount * sizeof(ImageProcessing::detail::AxisVisit);
   constexpr uint64 k_PartialBudgetBytes = 8192;
-  constexpr uint64 k_CompleteBudgetBytes = 32768;
+  constexpr uint64 k_CompleteBudgetBytes = 4 * k_RequiredBytes;
   const SizeVec3 dims{dimX, dimY, dimZ};
   const FloatVec3 spacing{1.0f, 1.0f, 1.0f};
   const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
   const std::vector<float32> expected = RunInCore<uint8>(pattern, dimX, dimY, dimZ, true, false, spacing);
+  const auto requiredResult = ImageProcessing::detail::CalculateDanielssonResidentWorkingMemoryBytes<uint8>(dims);
+  SIMPLNX_RESULT_REQUIRE_VALID(requiredResult);
+  REQUIRE(requiredResult.value() == k_RequiredBytes);
 
   auto& manager = CacheMemoryBudgetManager::instance();
   const uint64 previousBudget = manager.budgetBytes();
@@ -570,8 +731,10 @@ TEST_CASE("ImageProcessing::DanielssonDistanceMapEngine: both working-memory pat
     return inputStore.readCount();
   };
 
+  // The partial budget selects the slab, which streams each input plane exactly once. The complete budget selects the
+  // resident engine, which reads the in-memory input through its span and performs no bulk transfers.
   REQUIRE(run(k_PartialBudgetBytes) == dimZ);
-  REQUIRE(run(k_CompleteBudgetBytes) == dimZ);
+  REQUIRE(run(k_CompleteBudgetBytes) == 0);
   manager.setBudgetBytes(previousBudget);
 }
 

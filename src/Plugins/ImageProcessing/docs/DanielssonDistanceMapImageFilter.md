@@ -34,13 +34,13 @@ The filter propagates three-component integer offset vectors with Danielsson's r
 
 ### In-Core Path
 
-For resident input and output arrays, `DanielssonDistanceInCore` bulk-reads one input Z plane at a time while building the complete offset-vector map and feature mask in memory. It reproduces the reflective visitation order directly and converts the final vectors into one float32 output buffer.
+For resident input and output arrays, `DanielssonDistanceInCore` builds the complete offset-vector map and feature mask in parallel from the resident input span. It propagates the vectors with a serial reflective sweep. It then converts the final vectors in parallel directly into the resident float32 output span.
 
 ### Out-of-Core Path
 
-For a three-dimensional disk-backed image, the filter first asks the shared cache-memory budget for the complete offset-vector map, feature mask, float32 output, one input plane, and reflective axis-visit lists. The fast resident path runs only when the complete request is granted. For a `512 x 512 x 128` uint8 image, the request is about 544.3 MiB.
+For a three-dimensional disk-backed image, the filter first asks the shared cache-memory budget for the complete offset-vector map, feature mask, one input transfer plane, one output transfer plane, and reflective axis-visit lists. The fast resident path runs only when the complete request is granted. For a `512 x 512 x 128` uint8 image, the request is about 417.3 MiB.
 
-If the complete request is unavailable, allocation fails, or the image is truly two-dimensional, `DanielssonDistanceSlab` keeps the offset-vector map in a raw, uncompressed fixed-record scratch store when either endpoint is disk-backed (keeping that traffic off the deflate codec), or in the resolved in-core format when neither endpoint is out-of-core, and processes one Z plane at a time. Two vector planes, one input plane, one feature-mask plane, and one output plane form the bounded working set. Consecutive forward and backward visits reuse the previously written vector plane as the next adjacent neighbor. All temporary-memory requests share the application cache budget and remain subject to its aggregate 25% limit.
+If the complete request is unavailable, allocation fails, or the image is truly two-dimensional, `DanielssonDistanceSlab` keeps the offset-vector map in a raw, uncompressed fixed-record scratch store when either endpoint is disk-backed (keeping that traffic off the deflate codec), or in the resolved in-core format when neither endpoint is out-of-core, and processes one Z plane at a time. The seed and distance phases run in parallel on resident plane buffers. The reflective propagation remains serial. Two vector planes, one input plane, and one output plane form the fixed working set. Compact vector scratch also uses a compact-transfer staging plane when applicable. Consecutive forward and backward visits reuse the previously written vector plane as the next adjacent neighbor. All temporary-memory requests share the application cache budget and remain subject to its aggregate 25% limit.
 
 % Auto generated parameter table will be inserted here
 
