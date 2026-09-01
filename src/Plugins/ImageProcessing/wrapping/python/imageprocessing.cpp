@@ -1,10 +1,10 @@
-#include <CxPybind/CxPybind.hpp>
+#include <NxPybind/NxPybind.hpp>
 
 #include "ImageProcessing/ImageProcessingFilterBinding.hpp"
 #include "ImageProcessing/ImageProcessingPlugin.hpp"
 
 using namespace nx::core;
-using namespace nx::core::CxPybind;
+using namespace nx::core::NxPybind;
 namespace py = pybind11;
 
 PYBIND11_MODULE(imageprocessing, mod)
