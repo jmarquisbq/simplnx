@@ -5,6 +5,7 @@ set(${PLUGIN_NAME}UnitTest_SRCS
   ItkGoldenTestUtilsSelfTest.cpp
   ApplyPointwiseTest.cpp
   WorkingMemoryTest.cpp
+  StoreElementwiseUtilitiesTest.cpp
   ThresholdImageFilterTest.cpp
   PipelineUuidRedirectTest.cpp
   AbsImageFilterTest.cpp

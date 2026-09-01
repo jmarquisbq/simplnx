@@ -842,92 +842,214 @@ enum class BinaryCompositeOp
 };
 
 /**
- * @brief Elementwise @c out[i] = a[i] - b[i] over three equal-length scalar stores, streamed in bounded
- *        65536-value chunks via the bulk copyIntoBuffer/copyFromBuffer path (a memcpy in-core, a coalesced
- *        hyperslab out-of-core -- identical code either way, memory bounded at two chunk buffers).
+ * @brief Specifies the maximum number of values in an elementwise staging chunk.
+ * @tparam T Specifies the scalar value type.
  *
- * Safe when @p out aliases @p a or @p b (which every composite difference below does): each chunk reads
- * BOTH inputs into local buffers BEFORE writing that chunk back to @p out, and the chunks are disjoint, so
- * no value is ever overwritten before it has been read. This is the two-input streaming idiom of
- * @ref ApplyMask specialized to a binary subtract; @ref ApplyPointwise is unary and cannot express it.
- *
- * The morphology composite invariants guarantee the operands are ordered so @c a[i] >= b[i] at every voxel
- * (WhiteTopHat: opening(in) <= in; BlackTopHat: closing(in) >= in; Gradient: dilate(in) >= erode(in)), so the
- * difference is non-negative -- free of unsigned underflow -- at every voxel with at least one in-bounds
- * structuring-element neighbor. The lone exception is a center-EXCLUDING kernel (Annulus) on an image so small
- * that a voxel has NO in-bounds SE neighbor: there dilate seeds lowest() and erode seeds max(), so Gradient
- * computes lowest()-max() (wraps for unsigned / -inf for float). That matches ITK's identical extremum-seeded
- * result, so it is a shared boundary quirk rather than a divergence; Box/Ball/Cross include the center and are
- * immune.
- *
- * @pre @p a, @p b and @p out are scalar stores of identical length.
+ * The 32 MiB target bounds each buffer while keeping bulk transfers large enough for out-of-core stores.
  */
 template <class T>
-Result<> SubtractStores(const AbstractDataStore<T>& a, const AbstractDataStore<T>& b, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel)
+inline constexpr usize k_ElementwiseChunkValues = std::max<usize>(usize{1}, (usize{32} << 20) / sizeof(T));
+
+namespace detail
+{
+/**
+ * @brief Applies an elementwise operation to a resident range in parallel.
+ * @tparam T Specifies the scalar value type.
+ * @tparam OperationT Specifies the operation for one index.
+ * @param inputA First resident input buffer.
+ * @param inputB Second resident input buffer. A unary operation can ignore this buffer.
+ * @param output Resident output buffer.
+ * @param count Number of values to process.
+ * @param operation Applies the required arithmetic to one index.
+ *
+ * Worker threads use only raw resident pointers. Each index reads its operands before a possible aliased output write.
+ */
+template <class T, class OperationT>
+void ApplyElementwiseResidentRange(const T* inputA, const T* inputB, T* output, usize count, OperationT operation)
+{
+  ParallelDataAlgorithm parallelAlgorithm;
+  parallelAlgorithm.setRange(0, count);
+  parallelAlgorithm.execute([=](const Range& range) {
+    const T* const inputAValuesPtr = inputA;
+    const T* const inputBValuesPtr = inputB;
+    T* const outputValuesPtr = output;
+    const OperationT applyOperation = operation;
+    for(usize index = range.min(); index < range.max(); ++index)
+    {
+      applyOperation(inputAValuesPtr, inputBValuesPtr, outputValuesPtr, index);
+    }
+  });
+}
+
+/**
+ * @brief Subtracts two stores through bounded resident chunks.
+ * @tparam T Specifies the scalar value type.
+ * @param a First input store.
+ * @param b Second input store.
+ * @param out Output store.
+ * @param shouldCancel Requests cancellation between chunks.
+ * @param chunkValues Maximum number of values in each chunk.
+ * @return An error from a bulk transfer, or a valid empty result.
+ *
+ * Serial bulk transfers isolate store access from parallel arithmetic. Both inputs are read before an aliased output write.
+ * The arithmetic matches the resident path exactly.
+ * Cancellation returns a valid result. The chunked path preserves completed output chunks, and a started resident operation runs to completion.
+ */
+template <class T>
+Result<> SubtractStoresChunked(const AbstractDataStore<T>& a, const AbstractDataStore<T>& b, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel, usize chunkValues)
 {
   const usize size = a.getSize();
-  constexpr usize k_ChunkValues = std::max<usize>(1, (16ULL * 1024ULL * 1024ULL) / (2 * sizeof(T)));
-  auto bufferA = std::make_unique<T[]>(std::min(k_ChunkValues, size));
-  auto bufferB = std::make_unique<T[]>(std::min(k_ChunkValues, size));
-  for(usize start = 0; start < size; start += k_ChunkValues)
+  chunkValues = std::max<usize>(usize{1}, chunkValues);
+  auto bufferA = std::make_unique_for_overwrite<T[]>(std::min(chunkValues, size));
+  auto bufferB = std::make_unique_for_overwrite<T[]>(std::min(chunkValues, size));
+  for(usize start = 0; start < size; start += chunkValues)
   {
     if(shouldCancel)
     {
       return {};
     }
-    const usize count = std::min(k_ChunkValues, size - start);
-    if(Result<> r = a.copyIntoBuffer(start, nonstd::span<T>(bufferA.get(), count)); r.invalid())
+    const usize count = std::min(chunkValues, size - start);
+    if(Result<> result = a.copyIntoBuffer(start, nonstd::span<T>(bufferA.get(), count)); result.invalid())
     {
-      return r;
+      return result;
     }
-    if(Result<> r = b.copyIntoBuffer(start, nonstd::span<T>(bufferB.get(), count)); r.invalid())
+    if(Result<> result = b.copyIntoBuffer(start, nonstd::span<T>(bufferB.get(), count)); result.invalid())
     {
-      return r;
+      return result;
     }
-    for(usize i = 0; i < count; ++i)
+    ApplyElementwiseResidentRange(bufferA.get(), bufferB.get(), bufferA.get(), count, [](const T* aValues, const T* bValues, T* outValues, usize index) {
+      const T aValue = aValues[index];
+      const T bValue = bValues[index];
+      outValues[index] = static_cast<T>(aValue - bValue);
+    });
+    if(Result<> result = out.copyFromBuffer(start, nonstd::span<const T>(bufferA.get(), count)); result.invalid())
     {
-      bufferA[i] = static_cast<T>(bufferA[i] - bufferB[i]);
-    }
-    if(Result<> r = out.copyFromBuffer(start, nonstd::span<const T>(bufferA.get(), count)); r.invalid())
-    {
-      return r;
+      return result;
     }
   }
   return {};
 }
 
 /**
- * @brief Binary intensity invert matching ITK's SignedDanielsson InvertIntensityFunctor: out[i] = (in[i] != 0) ? 0 : 1.
- *        Streamed in bounded chunks (identical in-core and out-of-core), @p in and @p out are scalar stores of equal
- *        length. Used to build the inverted image for the second Danielsson pass in the signed composite.
+ * @brief Inverts a binary store through bounded resident chunks.
+ * @tparam T Specifies the scalar value type.
+ * @param in Input store.
+ * @param out Output store.
+ * @param shouldCancel Requests cancellation between chunks.
+ * @param chunkValues Maximum number of values in each chunk.
+ * @return An error from a bulk transfer, or a valid empty result.
+ *
+ * Serial bulk transfers isolate store access from parallel arithmetic. Each input chunk is resident before an aliased output write.
+ * The arithmetic matches the resident path exactly.
+ * Cancellation returns a valid result. The chunked path preserves completed output chunks, and a started resident operation runs to completion.
  */
 template <class T>
-Result<> InvertBinaryStore(const AbstractDataStore<T>& in, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel)
+Result<> InvertBinaryStoreChunked(const AbstractDataStore<T>& in, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel, usize chunkValues)
 {
   const usize size = in.getSize();
-  constexpr usize k_ChunkValues = 65536;
-  auto buffer = std::make_unique<T[]>(std::min(k_ChunkValues, size));
-  for(usize start = 0; start < size; start += k_ChunkValues)
+  chunkValues = std::max<usize>(usize{1}, chunkValues);
+  auto buffer = std::make_unique_for_overwrite<T[]>(std::min(chunkValues, size));
+  for(usize start = 0; start < size; start += chunkValues)
   {
     if(shouldCancel)
     {
       return {};
     }
-    const usize count = std::min(k_ChunkValues, size - start);
-    if(Result<> r = in.copyIntoBuffer(start, nonstd::span<T>(buffer.get(), count)); r.invalid())
+    const usize count = std::min(chunkValues, size - start);
+    if(Result<> result = in.copyIntoBuffer(start, nonstd::span<T>(buffer.get(), count)); result.invalid())
     {
-      return r;
+      return result;
     }
-    for(usize i = 0; i < count; ++i)
+    ApplyElementwiseResidentRange(buffer.get(), buffer.get(), buffer.get(), count, [](const T* inValues, const T*, T* outValues, usize index) {
+      const T inValue = inValues[index];
+      outValues[index] = (inValue != T{0}) ? T{0} : T{1};
+    });
+    if(Result<> result = out.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)); result.invalid())
     {
-      buffer[i] = (buffer[i] != T{0}) ? T{0} : T{1};
-    }
-    if(Result<> r = out.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)); r.invalid())
-    {
-      return r;
+      return result;
     }
   }
   return {};
+}
+} // namespace detail
+
+/**
+ * @brief Computes @c out[i] = a[i] - b[i] for equal-length scalar stores.
+ * @tparam T Specifies the scalar value type.
+ * @param a First input store.
+ * @param b Second input store.
+ * @param out Output store.
+ * @param shouldCancel Requests cancellation before resident work or between chunks.
+ * @param chunkValues Maximum number of values in each fallback chunk.
+ * @return An error from a bulk transfer, or a valid empty result.
+ *
+ * Concrete in-memory stores use parallel resident spans. Other stores use bounded chunks with serial bulk transfers.
+ * Both paths read each index before an aliased output write and use identical arithmetic.
+ * Morphology callers order operands so valid neighborhoods produce nonnegative differences. A center-excluding kernel can have no in-bounds neighbor on a small image.
+ * In that case, subtraction preserves ITK's extremum-seeded boundary result.
+ * Cancellation returns a valid result. The chunked path preserves completed output chunks, and a started resident operation runs to completion.
+ * @pre The three stores have equal lengths.
+ */
+template <class T>
+Result<> SubtractStores(const AbstractDataStore<T>& a, const AbstractDataStore<T>& b, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel, usize chunkValues = k_ElementwiseChunkValues<T>)
+{
+  const auto* residentAPtr = dynamic_cast<const DataStore<T>*>(&a);
+  const auto* residentBPtr = dynamic_cast<const DataStore<T>*>(&b);
+  auto* residentOutPtr = dynamic_cast<DataStore<T>*>(&out);
+  if(residentAPtr != nullptr && residentBPtr != nullptr && residentOutPtr != nullptr)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const auto aValues = residentAPtr->createSpan();
+    const auto bValues = residentBPtr->createSpan();
+    auto outValues = residentOutPtr->createSpan();
+    detail::ApplyElementwiseResidentRange(aValues.data(), bValues.data(), outValues.data(), aValues.size(), [](const T* aData, const T* bData, T* outData, usize index) {
+      const T aValue = aData[index];
+      const T bValue = bData[index];
+      outData[index] = static_cast<T>(aValue - bValue);
+    });
+    return {};
+  }
+  return detail::SubtractStoresChunked(a, b, out, shouldCancel, chunkValues);
+}
+
+/**
+ * @brief Maps each nonzero input value to zero and each zero input value to one.
+ * @tparam T Specifies the scalar value type.
+ * @param in Input store.
+ * @param out Output store.
+ * @param shouldCancel Requests cancellation before resident work or between chunks.
+ * @param chunkValues Maximum number of values in each fallback chunk.
+ * @return An error from a bulk transfer, or a valid empty result.
+ *
+ * Concrete in-memory stores use parallel resident spans. Other stores use bounded chunks with serial bulk transfers.
+ * Both paths read each index before an aliased output write and use identical arithmetic.
+ * Signed Danielsson uses this operation to build the input for its second distance transform.
+ * Cancellation returns a valid result. The chunked path preserves completed output chunks, and a started resident operation runs to completion.
+ * @pre The two stores have equal lengths.
+ */
+template <class T>
+Result<> InvertBinaryStore(const AbstractDataStore<T>& in, AbstractDataStore<T>& out, const std::atomic_bool& shouldCancel, usize chunkValues = k_ElementwiseChunkValues<T>)
+{
+  const auto* residentInPtr = dynamic_cast<const DataStore<T>*>(&in);
+  auto* residentOutPtr = dynamic_cast<DataStore<T>*>(&out);
+  if(residentInPtr != nullptr && residentOutPtr != nullptr)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const auto inValues = residentInPtr->createSpan();
+    auto outValues = residentOutPtr->createSpan();
+    detail::ApplyElementwiseResidentRange(inValues.data(), inValues.data(), outValues.data(), inValues.size(), [](const T* inData, const T*, T* outData, usize index) {
+      const T inValue = inData[index];
+      outData[index] = (inValue != T{0}) ? T{0} : T{1};
+    });
+    return {};
+  }
+  return detail::InvertBinaryStoreChunked(in, out, shouldCancel, chunkValues);
 }
 
 /**
