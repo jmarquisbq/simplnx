@@ -1173,43 +1173,133 @@ struct AdaptiveHistogramEqualizationExecuteFn
 };
 
 /**
- * @brief Binary-input safeguard scan. The binary morphology engine emits a strictly {foreground, background}
- *        image, which is bit-identical to ITK's binary morphology ONLY when the input already contains just
- *        those two values (ITK otherwise PRESERVES every non-foreground voxel's original value). This enforces
- *        that contract: it streams @p inStore in bounded chunks (OOC-safe, never O(volume) in RAM) and rejects
- *        (with @ref k_NonBinaryInput) any voxel that is neither @p fg nor @p bg. One O(N) input scan per run --
- *        acceptable to guarantee the domain; the engine itself is left untouched.
+ * @brief Publishes a candidate index when it is smaller than the current index.
+ * @param smallest Atomic index that receives the minimum published value.
+ * @param candidate Index to compare with the current minimum.
  *
- * Shared by the standalone binary Dilate/Erode façade (@ref BinaryMorphologyExecuteFn) and the binary
- * composites (@ref BinaryMorphologyCompositeExecuteFn), which run it EXACTLY ONCE on the original input and
- * then drive the engine directly on scratch stores (the {fg, bg} intermediate must not be re-scanned).
+ * The compare-and-exchange loop makes the result independent of the order in which workers publish candidates.
+ */
+inline void PublishSmallerIndex(std::atomic<usize>& smallest, usize candidate) noexcept
+{
+  usize current = smallest.load(std::memory_order_relaxed);
+  while(candidate < current && !smallest.compare_exchange_weak(current, candidate, std::memory_order_relaxed))
+  {
+  }
+}
+
+/**
+ * @brief Finds the first value that does not match either binary value.
+ * @tparam T Specifies the resident value type.
+ * @param values Caller-owned resident values to compare.
+ * @param fg Foreground value.
+ * @param bg Background value.
+ * @return Smallest invalid index, or no value when the span is empty or all values are binary.
+ *
+ * The parallel comparison is exact because an atomic minimum combines the first violation from each range.
+ * A range that starts at or after the known minimum cannot produce a smaller index, so the worker safely skips it.
+ * Worker threads read only the caller-owned resident span, so they do not access a data store.
+ * Cancellation is checked by the caller between resident chunks, so a chunk that contains a violation always reports it.
  */
 template <class T>
-Result<> ScanBinaryInput(const AbstractDataStore<T>& inStore, T fg, T bg, const DataPath& inputArrayPath, const std::atomic_bool& shouldCancel)
+std::optional<usize> FindFirstNonBinaryValue(nonstd::span<const T> values, T fg, T bg)
+{
+  constexpr usize k_ScanBlockValues = 4096;
+  std::atomic<usize> firstInvalid{values.size()};
+  // The block OR-reduction has no data-dependent exit, so compilers can vectorize it.
+  // The first-violation search runs only in the first block of each range that contains a violation.
+  // The per-block check bounds unused work after another range publishes a smaller index.
+  const T* const data = values.data();
+  ParallelDataAlgorithm parallelAlgorithm;
+  parallelAlgorithm.setRange(0, values.size());
+  parallelAlgorithm.execute([&](const Range& range) {
+    const usize known = firstInvalid.load(std::memory_order_relaxed);
+    if(range.min() >= known)
+    {
+      return;
+    }
+    // Local copies keep both reference values in registers; a by-reference capture is reloaded inside the loop.
+    const T foreground = fg;
+    const T background = bg;
+    for(usize blockBegin = range.min(); blockBegin < range.max(); blockBegin += k_ScanBlockValues)
+    {
+      if(blockBegin >= firstInvalid.load(std::memory_order_relaxed))
+      {
+        return;
+      }
+      const usize blockEnd = std::min(range.max(), blockBegin + k_ScanBlockValues);
+      uint32 invalidMask = 0;
+      for(usize i = blockBegin; i < blockEnd; ++i)
+      {
+        invalidMask |= static_cast<uint32>(data[i] != foreground) & static_cast<uint32>(data[i] != background);
+      }
+      if(invalidMask != 0)
+      {
+        for(usize i = blockBegin; i < blockEnd; ++i)
+        {
+          if(data[i] != foreground && data[i] != background)
+          {
+            PublishSmallerIndex(firstInvalid, i);
+            return;
+          }
+        }
+      }
+    }
+  });
+
+  const usize invalid = firstInvalid.load(std::memory_order_relaxed);
+  if(invalid == values.size())
+  {
+    return std::nullopt;
+  }
+  return invalid;
+}
+
+/**
+ * @brief Specifies the default number of resident values for a binary input scan.
+ * @tparam T Specifies the input value type that determines the 64 MiB value count.
+ */
+template <class T>
+inline constexpr usize k_BinaryScanChunkValues = std::max<usize>(usize{1}, (usize{64} << 20) / sizeof(T));
+
+/**
+ * @brief Validates that a binary morphology input contains only the foreground and background values.
+ * @tparam T Specifies the input value type.
+ * @param inStore Store that contains the original input values.
+ * @param fg Foreground value that the binary morphology engine accepts.
+ * @param bg Background value that the binary morphology engine accepts.
+ * @param inputArrayPath Path included in a non-binary input error.
+ * @param shouldCancel Shared cancellation flag.
+ * @param chunkValues Requested maximum number of values in each resident chunk. Values less than one select one value.
+ * @return Error for a store-read failure or the first non-binary value. A binary or cancelled scan returns a valid result.
+ *
+ * The engine emits a strict {foreground, background} image. ITK preserves each original non-foreground value, so equivalent behavior requires a strict binary input.
+ * Store reads are serial and bounded. The function compares each resident chunk in parallel.
+ * Standalone binary Dilate and Erode, binary Opening and Closing composites, and Binary Opening By Reconstruction scan the original input exactly once.
+ * The callers do not scan engine-created intermediate stores because those stores contain only the foreground and background values.
+ */
+template <class T>
+Result<> ScanBinaryInput(const AbstractDataStore<T>& inStore, T fg, T bg, const DataPath& inputArrayPath, const std::atomic_bool& shouldCancel, usize chunkValues = k_BinaryScanChunkValues<T>)
 {
   const usize size = inStore.getSize();
-  constexpr usize k_ChunkValues = std::max<usize>(1, (64ULL * 1024ULL * 1024ULL) / sizeof(T));
-  auto scanBuffer = std::make_unique<T[]>(std::min(k_ChunkValues, size));
-  for(usize start = 0; start < size; start += k_ChunkValues)
+  chunkValues = std::max<usize>(usize{1}, chunkValues);
+  auto scanBuffer = std::make_unique<T[]>(std::min(chunkValues, size));
+  for(usize start = 0; start < size; start += chunkValues)
   {
     if(shouldCancel)
     {
       return {};
     }
-    const usize count = std::min(k_ChunkValues, size - start);
+    const usize count = std::min(chunkValues, size - start);
     if(Result<> r = inStore.copyIntoBuffer(start, nonstd::span<T>(scanBuffer.get(), count)); r.invalid())
     {
       return r;
     }
-    for(usize i = 0; i < count; ++i)
+    if(const std::optional<usize> invalid = FindFirstNonBinaryValue<T>(nonstd::span<const T>(scanBuffer.get(), count), fg, bg); invalid.has_value())
     {
-      if(scanBuffer[i] != fg && scanBuffer[i] != bg)
-      {
-        return MakeErrorResult(k_NonBinaryInput,
-                               fmt::format("Binary morphology requires a binary image containing only the foreground ({}) or background ({}) value, but input array '{}' contains the value {} at "
-                                           "index {}. Threshold or relabel the input first.",
-                                           static_cast<int64>(fg), static_cast<int64>(bg), inputArrayPath.toString(), static_cast<int64>(scanBuffer[i]), start + i));
-      }
+      return MakeErrorResult(k_NonBinaryInput,
+                             fmt::format("Binary morphology requires a binary image containing only the foreground ({}) or background ({}) value, but input array '{}' contains the value {} at "
+                                         "index {}. Threshold or relabel the input first.",
+                                         static_cast<int64>(fg), static_cast<int64>(bg), inputArrayPath.toString(), static_cast<int64>(scanBuffer[*invalid]), start + *invalid));
     }
   }
   return {};

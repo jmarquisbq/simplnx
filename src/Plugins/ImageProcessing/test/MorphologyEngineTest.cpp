@@ -29,9 +29,11 @@
 #include "simplnx/Utilities/AlgorithmDispatch.hpp"
 #include "simplnx/Utilities/CacheMemoryBudgetManager.hpp"
 #include "simplnx/Utilities/DataStoreUtilities.hpp"
+#include "simplnx/Utilities/ImageProcessing/ImageProcessingConstants.hpp"
 #include "simplnx/Utilities/ImageProcessing/ImageProcessingFilterUtilities.hpp"
 
 #include <catch2/catch.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <any>
@@ -40,6 +42,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -132,6 +135,26 @@ private:
   usize m_MaxWriteValues = 0;
   usize m_WrittenValues = 0;
   std::vector<usize> m_WriteBatchSizes;
+};
+
+class CancelOnReadDataStore : public TransferCountingDataStore<uint8>
+{
+public:
+  CancelOnReadDataStore(const ShapeType& tupleShape, const ShapeType& componentShape, uint8 initialValue, std::atomic_bool& shouldCancel)
+  : TransferCountingDataStore<uint8>(tupleShape, componentShape, initialValue)
+  , m_ShouldCancel(shouldCancel)
+  {
+  }
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<uint8> buffer) const override
+  {
+    Result<> result = TransferCountingDataStore<uint8>::copyIntoBuffer(startIndex, buffer);
+    m_ShouldCancel.store(true);
+    return result;
+  }
+
+private:
+  std::atomic_bool& m_ShouldCancel;
 };
 
 DataPath BuildMorphologyFilterPreflightInput(DataStructure& dataStructure)
@@ -1019,6 +1042,224 @@ TEST_CASE("ImageProcessing::MorphologyEngine: interior X range excludes incomple
     REQUIRE(begin == testCase.expectedBegin);
     REQUIRE(end == testCase.expectedEnd);
   }
+}
+
+TEMPLATE_TEST_CASE("ImageProcessing::MorphologyEngine: first non-binary value is deterministic across parallel ranges", "[ImageProcessing][MorphologyEngine]", uint8, int32)
+{
+  using T = TestType;
+  static constexpr usize k_Count = (usize{1} << 20) + 37;
+  const T fg = T{1};
+  const T bg = T{0};
+  const auto makeBuffer = [fg](T background) {
+    std::vector<T> buffer(k_Count);
+    for(usize i = 0; i < k_Count; ++i)
+    {
+      buffer[i] = (i % usize{2} == usize{0}) ? fg : background;
+    }
+    return buffer;
+  };
+
+  SECTION("All values are binary")
+  {
+    const std::vector<T> buffer = makeBuffer(bg);
+    const auto result = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(buffer.data(), buffer.size()), fg, bg);
+    REQUIRE_FALSE(result.has_value());
+  }
+
+  SECTION("One invalid value")
+  {
+    std::vector<T> buffer = makeBuffer(bg);
+    buffer[usize{777777}] = T{7};
+    const auto result = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(buffer.data(), buffer.size()), fg, bg);
+    REQUIRE(result == usize{777777});
+  }
+
+  SECTION("The smallest invalid index wins")
+  {
+    std::vector<T> buffer = makeBuffer(bg);
+    buffer[usize{900000}] = T{7};
+    buffer[usize{123}] = T{7};
+    buffer[usize{500000}] = T{7};
+    const auto result = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(buffer.data(), buffer.size()), fg, bg);
+    REQUIRE(result == usize{123});
+  }
+
+  SECTION("Boundary invalid indexes")
+  {
+    std::vector<T> buffer = makeBuffer(bg);
+    buffer[usize{0}] = T{7};
+    buffer[k_Count - usize{1}] = T{7};
+    const auto firstResult = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(buffer.data(), buffer.size()), fg, bg);
+    REQUIRE(firstResult == usize{0});
+
+    std::vector<T> lastBuffer = makeBuffer(bg);
+    lastBuffer[k_Count - usize{1}] = T{7};
+    const auto lastResult = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(lastBuffer.data(), lastBuffer.size()), fg, bg);
+    REQUIRE(lastResult == k_Count - usize{1});
+  }
+
+  SECTION("Empty span")
+  {
+    const auto result = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>{}, fg, bg);
+    REQUIRE_FALSE(result.has_value());
+  }
+
+  if constexpr(std::is_same_v<T, int32>)
+  {
+    SECTION("Negative background and invalid values")
+    {
+      const T negativeBg = T{-5};
+      std::vector<T> buffer = makeBuffer(negativeBg);
+      buffer[usize{2468}] = T{-6};
+      const auto result = ImageProcessing::detail::FindFirstNonBinaryValue(nonstd::span<const T>(buffer.data(), buffer.size()), fg, negativeBg);
+      REQUIRE(result == usize{2468});
+    }
+  }
+}
+
+TEST_CASE("ImageProcessing::MorphologyEngine: binary input scan reports global indexes across chunks", "[ImageProcessing][MorphologyEngine]")
+{
+  constexpr usize k_ChunkValues = 8;
+  constexpr uint8 k_Foreground = 1;
+  constexpr uint8 k_Background = 0;
+  const DataPath inputPath({"Image", "Cell", "Input"});
+  const auto makeValues = [](usize size) {
+    std::vector<uint8> values(size);
+    for(usize i = 0; i < size; ++i)
+    {
+      values[i] = (i % usize{2} == usize{0}) ? k_Background : k_Foreground;
+    }
+    return values;
+  };
+  const auto expectedMessage = [&inputPath](uint8 value, usize index) {
+    return fmt::format("Binary morphology requires a binary image containing only the foreground ({}) or background ({}) value, but input array '{}' contains the value {} at index {}. Threshold or "
+                       "relabel the input first.",
+                       static_cast<int64>(k_Foreground), static_cast<int64>(k_Background), inputPath.toString(), static_cast<int64>(value), index);
+  };
+
+  SECTION("All chunks contain only binary values")
+  {
+    DataStore<uint8> store = MakeStore(makeValues(21), 21, 1, 1);
+    std::atomic_bool shouldCancel{false};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.valid());
+  }
+
+  SECTION("A violation in the second chunk reports its global index")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[11] = uint8{7};
+    DataStore<uint8> store = MakeStore(values, 21, 1, 1);
+    std::atomic_bool shouldCancel{false};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.invalid());
+    REQUIRE_FALSE(result.errors().empty());
+    REQUIRE(result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+    REQUIRE(result.errors()[0].message == expectedMessage(uint8{7}, usize{11}));
+  }
+
+  SECTION("Two full chunks report the last index")
+  {
+    std::vector<uint8> values = makeValues(16);
+    values[15] = uint8{7};
+    DataStore<uint8> store = MakeStore(values, 16, 1, 1);
+    std::atomic_bool shouldCancel{false};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.invalid());
+    REQUIRE_FALSE(result.errors().empty());
+    REQUIRE(result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+    REQUIRE(result.errors()[0].message == expectedMessage(uint8{7}, usize{15}));
+  }
+
+  SECTION("A final partial chunk reports its last index")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[20] = uint8{7};
+    DataStore<uint8> store = MakeStore(values, 21, 1, 1);
+    std::atomic_bool shouldCancel{false};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.invalid());
+    REQUIRE_FALSE(result.errors().empty());
+    REQUIRE(result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+    REQUIRE(result.errors()[0].message == expectedMessage(uint8{7}, usize{20}));
+  }
+
+  SECTION("The earliest invalid chunk stops later reads")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[11] = uint8{7};
+    values[20] = uint8{9};
+    TransferCountingDataStore<uint8> store(ShapeType{1, 1, 21}, ShapeType{1}, uint8{0});
+    SIMPLNX_RESULT_REQUIRE_VALID(store.copyFromBuffer(0, nonstd::span<const uint8>(values.data(), values.size())));
+    std::atomic_bool shouldCancel{false};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.invalid());
+    REQUIRE_FALSE(result.errors().empty());
+    REQUIRE(result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+    REQUIRE(result.errors()[0].message == expectedMessage(uint8{7}, usize{11}));
+    REQUIRE(store.readValues() == usize{16});
+  }
+
+  SECTION("A pre-cancelled scan reads nothing and returns a valid result")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[11] = uint8{7};
+    TransferCountingDataStore<uint8> store(ShapeType{1, 1, 21}, ShapeType{1}, uint8{0});
+    SIMPLNX_RESULT_REQUIRE_VALID(store.copyFromBuffer(0, nonstd::span<const uint8>(values.data(), values.size())));
+    std::atomic_bool shouldCancel{true};
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.valid());
+    REQUIRE(store.readValues() == usize{0});
+  }
+
+  SECTION("Cancellation during a violating chunk read still reports the violation")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[3] = uint8{7};
+    std::atomic_bool shouldCancel{false};
+    CancelOnReadDataStore store(ShapeType{1, 1, 21}, ShapeType{1}, uint8{0}, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(store.copyFromBuffer(0, nonstd::span<const uint8>(values.data(), values.size())));
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.invalid());
+    REQUIRE_FALSE(result.errors().empty());
+    REQUIRE(result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+    REQUIRE(result.errors()[0].message == expectedMessage(uint8{7}, usize{3}));
+    REQUIRE(shouldCancel.load() == true);
+  }
+
+  SECTION("Cancellation after a binary chunk read stops before the next chunk")
+  {
+    std::vector<uint8> values = makeValues(21);
+    values[11] = uint8{7};
+    std::atomic_bool shouldCancel{false};
+    CancelOnReadDataStore store(ShapeType{1, 1, 21}, ShapeType{1}, uint8{0}, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(store.copyFromBuffer(0, nonstd::span<const uint8>(values.data(), values.size())));
+    const Result<> result = ImageProcessing::detail::ScanBinaryInput<uint8>(store, k_Foreground, k_Background, inputPath, shouldCancel, k_ChunkValues);
+    REQUIRE(result.valid());
+    REQUIRE(store.readValues() == usize{8});
+  }
+}
+
+TEST_CASE("ImageProcessing::MorphologyEngine: smaller invalid index wins regardless of publish order", "[ImageProcessing][MorphologyEngine]")
+{
+  constexpr usize k_Size = 1'000'000;
+  std::atomic<usize> largerFirst{k_Size};
+  ImageProcessing::detail::PublishSmallerIndex(largerFirst, usize{900000});
+  ImageProcessing::detail::PublishSmallerIndex(largerFirst, usize{123});
+  REQUIRE(largerFirst.load(std::memory_order_relaxed) == usize{123});
+
+  std::atomic<usize> smallerFirst{k_Size};
+  ImageProcessing::detail::PublishSmallerIndex(smallerFirst, usize{123});
+  ImageProcessing::detail::PublishSmallerIndex(smallerFirst, usize{900000});
+  REQUIRE(smallerFirst.load(std::memory_order_relaxed) == usize{123});
+
+  std::atomic<usize> equalValue{usize{123}};
+  ImageProcessing::detail::PublishSmallerIndex(equalValue, usize{123});
+  REQUIRE(equalValue.load(std::memory_order_relaxed) == usize{123});
+
+  std::atomic<usize> largerValue{usize{123}};
+  ImageProcessing::detail::PublishSmallerIndex(largerValue, usize{900000});
+  REQUIRE(largerValue.load(std::memory_order_relaxed) == usize{123});
 }
 
 TEST_CASE("ImageProcessing::MorphologyEngine: composite plane subtraction supports independent row ranges", "[ImageProcessing][MorphologyEngine]")

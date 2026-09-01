@@ -4,6 +4,8 @@
 
 #include "simplnx/Utilities/ImageProcessing/ImageProcessingConstants.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -61,9 +63,8 @@ TEST_CASE("ImageProcessing::BinaryErodeImageFilter: Legacy parity grid (Ball/Box
 // (2) Binary-input contract: the façade emits a strictly {fg, bg} image and therefore REJECTS a non-binary
 //     input at execute. BuildMorphologyImage fills values in [0,199], so with fg=1/bg=0 many voxels are neither
 //     foreground nor background: preflight passes (fg/bg are in range) but execute must fail with the
-//     k_NonBinaryInput safeguard code. This replaces the earlier multi-label computed-expected case (which
-//     encoded a now-removed binarize-any-label behavior); Annulus / zero-radius kernel correctness is covered
-//     at the engine level (MorphologyEngineTest cross-validates all four kernels).
+//     k_NonBinaryInput safeguard code. MorphologyEngineTest covers Annulus and zero-radius kernel correctness
+//     across all four kernels.
 // -----------------------------------------------------------------------------
 TEST_CASE("ImageProcessing::BinaryErodeImageFilter: Rejects non-binary input at execute", "[ImageProcessing][BinaryErodeImageFilter]")
 {
@@ -90,6 +91,51 @@ TEST_CASE("ImageProcessing::BinaryErodeImageFilter: Rejects non-binary input at 
   REQUIRE(executeResult.result.invalid()); // non-binary input rejected at execute
   REQUIRE_FALSE(executeResult.result.errors().empty());
   REQUIRE(executeResult.result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+}
+
+TEST_CASE("ImageProcessing::BinaryErodeImageFilter: Reports the first non-binary value and index", "[ImageProcessing][BinaryErodeImageFilter]")
+{
+  UnitTest::LoadPlugins();
+  const UnitTest::PreferencesSentinel prefsSentinel(nx::core::DataStorageMode::ForceInCore, 0);
+
+  DataStructure ds;
+  const DataPath inputPath = morph_test::BuildMorphologyImage<uint8>(ds, 16, 16, 16);
+  constexpr uint8 fg = 1;
+  constexpr uint8 bg = 0;
+  constexpr uint8 value = 9;
+  constexpr usize index = 1200;
+  AbstractDataStore<uint8>* inputStorePtr = nullptr;
+  REQUIRE_NOTHROW(inputStorePtr = &ds.getDataRefAs<DataArray<uint8>>(inputPath).getDataStoreRef());
+  REQUIRE(inputStorePtr != nullptr);
+  for(usize i = 0; i < inputStorePtr->getSize(); ++i)
+  {
+    inputStorePtr->setValue(i, (i % usize{3} == usize{0}) ? fg : bg);
+  }
+  inputStorePtr->setValue(usize{3000}, uint8{7});
+  inputStorePtr->setValue(index, value);
+
+  BinaryErodeImageFilter filter;
+  Arguments args;
+  args.insertOrAssign(BinaryErodeImageFilter::k_InputImageGeomPath_Key, std::make_any<DataPath>(DataPath({"Image Geometry"})));
+  args.insertOrAssign(BinaryErodeImageFilter::k_InputImageDataPath_Key, std::make_any<DataPath>(inputPath));
+  args.insertOrAssign(BinaryErodeImageFilter::k_OutputImageArrayName_Key, std::make_any<std::string>("Output"));
+  args.insertOrAssign(BinaryErodeImageFilter::k_KernelType_Key, std::make_any<ChoicesParameter::ValueType>(static_cast<ChoicesParameter::ValueType>(morph_test::KernelType::Ball)));
+  args.insertOrAssign(BinaryErodeImageFilter::k_KernelRadius_Key, std::make_any<VectorUInt32Parameter::ValueType>(std::vector<uint32>{1, 1, 1}));
+  args.insertOrAssign(BinaryErodeImageFilter::k_ForegroundValue_Key, std::make_any<float64>(static_cast<float64>(fg)));
+  args.insertOrAssign(BinaryErodeImageFilter::k_BackgroundValue_Key, std::make_any<float64>(static_cast<float64>(bg)));
+  args.insertOrAssign(BinaryErodeImageFilter::k_BoundaryToForeground_Key, std::make_any<bool>(false));
+
+  auto preflightResult = filter.preflight(ds, args);
+  SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
+  auto executeResult = filter.execute(ds, args);
+  REQUIRE(executeResult.result.invalid());
+  REQUIRE_FALSE(executeResult.result.errors().empty());
+  REQUIRE(executeResult.result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+  const std::string expectedMessage =
+      fmt::format("Binary morphology requires a binary image containing only the foreground ({}) or background ({}) value, but input array '{}' contains the value {} at index {}. Threshold or "
+                  "relabel the input first.",
+                  static_cast<int64>(fg), static_cast<int64>(bg), inputPath.toString(), static_cast<int64>(value), index);
+  REQUIRE(executeResult.result.errors()[0].message == expectedMessage);
 }
 
 // -----------------------------------------------------------------------------

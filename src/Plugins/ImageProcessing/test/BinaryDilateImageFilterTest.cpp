@@ -4,6 +4,8 @@
 
 #include "simplnx/Utilities/ImageProcessing/ImageProcessingConstants.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -60,9 +62,8 @@ TEST_CASE("ImageProcessing::BinaryDilateImageFilter: Legacy parity grid (Ball/Bo
 // (2) Binary-input contract: the façade emits a strictly {fg, bg} image and therefore REJECTS a non-binary
 //     input at execute. BuildMorphologyImage fills values in [0,199], so with fg=1/bg=0 many voxels are neither
 //     foreground nor background: preflight passes (fg/bg are in range) but execute must fail with the
-//     k_NonBinaryInput safeguard code. This replaces the earlier multi-label computed-expected case (which
-//     encoded a now-removed binarize-any-label behavior); Annulus / zero-radius kernel correctness is covered
-//     at the engine level (MorphologyEngineTest cross-validates all four kernels).
+//     k_NonBinaryInput safeguard code. MorphologyEngineTest covers Annulus and zero-radius kernel correctness
+//     across all four kernels.
 // -----------------------------------------------------------------------------
 TEST_CASE("ImageProcessing::BinaryDilateImageFilter: Rejects non-binary input at execute", "[ImageProcessing][BinaryDilateImageFilter]")
 {
@@ -71,6 +72,23 @@ TEST_CASE("ImageProcessing::BinaryDilateImageFilter: Rejects non-binary input at
 
   DataStructure ds;
   const DataPath inputPath = morph_test::BuildMorphologyImage<uint8>(ds, 8, 8, 8); // values in [0,199] -> NOT binary
+  constexpr uint8 fg = 1;
+  constexpr uint8 bg = 0;
+  const AbstractDataStore<uint8>* inputStorePtr = nullptr;
+  REQUIRE_NOTHROW(inputStorePtr = &ds.getDataRefAs<DataArray<uint8>>(inputPath).getDataStoreRef());
+  REQUIRE(inputStorePtr != nullptr);
+  usize expectedIndex = 0;
+  uint8 expectedValue = 0;
+  for(usize i = 0; i < inputStorePtr->getSize(); ++i)
+  {
+    const uint8 value = inputStorePtr->getValue(i);
+    if(value != bg && value != fg)
+    {
+      expectedIndex = i;
+      expectedValue = value;
+      break;
+    }
+  }
 
   BinaryDilateImageFilter filter;
   Arguments args;
@@ -79,8 +97,8 @@ TEST_CASE("ImageProcessing::BinaryDilateImageFilter: Rejects non-binary input at
   args.insertOrAssign(BinaryDilateImageFilter::k_OutputImageArrayName_Key, std::make_any<std::string>("Output"));
   args.insertOrAssign(BinaryDilateImageFilter::k_KernelType_Key, std::make_any<ChoicesParameter::ValueType>(static_cast<ChoicesParameter::ValueType>(morph_test::KernelType::Ball)));
   args.insertOrAssign(BinaryDilateImageFilter::k_KernelRadius_Key, std::make_any<VectorUInt32Parameter::ValueType>(std::vector<uint32>{1, 1, 1}));
-  args.insertOrAssign(BinaryDilateImageFilter::k_ForegroundValue_Key, std::make_any<float64>(1.0));
-  args.insertOrAssign(BinaryDilateImageFilter::k_BackgroundValue_Key, std::make_any<float64>(0.0));
+  args.insertOrAssign(BinaryDilateImageFilter::k_ForegroundValue_Key, std::make_any<float64>(static_cast<float64>(fg)));
+  args.insertOrAssign(BinaryDilateImageFilter::k_BackgroundValue_Key, std::make_any<float64>(static_cast<float64>(bg)));
   args.insertOrAssign(BinaryDilateImageFilter::k_BoundaryToForeground_Key, std::make_any<bool>(false));
 
   auto preflightResult = filter.preflight(ds, args);
@@ -89,6 +107,11 @@ TEST_CASE("ImageProcessing::BinaryDilateImageFilter: Rejects non-binary input at
   REQUIRE(executeResult.result.invalid()); // non-binary input rejected at execute
   REQUIRE_FALSE(executeResult.result.errors().empty());
   REQUIRE(executeResult.result.errors()[0].code == ImageProcessing::k_NonBinaryInput);
+  const std::string expectedMessage =
+      fmt::format("Binary morphology requires a binary image containing only the foreground ({}) or background ({}) value, but input array '{}' contains the value {} at index {}. Threshold or "
+                  "relabel the input first.",
+                  static_cast<int64>(fg), static_cast<int64>(bg), inputPath.toString(), static_cast<int64>(expectedValue), expectedIndex);
+  REQUIRE(executeResult.result.errors()[0].message == expectedMessage);
 }
 
 // -----------------------------------------------------------------------------
