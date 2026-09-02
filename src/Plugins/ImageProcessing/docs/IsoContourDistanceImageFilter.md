@@ -12,7 +12,9 @@ Produces a **float32** image in which the value at each voxel adjacent to the **
 
 This is the classic initializer for level-set and fast-marching methods: it produces an accurate distance only in a one-voxel band around the contour, leaving the rest of the image at the saturated far value. It is a single neighborhood pass (not a full distance transform); when a full signed distance is required, prefer the Signed Maurer or Signed Danielsson Distance Map Image Filters.
 
-The input array must be single-component (scalar) and may be **any numeric type, integer or floating point**. The output is a fixed **float32** image regardless of the input element type. This is an ITK-free, out-of-core-capable reimplementation of the legacy ITK Iso Contour Distance Image Filter, and matches it exactly.
+The input array must be single-component and can use any numeric type. The output is always a **float32** image.
+
+This implementation does not use ITK and supports out-of-core data. Integer and float64 inputs exactly match the legacy ITK filter. Float32-input results are within one unit in the last place (ULP).
 
 ### Level Set Value
 
@@ -28,13 +30,17 @@ The filter examines each voxel and its axis neighbors, detects level-set crossin
 
 ### In-Core Path
 
-Resident arrays use a parallel gather. Each worker reads from the complete input and writes a separate output voxel, so no worker writes through a shared `DataStore` interface.
+For each voxel, the filter compares its class with the classes of its six face neighbors. Only voxels on the crossing surface run the gradient interpolation. The filter processes rows in parallel plane groups. Each worker reads the resident input span and writes a disjoint output row.
 
 ### Out-of-Core Path
 
-For true 3-D disk-backed images, the filter first requests enough shared working memory for one complete input buffer and one float32 output buffer. The request scales with dimensions and input type; a `512 x 512 x 128` uint8 image uses 160 MiB, while a float64 input uses 384 MiB. The fast gather runs only after a complete grant, using one bulk read and one bulk write.
+For 3-D disk-backed images, the filter sizes plane slabs from the shared working-memory grant. Each slab has a radius-2 input halo and a disjoint output core.
 
-If the complete request is unavailable or allocation fails, the existing 3-D rolling-plane engine remains the bounded fallback. True 2-D always uses bounded row blocks or X tiles. All requests share the application cache budget and remain subject to its aggregate 25% limit.
+The input buffer uses a ring of planes. It does not copy shared halo planes between slabs. Each slab uses at most two bulk reads and one bulk write. Every input plane is read once.
+
+A complete grant processes the image with one read and one write. The standard minimum slab allocates five input planes and one output plane. It uses this allocation even when the grant is smaller. A thin volume limits the input depth to the volume depth.
+
+The complete-grant size scales with the dimensions and input type. A `512 x 512 x 128` uint8 image uses 160 MiB. The same image with float64 input uses 384 MiB. Disk-backed 2-D images use bounded row blocks or X tiles. All requests share the application cache budget and remain subject to its aggregate 25% limit.
 
 % Auto generated parameter table will be inserted here
 

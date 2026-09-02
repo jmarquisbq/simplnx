@@ -17,7 +17,6 @@
 #include <nonstd/span.hpp>
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -34,9 +33,10 @@ namespace detail
 constexpr usize k_IsoContour2DResidentLimit = 64ULL * 1024ULL * 1024ULL;
 constexpr usize k_IsoContour2DFixedStateBytes = 4096;
 
-// ITK's PixelRealType = NumericTraits<InputPixelType>::RealType: double for every integer type and for float64, float
-// for float32. The narrow-band level-set math (and the level-set value itself) is carried in this type; matching it
-// per input type is required for bit-exact parity.
+/**
+ * @brief Selects the real type that ITK uses for the input type.
+ * @tparam T Specifies the input value type.
+ */
 template <class T>
 using IsoRealType = std::conditional_t<std::is_same_v<T, float32>, float32, float64>;
 
@@ -69,24 +69,32 @@ inline bool IsoContourCheckedMultiply(usize left, usize right, usize& result)
   return true;
 }
 
-struct IsoContourResidentMemoryAllocation
+/**
+ * @struct IsoContourSlabPlan
+ * @brief Specifies the input halo and output core buffers for one 3-D slab.
+ *
+ * The working-memory grant bounds each slab when the grant can hold the minimum plan.
+ * The standard minimum plan contains five input planes and one output plane, even when the grant is smaller.
+ * Thin volumes cap the input depth at the volume depth.
+ * A radius-2 halo adds two input planes on each side of the output core.
+ * A complete grant processes the volume with one input read and one output write.
+ */
+struct IsoContourSlabPlan
 {
-  CacheMemoryBudgetManager::WorkingMemoryReservation reservation;
-  usize requiredBytes = 0;
-
-  [[nodiscard]] bool holdsCompleteState() const noexcept
-  {
-    return requiredBytes > 0 && reservation.sizeBytes() == requiredBytes;
-  }
+  usize corePlanes = 0;
+  usize inputPlanes = 0;
+  usize inputBytes = 0;
+  usize outputBytes = 0;
 };
 
-inline bool ShouldUseIsoContourResidentState(const SizeVec3& dims)
-{
-  return dims[2] > 1;
-}
-
+/**
+ * @brief Computes the useful bytes for complete input and float32 output buffers.
+ * @tparam T Specifies the input value type.
+ * @param dims Gives the image dimensions in X, Y, Z order.
+ * @return The useful byte count, or error -8626 if the calculation overflows.
+ */
 template <class T>
-Result<usize> CalculateIsoContourResidentWorkingMemoryBytes(const SizeVec3& dims)
+inline Result<usize> IsoContourSlabUsefulBytes(const SizeVec3& dims)
 {
   if(dims[0] == 0 || dims[1] == 0 || dims[2] == 0)
   {
@@ -100,22 +108,96 @@ Result<usize> CalculateIsoContourResidentWorkingMemoryBytes(const SizeVec3& dims
   if(!IsoContourCheckedMultiply(dims[0], dims[1], sliceValues) || !IsoContourCheckedMultiply(sliceValues, dims[2], volumeValues) || !IsoContourCheckedAdd(sizeof(T), sizeof(float32), bytesPerValue) ||
      !IsoContourCheckedMultiply(volumeValues, bytesPerValue, requiredBytes))
   {
-    return MakeErrorResult<usize>(-8626, fmt::format("Iso-contour distance dimensions ({}) and input element size ({} bytes) overflow while sizing the resident input and float32 output state.",
+    return MakeErrorResult<usize>(-8626, fmt::format("Iso-contour distance dimensions ({}) and input element size ({} bytes) overflow while sizing complete input and float32 output buffers.",
                                                      StringUtilities::formatDimensions3D(dims), sizeof(T)));
   }
   return {requiredBytes};
 }
 
+/**
+ * @brief Plans a 3-D slab from the available working-memory grant.
+ * @tparam T Specifies the input value type.
+ * @param dims Gives the image dimensions in X, Y, Z order.
+ * @param grantBytes Gives the working-memory grant in bytes.
+ * @return The output core depth and the related input and output buffer sizes.
+ * @pre The image depth is greater than one. The 2-D route handles a depth of one.
+ *
+ * The input depth includes a radius-2 halo on each side of the output core.
+ * The standard minimum plan uses five input planes and one output plane, even when this plan exceeds the grant.
+ * The input depth never exceeds the volume depth.
+ * A grant for the complete buffers produces one slab and permits one input read and one output write.
+ */
 template <class T>
-Result<IsoContourResidentMemoryAllocation> ReserveIsoContourResidentWorkingMemory(const SizeVec3& dims)
+inline IsoContourSlabPlan PlanIsoContourSlab(const SizeVec3& dims, uint64 grantBytes)
 {
-  auto requiredResult = CalculateIsoContourResidentWorkingMemoryBytes<T>(dims);
-  if(requiredResult.invalid())
+  const usize sliceValues = dims[0] * dims[1];
+  const usize planeInputBytes = sliceValues * sizeof(T);
+  const usize planeOutputBytes = sliceValues * sizeof(float32);
+  const usize usefulBytes = dims[2] * (planeInputBytes + planeOutputBytes);
+  if(grantBytes >= usefulBytes)
   {
-    return ConvertInvalidResult<IsoContourResidentMemoryAllocation>(std::move(requiredResult));
+    return {dims[2], dims[2], dims[2] * planeInputBytes, dims[2] * planeOutputBytes};
   }
-  auto reservation = ReserveWorkingMemory(requiredResult.value(), requiredResult.value());
-  return {IsoContourResidentMemoryAllocation{std::move(reservation), requiredResult.value()}};
+
+  const uint64 haloBytes = uint64{4} * planeInputBytes;
+  const uint64 bytesPerCorePlane = planeInputBytes + planeOutputBytes;
+  const usize quotient = grantBytes > haloBytes ? static_cast<usize>((grantBytes - haloBytes) / bytesPerCorePlane) : 0;
+  const usize corePlanes = std::clamp(std::max<usize>(1, quotient), usize{1}, dims[2] - 1);
+  const usize inputPlanes = std::min(dims[2], corePlanes + 4);
+  return {corePlanes, inputPlanes, inputPlanes * planeInputBytes, corePlanes * planeOutputBytes};
+}
+
+/** @brief Gives the maximum value count in one direct-route plane group. */
+inline constexpr usize k_IsoContourDirectGroupValues = usize{16} << 20;
+
+/**
+ * @brief Classifies one row and evaluates only voxels adjacent to an iso-contour crossing.
+ * @tparam T Specifies the input value type.
+ * @tparam Gather Specifies the callable that evaluates the complete 3-D kernel.
+ * @param previousPlaneRow Gives the row at the negative Z neighbor.
+ * @param previousRow Gives the row at the negative Y neighbor.
+ * @param row Gives the center row.
+ * @param nextRow Gives the row at the positive Y neighbor.
+ * @param nextPlaneRow Gives the row at the positive Z neighbor.
+ * @param output Receives one output row.
+ * @param nx Gives the number of values in each row.
+ * @param levelSet Gives the iso-contour value in the selected real type.
+ * @param farValue Gives the positive value for voxels above the level set.
+ * @param negativeFar Gives the negative value for voxels below the level set.
+ * @param gather Evaluates the complete kernel for one X coordinate.
+ *
+ * Each edge test returns before it reads the candidate minimum when both endpoints share a class.
+ * Edges outside the volume are not evaluated.
+ * A clamped neighbor is therefore equivalent to the center for this classification.
+ */
+template <class T, class Gather>
+inline void IsoContourRow(const T* previousPlaneRow, const T* previousRow, const T* row, const T* nextRow, const T* nextPlaneRow, float32* output, usize nx, IsoRealType<T> levelSet, float32 farValue,
+                          float32 negativeFar, Gather&& gather)
+{
+  using RealT = IsoRealType<T>;
+  const usize lastX = nx - 1;
+  const auto classify = [levelSet](T value) -> uint32 { return static_cast<uint32>((static_cast<RealT>(value) - levelSet) > RealT{0}); };
+  for(usize x = 0; x < nx; ++x)
+  {
+    const usize previousX = x > 0 ? x - 1 : 0;
+    const usize nextX = x < lastX ? x + 1 : lastX;
+    const RealT centerValue = static_cast<RealT>(row[x]);
+    const uint32 centerClass = classify(row[x]);
+    uint32 classDifference = centerClass ^ classify(row[previousX]);
+    classDifference |= centerClass ^ classify(row[nextX]);
+    classDifference |= centerClass ^ classify(previousRow[x]);
+    classDifference |= centerClass ^ classify(nextRow[x]);
+    classDifference |= centerClass ^ classify(previousPlaneRow[x]);
+    classDifference |= centerClass ^ classify(nextPlaneRow[x]);
+    if(classDifference == 0)
+    {
+      output[x] = centerValue > levelSet ? farValue : (centerValue < levelSet ? negativeFar : 0.0f);
+    }
+    else
+    {
+      output[x] = gather(x);
+    }
+  }
 }
 
 inline bool IsoContour2DFullWidthPeak(usize columns, usize rows, usize inputBytes, usize& peak)
@@ -220,18 +302,18 @@ inline IsoContour2DBufferPlan BuildIsoContour2DBufferPlan(usize nx, usize ny, us
 } // namespace detail
 
 /**
- * @brief ITK-free IsoContourDistance: a narrow-band SIGNED distance around the @p levelSetValue iso-contour of the
- * input. Every voxel is first initialized to +@p farValue (input above the level set), -@p farValue (below), or 0
- * (exactly on it); then a single neighborhood pass writes the sub-pixel gradient-interpolated signed distance for the
- * voxels adjacent to a level-set crossing, keeping the MINIMUM-magnitude value (the nearest crossing). Faithful port
- * of itk::IsoContourDistanceImageFilter's full (non-narrow-band) path, including its ZeroFluxNeumann edge clamping,
- * the grad0(real)/grad1(float32) cast asymmetry, the double-precision magnitude compare, and PixelRealType per type.
+ * @class IsoContourDistance
+ * @brief Computes a narrow-band signed distance around an input iso-contour without ITK.
+ * @tparam T Specifies the input value type.
  *
- * STORAGE PATHS: exact in-memory stores use a full-span parallel gather with disjoint writes. Real-OOC 3-D stores
- * reuse that gather directly after a complete shared working-memory reservation; otherwise they fall back to a
- * radius-2 rolling Z-window parallel gather (one input plane read and one output plane write per Z step, each output
- * plane computed independently from the window). Real-OOC 2-D stores use bounded row blocks or X tiles. Every path
- * preserves the same interpolation and candidate order.
+ * Each voxel starts at the signed far value or zero.
+ * Voxels adjacent to a crossing receive the minimum-magnitude gradient-interpolated distance.
+ * The kernel matches ITK edge clamping, cast order, candidate order, and input-dependent real types.
+ *
+ * Eligible in-memory stores process row groups directly through resident spans.
+ * Other 3-D stores use working-memory slabs with a radius-2 halo and serial bulk transfers.
+ * Other 2-D stores use bounded row blocks or X tiles.
+ * Parallel workers access only resident buffers or in-memory spans.
  */
 template <class T>
 class IsoContourDistance
@@ -302,180 +384,190 @@ public:
     const int64 nY = static_cast<int64>(m_Dims[1]);
     const int64 nZ = static_cast<int64>(m_Dims[2]);
 
-    // Spacing is held as DOUBLE, matching ITK's InputSpacingType = Vector<double> (its m_Spacing is double regardless
-    // of PixelRealType). This makes the grad-denominator (`2.0 * sp`) and `val` (`... * sp[n] / norm / diff`)
-    // expressions promote to double for float32 input as ITK does; the integer/float64 path (RealT == double) is
-    // unchanged. This eliminates the spacing-arithmetic divergence on the float32 path (notably for non-unit spacing).
-    // NOTE: a residual <=1 ULP difference vs ITK can still remain on the RealT==float (float32-input) path from other
-    // float-vs-double interpolation intermediates and, more fundamentally, from ITK's multithreaded min-magnitude
-    // tie-breaking (a std::mutex over competing neighbor writes, so the winner among near-equal-magnitude candidates
-    // is not bit-reproducible). Integer and float64 inputs (the only ones the ApproximateSignedDistanceMap composite
-    // uses) are bit-exact vs ITK; float32 matches within ~1 ULP.
+    // ITK stores spacing as double for every input type.
+    // Double spacing preserves ITK promotion rules in the gradient denominator and distance calculation.
+    // Float32 input can differ from ITK by one ULP because ITK resolves equal candidates through concurrent writes.
     const double sp[3] = {static_cast<double>(m_Spacing[0]), static_cast<double>(m_Spacing[1]), static_cast<double>(m_Spacing[2])};
     const float32 negFar = -m_FarValue;
 
+    const auto* inMemoryInputStore = dynamic_cast<const DataStore<T>*>(&m_In);
+    auto* inMemoryOutputStore = dynamic_cast<DataStore<float32>*>(&m_Out);
     const bool usesOutOfCoreStore = m_In.getStoreType() == IDataStore::StoreType::OutOfCore || m_Out.getStoreType() == IDataStore::StoreType::OutOfCore;
-    const bool useStreamed = !ForceInCoreAlgorithm() && (usesOutOfCoreStore || ForceOocAlgorithm());
-    RecordAlgorithmPathExecution(useStreamed ? AlgorithmPath::OutOfCore : AlgorithmPath::InCore, usesOutOfCoreStore);
-    if(!useStreamed)
+    const bool forceSlabs = ForceOocAlgorithm() && !ForceInCoreAlgorithm();
+    const bool direct = inMemoryInputStore != nullptr && inMemoryOutputStore != nullptr && !usesOutOfCoreStore && !forceSlabs;
+    RecordAlgorithmPathExecution(direct ? AlgorithmPath::InCore : AlgorithmPath::OutOfCore, usesOutOfCoreStore);
+    if(direct)
     {
-      const auto* inMemoryInputStore = dynamic_cast<const DataStore<T>*>(&m_In);
-      auto* inMemoryOutputStore = dynamic_cast<DataStore<float32>*>(&m_Out);
-      return RunResident(inMemoryInputStore->createSpan(), inMemoryOutputStore->createSpan(), nX, nY, nZ, slice, vol, sp, negFar);
+      return RunResident(inMemoryInputStore->createSpan(), inMemoryOutputStore->createSpan(), nX, nY, nZ, slice, sp, negFar);
     }
 
-    if(usesOutOfCoreStore && detail::ShouldUseIsoContourResidentState(m_Dims))
-    {
-      auto allocationResult = detail::ReserveIsoContourResidentWorkingMemory<T>(m_Dims);
-      if(allocationResult.invalid())
-      {
-        return ConvertInvalidResult<void>(std::move(allocationResult));
-      }
-      auto allocation = std::move(allocationResult.value());
-      if(allocation.holdsCompleteState())
-      {
-        try
-        {
-          auto input = std::make_unique<T[]>(vol);
-          auto output = std::make_unique<float32[]>(vol);
-          if(Result<> result = m_In.copyIntoBuffer(0, nonstd::span<T>(input.get(), vol)); result.invalid())
-          {
-            return result;
-          }
-          if(Result<> result = RunResident(nonstd::span<const T>(input.get(), vol), nonstd::span<float32>(output.get(), vol), nX, nY, nZ, slice, vol, sp, negFar); result.invalid())
-          {
-            return result;
-          }
-          if(m_ShouldCancel)
-          {
-            return {};
-          }
-          return m_Out.copyFromBuffer(0, nonstd::span<const float32>(output.get(), vol));
-        } catch(const std::bad_alloc&)
-        {
-          // Release the complete-state reservation before entering the bounded fallback.
-        }
-      }
-    }
-
-    if(usesOutOfCoreStore && nZ == 1)
+    if(nZ == 1)
     {
       return RunBounded2D(static_cast<usize>(nX), static_cast<usize>(nY), sp, negFar);
     }
 
-    return RunStreamed3D(nX, nY, nZ, slice, sp, negFar);
+    return RunSlabs(nX, nY, nZ, slice, sp, negFar);
   }
 
 private:
   /**
-   * @brief Real-OOC 3-D fallback for when the resident reservation does not fit: a radius-2 rolling Z window over
-   * the input (one new input plane read and one output plane write per Z step) whose compute body is
-   * Evaluate3DGather's independent per-cell gather, parallelized over each output plane. Radius 2 because
-   * Evaluate3DGather's widest edge (the +Z edge, evaluated at z and z+1) reads gradient samples out to z-1 and z+2.
-   * Because every cell derives solely from the window (no cross-plane scatter), the output plane for z needs no
-   * carry-over state from neighboring z iterations beyond the window itself, unlike a scatter formulation.
+   * @brief Processes a 3-D image in slabs sized by the shared working-memory grant.
+   * @param nX Gives the image width.
+   * @param nY Gives the image height.
+   * @param nZ Gives the image depth.
+   * @param slice Gives the number of values in one plane.
+   * @param spacing Gives the physical spacing for each axis.
+   * @param negativeFar Gives the negative value for voxels below the level set.
+   * @return An error for invalid sizing, allocation, or bulk transfer failures.
+   *
+   * Each slab has a radius-2 input halo and a disjoint output core.
+   * The positive Z edge reads gradient samples through Z-1 and Z+2, which requires the halo.
+   * Absolute plane indices map to ring slots, which removes copies of shared halo planes.
+   * Each slab uses at most two bulk reads because its new plane range can wrap once.
+   * Each completed slab uses one bulk output write. A successful run reads every input plane once.
    */
-  Result<> RunStreamed3D(int64 nX, int64 nY, int64 nZ, usize slice, const double spacing[3], float32 negativeFar)
+  Result<> RunSlabs(int64 nX, int64 nY, int64 nZ, usize slice, const double spacing[3], float32 negativeFar)
   {
-    // win[dz + 2] holds the input plane at clamp(z + dz, 0, nZ-1), dz in [-2, +2] (dz == -2 is never read at z == 0
-    // but kept for uniform indexing/rolling).
-    std::array<std::vector<T>, 5> win;
-    for(auto& p : win)
+    auto usefulResult = detail::IsoContourSlabUsefulBytes<T>(m_Dims);
+    if(usefulResult.invalid())
     {
-      p.resize(slice);
+      return ConvertInvalidResult<void>(std::move(usefulResult));
     }
-    std::vector<float32> outPlane(slice);
+    const usize usefulBytes = usefulResult.value();
+    auto reservation = ReserveWorkingMemory(usefulBytes, usefulBytes);
+    const detail::IsoContourSlabPlan plan = detail::PlanIsoContourSlab<T>(m_Dims, reservation.sizeBytes());
 
-    auto clampi = [](int64 v, int64 hi) { return v < 0 ? int64{0} : (v > hi ? hi : v); };
-    std::array<int64, 5> windowZ = {std::numeric_limits<int64>::min(), std::numeric_limits<int64>::min(), std::numeric_limits<int64>::min(), std::numeric_limits<int64>::min(),
-                                    std::numeric_limits<int64>::min()};
-    auto loadInputPlane = [&](usize slot, int64 zWanted) -> Result<> {
-      const int64 zc = clampi(zWanted, nZ - 1);
-      for(usize sourceSlot = 0; sourceSlot < windowZ.size(); ++sourceSlot)
-      {
-        if(sourceSlot != slot && windowZ[sourceSlot] == zc)
-        {
-          win[slot] = win[sourceSlot];
-          windowZ[slot] = zc;
-          return {};
-        }
-      }
-      if(Result<> result = m_In.copyIntoBuffer(static_cast<usize>(zc) * slice, nonstd::span<T>(win[slot].data(), slice)); result.invalid())
-      {
-        return result;
-      }
-      windowZ[slot] = zc;
-      return {};
-    };
-
-    // Prime the window for z = 0: planes clamp(-2..2).
-    for(int64 dz = -2; dz <= 2; ++dz)
+    std::unique_ptr<T[]> input;
+    std::unique_ptr<float32[]> output;
+    try
     {
-      if(Result<> r = loadInputPlane(static_cast<usize>(dz + 2), dz); r.invalid())
-      {
-        return r;
-      }
+      input = std::make_unique_for_overwrite<T[]>(plan.inputPlanes * slice);
+      output = std::make_unique_for_overwrite<float32[]>(plan.corePlanes * slice);
+    } catch(const std::bad_alloc&)
+    {
+      return MakeErrorResult(-8627, fmt::format("Iso-contour distance could not allocate a slab with {} input planes ({} bytes) and {} output planes ({} bytes) from a {}-byte working-memory grant.",
+                                                plan.inputPlanes, plan.inputBytes, plan.corePlanes, plan.outputBytes, reservation.sizeBytes()));
     }
 
-    for(int64 z = 0; z < nZ; ++z)
+    const usize xCount = static_cast<usize>(nX);
+    const usize yCount = static_cast<usize>(nY);
+    const usize zCount = static_cast<usize>(nZ);
+    usize windowLo = 0;
+    usize windowHi = 0;
+    for(usize z0 = 0; z0 < zCount; z0 += plan.corePlanes)
     {
       if(m_ShouldCancel)
       {
         return {};
       }
 
-      auto processPlane = [&](const Range& range) {
-        for(usize tuple = range.min(); tuple < range.max(); ++tuple)
+      const usize needLo = z0 >= 2 ? z0 - 2 : 0;
+      const usize zEnd = std::min(zCount, z0 + plan.corePlanes);
+      const usize needHi = std::min(zCount, zEnd + 2);
+      const usize retainedLo = std::max(needLo, windowLo);
+      const usize readLo = std::max(retainedLo, windowHi);
+      const usize readPlanes = needHi - readLo;
+      if(readPlanes > 0)
+      {
+        const usize firstSlot = readLo % plan.inputPlanes;
+        const usize firstReadPlanes = std::min(readPlanes, plan.inputPlanes - firstSlot);
+        if(Result<> result = m_In.copyIntoBuffer(readLo * slice, nonstd::span<T>(input.get() + firstSlot * slice, firstReadPlanes * slice)); result.invalid())
         {
-          if(((tuple - range.min()) & 4095ULL) == 0 && m_ShouldCancel)
+          return result;
+        }
+        const usize secondReadPlanes = readPlanes - firstReadPlanes;
+        if(secondReadPlanes > 0)
+        {
+          if(m_ShouldCancel)
+          {
+            return {};
+          }
+          const usize secondReadLo = readLo + firstReadPlanes;
+          if(Result<> result = m_In.copyIntoBuffer(secondReadLo * slice, nonstd::span<T>(input.get(), secondReadPlanes * slice)); result.invalid())
+          {
+            return result;
+          }
+        }
+      }
+      windowLo = needLo;
+      windowHi = needHi;
+
+      const usize rowCount = (zEnd - z0) * yCount;
+      auto processRows = [&](const Range& range) {
+        for(usize rowIndex = range.min(); rowIndex < range.max(); ++rowIndex)
+        {
+          // One atomic load per row keeps cancellation responsive inside a large slab or plane group.
+          if(m_ShouldCancel)
           {
             return;
           }
-          const int64 y = static_cast<int64>(tuple / static_cast<usize>(nX));
-          const int64 x = static_cast<int64>(tuple - static_cast<usize>(y) * static_cast<usize>(nX));
-          // win[dz+2] = input plane at clamp(z+dz); nX-1/nY-1 clamp the in-plane (x, y) offsets.
-          auto sampleReal = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> RealT {
-            const usize idx = static_cast<usize>(clampi(y + deltaY, nY - 1) * nX + clampi(x + deltaX, nX - 1));
-            return static_cast<RealT>(win[static_cast<usize>(deltaZ + 2)][idx]);
+          const usize localZ = rowIndex / yCount;
+          const usize yIndex = rowIndex - localZ * yCount;
+          const usize zIndex = z0 + localZ;
+          const usize previousZ = zIndex > 0 ? zIndex - 1 : 0;
+          const usize nextZ = std::min(zIndex + 1, zCount - 1);
+          const usize previousY = yIndex > 0 ? yIndex - 1 : 0;
+          const usize nextY = std::min(yIndex + 1, yCount - 1);
+          const T* previousPlaneRow = input.get() + (previousZ % plan.inputPlanes) * slice + yIndex * xCount;
+          const T* previousRow = input.get() + (zIndex % plan.inputPlanes) * slice + previousY * xCount;
+          const T* row = input.get() + (zIndex % plan.inputPlanes) * slice + yIndex * xCount;
+          const T* nextRow = input.get() + (zIndex % plan.inputPlanes) * slice + nextY * xCount;
+          const T* nextPlaneRow = input.get() + (nextZ % plan.inputPlanes) * slice + yIndex * xCount;
+          float32* outputRow = output.get() + localZ * slice + yIndex * xCount;
+          const int64 y = static_cast<int64>(yIndex);
+          const int64 z = static_cast<int64>(zIndex);
+          auto gather = [&](usize xIndex) {
+            const int64 x = static_cast<int64>(xIndex);
+            auto relativeReal = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> RealT {
+              const usize sampleX = static_cast<usize>(std::clamp<int64>(x + deltaX, 0, nX - 1));
+              const usize sampleY = static_cast<usize>(std::clamp<int64>(y + deltaY, 0, nY - 1));
+              const usize sampleZ = static_cast<usize>(std::clamp<int64>(z + deltaZ, 0, nZ - 1));
+              return static_cast<RealT>(input[(sampleZ % plan.inputPlanes) * slice + sampleY * xCount + sampleX]);
+            };
+            auto relativeFloat = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> float32 {
+              const usize sampleX = static_cast<usize>(std::clamp<int64>(x + deltaX, 0, nX - 1));
+              const usize sampleY = static_cast<usize>(std::clamp<int64>(y + deltaY, 0, nY - 1));
+              const usize sampleZ = static_cast<usize>(std::clamp<int64>(z + deltaZ, 0, nZ - 1));
+              return static_cast<float32>(input[(sampleZ % plan.inputPlanes) * slice + sampleY * xCount + sampleX]);
+            };
+            return Evaluate3DGather(relativeReal, relativeFloat, x, y, z, nX, nY, nZ, spacing, negativeFar);
           };
-          auto sampleFloat = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> float32 {
-            const usize idx = static_cast<usize>(clampi(y + deltaY, nY - 1) * nX + clampi(x + deltaX, nX - 1));
-            return static_cast<float32>(win[static_cast<usize>(deltaZ + 2)][idx]);
-          };
-          outPlane[tuple] = Evaluate3DGather(sampleReal, sampleFloat, x, y, z, nX, nY, nZ, spacing, negativeFar);
+          detail::IsoContourRow(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, outputRow, xCount, m_LevelSet, m_FarValue, negativeFar, gather);
         }
       };
       ParallelDataAlgorithm parallelAlgorithm;
-      parallelAlgorithm.setRange(0, slice);
-      parallelAlgorithm.execute(processPlane);
+      parallelAlgorithm.setRange(0, rowCount);
+      parallelAlgorithm.execute(processRows);
 
       if(m_ShouldCancel)
       {
         return {};
       }
-      if(Result<> r = m_Out.copyFromBuffer(static_cast<usize>(z) * slice, nonstd::span<const float32>(outPlane.data(), slice)); r.invalid())
+      const usize outputValues = (zEnd - z0) * slice;
+      if(Result<> result = m_Out.copyFromBuffer(z0 * slice, nonstd::span<const float32>(output.get(), outputValues)); result.invalid())
       {
-        return r;
-      }
-
-      if((z + 1) < nZ)
-      {
-        // roll input window: shift left, load the new leading plane clamp(z+3).
-        for(int32 i = 0; i < 4; ++i)
-        {
-          std::swap(win[static_cast<usize>(i)], win[static_cast<usize>(i + 1)]);
-          std::swap(windowZ[static_cast<usize>(i)], windowZ[static_cast<usize>(i + 1)]);
-        }
-        if(Result<> r = loadInputPlane(4, z + 3); r.invalid())
-        {
-          return r;
-        }
+        return result;
       }
     }
     return {};
   }
 
-  Result<> RunResident(nonstd::span<const T> input, nonstd::span<float32> output, int64 nX, int64 nY, int64 nZ, usize slice, usize volume, const double spacing[3], float32 negativeFar)
+  /**
+   * @brief Processes resident input and output spans in parallel plane groups.
+   * @param input Gives the complete input volume.
+   * @param output Receives the complete output volume.
+   * @param nX Gives the image width.
+   * @param nY Gives the image height.
+   * @param nZ Gives the image depth.
+   * @param slice Gives the number of values in one plane.
+   * @param spacing Gives the physical spacing for each axis.
+   * @param negativeFar Gives the negative value for voxels below the level set.
+   * @return An empty valid result after completion or cancellation.
+   *
+   * The algorithm checks cancellation between plane groups and once per row inside each group.
+   * The algorithm never checks cancellation per voxel.
+   */
+  Result<> RunResident(nonstd::span<const T> input, nonstd::span<float32> output, int64 nX, int64 nY, int64 nZ, usize slice, const double spacing[3], float32 negativeFar)
   {
     auto clampCoordinate = [](int64 value, int64 high) { return value < 0 ? int64{0} : (value > high ? high : value); };
     auto sampleReal = [&](int64 x, int64 y, int64 z) -> RealT {
@@ -486,118 +578,58 @@ private:
       const usize index = static_cast<usize>((clampCoordinate(z, nZ - 1) * nY + clampCoordinate(y, nY - 1)) * nX + clampCoordinate(x, nX - 1));
       return static_cast<float32>(input[index]);
     };
-    const bool is2D = nZ == 1;
-
-    auto processValues = [&](const Range& range) {
-      for(usize tuple = range.min(); tuple < range.max(); ++tuple)
+    const usize xCount = static_cast<usize>(nX);
+    const usize yCount = static_cast<usize>(nY);
+    const usize zCount = static_cast<usize>(nZ);
+    const usize planesPerGroup = std::max<usize>(1, detail::k_IsoContourDirectGroupValues / slice);
+    for(usize zBegin = 0; zBegin < zCount; zBegin += planesPerGroup)
+    {
+      if(m_ShouldCancel)
       {
-        if(((tuple - range.min()) & 4095ULL) == 0 && m_ShouldCancel)
-        {
-          return;
-        }
-        const int64 z = is2D ? 0 : static_cast<int64>(tuple / slice);
-        const usize planeIndex = is2D ? tuple : tuple - static_cast<usize>(z) * slice;
-        const int64 y = static_cast<int64>(planeIndex / m_Dims[0]);
-        const int64 x = static_cast<int64>(planeIndex - static_cast<usize>(y) * m_Dims[0]);
-        const RealT centerValue = sampleReal(x, y, z);
-        float32 best = centerValue > m_LevelSet ? m_FarValue : (centerValue < m_LevelSet ? negativeFar : 0.0f);
-
-        auto evaluateEdge = [&](int64 edgeX, int64 edgeY, int64 edgeZ, int32 axis, bool targetIsFirst) {
-          int64 neighborX = edgeX;
-          int64 neighborY = edgeY;
-          int64 neighborZ = edgeZ;
-          if(axis == 0)
-          {
-            ++neighborX;
-          }
-          else if(axis == 1)
-          {
-            ++neighborY;
-          }
-          else
-          {
-            ++neighborZ;
-          }
-
-          const RealT val0 = sampleReal(edgeX, edgeY, edgeZ) - m_LevelSet;
-          const RealT val1 = sampleReal(neighborX, neighborY, neighborZ) - m_LevelSet;
-          const bool sign = val0 > RealT{0};
-          if(sign == (val1 > RealT{0}))
-          {
-            return;
-          }
-
-          RealT gradient0[3];
-          RealT gradient1[3];
-          for(int32 gradientAxis = 0; gradientAxis < 3; ++gradientAxis)
-          {
-            const int64 dx = gradientAxis == 0 ? 1 : 0;
-            const int64 dy = gradientAxis == 1 ? 1 : 0;
-            const int64 dz = gradientAxis == 2 ? 1 : 0;
-            gradient0[gradientAxis] = sampleReal(edgeX + dx, edgeY + dy, edgeZ + dz) - sampleReal(edgeX - dx, edgeY - dy, edgeZ - dz);
-            const float32 positive = sampleFloat(neighborX + dx, neighborY + dy, neighborZ + dz);
-            const float32 negative = sampleFloat(neighborX - dx, neighborY - dy, neighborZ - dz);
-            gradient1[gradientAxis] = static_cast<RealT>(positive - negative);
-          }
-
-          const RealT difference = sign ? (val0 - val1) : (val1 - val0);
-          if(difference < std::numeric_limits<RealT>::min())
-          {
-            return;
-          }
-          RealT gradient[3];
-          RealT norm = RealT{0};
-          for(int32 gradientAxis = 0; gradientAxis < 3; ++gradientAxis)
-          {
-            gradient[gradientAxis] = (gradient0[gradientAxis] * RealT{0.5} + gradient1[gradientAxis] * RealT{0.5}) / (RealT{2} * spacing[gradientAxis]);
-            norm += gradient[gradientAxis] * gradient[gradientAxis];
-          }
-          norm = std::sqrt(norm);
-          if(norm < std::numeric_limits<RealT>::min())
-          {
-            return;
-          }
-
-          const RealT scale = std::abs(gradient[axis]) * spacing[axis] / norm / difference;
-          const float32 candidate = static_cast<float32>((targetIsFirst ? val0 : val1) * scale);
-          if(std::abs(static_cast<double>(candidate)) < std::abs(static_cast<double>(best)))
-          {
-            best = candidate;
-          }
-        };
-
-        // Match the serial scatter's arrival order for strict min-magnitude ties: prior Z, Y, and X edges,
-        // followed by this voxel's positive X, Y, and Z edges.
-        if(z > 0)
-        {
-          evaluateEdge(x, y, z - 1, 2, false);
-        }
-        if(y > 0)
-        {
-          evaluateEdge(x, y - 1, z, 1, false);
-        }
-        if(x > 0)
-        {
-          evaluateEdge(x - 1, y, z, 0, false);
-        }
-        if(x + 1 < nX)
-        {
-          evaluateEdge(x, y, z, 0, true);
-        }
-        if(y + 1 < nY)
-        {
-          evaluateEdge(x, y, z, 1, true);
-        }
-        if(z + 1 < nZ)
-        {
-          evaluateEdge(x, y, z, 2, true);
-        }
-        output[tuple] = best;
+        return {};
       }
-    };
-    ParallelDataAlgorithm parallelAlgorithm;
-    parallelAlgorithm.setRange(0, volume);
-    parallelAlgorithm.execute(processValues);
+      const usize zEnd = std::min(zCount, zBegin + planesPerGroup);
+      const usize rowCount = (zEnd - zBegin) * yCount;
+      auto processRows = [&](const Range& range) {
+        for(usize rowIndex = range.min(); rowIndex < range.max(); ++rowIndex)
+        {
+          // One atomic load per row keeps cancellation responsive inside a large slab or plane group.
+          if(m_ShouldCancel)
+          {
+            return;
+          }
+          const usize localZ = rowIndex / yCount;
+          const usize yIndex = rowIndex - localZ * yCount;
+          const usize zIndex = zBegin + localZ;
+          const usize previousZ = zIndex > 0 ? zIndex - 1 : 0;
+          const usize nextZ = std::min(zIndex + 1, zCount - 1);
+          const usize previousY = yIndex > 0 ? yIndex - 1 : 0;
+          const usize nextY = std::min(yIndex + 1, yCount - 1);
+          const T* previousPlaneRow = input.data() + previousZ * slice + yIndex * xCount;
+          const T* previousRow = input.data() + zIndex * slice + previousY * xCount;
+          const T* row = input.data() + zIndex * slice + yIndex * xCount;
+          const T* nextRow = input.data() + zIndex * slice + nextY * xCount;
+          const T* nextPlaneRow = input.data() + nextZ * slice + yIndex * xCount;
+          float32* outputRow = output.data() + zIndex * slice + yIndex * xCount;
+          const int64 y = static_cast<int64>(yIndex);
+          const int64 z = static_cast<int64>(zIndex);
+          auto gather = [&](usize xIndex) {
+            const int64 x = static_cast<int64>(xIndex);
+            auto relativeReal = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> RealT { return sampleReal(x + deltaX, y + deltaY, z + deltaZ); };
+            auto relativeFloat = [&](int64 deltaX, int64 deltaY, int64 deltaZ) -> float32 { return sampleFloat(x + deltaX, y + deltaY, z + deltaZ); };
+            return Evaluate3DGather(relativeReal, relativeFloat, x, y, z, nX, nY, nZ, spacing, negativeFar);
+          };
+          detail::IsoContourRow(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, outputRow, xCount, m_LevelSet, m_FarValue, negativeFar, gather);
+        }
+      };
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, rowCount);
+      parallelAlgorithm.execute(processRows);
+      if(m_ShouldCancel)
+      {
+        return {};
+      }
+    }
     return {};
   }
 
@@ -679,15 +711,24 @@ private:
   }
 
   /**
-   * @brief Independent per-cell gather for a single 3-D voxel (x, y, z), using the exact edge set, evaluation
-   * order, and tie-breaking as RunResident's kernel: prior Z, Y, and X edges (this voxel as the second/neighbor
-   * point of the edge), followed by this voxel's own positive X, Y, and Z edges (this voxel as the first point).
-   * Because every candidate write is a strict less-than minimum-magnitude update, the result is independent of the
-   * order candidates are combined -- EXCEPT for exact-magnitude ties, where the first candidate written wins; this
-   * fixed six-edge sequence is what pins ties to match RunResident (and, transitively, the prior rolling-scatter
-   * formulation this gather replaces -- see RunStreamed3D's Doxygen for why the two are equivalent). Samplers take
-   * offsets relative to (x, y, z) rather than absolute coordinates, so the same body serves both a full in-core
-   * array and RunStreamed3D's radius-2 rolling window -- only the sampler differs per caller.
+   * @brief Evaluates the six crossing edges for one 3-D voxel in a fixed order.
+   * @tparam SampleReal Specifies the real-type sampler for offsets from the voxel.
+   * @tparam SampleFloat Specifies the float32 sampler for offsets from the voxel.
+   * @param sampleReal Reads one relative offset in the input-dependent real type.
+   * @param sampleFloat Reads one relative offset as float32.
+   * @param x Gives the voxel X coordinate.
+   * @param y Gives the voxel Y coordinate.
+   * @param z Gives the voxel Z coordinate.
+   * @param nx Gives the image width.
+   * @param ny Gives the image height.
+   * @param nz Gives the image depth.
+   * @param spacing Gives the physical spacing for each axis.
+   * @param negativeFar Gives the negative value for voxels below the level set.
+   * @return The minimum-magnitude signed candidate or the signed far value.
+   *
+   * The order is negative Z, Y, and X, followed by positive X, Y, and Z.
+   * Strict minimum updates preserve the first candidate when magnitudes are equal.
+   * Relative samplers let resident and slab routes use the same kernel.
    */
   template <class SampleReal, class SampleFloat>
   float32 Evaluate3DGather(SampleReal&& sampleReal, SampleFloat&& sampleFloat, int64 x, int64 y, int64 z, int64 nx, int64 ny, int64 nz, const double spacing[3], float32 negativeFar) const
@@ -917,9 +958,17 @@ private:
 };
 
 /**
- * @brief IsoContour narrow-band signed distance. Exact in-memory stores use a direct parallel gather; real-OOC 2-D
- * stores use a bounded parallel gather; real-OOC 3-D stores use a rolling-window parallel gather. Output is fixed
- * float32.
+ * @brief Applies the IsoContour narrow-band signed-distance algorithm.
+ * @tparam T Specifies the input value type.
+ * @param inStore Gives the scalar input store.
+ * @param outStore Receives float32 signed distances.
+ * @param dims Gives the image dimensions in X, Y, Z order.
+ * @param levelSetValue Gives the iso-contour value.
+ * @param farValue Gives the magnitude for voxels away from the crossing surface.
+ * @param spacing Gives the physical spacing for each axis.
+ * @param shouldCancel Requests cancellation between plane groups or slabs and once per row inside them.
+ * @param messageHandler Receives algorithm messages.
+ * @return An error for invalid input, allocation, or transfer failures.
  */
 template <class T>
 Result<> ApplyIsoContourDistance(const AbstractDataStore<T>& inStore, AbstractDataStore<float32>& outStore, const SizeVec3& dims, float64 levelSetValue, float64 farValue, FloatVec3 spacing,
