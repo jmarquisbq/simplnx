@@ -42,7 +42,7 @@ A contiguous in-memory `DataStore` input is borrowed. Any other in-memory store 
 
 On the complete-grant route, resident memory holds an input copy and the float32 work volume. A `512 x 512 x 128` uint8 image needs about 160 MiB.
 
-On the bounded route, the X and Y passes stream one Z plane at a time into raw scratch storage. Each scratch value contains the encoded sign. The Z pass batches consecutive Y rows across all Z planes and writes each batch as one extent. All resident-memory requests share the application cache budget and its 25% limit.
+On the bounded route, the X and Y passes stream one Z plane at a time into raw scratch storage. One I/O thread prefetches the next input plane. The Z pass uses two bounded staging buffers. The I/O thread writes the previous Y batch and gathers the next one while workers transform the current batch. Store calls remain serial, and workers access only resident buffers. The Z-pass resident peak is worker line scratch plus two staged XZ bands. All requests share the application cache budget and its 25% limit.
 
 % Auto generated parameter table will be inserted here
 

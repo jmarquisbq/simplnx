@@ -15,13 +15,17 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -400,6 +404,301 @@ private:
 
 template <class T>
 using WriteCountingDataStore = ExtentCountingDataStore<T>;
+
+struct TransferEvent
+{
+  enum class Kind
+  {
+    InputRead,
+    WorkRead,
+    WorkWrite,
+    OutputExtent
+  };
+
+  Kind kind;
+  usize start = 0;
+  usize count = 0;
+  Extent extent;
+};
+
+struct TransferLog
+{
+  std::atomic<int32> active{0};
+  std::atomic<int32> maxActive{0};
+  std::mutex mutex;
+  std::vector<TransferEvent> events;
+};
+
+class ActiveCallScope
+{
+public:
+  explicit ActiveCallScope(TransferLog& log)
+  : m_Log(log)
+  {
+    const int32 activeCount = m_Log.active.fetch_add(1, std::memory_order_relaxed) + 1;
+    int32 observedMaximum = m_Log.maxActive.load(std::memory_order_relaxed);
+    while(observedMaximum < activeCount && !m_Log.maxActive.compare_exchange_weak(observedMaximum, activeCount, std::memory_order_relaxed))
+    {
+    }
+  }
+
+  ~ActiveCallScope()
+  {
+    m_Log.active.fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  ActiveCallScope(const ActiveCallScope&) = delete;
+  ActiveCallScope(ActiveCallScope&&) noexcept = delete;
+  ActiveCallScope& operator=(const ActiveCallScope&) = delete;
+  ActiveCallScope& operator=(ActiveCallScope&&) noexcept = delete;
+
+private:
+  TransferLog& m_Log;
+};
+
+void RecordTransfer(TransferLog& log, TransferEvent event)
+{
+  std::lock_guard<std::mutex> lock(log.mutex);
+  log.events.push_back(std::move(event));
+}
+
+std::vector<TransferEvent> GetTransferEvents(TransferLog& log, TransferEvent::Kind kind)
+{
+  std::lock_guard<std::mutex> lock(log.mutex);
+  std::vector<TransferEvent> events;
+  std::copy_if(log.events.cbegin(), log.events.cend(), std::back_inserter(events), [kind](const TransferEvent& event) { return event.kind == kind; });
+  return events;
+}
+
+std::vector<TransferEvent> GetAllTransferEvents(TransferLog& log)
+{
+  std::lock_guard<std::mutex> lock(log.mutex);
+  return log.events;
+}
+
+std::vector<std::pair<usize, usize>> GetTransferRanges(const std::vector<TransferEvent>& events)
+{
+  std::vector<std::pair<usize, usize>> ranges;
+  ranges.reserve(events.size());
+  std::transform(events.cbegin(), events.cend(), std::back_inserter(ranges), [](const TransferEvent& event) { return std::pair<usize, usize>{event.start, event.count}; });
+  return ranges;
+}
+
+template <class T>
+class RecordingInputStore : public DataStore<T>
+{
+public:
+  RecordingInputStore(const ShapeType& tupleShape, const ShapeType& componentShape, T initValue, TransferLog& log, std::atomic_bool& shouldCancel, std::optional<usize> failAtRead = std::nullopt,
+                      std::optional<usize> cancelAtRead = std::nullopt, std::optional<usize> throwAtRead = std::nullopt)
+  : DataStore<T>(tupleShape, componentShape, initValue)
+  , m_Log(log)
+  , m_ShouldCancel(shouldCancel)
+  , m_FailAtRead(failAtRead)
+  , m_CancelAtRead(cancelAtRead)
+  , m_ThrowAtRead(throwAtRead)
+  {
+  }
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
+  {
+    ActiveCallScope scope(m_Log);
+    const usize readOrdinal = m_ReadCount.fetch_add(1, std::memory_order_relaxed) + 1;
+    RecordTransfer(m_Log, TransferEvent{TransferEvent::Kind::InputRead, startIndex, buffer.size(), {}});
+    if(m_ThrowAtRead == readOrdinal)
+    {
+      throw std::runtime_error("Injected Maurer input read exception.");
+    }
+    if(m_FailAtRead == readOrdinal)
+    {
+      return MakeErrorResult(-8399, "Injected Maurer input read failure.");
+    }
+    Result<> result = DataStore<T>::copyIntoBuffer(startIndex, buffer);
+    if(m_CancelAtRead == readOrdinal)
+    {
+      m_ShouldCancel.store(true);
+    }
+    return result;
+  }
+
+private:
+  TransferLog& m_Log;
+  std::atomic_bool& m_ShouldCancel;
+  std::optional<usize> m_FailAtRead;
+  std::optional<usize> m_CancelAtRead;
+  std::optional<usize> m_ThrowAtRead;
+  mutable std::atomic<usize> m_ReadCount{0};
+};
+
+class RecordingWorkStore : public DataStore<float32>
+{
+public:
+  RecordingWorkStore(const ShapeType& tupleShape, const ShapeType& componentShape, float32 initValue, TransferLog& log, std::atomic_bool& shouldCancel, std::optional<usize> failAtRead = std::nullopt,
+                     std::optional<usize> failAtWrite = std::nullopt, std::optional<usize> cancelAtRead = std::nullopt, std::optional<usize> throwAtRead = std::nullopt,
+                     std::optional<usize> throwAtWrite = std::nullopt)
+  : DataStore<float32>(tupleShape, componentShape, initValue)
+  , m_Log(log)
+  , m_ShouldCancel(shouldCancel)
+  , m_FailAtRead(failAtRead)
+  , m_FailAtWrite(failAtWrite)
+  , m_CancelAtRead(cancelAtRead)
+  , m_ThrowAtRead(throwAtRead)
+  , m_ThrowAtWrite(throwAtWrite)
+  {
+  }
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<float32> buffer) const override
+  {
+    ActiveCallScope scope(m_Log);
+    const usize readOrdinal = m_ReadCount.fetch_add(1, std::memory_order_relaxed) + 1;
+    RecordTransfer(m_Log, TransferEvent{TransferEvent::Kind::WorkRead, startIndex, buffer.size(), {}});
+    if(m_ThrowAtRead == readOrdinal)
+    {
+      throw std::runtime_error("Injected Maurer work read exception.");
+    }
+    if(m_FailAtRead == readOrdinal)
+    {
+      return MakeErrorResult(-8399, "Injected Maurer work read failure.");
+    }
+    Result<> result = DataStore<float32>::copyIntoBuffer(startIndex, buffer);
+    if(m_CancelAtRead == readOrdinal)
+    {
+      m_ShouldCancel.store(true);
+    }
+    return result;
+  }
+
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const float32> buffer) override
+  {
+    ActiveCallScope scope(m_Log);
+    const usize writeOrdinal = m_WriteCount.fetch_add(1, std::memory_order_relaxed) + 1;
+    RecordTransfer(m_Log, TransferEvent{TransferEvent::Kind::WorkWrite, startIndex, buffer.size(), {}});
+    if(m_ThrowAtWrite == writeOrdinal)
+    {
+      throw std::runtime_error("Injected Maurer work write exception.");
+    }
+    if(m_FailAtWrite == writeOrdinal)
+    {
+      return MakeErrorResult(-8398, "Injected Maurer work write failure.");
+    }
+    return DataStore<float32>::copyFromBuffer(startIndex, buffer);
+  }
+
+private:
+  TransferLog& m_Log;
+  std::atomic_bool& m_ShouldCancel;
+  std::optional<usize> m_FailAtRead;
+  std::optional<usize> m_FailAtWrite;
+  std::optional<usize> m_CancelAtRead;
+  std::optional<usize> m_ThrowAtRead;
+  std::optional<usize> m_ThrowAtWrite;
+  mutable std::atomic<usize> m_ReadCount{0};
+  std::atomic<usize> m_WriteCount{0};
+};
+
+class RecordingOutputStore : public DataStore<float32>
+{
+public:
+  RecordingOutputStore(const ShapeType& tupleShape, const ShapeType& componentShape, float32 initValue, TransferLog& log, std::atomic_bool& shouldCancel,
+                       std::optional<usize> cancelAtExtent = std::nullopt, std::optional<usize> throwAtExtent = std::nullopt)
+  : DataStore<float32>(tupleShape, componentShape, initValue)
+  , m_Log(log)
+  , m_ShouldCancel(shouldCancel)
+  , m_CancelAtExtent(cancelAtExtent)
+  , m_ThrowAtExtent(throwAtExtent)
+  {
+  }
+
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const float32> buffer) override
+  {
+    ActiveCallScope scope(m_Log);
+    m_FlatWriteCount.fetch_add(1, std::memory_order_relaxed);
+    return DataStore<float32>::copyFromBuffer(startIndex, buffer);
+  }
+
+  void writeExtent(const Extent& extent, nonstd::span<const float32> data) override
+  {
+    ActiveCallScope scope(m_Log);
+    const usize extentOrdinal = m_ExtentCount.fetch_add(1, std::memory_order_relaxed) + 1;
+    RecordTransfer(m_Log, TransferEvent{TransferEvent::Kind::OutputExtent, 0, data.size(), extent});
+    if(m_ThrowAtExtent == extentOrdinal)
+    {
+      throw std::runtime_error("Injected Maurer output extent exception.");
+    }
+    DataStore<float32>::writeExtent(extent, data);
+    m_CompletedExtentCount.fetch_add(1, std::memory_order_relaxed);
+    if(m_CancelAtExtent == extentOrdinal)
+    {
+      m_ShouldCancel.store(true);
+    }
+  }
+
+  [[nodiscard]] usize flatWriteCount() const noexcept
+  {
+    return m_FlatWriteCount.load(std::memory_order_relaxed);
+  }
+
+  [[nodiscard]] usize completedExtentCount() const noexcept
+  {
+    return m_CompletedExtentCount.load(std::memory_order_relaxed);
+  }
+
+private:
+  TransferLog& m_Log;
+  std::atomic_bool& m_ShouldCancel;
+  std::optional<usize> m_CancelAtExtent;
+  std::optional<usize> m_ThrowAtExtent;
+  std::atomic<usize> m_FlatWriteCount{0};
+  std::atomic<usize> m_ExtentCount{0};
+  std::atomic<usize> m_CompletedExtentCount{0};
+};
+
+struct SeamResults
+{
+  Result<> xyResult;
+  Result<> zResult;
+  bool zRan = false;
+};
+
+template <class T>
+SeamResults RunSeam(const std::vector<int32>& pattern, const SizeVec3& dims, const ImageProcessing::detail::Maurer3DSlabParameters<T>& parameters, TransferLog&, RecordingInputStore<T>& inputStore,
+                    RecordingWorkStore& workStore, RecordingOutputStore& outputStore, std::atomic_bool& shouldCancel)
+{
+  REQUIRE(pattern.size() == dims[0] * dims[1] * dims[2]);
+  for(usize index = 0; index < pattern.size(); ++index)
+  {
+    inputStore.setValue(index, static_cast<T>(pattern[index]));
+  }
+
+  bool hasBoundary = false;
+  Result<> xyResult = ImageProcessing::detail::StreamMaurer3DInitAndTransformXY<T>(inputStore, workStore, parameters, shouldCancel, hasBoundary);
+  Result<> zResult;
+  bool zRan = false;
+  if(xyResult.valid())
+  {
+    zRan = true;
+    zResult = ImageProcessing::detail::RunMaurer3DZPass<T>(workStore, outputStore, parameters, shouldCancel, hasBoundary);
+  }
+  return {std::move(xyResult), std::move(zResult), zRan};
+}
+
+usize PlanGrant(const SizeVec3& dims, usize rows)
+{
+  const usize workerCount = std::max<usize>(1, static_cast<usize>(std::thread::hardware_concurrency()));
+  const usize maximumLineValues = std::max({dims[0], dims[1], dims[2]});
+  const usize workerScratchBytes = workerCount * maximumLineValues * 3 * sizeof(float32);
+  const usize stagingRowBytes = dims[0] * dims[2] * sizeof(float32);
+  return workerScratchBytes + 2 * rows * stagingRowBytes;
+}
+
+std::vector<float32> ReadOutput(const RecordingOutputStore& outputStore, usize valueCount)
+{
+  std::vector<float32> output(valueCount);
+  for(usize index = 0; index < valueCount; ++index)
+  {
+    output[index] = outputStore.getValue(index);
+  }
+  return output;
+}
 
 // This brute-force signed EDT oracle does not use image spacing.
 // An object voxel is a feature when it has an in-bounds background neighbor in full connectivity.
@@ -954,6 +1253,32 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: working format follows OOC 
   REQUIRE_FALSE(abstractResidentStore.getChunkShape().has_value());
 }
 
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: 3D slab plan charges two staging buffers", "[ImageProcessing][MaurerDistanceMapEngine][WorkingMemory]")
+{
+  const SizeVec3 dims{5, 6, 7};
+  for(const usize rows : {usize{1}, usize{3}, usize{6}})
+  {
+    const usize grant = PlanGrant(dims, rows);
+    auto planResult = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, grant);
+    SIMPLNX_RESULT_REQUIRE_VALID(planResult);
+    REQUIRE(planResult.value().maxYRows == rows);
+    REQUIRE(planResult.value().stagingValues == rows * 5 * 7);
+    REQUIRE(planResult.value().residentBytes == grant);
+    REQUIRE(planResult.value().residentBytes <= grant);
+  }
+
+  SIMPLNX_RESULT_REQUIRE_INVALID(ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, PlanGrant(dims, 1) - 1));
+
+  const SizeVec3 largeDims{512, 512, 128};
+  const usize largeGrant = PlanGrant(largeDims, 512);
+  auto largePlanResult = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(largeDims, largeGrant);
+  SIMPLNX_RESULT_REQUIRE_VALID(largePlanResult);
+  REQUIRE(largePlanResult.value().maxYRows == 512);
+  REQUIRE(largePlanResult.value().stagingValues == 512 * 512 * 128);
+  REQUIRE(largePlanResult.value().residentBytes == largeGrant);
+  REQUIRE(largePlanResult.value().residentBytes <= largeGrant);
+}
+
 TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: resident state requires a complete dataset-scaled reservation", "[ImageProcessing][MaurerDistanceMapEngine][WorkingMemory]")
 {
   constexpr usize dimX = 512;
@@ -978,7 +1303,8 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: resident state requires a c
 
   auto smallSlabPlan = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, 16 * k_MiB);
   auto mediumSlabPlan = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, 128 * k_MiB);
-  auto fullSlabPlan = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, 256 * k_MiB);
+  const usize fullSlabGrant = PlanGrant(dims, dimY);
+  auto fullSlabPlan = ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, fullSlabGrant);
   SIMPLNX_RESULT_REQUIRE_VALID(smallSlabPlan);
   SIMPLNX_RESULT_REQUIRE_VALID(mediumSlabPlan);
   SIMPLNX_RESULT_REQUIRE_VALID(fullSlabPlan);
@@ -998,7 +1324,7 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: resident state requires a c
   requireMinimumRowsForBatchCount(fullSlabPlan.value());
   REQUIRE(smallSlabPlan.value().residentBytes <= 16 * k_MiB);
   REQUIRE(mediumSlabPlan.value().residentBytes <= 128 * k_MiB);
-  REQUIRE(fullSlabPlan.value().residentBytes <= 256 * k_MiB);
+  REQUIRE(fullSlabPlan.value().residentBytes <= fullSlabGrant);
   SIMPLNX_RESULT_REQUIRE_INVALID(ImageProcessing::detail::CreateMaurer3DSlabMemoryPlan<uint8>(dims, 1));
 
   auto& manager = CacheMemoryBudgetManager::instance();
@@ -1263,6 +1589,426 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: bounded 3D Z pass transfers
   REQUIRE(outputStore.flatWriteCount() == 0);
   REQUIRE(manager.reservedWorkingMemoryBytes() == 0);
   manager.setBudgetBytes(previousBudget);
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: XY stream and Z pass transfer exact ranges", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  struct ExactTransferCase
+  {
+    usize dimZ;
+    std::vector<std::pair<usize, usize>> planeRanges;
+    std::vector<std::pair<usize, usize>> workReadRanges;
+  };
+  const std::vector<ExactTransferCase> testCases = {
+      {2, {{0, 30}, {30, 30}}, {{0, 15}, {30, 15}, {15, 15}, {45, 15}}},
+      {3, {{0, 30}, {30, 30}, {60, 30}}, {{0, 15}, {30, 15}, {60, 15}, {15, 15}, {45, 15}, {75, 15}}},
+      {7,
+       {{0, 30}, {30, 30}, {60, 30}, {90, 30}, {120, 30}, {150, 30}, {180, 30}},
+       {{0, 15}, {30, 15}, {60, 15}, {90, 15}, {120, 15}, {150, 15}, {180, 15}, {15, 15}, {45, 15}, {75, 15}, {105, 15}, {135, 15}, {165, 15}, {195, 15}}}};
+
+  for(const ExactTransferCase& testCase : testCases)
+  {
+    DYNAMIC_SECTION(dimX << "x" << dimY << "x" << testCase.dimZ)
+    {
+      const SizeVec3 dims{dimX, dimY, testCase.dimZ};
+      const std::vector<int32> pattern = MakePattern(dimX, dimY, testCase.dimZ);
+      const std::vector<float32> expected = RunInCore<uint8>(pattern, dimX, dimY, testCase.dimZ, 0, false, true);
+      TransferLog log;
+      std::atomic_bool shouldCancel{false};
+      RecordingInputStore<uint8> inputStore(ShapeType{testCase.dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+      RecordingWorkStore workStore(ShapeType{testCase.dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+      RecordingOutputStore outputStore(ShapeType{testCase.dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+      const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+      const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+      SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+      REQUIRE(results.zRan);
+      SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+      REQUIRE(GetTransferRanges(GetTransferEvents(log, TransferEvent::Kind::InputRead)) == testCase.planeRanges);
+      REQUIRE(GetTransferRanges(GetTransferEvents(log, TransferEvent::Kind::WorkWrite)) == testCase.planeRanges);
+      REQUIRE(GetTransferRanges(GetTransferEvents(log, TransferEvent::Kind::WorkRead)) == testCase.workReadRanges);
+
+      const std::vector<TransferEvent> outputExtents = GetTransferEvents(log, TransferEvent::Kind::OutputExtent);
+      REQUIRE(outputExtents.size() == 2);
+      REQUIRE(outputExtents[0].extent.min == std::vector<uint64>{0, 0, 0});
+      REQUIRE(outputExtents[0].extent.max == std::vector<uint64>{static_cast<uint64>(testCase.dimZ - 1), 2, 4});
+      REQUIRE(outputExtents[0].count == 3 * dimX * testCase.dimZ);
+      REQUIRE(outputExtents[1].extent.min == std::vector<uint64>{0, 3, 0});
+      REQUIRE(outputExtents[1].extent.max == std::vector<uint64>{static_cast<uint64>(testCase.dimZ - 1), 5, 4});
+      REQUIRE(outputExtents[1].count == 3 * dimX * testCase.dimZ);
+      REQUIRE(outputStore.flatWriteCount() == 0);
+      RequireBitIdentical(ReadOutput(outputStore, pattern.size()), expected);
+    }
+  }
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: single store call in flight", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+
+  for(const usize maxYRows : {usize{3}, usize{1}, usize{6}})
+  {
+    CAPTURE(maxYRows);
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+    RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+    RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+    const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, maxYRows, 2};
+
+    const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+    REQUIRE(results.zRan);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+    REQUIRE(log.active.load() == 0);
+    REQUIRE(log.maxActive.load() == 1);
+  }
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: cancellation during a prefetched plane read", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  constexpr float32 kPoison = -999.0f;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel, std::nullopt, 3);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, kPoison, log, shouldCancel);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+  REQUIRE(results.zRan);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::InputRead).size() == 3);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::WorkWrite).size() <= 2);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).empty());
+  const std::vector<float32> output = ReadOutput(outputStore, pattern.size());
+  REQUIRE(std::all_of(output.cbegin(), output.cend(), [](float32 value) { return value == kPoison; }));
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: cancellation during the first output extent write", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel, 1);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 2, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+  REQUIRE(results.zRan);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).size() == 1);
+  const std::vector<TransferEvent> workReads = GetTransferEvents(log, TransferEvent::Kind::WorkRead);
+  REQUIRE(workReads.size() == 14);
+  REQUIRE(std::none_of(workReads.cbegin(), workReads.cend(), [](const TransferEvent& event) { return event.start % 30 == 20; }));
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: cancellation during a scratch-band read stops after the previous extent", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 9;
+  constexpr usize dimZ = 4;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel, std::nullopt, std::nullopt, 9);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+  REQUIRE(results.zRan);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+  const std::vector<TransferEvent> workReads = GetTransferEvents(log, TransferEvent::Kind::WorkRead);
+  REQUIRE(workReads.size() == 9);
+  REQUIRE(workReads.back().start == 30);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).size() == 1);
+  REQUIRE(outputStore.completedExtentCount() == 1);
+  const std::vector<TransferEvent> events = GetAllTransferEvents(log);
+  REQUIRE(events.back().kind == TransferEvent::Kind::WorkRead);
+  REQUIRE(events.back().start == 30);
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: input read error stops the run before any output", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel, 5);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_INVALID(results.xyResult);
+  REQUIRE(results.xyResult.errors().size() == 1);
+  REQUIRE(results.xyResult.errors().front().code == -8399);
+  REQUIRE_FALSE(results.zRan);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).empty());
+  const std::vector<TransferEvent> workWrites = GetTransferEvents(log, TransferEvent::Kind::WorkWrite);
+  REQUIRE(workWrites.size() <= 3);
+  REQUIRE(std::none_of(workWrites.cbegin(), workWrites.cend(), [](const TransferEvent& event) { return event.start >= 120; }));
+  const std::vector<TransferEvent> events = GetAllTransferEvents(log);
+  REQUIRE(events.back().kind == TransferEvent::Kind::InputRead);
+  REQUIRE(events.back().start == 120);
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: scratch-plane write error stops the XY stream", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 4;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel, std::nullopt, 3);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_INVALID(results.xyResult);
+  REQUIRE(results.xyResult.errors().size() == 1);
+  REQUIRE(results.xyResult.errors().front().code == -8398);
+  REQUIRE_FALSE(results.zRan);
+  const std::vector<TransferEvent> workWrites = GetTransferEvents(log, TransferEvent::Kind::WorkWrite);
+  REQUIRE(workWrites.size() == 3);
+  REQUIRE(workWrites.back().start == 60);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::InputRead).size() <= 4);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).empty());
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: work read error stops the Z pass", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+  RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel, 9);
+  RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+  const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+  SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+  REQUIRE(results.zRan);
+  SIMPLNX_RESULT_REQUIRE_INVALID(results.zResult);
+  REQUIRE(results.zResult.errors().size() == 1);
+  REQUIRE(results.zResult.errors().front().code == -8399);
+  const std::vector<TransferEvent> workReads = GetTransferEvents(log, TransferEvent::Kind::WorkRead);
+  REQUIRE(workReads.size() <= 9);
+  REQUIRE(workReads.back().start == 45);
+  REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).size() <= 1);
+  const std::vector<TransferEvent> events = GetAllTransferEvents(log);
+  REQUIRE(events.back().kind == TransferEvent::Kind::WorkRead);
+  REQUIRE(events.back().start == 45);
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: store exceptions become error results", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<int32> pattern = MakePattern(dimX, dimY, dimZ);
+
+  SECTION("input read")
+  {
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel, std::nullopt, std::nullopt, 2);
+    RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+    RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+    const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+    const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_INVALID(results.xyResult);
+    REQUIRE_FALSE(results.xyResult.errors().empty());
+    REQUIRE(results.xyResult.errors().front().code < 0);
+    REQUIRE_FALSE(results.zRan);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::InputRead).size() == 2);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::WorkWrite).empty());
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).empty());
+    const std::vector<TransferEvent> events = GetAllTransferEvents(log);
+    REQUIRE(events.back().kind == TransferEvent::Kind::InputRead);
+    REQUIRE(log.active.load() == 0);
+  }
+
+  SECTION("work write")
+  {
+    constexpr usize writeDimZ = 4;
+    const SizeVec3 writeDims{dimX, dimY, writeDimZ};
+    const std::vector<int32> writePattern = MakePattern(dimX, dimY, writeDimZ);
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<uint8> inputStore(ShapeType{writeDimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+    RecordingWorkStore workStore(ShapeType{writeDimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel, std::nullopt, std::nullopt, std::nullopt, std::nullopt, 3);
+    RecordingOutputStore outputStore(ShapeType{writeDimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+    const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{writeDims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+    const SeamResults results = RunSeam(writePattern, writeDims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_INVALID(results.xyResult);
+    REQUIRE_FALSE(results.xyResult.errors().empty());
+    REQUIRE(results.xyResult.errors().front().code < 0);
+    REQUIRE_FALSE(results.zRan);
+    const std::vector<TransferEvent> workWrites = GetTransferEvents(log, TransferEvent::Kind::WorkWrite);
+    REQUIRE(workWrites.size() == 3);
+    REQUIRE(workWrites.back().start == 60);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::InputRead).size() <= 4);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).empty());
+    REQUIRE(log.active.load() == 0);
+  }
+
+  SECTION("work read")
+  {
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+    RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel, std::nullopt, std::nullopt, std::nullopt, 9);
+    RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel);
+    const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+    const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+    REQUIRE(results.zRan);
+    SIMPLNX_RESULT_REQUIRE_INVALID(results.zResult);
+    REQUIRE_FALSE(results.zResult.errors().empty());
+    REQUIRE(results.zResult.errors().front().code < 0);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::WorkRead).size() == 9);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).size() <= 1);
+    REQUIRE(log.active.load() == 0);
+  }
+
+  SECTION("output extent")
+  {
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<uint8> inputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0}, log, shouldCancel);
+    RecordingWorkStore workStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f, log, shouldCancel);
+    RecordingOutputStore outputStore(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, -999.0f, log, shouldCancel, std::nullopt, 2);
+    const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+    const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+    REQUIRE(results.zRan);
+    SIMPLNX_RESULT_REQUIRE_INVALID(results.zResult);
+    REQUIRE_FALSE(results.zResult.errors().empty());
+    REQUIRE(results.zResult.errors().front().code < 0);
+    REQUIRE(GetTransferEvents(log, TransferEvent::Kind::OutputExtent).size() == 2);
+    REQUIRE(outputStore.completedExtentCount() == 1);
+    const std::vector<TransferEvent> events = GetAllTransferEvents(log);
+    REQUIRE(events.back().kind == TransferEvent::Kind::OutputExtent);
+    REQUIRE(log.active.load() == 0);
+  }
+}
+
+TEMPLATE_TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: seam matches the oracle at every batch size", "[ImageProcessing][MaurerDistanceMapEngine]", int8, uint8, int16, uint16, int32, uint32,
+                   int64, uint64)
+{
+  using T = TestType;
+  SECTION("all integer types")
+  {
+    const SizeVec3 dims{5, 6, 7};
+    const std::vector<int32> pattern = MakePattern(dims[0], dims[1], dims[2]);
+    const std::vector<float32> oracle = MaurerOracle(pattern, dims[0], dims[1], dims[2], 0, false, true);
+    const std::vector<float32> inCore = RunInCore<T>(pattern, dims[0], dims[1], dims[2], 0, false, true);
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    RecordingInputStore<T> inputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, T{0}, log, shouldCancel);
+    RecordingWorkStore workStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, 0.0f, log, shouldCancel);
+    RecordingOutputStore outputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, -999.0f, log, shouldCancel);
+    const ImageProcessing::detail::Maurer3DSlabParameters<T> parameters{dims, T{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, 3, 2};
+
+    const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+    REQUIRE(results.zRan);
+    SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+    const std::vector<float32> actual = ReadOutput(outputStore, pattern.size());
+    RequireBitIdentical(actual, oracle);
+    RequireBitIdentical(actual, inCore);
+  }
+
+  if constexpr(std::is_same_v<T, uint8> || std::is_same_v<T, int16>)
+  {
+    SECTION("unit spacing full matrix")
+    {
+      const std::vector<SizeVec3> dimensions = {{5, 6, 7}, {7, 9, 5}, {5, 6, 2}, {5, 6, 3}};
+      for(const SizeVec3& dims : dimensions)
+      {
+        const std::vector<int32> pattern = MakePattern(dims[0], dims[1], dims[2]);
+        const std::vector<float32> oracle = MaurerOracle(pattern, dims[0], dims[1], dims[2], 0, false, true);
+        const std::vector<float32> inCore = RunInCore<T>(pattern, dims[0], dims[1], dims[2], 0, false, true);
+        for(const usize maxYRows : {usize{1}, usize{2}, usize{3}, usize{6}})
+        {
+          DYNAMIC_SECTION(dims[0] << "x" << dims[1] << "x" << dims[2] << " with " << maxYRows << " Y rows")
+          {
+            TransferLog log;
+            std::atomic_bool shouldCancel{false};
+            RecordingInputStore<T> inputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, T{0}, log, shouldCancel);
+            RecordingWorkStore workStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, 0.0f, log, shouldCancel);
+            RecordingOutputStore outputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, -999.0f, log, shouldCancel);
+            const ImageProcessing::detail::Maurer3DSlabParameters<T> parameters{dims, T{0}, false, true, false, FloatVec3{1.0f, 1.0f, 1.0f}, maxYRows, 2};
+
+            const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+            SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+            REQUIRE(results.zRan);
+            SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+            const std::vector<float32> actual = ReadOutput(outputStore, pattern.size());
+            RequireBitIdentical(actual, oracle);
+            RequireBitIdentical(actual, inCore);
+          }
+        }
+      }
+    }
+
+    SECTION("image spacing")
+    {
+      const SizeVec3 dims{5, 6, 7};
+      const std::vector<int32> pattern = MakePattern(dims[0], dims[1], dims[2]);
+      const FloatVec3 spacing{0.5f, 2.0f, 1.25f};
+      const std::vector<float32> inCore = RunInCore<T>(pattern, dims[0], dims[1], dims[2], 0, false, false, true, spacing);
+      TransferLog log;
+      std::atomic_bool shouldCancel{false};
+      RecordingInputStore<T> inputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, T{0}, log, shouldCancel);
+      RecordingWorkStore workStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, 0.0f, log, shouldCancel);
+      RecordingOutputStore outputStore(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, -999.0f, log, shouldCancel);
+      const ImageProcessing::detail::Maurer3DSlabParameters<T> parameters{dims, T{0}, false, false, true, spacing, 2, 2};
+
+      const SeamResults results = RunSeam(pattern, dims, parameters, log, inputStore, workStore, outputStore, shouldCancel);
+      SIMPLNX_RESULT_REQUIRE_VALID(results.xyResult);
+      REQUIRE(results.zRan);
+      SIMPLNX_RESULT_REQUIRE_VALID(results.zResult);
+      RequireBitIdentical(ReadOutput(outputStore, pattern.size()), inCore);
+    }
+  }
 }
 
 TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: encoded-sign line matches explicit inside mask", "[ImageProcessing][MaurerDistanceMapEngine]")

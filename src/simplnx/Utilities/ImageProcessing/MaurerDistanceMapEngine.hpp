@@ -36,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace nx::core::ImageProcessing
@@ -197,29 +198,33 @@ Result<Maurer3DSlabMemoryPlan> CreateMaurer3DSlabMemoryPlan(const SizeVec3& dims
 
   usize valuesPerYRow = 0;
   usize bytesPerYRow = 0;
-  if(!MaurerCheckedMultiply(dims[0], dims[2], valuesPerYRow) || !MaurerCheckedMultiply(valuesPerYRow, k_StagingBytesPerValue, bytesPerYRow))
-  {
-    return MakeErrorResult<Maurer3DSlabMemoryPlan>(-8363, fmt::format("Signed Maurer dimensions ({}) overflow while sizing one 3D Z-pass Y row.", StringUtilities::formatDimensions3D(dims)));
-  }
-  if(targetBytes < initPeakBytes || targetBytes <= workerScratchBytes || targetBytes - workerScratchBytes < bytesPerYRow)
+  usize twoStagingRowBytes = 0;
+  if(!MaurerCheckedMultiply(dims[0], dims[2], valuesPerYRow) || !MaurerCheckedMultiply(valuesPerYRow, k_StagingBytesPerValue, bytesPerYRow) ||
+     !MaurerCheckedMultiply(bytesPerYRow, 2, twoStagingRowBytes))
   {
     return MakeErrorResult<Maurer3DSlabMemoryPlan>(
-        -8364, fmt::format("Signed Maurer 3D slab target ({} bytes) cannot hold the initialization peak ({} bytes) or worker scratch ({} bytes) plus one Z-pass Y row ({} bytes) for dimensions {}.",
-                           targetBytes, initPeakBytes, workerScratchBytes, bytesPerYRow, StringUtilities::formatDimensions3D(dims)));
+        -8363, fmt::format("Signed Maurer dimensions ({}) overflow while sizing one Y row in each of the two 3D Z-pass staging buffers.", StringUtilities::formatDimensions3D(dims)));
+  }
+  if(targetBytes < initPeakBytes || targetBytes - workerScratchBytes < twoStagingRowBytes)
+  {
+    return MakeErrorResult<Maurer3DSlabMemoryPlan>(-8364, fmt::format("Signed Maurer 3D slab target ({} bytes) cannot hold the initialization peak ({} bytes) or worker scratch ({} bytes) plus one Y "
+                                                                      "row in each of two Z-pass staging buffers ({} bytes per row) for dimensions {}.",
+                                                                      targetBytes, initPeakBytes, workerScratchBytes, bytesPerYRow, StringUtilities::formatDimensions3D(dims)));
   }
 
   Maurer3DSlabMemoryPlan plan;
   plan.workerCount = workerCount;
-  const usize maximumYRows = std::min(dims[1], (targetBytes - workerScratchBytes) / bytesPerYRow);
+  const usize maximumYRows = std::min(dims[1], (targetBytes - workerScratchBytes) / twoStagingRowBytes);
   const usize batchCount = 1 + (dims[1] - 1) / maximumYRows;
   plan.maxYRows = 1 + (dims[1] - 1) / batchCount;
   usize stagingBytes = 0;
+  usize twoStagingBytes = 0;
   usize zPassPeakBytes = 0;
   if(!MaurerCheckedMultiply(plan.maxYRows, valuesPerYRow, plan.stagingValues) || !MaurerCheckedMultiply(plan.stagingValues, k_StagingBytesPerValue, stagingBytes) ||
-     !MaurerCheckedAdd(workerScratchBytes, stagingBytes, zPassPeakBytes))
+     !MaurerCheckedMultiply(stagingBytes, 2, twoStagingBytes) || !MaurerCheckedAdd(workerScratchBytes, twoStagingBytes, zPassPeakBytes))
   {
     return MakeErrorResult<Maurer3DSlabMemoryPlan>(
-        -8365, fmt::format("Signed Maurer dimensions ({}) and {} planned Y rows overflow while finalizing the 3D slab working-memory plan.", StringUtilities::formatDimensions3D(dims), plan.maxYRows));
+        -8365, fmt::format("Signed Maurer dimensions ({}) and {} planned Y rows overflow while sizing two 3D Z-pass staging buffers.", StringUtilities::formatDimensions3D(dims), plan.maxYRows));
   }
   plan.residentBytes = std::max(initPeakBytes, zPassPeakBytes);
   return {plan};
@@ -267,6 +272,136 @@ inline std::optional<ShapeType> SelectMaurer3DScratchChunkHint(const ShapeType& 
     }
   }
   return outputChunkShape;
+}
+
+/**
+ * @class MaurerIoWorker
+ * @brief Runs one serial store-I/O sequence on a dedicated thread.
+ *
+ * Bulk store calls must not overlap. The worker serializes these calls off the main thread so resident transforms can proceed.
+ */
+class MaurerIoWorker
+{
+public:
+  /**
+   * @brief Creates an idle I/O worker.
+   */
+  MaurerIoWorker() = default;
+
+  /**
+   * @brief Joins the I/O thread before the worker releases its state.
+   */
+  ~MaurerIoWorker()
+  {
+    join();
+  }
+
+  MaurerIoWorker(const MaurerIoWorker&) = delete;
+  MaurerIoWorker(MaurerIoWorker&&) noexcept = delete;
+  MaurerIoWorker& operator=(const MaurerIoWorker&) = delete;
+  MaurerIoWorker& operator=(MaurerIoWorker&&) noexcept = delete;
+
+  /**
+   * @brief Starts one store-I/O sequence.
+   * @tparam Callable Store-I/O callable type.
+   * @param callable Returns the result of the serial store-I/O sequence.
+   */
+  template <class Callable>
+  void start(Callable&& callable)
+  {
+    m_Result = {};
+    m_Thread = std::thread([this, ioSequence = std::forward<Callable>(callable)]() mutable {
+      try
+      {
+        m_Result = ioSequence();
+      } catch(const std::exception& exception)
+      {
+        m_Result = MakeErrorResult(-8370, fmt::format("Signed Maurer I/O worker caught a store exception: {}", exception.what()));
+      } catch(...)
+      {
+        m_Result = MakeErrorResult(-8371, "Signed Maurer I/O worker caught an unknown store exception.");
+      }
+    });
+    m_Started = true;
+  }
+
+  /**
+   * @brief Waits for the started I/O sequence to finish.
+   */
+  void join()
+  {
+    if(m_Started && m_Thread.joinable())
+    {
+      m_Thread.join();
+    }
+  }
+
+  /**
+   * @brief Returns the completed I/O sequence result.
+   * @return Valid result when no sequence started, or the completed sequence result.
+   * @pre join() completed after any start().
+   */
+  [[nodiscard]] const Result<>& result() const noexcept
+  {
+    return m_Result;
+  }
+
+private:
+  std::thread m_Thread;
+  Result<> m_Result;
+  bool m_Started = false;
+};
+
+/**
+ * @brief Converts a synchronous store exception to a Signed Maurer error result.
+ * @tparam Callable Store-I/O callable type.
+ * @param callable Runs one store call on the calling thread.
+ * @param context Identifies the transfer that failed.
+ * @return The store result or an error for a thrown exception.
+ */
+template <class Callable>
+Result<> RunMaurerIoCallSafely(Callable&& callable, std::string_view context)
+{
+  try
+  {
+    return callable();
+  } catch(const std::exception& exception)
+  {
+    return MakeErrorResult(-8370, fmt::format("Signed Maurer store call failed during {}: {}", context, exception.what()));
+  } catch(...)
+  {
+    return MakeErrorResult(-8371, fmt::format("Signed Maurer store call failed during {} with an unknown exception.", context));
+  }
+}
+
+/**
+ * @brief Writes one extent and converts provider exceptions to an error result.
+ * @tparam U Store value type.
+ * @param store Receives the extent values.
+ * @param extent Inclusive output bounds in store dimension order.
+ * @param values Values for the complete extent.
+ * @param shouldCancel Skips the store call when cancellation is set.
+ * @param context Identifies the transfer that failed.
+ * @return An empty result on success or cancellation, or an error for a provider exception.
+ */
+template <class U>
+Result<> WriteExtentSafely(AbstractDataStore<U>& store, const Extent& extent, nonstd::span<const U> values, const std::atomic_bool& shouldCancel, std::string_view context)
+{
+  if(shouldCancel)
+  {
+    return {};
+  }
+  try
+  {
+    store.writeExtent(extent, values);
+  } catch(const std::exception& exception)
+  {
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, exception.what()));
+  } catch(...)
+  {
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {} with an unknown exception.", context));
+  }
+  return {};
 }
 
 inline bool Maurer2DDirectXPeak(usize nx, usize rows, usize inputBytes, usize& peak)
@@ -1004,6 +1139,521 @@ bool BuildMaurerEncodedInit(nonstd::span<const T> input, T backgroundValue, Size
   parallelAlgorithm.execute(initializeRows);
   return hasBoundary.load(std::memory_order_relaxed);
 }
+
+/**
+ * @struct Maurer3DSlabParameters
+ * @brief Groups the immutable settings for the bounded 3D Maurer passes.
+ * @tparam T Integer input value type.
+ *
+ * The seam keeps store references separate so tests can verify transfer order and concurrency.
+ */
+template <class T>
+struct Maurer3DSlabParameters
+{
+  SizeVec3 dims;
+  T backgroundValue;
+  bool insideIsPositive;
+  bool squaredDistance;
+  bool useSpacing;
+  FloatVec3 spacing;
+  usize maxYRows;
+  usize workerCount;
+};
+
+/**
+ * @brief Runs resident 3D work with the configured worker limit.
+ * @tparam Body Parallel range callable type.
+ * @param count Number of independent work units.
+ * @param workerCount Maximum number of TBB workers.
+ * @param body Processes a range of independent resident work units.
+ */
+template <class Body>
+void ExecuteMaurer3DParallel(usize count, usize workerCount, const Body& body)
+{
+  ParallelDataAlgorithm algorithm;
+  algorithm.setRange(0, count);
+#ifdef SIMPLNX_ENABLE_MULTICORE
+  tbb::task_arena arena(static_cast<int>(std::max<usize>(1, workerCount)));
+  arena.execute([&]() { algorithm.execute(body); });
+#else
+  static_cast<void>(workerCount);
+  algorithm.execute(body);
+#endif
+}
+
+/**
+ * @brief Gathers one Y-row batch from all scratch Z planes.
+ * @tparam WorkStoreT Store type that provides flat bulk reads.
+ * @param workStore Provides transformed XY planes.
+ * @param stagingBuffer Receives the batch in Z-Y-X order.
+ * @param dims Image dimensions in X-Y-Z order.
+ * @param yBegin First Y row in the batch.
+ * @param yCount Number of Y rows in the batch.
+ * @param shouldCancel Stops before the next store call when true.
+ * @return An empty result on success or cancellation, or the first store error.
+ *
+ * Each read is a flat transfer because raw scratch stores do not provide an extent API.
+ */
+template <class WorkStoreT>
+Result<> GatherMaurer3DZBatch(const WorkStoreT& workStore, nonstd::span<float32> stagingBuffer, const SizeVec3& dims, usize yBegin, usize yCount, const std::atomic_bool& shouldCancel)
+{
+  const usize valuesPerPlaneBlock = yCount * dims[0];
+  float32* stagingData = stagingBuffer.data();
+  for(usize z = 0; z < dims[2]; ++z)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const usize planeRowOffset = (z * dims[1] + yBegin) * dims[0];
+    Result<> result = RunMaurerIoCallSafely([&]() { return workStore.copyIntoBuffer(planeRowOffset, nonstd::span<float32>(stagingData + z * valuesPerPlaneBlock, valuesPerPlaneBlock)); },
+                                            "3D Z-pass scratch gather");
+    if(result.invalid())
+    {
+      return result;
+    }
+  }
+  return {};
+}
+
+/**
+ * @brief Streams encoded initialization plus X and Y transforms into flat scratch storage.
+ * @tparam T Integer input value type.
+ * @tparam WorkStoreT Store type that provides flat bulk transfers.
+ * @param inputStore Provides input planes in Z-Y-X order.
+ * @param workStore Receives transformed XY planes in Z-Y-X order.
+ * @param parameters Defines dimensions, signs, spacing, and worker limits.
+ * @param shouldCancel Stops before the next store call when true.
+ * @param hasBoundary Receives true when the complete scan finds a boundary voxel.
+ * @return An empty result on success or cancellation, or the first store error.
+ *
+ * One I/O thread prefetches the next input plane while workers transform the current resident plane.
+ */
+template <class T, class WorkStoreT>
+Result<> StreamMaurer3DInitAndTransformXY(const AbstractDataStore<T>& inputStore, WorkStoreT& workStore, const Maurer3DSlabParameters<T>& parameters, const std::atomic_bool& shouldCancel,
+                                          bool& hasBoundary)
+{
+  constexpr float32 k_Max = std::numeric_limits<float32>::max();
+  const int64 nX = static_cast<int64>(parameters.dims[0]);
+  const int64 nY = static_cast<int64>(parameters.dims[1]);
+  const int64 nZ = static_cast<int64>(parameters.dims[2]);
+  const usize slice = parameters.dims[0] * parameters.dims[1];
+  const bool is2D = nZ == 1;
+  std::vector<T> prev(slice);
+  std::vector<T> cur(slice);
+  std::vector<T> next(slice);
+  std::vector<float32> featurePlane(slice);
+  const std::array<int64, 9> adjacentPlaneOffsets = {0, -1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
+  const std::array<int64, 8> currentPlaneOffsets = {-1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
+  std::atomic_bool boundaryFound{false};
+  const auto flat2d = [nX](int64 x, int64 y) { return static_cast<usize>(y * nX + x); };
+
+  if(shouldCancel)
+  {
+    return {};
+  }
+  if(Result<> result = RunMaurerIoCallSafely([&]() { return inputStore.copyIntoBuffer(0, nonstd::span<T>(cur.data(), slice)); }, "3D XY input plane 0 read"); result.invalid())
+  {
+    return result;
+  }
+  if(!is2D)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    if(Result<> result = RunMaurerIoCallSafely([&]() { return inputStore.copyIntoBuffer(slice, nonstd::span<T>(next.data(), slice)); }, "3D XY input plane 1 read"); result.invalid())
+    {
+      return result;
+    }
+  }
+
+  for(int64 z = 0; z < nZ; ++z)
+  {
+    if(shouldCancel)
+    {
+      return {};
+    }
+    const bool hasPrev = z > 0;
+    const bool hasNext = z < nZ - 1;
+    auto initializeRows = [&](const Range& rowRange) {
+      for(usize yIndex = rowRange.min(); yIndex < rowRange.max(); ++yIndex)
+      {
+        if(shouldCancel)
+        {
+          return;
+        }
+        const int64 y = static_cast<int64>(yIndex);
+        const T* prevData = prev.data();
+        const T* curData = cur.data();
+        const T* nextData = next.data();
+        float32* featurePlaneData = featurePlane.data();
+        bool rowHasBoundary = false;
+        auto initializeBoundedVoxel = [&](int64 x) {
+          const usize planeIndex = flat2d(x, y);
+          const bool isObject = curData[planeIndex] != parameters.backgroundValue;
+          bool isBoundary = false;
+          if(isObject)
+          {
+            const int64 minZOffset = is2D ? 0 : -1;
+            const int64 maxZOffset = is2D ? 0 : 1;
+            for(int64 zOffset = minZOffset; zOffset <= maxZOffset && !isBoundary; ++zOffset)
+            {
+              for(int64 yOffset = -1; yOffset <= 1 && !isBoundary; ++yOffset)
+              {
+                for(int64 xOffset = -1; xOffset <= 1 && !isBoundary; ++xOffset)
+                {
+                  if(xOffset == 0 && yOffset == 0 && zOffset == 0)
+                  {
+                    continue;
+                  }
+                  const int64 adjacentX = x + xOffset;
+                  const int64 adjacentY = y + yOffset;
+                  if(adjacentX < 0 || adjacentY < 0 || adjacentX >= nX || adjacentY >= nY || (zOffset < 0 && !hasPrev) || (zOffset > 0 && !hasNext))
+                  {
+                    continue; // ITK ignores out-of-bounds neighbors because the image border is not background.
+                  }
+                  const T neighborValue = zOffset == 0 ? curData[flat2d(adjacentX, adjacentY)] : zOffset < 0 ? prevData[flat2d(adjacentX, adjacentY)] : nextData[flat2d(adjacentX, adjacentY)];
+                  if(neighborValue == parameters.backgroundValue)
+                  {
+                    isBoundary = true;
+                  }
+                }
+              }
+            }
+          }
+          featurePlaneData[planeIndex] = MaurerSignedValue(isBoundary ? 0.0f : k_Max, isObject, parameters.insideIsPositive);
+          if(isBoundary)
+          {
+            rowHasBoundary = true;
+          }
+        };
+
+        const bool isInteriorRow = hasPrev && hasNext && y >= 1 && y < nY - 1 && nX > 2;
+        if(!isInteriorRow)
+        {
+          for(int64 x = 0; x < nX; ++x)
+          {
+            initializeBoundedVoxel(x);
+          }
+        }
+        else
+        {
+          initializeBoundedVoxel(0);
+          for(int64 x = 1; x < nX - 1; ++x)
+          {
+            const usize planeIndex = flat2d(x, y);
+            const bool isObject = curData[planeIndex] != parameters.backgroundValue;
+            bool isBoundary = false;
+            if(isObject)
+            {
+              const int64 center = static_cast<int64>(planeIndex);
+              for(const int64 offset : adjacentPlaneOffsets)
+              {
+                const usize neighborIndex = static_cast<usize>(center + offset);
+                if(prevData[neighborIndex] == parameters.backgroundValue || nextData[neighborIndex] == parameters.backgroundValue)
+                {
+                  isBoundary = true;
+                  break;
+                }
+              }
+              if(!isBoundary)
+              {
+                for(const int64 offset : currentPlaneOffsets)
+                {
+                  if(curData[static_cast<usize>(center + offset)] == parameters.backgroundValue)
+                  {
+                    isBoundary = true;
+                    break;
+                  }
+                }
+              }
+            }
+            featurePlaneData[planeIndex] = MaurerSignedValue(isBoundary ? 0.0f : k_Max, isObject, parameters.insideIsPositive);
+            if(isBoundary)
+            {
+              rowHasBoundary = true;
+            }
+          }
+          initializeBoundedVoxel(nX - 1);
+        }
+        if(rowHasBoundary && !boundaryFound.load(std::memory_order_relaxed))
+        {
+          boundaryFound.store(true, std::memory_order_relaxed);
+        }
+      }
+    };
+    ParallelDataAlgorithm initializeParallelAlgorithm;
+    initializeParallelAlgorithm.setRange(0, parameters.dims[1]);
+    initializeParallelAlgorithm.execute(initializeRows);
+
+    MaurerIoWorker ioWorker;
+    if(z + 2 < nZ)
+    {
+      // The boundary scan releases prev before prefetch. Compute workers access only featurePlane.
+      ioWorker.start([&, z]() -> Result<> {
+        if(shouldCancel)
+        {
+          return {};
+        }
+        return inputStore.copyIntoBuffer(static_cast<usize>(z + 2) * slice, nonstd::span<T>(prev.data(), slice));
+      });
+    }
+
+    auto transformXRows = [&](const Range& rowRange) {
+      std::vector<float32> localG(parameters.dims[0]);
+      std::vector<float32> localH(parameters.dims[0]);
+      float32* featurePlaneData = featurePlane.data();
+      for(usize y = rowRange.min(); y < rowRange.max(); ++y)
+      {
+        if(shouldCancel)
+        {
+          return;
+        }
+        const usize offset = y * parameters.dims[0];
+        Voronoi1DEncodedSign(nonstd::span<float32>(featurePlaneData + offset, parameters.dims[0]), parameters.dims[0], parameters.useSpacing, parameters.spacing[0], localG, localH);
+      }
+    };
+    ParallelDataAlgorithm xParallelAlgorithm;
+    xParallelAlgorithm.setRange(0, parameters.dims[1]);
+    xParallelAlgorithm.execute(transformXRows);
+
+    auto transformYColumns = [&](const Range& columnRange) {
+      std::vector<float32> localG(parameters.dims[1]);
+      std::vector<float32> localH(parameters.dims[1]);
+      std::vector<float32> localLine(parameters.dims[1]);
+      float32* featurePlaneData = featurePlane.data();
+      float32* lineData = localLine.data();
+      for(usize x = columnRange.min(); x < columnRange.max(); ++x)
+      {
+        if(shouldCancel)
+        {
+          return;
+        }
+        for(usize y = 0; y < parameters.dims[1]; ++y)
+        {
+          lineData[y] = featurePlaneData[y * parameters.dims[0] + x];
+        }
+        Voronoi1DEncodedSign(nonstd::span<float32>(lineData, parameters.dims[1]), parameters.dims[1], parameters.useSpacing, parameters.spacing[1], localG, localH);
+        for(usize y = 0; y < parameters.dims[1]; ++y)
+        {
+          featurePlaneData[y * parameters.dims[0] + x] = lineData[y];
+        }
+      }
+    };
+    ParallelDataAlgorithm yParallelAlgorithm;
+    yParallelAlgorithm.setRange(0, parameters.dims[0]);
+    yParallelAlgorithm.execute(transformYColumns);
+
+    ioWorker.join();
+    if(ioWorker.result().invalid())
+    {
+      return ioWorker.result();
+    }
+    if(shouldCancel)
+    {
+      return {};
+    }
+    if(Result<> result =
+           RunMaurerIoCallSafely([&]() { return workStore.copyFromBuffer(static_cast<usize>(z) * slice, nonstd::span<const float32>(featurePlane.data(), slice)); }, "3D XY scratch plane write");
+       result.invalid())
+    {
+      return result;
+    }
+
+    if(!is2D && hasNext)
+    {
+      std::swap(prev, cur);
+      std::swap(cur, next);
+    }
+  }
+  hasBoundary = boundaryFound.load(std::memory_order_relaxed);
+  return {};
+}
+
+/**
+ * @brief Transforms bounded XZ staging buffers along Z and writes output extents.
+ * @tparam T Integer input value type carried by the shared parameter seam.
+ * @tparam WorkStoreT Store type that provides flat bulk reads.
+ * @param workStore Provides transformed XY planes in Z-Y-X order.
+ * @param outputStore Receives final signed distances through Y-batch extents.
+ * @param parameters Defines dimensions, distance form, spacing, and worker limits.
+ * @param shouldCancel Stops before the next store call when true.
+ * @param hasBoundary True when initialization found at least one boundary voxel.
+ * @return An empty result on success or cancellation, or the first store error.
+ *
+ * The I/O thread writes the previous batch and gathers the next batch while workers transform the current batch.
+ */
+template <class T, class WorkStoreT>
+Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32>& outputStore, const Maurer3DSlabParameters<T>& parameters, const std::atomic_bool& shouldCancel, bool hasBoundary)
+{
+  const usize nX = parameters.dims[0];
+  const usize nY = parameters.dims[1];
+  const usize nZ = parameters.dims[2];
+  if(nZ == 1)
+  {
+    std::vector<float32> plane(nX * nY);
+    if(Result<> result = RunMaurerIoCallSafely([&]() { return workStore.copyIntoBuffer(0, nonstd::span<float32>(plane.data(), plane.size())); }, "2D XY scratch plane read"); result.invalid())
+    {
+      return result;
+    }
+    if(!parameters.squaredDistance || !hasBoundary)
+    {
+      auto finalizeValues = [&](const Range& valueRange) {
+        float32* planeData = plane.data();
+        for(usize index = valueRange.min(); index < valueRange.max(); ++index)
+        {
+          if(parameters.squaredDistance)
+          {
+            planeData[index] = std::abs(planeData[index]);
+          }
+          else
+          {
+            const float32 magnitude = std::sqrt(std::abs(planeData[index]));
+            planeData[index] = std::signbit(planeData[index]) ? -magnitude : magnitude;
+          }
+        }
+      };
+      ParallelDataAlgorithm finalizeParallelAlgorithm;
+      finalizeParallelAlgorithm.setRange(0, plane.size());
+      finalizeParallelAlgorithm.execute(finalizeValues);
+    }
+    if(shouldCancel)
+    {
+      return {};
+    }
+    return RunMaurerIoCallSafely([&]() { return outputStore.copyFromBuffer(0, nonstd::span<const float32>(plane.data(), plane.size())); }, "2D output plane write");
+  }
+
+  usize maxYRows = parameters.maxYRows;
+  if(maxYRows == 0)
+  {
+    // This limit bounds both fallback staging buffers together.
+    constexpr usize k_DefaultMaxStagingBytes = 16ULL * 1024ULL * 1024ULL;
+    const usize maxStagedValues = std::max<usize>(1, (k_DefaultMaxStagingBytes / 2) / sizeof(float32));
+    maxYRows = std::max<usize>(1, std::min(nY, maxStagedValues / nX / nZ));
+  }
+  else
+  {
+    maxYRows = std::min(maxYRows, nY);
+  }
+  if(const auto outputChunkShape = outputStore.getChunkShape(); outputChunkShape.has_value() && outputChunkShape->size() >= 3)
+  {
+    maxYRows = AlignMaurer3DYBatchRows(maxYRows, (*outputChunkShape)[1]);
+  }
+
+  const usize stagingValues = maxYRows * nX * nZ;
+  std::vector<float32> stagingA(stagingValues);
+  std::vector<float32> stagingB(stagingValues);
+  std::vector<float32>* current = &stagingA;
+  std::vector<float32>* other = &stagingB;
+  const usize batchCount = 1 + (nY - 1) / maxYRows;
+  const usize firstYCount = std::min(maxYRows, nY);
+  if(Result<> result = GatherMaurer3DZBatch(workStore, nonstd::span<float32>(current->data(), current->size()), parameters.dims, 0, firstYCount, shouldCancel); result.invalid())
+  {
+    return result;
+  }
+  if(shouldCancel)
+  {
+    return {};
+  }
+
+  for(usize batchIndex = 0; batchIndex < batchCount; ++batchIndex)
+  {
+    const usize yBegin = batchIndex * maxYRows;
+    const usize yCount = std::min(maxYRows, nY - yBegin);
+    const usize valuesPerPlaneBlock = yCount * nX;
+    const usize batchValues = valuesPerPlaneBlock * nZ;
+    MaurerIoWorker ioWorker;
+    // The I/O thread exclusively owns other until join. Compute workers exclusively own current during this interval.
+    ioWorker.start([&, batchIndex, other]() -> Result<> {
+      if(batchIndex > 0)
+      {
+        const usize previousYBegin = (batchIndex - 1) * maxYRows;
+        const usize previousYCount = std::min(maxYRows, nY - previousYBegin);
+        const usize previousBatchValues = previousYCount * nX * nZ;
+        const Extent previousExtent({0, static_cast<uint64>(previousYBegin), 0}, {static_cast<uint64>(nZ - 1), static_cast<uint64>(previousYBegin + previousYCount - 1), static_cast<uint64>(nX - 1)});
+        if(Result<> result = WriteExtentSafely(outputStore, previousExtent, nonstd::span<const float32>(other->data(), previousBatchValues), shouldCancel, "3D Z-pass output"); result.invalid())
+        {
+          return result;
+        }
+      }
+      if(batchIndex + 1 < batchCount)
+      {
+        const usize nextYBegin = (batchIndex + 1) * maxYRows;
+        const usize nextYCount = std::min(maxYRows, nY - nextYBegin);
+        return GatherMaurer3DZBatch(workStore, nonstd::span<float32>(other->data(), other->size()), parameters.dims, nextYBegin, nextYCount, shouldCancel);
+      }
+      return {};
+    });
+
+    auto transformZLines = [&](const Range& lineRange) {
+      std::vector<float32> localG(nZ);
+      std::vector<float32> localH(nZ);
+      std::vector<float32> localLine(nZ);
+      float32* currentData = current->data();
+      float32* lineData = localLine.data();
+      for(usize line = lineRange.min(); line < lineRange.max(); ++line)
+      {
+        if(shouldCancel)
+        {
+          return;
+        }
+        for(usize z = 0; z < nZ; ++z)
+        {
+          lineData[z] = currentData[z * valuesPerPlaneBlock + line];
+        }
+        Voronoi1DEncodedSign(nonstd::span<float32>(lineData, nZ), nZ, parameters.useSpacing, parameters.spacing[2], localG, localH);
+        for(usize z = 0; z < nZ; ++z)
+        {
+          currentData[z * valuesPerPlaneBlock + line] = lineData[z];
+        }
+      }
+    };
+    ExecuteMaurer3DParallel(valuesPerPlaneBlock, parameters.workerCount, transformZLines);
+
+    if(!shouldCancel && (!parameters.squaredDistance || !hasBoundary))
+    {
+      auto finalizeValues = [&](const Range& valueRange) {
+        float32* currentData = current->data();
+        for(usize index = valueRange.min(); index < valueRange.max(); ++index)
+        {
+          if(parameters.squaredDistance)
+          {
+            currentData[index] = std::abs(currentData[index]);
+          }
+          else
+          {
+            const float32 magnitude = std::sqrt(std::abs(currentData[index]));
+            currentData[index] = std::signbit(currentData[index]) ? -magnitude : magnitude;
+          }
+        }
+      };
+      ExecuteMaurer3DParallel(batchValues, parameters.workerCount, finalizeValues);
+    }
+
+    ioWorker.join();
+    if(ioWorker.result().invalid())
+    {
+      return ioWorker.result();
+    }
+    if(shouldCancel)
+    {
+      return {};
+    }
+    if(batchIndex + 1 < batchCount)
+    {
+      // The swap makes the gathered next batch current and preserves the transformed batch in other for the next write.
+      std::swap(current, other);
+    }
+  }
+
+  const usize lastYBegin = (batchCount - 1) * maxYRows;
+  const usize lastYCount = nY - lastYBegin;
+  const usize lastBatchValues = lastYCount * nX * nZ;
+  const Extent lastExtent({0, static_cast<uint64>(lastYBegin), 0}, {static_cast<uint64>(nZ - 1), static_cast<uint64>(lastYBegin + lastYCount - 1), static_cast<uint64>(nX - 1)});
+  return WriteExtentSafely(outputStore, lastExtent, nonstd::span<const float32>(current->data(), lastBatchValues), shouldCancel, "3D Z-pass output");
+}
 } // namespace detail
 
 /**
@@ -1192,10 +1842,13 @@ private:
  * @tparam T Integer input value type.
  *
  * Fused initialization, X, and Y passes stream one Z plane at a time.
- * The Z pass transforms one bounded Y-row batch across all Z planes and writes the signed result immediately.
+ * One serialized I/O thread prefetches the next input plane while workers transform the current plane.
+ * The Z pass alternates two bounded XZ staging buffers.
+ * The I/O thread writes the previous Y batch and gathers the next batch while workers transform the current batch.
  * Each work value retains the inside or outside state in its sign. Later passes do not reread the input.
- * Bounded memory peaks at three input planes plus one float32 work plane during initialization. The Z pass instead holds one XZ slab of Y rows. Both peaks add line scratch for the longest axis.
- * Store I/O remains serial while parallel workers access only staged local buffers.
+ * Initialization holds three input planes and one float32 work plane. The Z pass holds two staged XZ bands.
+ * Both peaks add worker line scratch for the longest axis.
+ * Store I/O remains serial while parallel workers access only resident buffers.
  */
 template <class T>
 class MaurerDistanceSlab
@@ -1254,7 +1907,7 @@ public:
         return ConvertResult(std::move(scratchResult));
       }
       std::unique_ptr<detail::SweepTemporaryStore<float32>> workScratch = std::move(scratchResult.value());
-      return Run3D(*workScratch, nX, nY, nZ, slice);
+      return Run3D(*workScratch);
     }
 
     const std::string workingFormat = detail::SelectDistanceWorkingDataFormat(m_In.getStoreType(), m_In.getDataFormat(), m_Out.getStoreType(), m_Out.getDataFormat());
@@ -1265,7 +1918,7 @@ public:
       workChunkHint = detail::SelectMaurer3DScratchChunkHint(*outputChunkShape, workTupleShape);
     }
     auto workPtr = DataStoreUtilities::CreateDataStoreWithFormat<float32>(workingFormat, workTupleShape, std::vector<usize>{1}, IDataAction::Mode::Execute, workChunkHint);
-    return Run3D(*workPtr, nX, nY, nZ, slice);
+    return Run3D(*workPtr);
   }
 
 private:
@@ -1274,11 +1927,11 @@ private:
   // transfers, no multi-dimensional extent API -- while the bounded-resident-memory route keeps passing a real
   // AbstractDataStore<float32> (a plain in-core allocation in that case, so an extent API costs nothing there).
   template <class WorkStoreT>
-  Result<> Run3D(WorkStoreT& work, int64 nX, int64 nY, int64 nZ, usize slice)
+  Result<> Run3D(WorkStoreT& work)
   {
-    const float32 spacing[3] = {m_Spacing[0], m_Spacing[1], m_Spacing[2]};
+    const detail::Maurer3DSlabParameters<T> parameters{m_Dims, m_Bg, m_InsidePos, m_Squared, m_UseSpacing, m_Spacing, m_Max3DYRows, m_Max3DWorkers};
     bool hasBoundary = false;
-    if(Result<> result = StreamInitAndTransformXY(work, nX, nY, nZ, slice, spacing, hasBoundary); result.invalid())
+    if(Result<> result = detail::StreamMaurer3DInitAndTransformXY(m_In, work, parameters, m_ShouldCancel, hasBoundary); result.invalid())
     {
       return result;
     }
@@ -1287,137 +1940,7 @@ private:
       return {};
     }
 
-    if(nZ == 1)
-    {
-      std::vector<float32> plane(slice);
-      if(Result<> result = work.copyIntoBuffer(0, nonstd::span<float32>(plane.data(), plane.size())); result.invalid())
-      {
-        return result;
-      }
-      if(!m_Squared || !hasBoundary)
-      {
-        auto finalizeValues = [&](const Range& valueRange) {
-          for(usize index = valueRange.min(); index < valueRange.max(); ++index)
-          {
-            if(m_Squared)
-            {
-              plane[index] = std::abs(plane[index]);
-            }
-            else
-            {
-              const float32 magnitude = std::sqrt(std::abs(plane[index]));
-              plane[index] = std::signbit(plane[index]) ? -magnitude : magnitude;
-            }
-          }
-        };
-        ParallelDataAlgorithm finalizeParallelAlgorithm;
-        finalizeParallelAlgorithm.setRange(0, plane.size());
-        finalizeParallelAlgorithm.execute(finalizeValues);
-      }
-      return m_Out.copyFromBuffer(0, nonstd::span<const float32>(plane.data(), plane.size()));
-    }
-
-    usize maxYRows = m_Max3DYRows;
-    if(maxYRows == 0)
-    {
-      constexpr usize k_DefaultMaxStagingBytes = 16ULL * 1024ULL * 1024ULL;
-      constexpr usize k_BytesPerStagedValue = sizeof(float32);
-      const usize maxStagedValues = std::max<usize>(1, k_DefaultMaxStagingBytes / k_BytesPerStagedValue);
-      maxYRows = std::max<usize>(1, std::min<usize>(m_Dims[1], maxStagedValues / m_Dims[0] / m_Dims[2]));
-    }
-    else
-    {
-      maxYRows = std::min(maxYRows, m_Dims[1]);
-    }
-    if(const auto outputChunkShape = m_Out.getChunkShape(); outputChunkShape.has_value() && outputChunkShape->size() >= 3)
-    {
-      maxYRows = detail::AlignMaurer3DYBatchRows(maxYRows, (*outputChunkShape)[1]);
-    }
-    std::vector<float32> slab;
-    for(usize yBegin = 0; yBegin < m_Dims[1]; yBegin += maxYRows)
-    {
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      const usize yCount = std::min(maxYRows, m_Dims[1] - yBegin);
-      const usize valuesPerPlaneBlock = yCount * m_Dims[0];
-      const usize batchValues = valuesPerPlaneBlock * m_Dims[2];
-      slab.resize(batchValues);
-      // The work store exposes flat offsets. One transfer gathers the contiguous Y band from each Z plane.
-      // The Z-Y-X layout keeps all X values for the selected Y rows contiguous.
-      for(usize z = 0; z < static_cast<usize>(nZ); ++z)
-      {
-        if(m_ShouldCancel)
-        {
-          return {};
-        }
-        const usize planeRowOffset = (z * m_Dims[1] + yBegin) * m_Dims[0];
-        if(Result<> result = work.copyIntoBuffer(planeRowOffset, nonstd::span<float32>(slab.data() + z * valuesPerPlaneBlock, valuesPerPlaneBlock)); result.invalid())
-        {
-          return result;
-        }
-      }
-      auto transformZLines = [&](const Range& lineRange) {
-        std::vector<float32> localG(static_cast<usize>(nZ));
-        std::vector<float32> localH(static_cast<usize>(nZ));
-        std::vector<float32> localLine(static_cast<usize>(nZ));
-        for(usize line = lineRange.min(); line < lineRange.max(); ++line)
-        {
-          if(m_ShouldCancel)
-          {
-            return;
-          }
-          for(usize z = 0; z < m_Dims[2]; ++z)
-          {
-            localLine[z] = slab[z * valuesPerPlaneBlock + line];
-          }
-          detail::Voronoi1DEncodedSign(nonstd::span<float32>(localLine.data(), m_Dims[2]), m_Dims[2], m_UseSpacing, spacing[2], localG, localH);
-          for(usize z = 0; z < m_Dims[2]; ++z)
-          {
-            slab[z * valuesPerPlaneBlock + line] = localLine[z];
-          }
-        }
-      };
-      ParallelDataAlgorithm parallelAlgorithm;
-      parallelAlgorithm.setRange(0, valuesPerPlaneBlock);
-#ifdef SIMPLNX_ENABLE_MULTICORE
-      tbb::task_arena arena(static_cast<int>(m_Max3DWorkers));
-      arena.execute([&]() { parallelAlgorithm.execute(transformZLines); });
-#else
-      parallelAlgorithm.execute(transformZLines);
-#endif
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      if(!m_Squared || !hasBoundary)
-      {
-        auto finalizeValues = [&](const Range& valueRange) {
-          for(usize index = valueRange.min(); index < valueRange.max(); ++index)
-          {
-            if(m_Squared)
-            {
-              slab[index] = std::abs(slab[index]);
-            }
-            else
-            {
-              const float32 magnitude = std::sqrt(std::abs(slab[index]));
-              slab[index] = std::signbit(slab[index]) ? -magnitude : magnitude;
-            }
-          }
-        };
-        ParallelDataAlgorithm finalizeParallelAlgorithm;
-        finalizeParallelAlgorithm.setRange(0, slab.size());
-        finalizeParallelAlgorithm.execute(finalizeValues);
-      }
-      const Extent outputExtent({0, static_cast<uint64>(yBegin), 0}, {static_cast<uint64>(m_Dims[2] - 1), static_cast<uint64>(yBegin + yCount - 1), static_cast<uint64>(m_Dims[0] - 1)});
-      if(Result<> result = WriteExtentSafely(m_Out, outputExtent, nonstd::span<const float32>(slab.data(), slab.size()), "3D Z-pass output"); result.invalid())
-      {
-        return result;
-      }
-    }
-    return {};
+    return detail::RunMaurer3DZPass(work, m_Out, parameters, m_ShouldCancel, hasBoundary);
   }
 
   template <class U>
@@ -1429,23 +1952,6 @@ private:
     }
     const Error& error = result.errors().front();
     return fmt::format("{} (provider code {})", error.message, error.code);
-  }
-
-  template <class U>
-  Result<> WriteExtentSafely(AbstractDataStore<U>& store, const Extent& extent, nonstd::span<const U> values, std::string_view context)
-  {
-    if(m_ShouldCancel)
-    {
-      return {};
-    }
-    try
-    {
-      store.writeExtent(extent, values);
-    } catch(const std::exception& exception)
-    {
-      return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, exception.what()));
-    }
-    return {};
   }
 
   Result<> WriteTemporaryRecordsSafely(ITemporaryRecordStore& store, uint64 recordOffset, uint64 recordCount, nonstd::span<const std::byte> records, std::string_view context)
@@ -1664,7 +2170,8 @@ private:
                 transposed[x * rowCount + localY] = rowWork[localY * nx + x];
               }
             }
-            if(Result<> result = WriteExtentSafely(*transposedWork, transposedExtent, nonstd::span<const float32>(transposed.data(), transposed.size()), "2D work transpose"); result.invalid())
+            if(Result<> result = detail::WriteExtentSafely(*transposedWork, transposedExtent, nonstd::span<const float32>(transposed.data(), transposed.size()), m_ShouldCancel, "2D work transpose");
+               result.invalid())
             {
               return result;
             }
@@ -1679,7 +2186,8 @@ private:
                 transposed[x * rowCount + localY] = rowInside[localY * nx + x];
               }
             }
-            if(Result<> result = WriteExtentSafely(*transposedInside, transposedExtent, nonstd::span<const uint8>(transposed.data(), transposed.size()), "2D inside transpose"); result.invalid())
+            if(Result<> result = detail::WriteExtentSafely(*transposedInside, transposedExtent, nonstd::span<const uint8>(transposed.data(), transposed.size()), m_ShouldCancel, "2D inside transpose");
+               result.invalid())
             {
               return result;
             }
@@ -1787,7 +2295,8 @@ private:
               return result;
             }
             const Extent insideExtent({0, static_cast<uint64>(chunk.begin), static_cast<uint64>(y)}, {0, static_cast<uint64>(chunk.begin + chunk.count - 1), static_cast<uint64>(y)});
-            if(Result<> result = WriteExtentSafely(*transposedInside, insideExtent, nonstd::span<const uint8>(insideValues.data(), chunk.count), "2D spill-X inside transpose"); result.invalid())
+            if(Result<> result = detail::WriteExtentSafely(*transposedInside, insideExtent, nonstd::span<const uint8>(insideValues.data(), chunk.count), m_ShouldCancel, "2D spill-X inside transpose");
+               result.invalid())
             {
               return result;
             }
@@ -1796,7 +2305,7 @@ private:
         }
         auto writeTransposedX = [&](usize blockBegin, nonstd::span<float32> values, nonstd::span<const uint8>) {
           const Extent workExtent({0, static_cast<uint64>(blockBegin), static_cast<uint64>(y)}, {0, static_cast<uint64>(blockBegin + values.size() - 1), static_cast<uint64>(y)});
-          return WriteExtentSafely(*transposedWork, workExtent, nonstd::span<const float32>(values.data(), values.size()), "2D spill-X work transpose");
+          return detail::WriteExtentSafely(*transposedWork, workExtent, nonstd::span<const float32>(values.data(), values.size()), m_ShouldCancel, "2D spill-X work transpose");
         };
         if(Result<> result = detail::ExternalVoronoi1DToSink(*xLine, *xInside, 0, nx, m_InsidePos, m_UseSpacing, m_Spacing[0], blockValues, *envelopeG, *envelopeH, writeTransposedX, m_ShouldCancel);
            result.invalid())
@@ -1949,7 +2458,7 @@ private:
             }
           }
           const Extent outputExtent({0, static_cast<uint64>(blockBegin), static_cast<uint64>(x)}, {0, static_cast<uint64>(blockBegin + values.size() - 1), static_cast<uint64>(x)});
-          return WriteExtentSafely(m_Out, outputExtent, nonstd::span<const float32>(values.data(), values.size()), "2D spill-Y output");
+          return detail::WriteExtentSafely(m_Out, outputExtent, nonstd::span<const float32>(values.data(), values.size()), m_ShouldCancel, "2D spill-Y output");
         };
         if(Result<> result = detail::ExternalVoronoi1DToSink(*transposedWork, *transposedInside, offset, ny, m_InsidePos, m_UseSpacing, m_Spacing[1], blockValues, *envelopeG, *envelopeH, writeOutputY,
                                                              m_ShouldCancel);
@@ -1959,238 +2468,6 @@ private:
         }
       }
     }
-    return {};
-  }
-
-  /**
-   * @brief Initializes and transforms each resident XY plane before one bulk work-store write.
-   * @tparam WorkStoreT Store type that provides flat bulk transfers.
-   * @param work Receives each transformed plane.
-   * @param nX Number of X values.
-   * @param nY Number of Y values.
-   * @param nZ Number of Z values.
-   * @param slice Number of values in one XY plane.
-   * @param spacing Image spacing in X-Y-Z order.
-   * @param hasBoundary Receives true when the complete scan finds a boundary voxel.
-   * @return An error from an input read or work-store write.
-   *
-   * The rolling input window keeps store I/O serial. Parallel workers access only resident plane buffers.
-   */
-  template <class WorkStoreT>
-  Result<> StreamInitAndTransformXY(WorkStoreT& work, int64 nX, int64 nY, int64 nZ, usize slice, const float32 spacing[3], bool& hasBoundary)
-  {
-    constexpr float32 k_Max = std::numeric_limits<float32>::max();
-    const bool is2D = (nZ == 1);
-    std::vector<T> prev(slice), cur(slice), next(slice);
-    std::vector<float32> featurePlane(slice);
-    const std::array<int64, 9> adjacentPlaneOffsets = {0, -1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
-    const std::array<int64, 8> currentPlaneOffsets = {-1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
-    std::atomic_bool boundaryFound{false};
-    auto flat2d = [nX](int64 x, int64 y) { return static_cast<usize>(y * nX + x); };
-
-    for(int64 z = 0; z < nZ; ++z)
-    {
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      if(z == 0)
-      {
-        if(Result<> r = m_In.copyIntoBuffer(0, nonstd::span<T>(cur.data(), slice)); r.invalid())
-        {
-          return r;
-        }
-        if(!is2D)
-        {
-          if(Result<> r = m_In.copyIntoBuffer(slice, nonstd::span<T>(next.data(), slice)); r.invalid())
-          {
-            return r;
-          }
-        }
-      }
-      const bool hasPrev = z > 0;
-      const bool hasNext = z < nZ - 1;
-      auto initializeRows = [&](const Range& rowRange) {
-        for(usize yIndex = rowRange.min(); yIndex < rowRange.max(); ++yIndex)
-        {
-          if(m_ShouldCancel)
-          {
-            return;
-          }
-          const int64 y = static_cast<int64>(yIndex);
-          const T* prevData = prev.data();
-          const T* curData = cur.data();
-          const T* nextData = next.data();
-          float32* featurePlaneData = featurePlane.data();
-          bool rowHasBoundary = false;
-          auto initializeBoundedVoxel = [&](int64 x) {
-            const usize p2d = flat2d(x, y);
-            const bool obj = curData[p2d] != m_Bg;
-            bool boundary = false;
-            if(obj)
-            {
-              const int64 wzLo = is2D ? 0 : -1;
-              const int64 wzHi = is2D ? 0 : 1;
-              for(int64 wz = wzLo; wz <= wzHi && !boundary; ++wz)
-              {
-                for(int64 wy = -1; wy <= 1 && !boundary; ++wy)
-                {
-                  for(int64 wx = -1; wx <= 1 && !boundary; ++wx)
-                  {
-                    if(wx == 0 && wy == 0 && wz == 0)
-                    {
-                      continue;
-                    }
-                    const int64 ax = x + wx;
-                    const int64 ay = y + wy;
-                    if(ax < 0 || ay < 0 || ax >= nX || ay >= nY || (wz < 0 && !hasPrev) || (wz > 0 && !hasNext))
-                    {
-                      continue; // ITK ignores out-of-bounds neighbors because the image border is not background.
-                    }
-                    const T neighborValue = (wz == 0) ? curData[flat2d(ax, ay)] : (wz < 0) ? prevData[flat2d(ax, ay)] : nextData[flat2d(ax, ay)];
-                    if(neighborValue == m_Bg)
-                    {
-                      boundary = true;
-                    }
-                  }
-                }
-              }
-            }
-            featurePlaneData[p2d] = detail::MaurerSignedValue(boundary ? 0.0f : k_Max, obj, m_InsidePos);
-            if(boundary)
-            {
-              rowHasBoundary = true;
-            }
-          };
-
-          const bool isInteriorRow = hasPrev && hasNext && y >= 1 && y < nY - 1 && nX > 2;
-          if(!isInteriorRow)
-          {
-            for(int64 x = 0; x < nX; ++x)
-            {
-              initializeBoundedVoxel(x);
-            }
-          }
-          else
-          {
-            initializeBoundedVoxel(0);
-            for(int64 x = 1; x < nX - 1; ++x)
-            {
-              const usize p2d = flat2d(x, y);
-              const bool obj = curData[p2d] != m_Bg;
-              bool boundary = false;
-              if(obj)
-              {
-                const int64 center = static_cast<int64>(p2d);
-                for(const int64 offset : adjacentPlaneOffsets)
-                {
-                  const usize neighborIndex = static_cast<usize>(center + offset);
-                  if(prevData[neighborIndex] == m_Bg || nextData[neighborIndex] == m_Bg)
-                  {
-                    boundary = true;
-                    break;
-                  }
-                }
-                if(!boundary)
-                {
-                  for(const int64 offset : currentPlaneOffsets)
-                  {
-                    if(curData[static_cast<usize>(center + offset)] == m_Bg)
-                    {
-                      boundary = true;
-                      break;
-                    }
-                  }
-                }
-              }
-              featurePlaneData[p2d] = detail::MaurerSignedValue(boundary ? 0.0f : k_Max, obj, m_InsidePos);
-              if(boundary)
-              {
-                rowHasBoundary = true;
-              }
-            }
-            initializeBoundedVoxel(nX - 1);
-          }
-          if(rowHasBoundary && !boundaryFound.load(std::memory_order_relaxed))
-          {
-            boundaryFound.store(true, std::memory_order_relaxed);
-          }
-        }
-      };
-      ParallelDataAlgorithm initializeParallelAlgorithm;
-      initializeParallelAlgorithm.setRange(0, static_cast<usize>(nY));
-      initializeParallelAlgorithm.execute(initializeRows);
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      auto transformXRows = [&](const Range& rowRange) {
-        std::vector<float32> localG(static_cast<usize>(nX));
-        std::vector<float32> localH(static_cast<usize>(nX));
-        for(usize y = rowRange.min(); y < rowRange.max(); ++y)
-        {
-          if(m_ShouldCancel)
-          {
-            return;
-          }
-          const usize offset = y * static_cast<usize>(nX);
-          detail::Voronoi1DEncodedSign(nonstd::span<float32>(featurePlane.data() + offset, static_cast<usize>(nX)), static_cast<usize>(nX), m_UseSpacing, spacing[0], localG, localH);
-        }
-      };
-      ParallelDataAlgorithm xParallelAlgorithm;
-      xParallelAlgorithm.setRange(0, static_cast<usize>(nY));
-      xParallelAlgorithm.execute(transformXRows);
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      auto transformYColumns = [&](const Range& columnRange) {
-        std::vector<float32> localG(static_cast<usize>(nY));
-        std::vector<float32> localH(static_cast<usize>(nY));
-        std::vector<float32> localLine(static_cast<usize>(nY));
-        for(usize x = columnRange.min(); x < columnRange.max(); ++x)
-        {
-          if(m_ShouldCancel)
-          {
-            return;
-          }
-          for(usize y = 0; y < static_cast<usize>(nY); ++y)
-          {
-            localLine[y] = featurePlane[y * static_cast<usize>(nX) + x];
-          }
-          detail::Voronoi1DEncodedSign(nonstd::span<float32>(localLine.data(), static_cast<usize>(nY)), static_cast<usize>(nY), m_UseSpacing, spacing[1], localG, localH);
-          for(usize y = 0; y < static_cast<usize>(nY); ++y)
-          {
-            featurePlane[y * static_cast<usize>(nX) + x] = localLine[y];
-          }
-        }
-      };
-      ParallelDataAlgorithm yParallelAlgorithm;
-      yParallelAlgorithm.setRange(0, static_cast<usize>(nX));
-      yParallelAlgorithm.execute(transformYColumns);
-      if(m_ShouldCancel)
-      {
-        return {};
-      }
-      if(Result<> r = work.copyFromBuffer(static_cast<usize>(z) * slice, nonstd::span<const float32>(featurePlane.data(), slice)); r.invalid())
-      {
-        return r;
-      }
-      // roll the window: cur->prev, next->cur, read new next
-      if(!is2D && hasNext)
-      {
-        std::swap(prev, cur);
-        std::swap(cur, next);
-        if(z + 2 < nZ)
-        {
-          if(Result<> r = m_In.copyIntoBuffer(static_cast<usize>(z + 2) * slice, nonstd::span<T>(next.data(), slice)); r.invalid())
-          {
-            return r;
-          }
-        }
-      }
-    }
-    hasBoundary = boundaryFound.load(std::memory_order_relaxed);
     return {};
   }
 
