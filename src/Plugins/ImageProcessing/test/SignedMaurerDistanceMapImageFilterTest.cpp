@@ -11,6 +11,7 @@
 
 #include <catch2/catch.hpp>
 
+#include <bit>
 #include <limits>
 #include <memory>
 #include <string>
@@ -58,10 +59,89 @@ struct MaurerConfig
 const std::vector<MaurerConfig> k_ParityConfigs = {{"3D 12x12x12", 12, 12, 12}, {"2D 20x16x1", 20, 16, 1}};
 } // namespace
 
+TEST_CASE("ImageProcessing::SignedMaurerDistanceMapImageFilter: algorithm paths agree on in-memory stores", "[ImageProcessing][SignedMaurerDistanceMapImageFilter]")
+{
+  UnitTest::LoadPlugins();
+  constexpr usize dimX = 5;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 7;
+  constexpr usize valueCount = dimX * dimY * dimZ;
+  const DataPath outputPath({"Image Geometry", "CellData", "Output"});
+
+  for(const std::string& inputCase : {std::string{"hand pattern"}, std::string{"all background"}, std::string{"all foreground"}})
+  {
+    const std::vector<uint8> pattern =
+        inputCase == "hand pattern" ? rt::MakeHolePattern<uint8>(dimX, dimY, dimZ, uint8{0}, uint8{1}) : std::vector<uint8>(valueCount, inputCase == "all foreground" ? uint8{1} : uint8{0});
+    for(const bool insideIsPositive : {false, true})
+    {
+      for(const bool squaredDistance : {true, false})
+      {
+        CAPTURE(inputCase, insideIsPositive, squaredDistance);
+        std::vector<float32> reference(valueCount);
+        {
+          const UnitTest::PreferencesSentinel prefsSentinel(DataStorageMode::ForceInCore, 0);
+          DataStructure referenceDataStructure;
+          const DataPath referenceInput = rt::BuildImageFromPattern<uint8>(referenceDataStructure, dimX, dimY, dimZ, pattern);
+          MaurerFilter referenceFilter;
+          RunMaurer(referenceFilter, referenceDataStructure, referenceInput, insideIsPositive, squaredDistance, false, 0.0);
+          const DataArray<float32>* referenceArray = nullptr;
+          REQUIRE_NOTHROW(referenceArray = &referenceDataStructure.getDataRefAs<DataArray<float32>>(outputPath));
+          SIMPLNX_RESULT_REQUIRE_VALID(referenceArray->getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(reference.data(), reference.size())));
+        }
+
+        for(const auto scenario : UnitTest::SelectAlgorithmTestScenariosForInMemoryStores())
+        {
+          DYNAMIC_SECTION(inputCase << ", insideIsPositive=" << insideIsPositive << ", squaredDistance=" << squaredDistance << ", scenario=" << scenario)
+          {
+            UnitTest::AlgorithmTestScope scope(scenario);
+            auto& budgetManager = CacheMemoryBudgetManager::instance();
+            const uint64 previousBudget = budgetManager.budgetBytes();
+            struct BudgetRestorer
+            {
+              CacheMemoryBudgetManager& budgetManager;
+              uint64 previousBudget;
+
+              ~BudgetRestorer()
+              {
+                budgetManager.setBudgetBytes(previousBudget);
+              }
+            };
+            const BudgetRestorer budgetRestorer{budgetManager, previousBudget};
+            budgetManager.clear();
+            // The 1,024-byte budget grants less memory than each worker scratch needs.
+            // The planner fails, so the default single-worker slab runs.
+            budgetManager.setBudgetBytes(1024);
+
+            DataStructure dataStructure;
+            const DataPath inputPath = rt::BuildImageFromPattern<uint8>(dataStructure, dimX, dimY, dimZ, pattern);
+            const IDataArray* inputArray = nullptr;
+            REQUIRE_NOTHROW(inputArray = &dataStructure.getDataRefAs<IDataArray>(inputPath));
+            scope.requireExpectedStore(*inputArray);
+
+            MaurerFilter filter;
+            RunMaurer(filter, dataStructure, inputPath, insideIsPositive, squaredDistance, false, 0.0, &scope);
+
+            const DataArray<float32>* outputArray = nullptr;
+            REQUIRE_NOTHROW(outputArray = &dataStructure.getDataRefAs<DataArray<float32>>(outputPath));
+            scope.requireExpectedStore(*outputArray);
+            std::vector<float32> actual(valueCount);
+            SIMPLNX_RESULT_REQUIRE_VALID(outputArray->getDataStoreRef().copyIntoBuffer(0, nonstd::span<float32>(actual.data(), actual.size())));
+            for(usize index = 0; index < actual.size(); ++index)
+            {
+              CAPTURE(index);
+              REQUIRE(std::bit_cast<uint32>(actual[index]) == std::bit_cast<uint32>(reference[index]));
+            }
+            UnitTest::CheckArraysInheritTupleDims(dataStructure);
+          }
+        }
+      }
+    }
+  }
+}
+
 // -----------------------------------------------------------------------------
-// (1) Live-ITK EXACT parity grid: integer types x {SquaredDistance on/off} x {InsideIsPositive on/off} x 3D + 2D on a
-//     binary hole-bearing image (object blobs on a background field). The signed Maurer distance transform is a fixed
-//     float32 output; the new filter must reproduce the legacy ITK output EXACTLY (no tolerance).
+// This grid compares integer types, distance modes, sign modes, and dimensions against live ITK.
+// The input contains binary holes. The float32 output must match exactly.
 // -----------------------------------------------------------------------------
 TEMPLATE_TEST_CASE("ImageProcessing::SignedMaurerDistanceMapImageFilter: Live-ITK exact parity grid", "[ImageProcessing][SignedMaurerDistanceMapImageFilter]", uint8, int16, int32)
 {

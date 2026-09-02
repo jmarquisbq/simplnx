@@ -5,6 +5,7 @@
 #include "simplnx/Common/Result.hpp"
 #include "simplnx/Common/Types.hpp"
 #include "simplnx/DataStructure/AbstractDataStore.hpp"
+#include "simplnx/DataStructure/DataStore.hpp"
 #include "simplnx/DataStructure/IDataArray.hpp"
 #include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
 #include "simplnx/Filter/IFilter.hpp"
@@ -23,6 +24,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -131,12 +133,12 @@ Result<usize> CalculateMaurerResidentWorkingMemoryBytes(const SizeVec3& dims)
   usize volumeValues = 0;
   usize bytesPerValue = 0;
   usize requiredBytes = 0;
-  if(!MaurerCheckedMultiply(dims[0], dims[1], planeValues) || !MaurerCheckedMultiply(planeValues, dims[2], volumeValues) ||
-     !MaurerCheckedAdd(sizeof(T), sizeof(float32) + sizeof(uint8), bytesPerValue) || !MaurerCheckedMultiply(volumeValues, bytesPerValue, requiredBytes))
+  if(!MaurerCheckedMultiply(dims[0], dims[1], planeValues) || !MaurerCheckedMultiply(planeValues, dims[2], volumeValues) || !MaurerCheckedAdd(sizeof(T), sizeof(float32), bytesPerValue) ||
+     !MaurerCheckedMultiply(volumeValues, bytesPerValue, requiredBytes))
   {
-    return MakeErrorResult<usize>(
-        -8359, fmt::format("Signed Maurer distance-map dimensions ({}) and input element size ({} bytes) overflow while sizing the resident input, transform, and inside-mask state.",
-                           StringUtilities::formatDimensions3D(dims), sizeof(T)));
+    return MakeErrorResult<usize>(-8359,
+                                  fmt::format("Signed Maurer distance-map dimensions ({}) and input element size ({} bytes) overflow while sizing the resident input copy and float32 transform state.",
+                                              StringUtilities::formatDimensions3D(dims), sizeof(T)));
   }
   return {requiredBytes};
 }
@@ -453,21 +455,31 @@ inline bool MaurerRemove(float32 d1, float32 d2, float32 df, float32 x1, float32
 }
 
 /**
- * @brief One 1D Maurer pass along a line of length @p nd (itk Voronoi()). @p line[i] holds the current SIGNED partial
- * squared distance, or +FLT_MAX where the pixel has not yet reached any feature; @p inside[i] is 1 iff the ORIGINAL
- * input pixel is inside the object (input != BackgroundValue). @p spacingD is the voxel spacing along this axis
- * (unused when @p useSpacing is false). @p g / @p h are reusable scratch vectors of length >= nd. Writes the refined
- * signed partial squared distance back into @p line. Faithful to ITK, including the build-loop iw = float(i)*float(sp)
- * vs the query-loop iw = float(i*sp) distinction and the per-pass sign re-application.
+ * @brief Runs one Maurer Voronoi pass along a line.
+ * @tparam HasEncodedInsideSign Selects whether each line value contains its final sign.
+ * @param line Contains signed partial squared distances. Encoded mode permits +FLT_MAX and -FLT_MAX for unreached values.
+ * @param inside Contains original inside states in explicit mode. Encoded mode accepts an empty span.
+ * @param nd Number of values in the line.
+ * @param insideIsPositive Selects a positive result for inside voxels in explicit mode.
+ * @param useSpacing Applies physical spacing when true.
+ * @param spacingD Physical spacing along the line axis.
+ * @param g Stores the reusable distance-envelope values.
+ * @param h Stores the reusable distance-envelope coordinates.
+ *
+ * Encoded mode preserves each input sign. Explicit mode reapplies the sign from @p inside after the pass.
+ * The implementation matches ITK's distinct float conversion order in the build and query loops.
  */
 template <bool HasEncodedInsideSign = false>
 void Voronoi1D(nonstd::span<float32> line, nonstd::span<const uint8> inside, usize nd, bool insideIsPositive, bool useSpacing, float32 spacingD, std::vector<float32>& g, std::vector<float32>& h)
 {
   constexpr float32 k_Max = std::numeric_limits<float32>::max();
+  // Raw pointers avoid the per-element span contract check in the line kernel.
+  float32* lineData = line.data();
+  const uint8* insideData = inside.data();
   int32 l = -1;
   for(usize i = 0; i < nd; ++i)
   {
-    const float32 di = line[i];
+    const float32 di = lineData[i];
     const float32 iw = useSpacing ? (static_cast<float32>(i) * spacingD) : static_cast<float32>(i);
     const bool isReached = HasEncodedInsideSign ? std::abs(di) != k_Max : di != k_Max;
     if(isReached)
@@ -492,7 +504,7 @@ void Voronoi1D(nonstd::span<float32> line, nonstd::span<const uint8> inside, usi
   }
   if(l == -1)
   {
-    return; // no features on this line -> leave it entirely +FLT_MAX
+    return; // No feature on this line: leave every value unchanged, including its encoded sign.
   }
   const int32 ns = l;
   l = 0;
@@ -501,7 +513,7 @@ void Voronoi1D(nonstd::span<float32> line, nonstd::span<const uint8> inside, usi
     bool encodedNegativeSign = false;
     if constexpr(HasEncodedInsideSign)
     {
-      encodedNegativeSign = std::signbit(line[i]);
+      encodedNegativeSign = std::signbit(lineData[i]);
     }
     // ITK's query loop uses float(i*spacing) (double-ish intermediate), unlike the build loop's float(i)*float(spacing).
     const float32 iw = useSpacing ? static_cast<float32>(static_cast<float64>(i) * static_cast<float64>(spacingD)) : static_cast<float32>(i);
@@ -518,23 +530,37 @@ void Voronoi1D(nonstd::span<float32> line, nonstd::span<const uint8> inside, usi
     }
     if constexpr(HasEncodedInsideSign)
     {
-      line[i] = encodedNegativeSign ? -d1 : d1;
+      lineData[i] = encodedNegativeSign ? -d1 : d1;
     }
     else
     {
       // Sign table (itk lines 405-426): inside==insideIsPositive -> +d1, else -d1.
-      line[i] = ((inside[i] != 0) == insideIsPositive) ? d1 : -d1;
+      lineData[i] = ((insideData[i] != 0) == insideIsPositive) ? d1 : -d1;
     }
   }
 }
 
-/** @brief Runs one 1D pass when each input work value already encodes its final sign. */
+/**
+ * @brief Runs one 1D pass when each input work value already encodes its final sign.
+ * @param line Signed distance values for one line.
+ * @param nd Number of values in the line.
+ * @param useSpacing Applies physical spacing when true.
+ * @param spacingD Physical spacing along the line axis.
+ * @param g Stores the distance-envelope values.
+ * @param h Stores the distance-envelope coordinates.
+ */
 inline void Voronoi1DEncodedSign(nonstd::span<float32> line, usize nd, bool useSpacing, float32 spacingD, std::vector<float32>& g, std::vector<float32>& h)
 {
   Voronoi1D<true>(line, {}, nd, false, useSpacing, spacingD, g, h);
 }
 
-/** @brief Applies the final distance sign for one original inside/outside state. */
+/**
+ * @brief Applies the selected sign convention to one distance magnitude.
+ * @param magnitude Nonnegative distance magnitude.
+ * @param inside True when the voxel is inside the object.
+ * @param insideIsPositive Selects a positive result for inside voxels when true.
+ * @return Signed distance value.
+ */
 inline float32 MaurerSignedValue(float32 magnitude, bool inside, bool insideIsPositive) noexcept
 {
   return inside == insideIsPositive ? magnitude : -magnitude;
@@ -542,8 +568,22 @@ inline float32 MaurerSignedValue(float32 magnitude, bool inside, bool insideIsPo
 
 /**
  * @brief Blockwise equivalent of Voronoi1D for a line whose envelope cannot reside in the fixed RAM budget.
- * Source, inside, and g/h envelope stores are accessed only through bounded bulk transfers. The output sink receives
- * ascending line-relative blocks after envelope construction completes, so it may write back to @p source safely.
+ * @tparam OutputSink Callable that receives each completed output block.
+ * @param source Provides source distances through bounded transfers.
+ * @param inside Provides inside-state values through bounded transfers.
+ * @param offset First source value for the line.
+ * @param nd Number of values in the line.
+ * @param insideIsPositive Selects a positive result for inside voxels when true.
+ * @param useSpacing Applies physical spacing when true.
+ * @param spacingD Physical spacing along the line axis.
+ * @param lineBlockValues Maximum number of values in one transfer block.
+ * @param gStore Stores the distance-envelope values.
+ * @param hStore Stores the distance-envelope coordinates.
+ * @param outputSink Receives completed blocks in ascending line order.
+ * @param shouldCancel Stops processing between transfer blocks when true.
+ * @return An error from a store transfer or output sink.
+ *
+ * Envelope construction finishes before the sink receives blocks. Therefore, the sink can safely write to the source store.
  */
 template <class OutputSink>
 Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const AbstractDataStore<uint8>& inside, usize offset, usize nd, bool insideIsPositive, bool useSpacing, float32 spacingD,
@@ -826,29 +866,49 @@ inline Result<> ExternalVoronoi1D(const AbstractDataStore<float32>& source, cons
 }
 
 /**
- * @brief Build the Maurer feature buffer + inside mask from an input store (itk BinaryThreshold + full-connectivity
- * BinaryContour). @p feature is +FLT_MAX everywhere except object-BOUNDARY pixels, which are 0 (the seed features);
- * @p inside is 1 iff input != @p backgroundValue. A pixel is a boundary feature iff it is an object pixel with at
- * least one background (or out-of-bounds) neighbor in the full (26- / 8- in 2D) connectivity. For a 2D image (nZ==1)
- * the z-neighbors are clamped out so a flat object does not read itself as all-boundary.
+ * @brief Initializes signed Maurer work values from a resident input span.
+ * @tparam T Integer input value type.
+ * @param input Input values in Z-Y-X order.
+ * @param backgroundValue Value that identifies background voxels.
+ * @param dims Image dimensions in X-Y-Z order.
+ * @param insideIsPositive Selects the positive sign for object voxels when true.
+ * @param work Receives one signed boundary seed or unreached value for each input value.
+ * @param shouldCancel Stops the scan between rows when true.
+ * @return True if the scan finds an object voxel with a background neighbor.
+ *
+ * Each work value retains its final sign so later axis passes do not need a separate inside-state volume.
  */
 template <class T>
-Result<> BuildMaurerInit(const AbstractDataStore<T>& in, T backgroundValue, SizeVec3 dims, std::vector<float32>& feature, std::vector<uint8>& inside, const std::atomic_bool& shouldCancel)
+bool BuildMaurerEncodedInit(nonstd::span<const T> input, T backgroundValue, SizeVec3 dims, bool insideIsPositive, nonstd::span<float32> work, const std::atomic_bool& shouldCancel)
 {
+  constexpr float32 k_Max = std::numeric_limits<float32>::max();
+  // Raw pointers avoid the per-element span contract check during initialization.
+  const T* inputData = input.data();
+  float32* workData = work.data();
   const int64 nX = static_cast<int64>(dims[0]);
   const int64 nY = static_cast<int64>(dims[1]);
   const int64 nZ = static_cast<int64>(dims[2]);
-  const usize vol = static_cast<usize>(nX * nY * nZ);
-  feature.assign(vol, std::numeric_limits<float32>::max());
-  inside.assign(vol, 0);
-  std::vector<T> input(vol);
-  if(Result<> result = in.copyIntoBuffer(0, nonstd::span<T>(input.data(), input.size())); result.invalid())
-  {
-    return result;
-  }
-
+  const int64 planeStride = nX * nY;
   const int64 wzLo = (nZ == 1) ? 0 : -1;
   const int64 wzHi = (nZ == 1) ? 0 : 1;
+  std::array<int64, 26> interiorOffsets{};
+  usize interiorOffsetIndex = 0;
+  for(int64 dz = -1; dz <= 1; ++dz)
+  {
+    for(int64 dy = -1; dy <= 1; ++dy)
+    {
+      for(int64 dx = -1; dx <= 1; ++dx)
+      {
+        if(dx == 0 && dy == 0 && dz == 0)
+        {
+          continue;
+        }
+        interiorOffsets[interiorOffsetIndex++] = dz * planeStride + dy * nX + dx;
+      }
+    }
+  }
+
+  std::atomic_bool hasBoundary{false};
   auto flat = [nX, nY](int64 x, int64 y, int64 z) { return static_cast<usize>((z * nY + y) * nX + x); };
   auto initializeRows = [&](const Range& rowRange) {
     for(usize row = rowRange.min(); row < rowRange.max(); ++row)
@@ -859,61 +919,101 @@ Result<> BuildMaurerInit(const AbstractDataStore<T>& in, T backgroundValue, Size
       }
       const int64 z = static_cast<int64>(row / static_cast<usize>(nY));
       const int64 y = static_cast<int64>(row % static_cast<usize>(nY));
-      for(int64 x = 0; x < nX; ++x)
-      {
+      bool rowHasBoundary = false;
+      auto initializeBoundedVoxel = [&](int64 x) {
         const usize p = flat(x, y, z);
-        const bool obj = input[p] != backgroundValue;
-        inside[p] = obj ? uint8{1} : uint8{0};
-        if(!obj)
-        {
-          continue;
-        }
+        const bool obj = inputData[p] != backgroundValue;
         bool boundary = false;
-        for(int64 wz = wzLo; wz <= wzHi && !boundary; ++wz)
+        if(obj)
         {
-          for(int64 wy = -1; wy <= 1 && !boundary; ++wy)
+          for(int64 wz = wzLo; wz <= wzHi && !boundary; ++wz)
           {
-            for(int64 wx = -1; wx <= 1 && !boundary; ++wx)
+            for(int64 wy = -1; wy <= 1 && !boundary; ++wy)
             {
-              if(wx == 0 && wy == 0 && wz == 0)
+              for(int64 wx = -1; wx <= 1 && !boundary; ++wx)
               {
-                continue;
-              }
-              const int64 ax = x + wx;
-              const int64 ay = y + wy;
-              const int64 az = z + wz;
-              if(ax < 0 || ay < 0 || az < 0 || ax >= nX || ay >= nY || az >= nZ)
-              {
-                continue; // ITK's BinaryContour IGNORES out-of-bounds neighbors (the image border is not background)
-              }
-              if(input[flat(ax, ay, az)] == backgroundValue)
-              {
-                boundary = true;
+                if(wx == 0 && wy == 0 && wz == 0)
+                {
+                  continue;
+                }
+                const int64 ax = x + wx;
+                const int64 ay = y + wy;
+                const int64 az = z + wz;
+                if(ax < 0 || ay < 0 || az < 0 || ax >= nX || ay >= nY || az >= nZ)
+                {
+                  continue; // ITK ignores out-of-bounds neighbors because the image border is not background.
+                }
+                if(inputData[flat(ax, ay, az)] == backgroundValue)
+                {
+                  boundary = true;
+                }
               }
             }
           }
         }
+        workData[p] = MaurerSignedValue(boundary ? 0.0f : k_Max, obj, insideIsPositive);
         if(boundary)
         {
-          feature[p] = 0.0f;
+          rowHasBoundary = true;
         }
+      };
+
+      const bool isInteriorRow = nZ > 1 && z >= 1 && z < nZ - 1 && y >= 1 && y < nY - 1 && nX > 2;
+      if(!isInteriorRow)
+      {
+        for(int64 x = 0; x < nX; ++x)
+        {
+          initializeBoundedVoxel(x);
+        }
+      }
+      else
+      {
+        initializeBoundedVoxel(0);
+        for(int64 x = 1; x < nX - 1; ++x)
+        {
+          const usize p = flat(x, y, z);
+          const bool obj = inputData[p] != backgroundValue;
+          bool boundary = false;
+          if(obj)
+          {
+            for(const int64 offset : interiorOffsets)
+            {
+              if(inputData[static_cast<usize>(static_cast<int64>(p) + offset)] == backgroundValue)
+              {
+                boundary = true;
+                break;
+              }
+            }
+          }
+          workData[p] = MaurerSignedValue(boundary ? 0.0f : k_Max, obj, insideIsPositive);
+          if(boundary)
+          {
+            rowHasBoundary = true;
+          }
+        }
+        initializeBoundedVoxel(nX - 1);
+      }
+      if(rowHasBoundary && !hasBoundary.load(std::memory_order_relaxed))
+      {
+        hasBoundary.store(true, std::memory_order_relaxed);
       }
     }
   };
   ParallelDataAlgorithm parallelAlgorithm;
   parallelAlgorithm.setRange(0, static_cast<usize>(nZ) * static_cast<usize>(nY));
   parallelAlgorithm.execute(initializeRows);
-  return {};
+  return hasBoundary.load(std::memory_order_relaxed);
 }
 } // namespace detail
 
 /**
- * @brief In-core signed Maurer distance transform (itk's separable exact signed EDT). Builds the feature buffer +
- * inside mask in RAM, runs one Voronoi pass per axis (2 axes for a 2D image), applies the final sqrt/sign, and writes
- * the fixed float32 result. Footprint ~= one float32 volume + one uint8 mask + O(max dim) scratch. The output store
- * is float32 regardless of the input element type @p T.
+ * @class MaurerDistanceInCore
+ * @brief Computes the in-core exact signed Maurer distance transform.
+ * @tparam T Integer input value type.
  *
- * @pre marker/mask/out shapes match dims; identical constructor signature to @ref MaurerDistanceSlab (DispatchAlgorithm).
+ * The algorithm borrows a resident input or makes one input copy. One float32 volume stores each distance and its final sign.
+ * Independent lines run in parallel. Each axis completes before the next axis reads the work volume.
+ * @pre The input and output stores contain one value for each image voxel.
  */
 template <class T>
 class MaurerDistanceInCore
@@ -949,13 +1049,32 @@ public:
     {
       return {};
     }
-
-    std::vector<float32> work;
-    std::vector<uint8> inside;
-    if(Result<> result = detail::BuildMaurerInit<T>(m_In, m_Bg, m_Dims, work, inside, m_ShouldCancel); result.invalid())
+    if(m_ShouldCancel)
     {
-      return result;
+      return {};
     }
+
+    std::unique_ptr<T[]> inputOwner;
+    nonstd::span<const T> input;
+    const auto* inStorePtr = dynamic_cast<const DataStore<T>*>(&m_In);
+    if(inStorePtr != nullptr && m_In.getStoreType() != IDataStore::StoreType::OutOfCore)
+    {
+      input = inStorePtr->createSpan();
+    }
+    else
+    {
+      inputOwner = std::make_unique_for_overwrite<T[]>(vol);
+      nonstd::span<T> inputBuffer(inputOwner.get(), vol);
+      if(Result<> result = m_In.copyIntoBuffer(0, inputBuffer); result.invalid())
+      {
+        return result;
+      }
+      input = nonstd::span<const T>(inputOwner.get(), vol);
+    }
+
+    auto workOwner = std::make_unique_for_overwrite<float32[]>(vol);
+    nonstd::span<float32> work(workOwner.get(), vol);
+    const bool hasBoundary = detail::BuildMaurerEncodedInit<T>(input, m_Bg, m_Dims, m_InsidePos, work, m_ShouldCancel);
     if(m_ShouldCancel)
     {
       return {};
@@ -965,12 +1084,8 @@ public:
 
     const int32 dimCount = (nZ == 1) ? 2 : 3;
     const usize slice = static_cast<usize>(nX * nY);
-    // Each axis pass refines every 1-D line along axis d. The lines PARTITION the volume (every element belongs to
-    // exactly one line along d), so distinct lines read/write DISJOINT elements of `work` while `inside` is read-only:
-    // the lines within one pass are independent and can run concurrently, byte-exact (reordering cannot change any
-    // value). The `for d` axis loop STAYS serial -- axis d+1 depends on axis d's completed `work`, a barrier between
-    // passes. Parallelize each pass over the flattened line index [0, numLines); every worker allocates its OWN g/h/
-    // lineBuf/insBuf scratch (sized nd) so there is no shared mutable state (a shared-scratch race would corrupt).
+    // The lines partition the volume for each axis. Workers update disjoint work values and keep line scratch private.
+    // Each axis completes before the next axis reads the encoded distances.
     for(int32 d = 0; d < dimCount; ++d)
     {
       if(m_ShouldCancel)
@@ -979,16 +1094,15 @@ public:
       }
       const usize nd = (d == 0) ? static_cast<usize>(nX) : (d == 1) ? static_cast<usize>(nY) : static_cast<usize>(nZ);
       const usize stride = (d == 0) ? 1u : (d == 1) ? static_cast<usize>(nX) : slice;
-      // numLines = product of the two orthogonal extents; the base-from-k mapping reproduces the old nested-loop order
-      // (d==0: k==z*nY+y; d==1: k==z*nX+x -> split into z,x; d==2: k==y*nX+x), so every line's base is unchanged.
+      // The line count is the product of the orthogonal extents. The flattened line index preserves Z-Y-X storage order.
       const usize numLines = (d == 0) ? (static_cast<usize>(nZ) * static_cast<usize>(nY)) :
                              (d == 1) ? (static_cast<usize>(nZ) * static_cast<usize>(nX)) :
                                         (static_cast<usize>(nY) * static_cast<usize>(nX));
-      // Per-worker scratch (g/h for Voronoi1D, lineBuf/insBuf for the strided gather/scatter) is allocated INSIDE the
-      // body so each TBB worker owns its own four vectors and reuses them across its sub-range of lines.
+      // Each worker reuses private envelope and line buffers across its assigned lines.
       auto processLines = [&](const Range& lineRange) {
+        // The raw pointer avoids the per-element span contract check in the X-axis line kernel.
+        float32* workData = work.data();
         std::vector<float32> g(nd), h(nd), lineBuf(nd);
-        std::vector<uint8> insBuf(nd);
         for(usize k = lineRange.min(); k < lineRange.max(); ++k)
         {
           if(m_ShouldCancel)
@@ -998,11 +1112,11 @@ public:
           const usize base = (d == 0) ? (k * static_cast<usize>(nX)) : (d == 1) ? ((k / static_cast<usize>(nX)) * slice + (k % static_cast<usize>(nX))) : k;
           if(d == 0)
           {
-            detail::Voronoi1D(nonstd::span<float32>(work.data() + base, nd), nonstd::span<const uint8>(inside.data() + base, nd), nd, m_InsidePos, m_UseSpacing, sp[d], g, h);
+            detail::Voronoi1DEncodedSign(nonstd::span<float32>(workData + base, nd), nd, m_UseSpacing, sp[d], g, h);
           }
           else
           {
-            RunLine(work, inside, base, stride, nd, sp[d], g, h, lineBuf, insBuf);
+            RunLine(work, base, stride, nd, sp[d], g, h, lineBuf);
           }
         }
       };
@@ -1015,14 +1129,16 @@ public:
       }
     }
 
-    // Final sqrt/sign pass (itk applies it only when !SquaredDistance; the sign is the input rule, not sign(work)).
+    // The encoded sign remains unchanged while the final pass converts squared magnitudes to distances.
     if(!m_Squared)
     {
       auto finalizeDistances = [&](const Range& valueRange) {
+        // The raw pointer avoids the per-element span contract check during finalization.
+        float32* workData = work.data();
         for(usize p = valueRange.min(); p < valueRange.max(); ++p)
         {
-          const float32 mag = std::sqrt(std::abs(work[p]));
-          work[p] = ((inside[p] != 0) == m_InsidePos) ? mag : -mag;
+          const float32 mag = std::sqrt(std::abs(workData[p]));
+          workData[p] = std::signbit(workData[p]) ? -mag : mag;
         }
       };
       ParallelDataAlgorithm parallelAlgorithm;
@@ -1033,23 +1149,28 @@ public:
         return {};
       }
     }
-    return m_Out.copyFromBuffer(0, nonstd::span<const float32>(work.data(), vol));
+    else if(!hasBoundary)
+    {
+      // ITK leaves an unreached squared distance at positive FLT_MAX when the image has no boundary voxels.
+      std::fill(work.begin(), work.end(), std::numeric_limits<float32>::max());
+    }
+    return m_Out.copyFromBuffer(0, nonstd::span<const float32>(work.data(), work.size()));
   }
 
 private:
-  // Gather a strided line into scratch, run Voronoi1D, scatter it back.
-  void RunLine(std::vector<float32>& work, const std::vector<uint8>& inside, usize base, usize stride, usize nd, float32 spacingD, std::vector<float32>& g, std::vector<float32>& h,
-               std::vector<float32>& lineBuf, std::vector<uint8>& insBuf)
+  // The buffer makes a strided line contiguous for the encoded-sign Voronoi pass.
+  void RunLine(nonstd::span<float32> work, usize base, usize stride, usize nd, float32 spacingD, std::vector<float32>& g, std::vector<float32>& h, std::vector<float32>& lineBuf)
   {
+    // The raw pointer avoids the per-element span contract check during gather and scatter.
+    float32* workData = work.data();
     for(usize i = 0; i < nd; ++i)
     {
-      lineBuf[i] = work[base + i * stride];
-      insBuf[i] = inside[base + i * stride];
+      lineBuf[i] = workData[base + i * stride];
     }
-    detail::Voronoi1D(nonstd::span<float32>(lineBuf.data(), nd), nonstd::span<const uint8>(insBuf.data(), nd), nd, m_InsidePos, m_UseSpacing, spacingD, g, h);
+    detail::Voronoi1DEncodedSign(nonstd::span<float32>(lineBuf.data(), nd), nd, m_UseSpacing, spacingD, g, h);
     for(usize i = 0; i < nd; ++i)
     {
-      work[base + i * stride] = lineBuf[i];
+      workData[base + i * stride] = lineBuf[i];
     }
   }
 
@@ -1066,16 +1187,15 @@ private:
 };
 
 /**
- * @brief Out-of-core signed Maurer distance transform: orthogonal-slab streaming over one disk-backed float32 working
- * store. Fused initialization, X, and Y passes stream one Z plane at a time. The Z pass reads one bounded Y-row
- * batch across all Z planes, runs Voronoi down each staged Z column in parallel, and writes the signed result
- * immediately.
+ * @class MaurerDistanceSlab
+ * @brief Computes the out-of-core exact signed Maurer distance transform with bounded slabs.
+ * @tparam T Integer input value type.
  *
- * The sign of each work value retains the original inside/outside state, so later passes do not reread the input or
- * need a second full-volume scratch store. Bounded memory consists of one z-plane or XZ slab of float32 work and
- * O(max dimension) line scratch. Output is byte-identical to @ref MaurerDistanceInCore. Store I/O remains serial while
- * parallel workers touch only staged local buffers. The constructor signature matches the in-core implementation for
- * dispatch.
+ * Fused initialization, X, and Y passes stream one Z plane at a time.
+ * The Z pass transforms one bounded Y-row batch across all Z planes and writes the signed result immediately.
+ * Each work value retains the inside or outside state in its sign. Later passes do not reread the input.
+ * Bounded memory peaks at three input planes plus one float32 work plane during initialization. The Z pass instead holds one XZ slab of Y rows. Both peaks add line scratch for the longest axis.
+ * Store I/O remains serial while parallel workers access only staged local buffers.
  */
 template <class T>
 class MaurerDistanceSlab
@@ -1123,11 +1243,9 @@ public:
       return RunBounded2D(static_cast<usize>(nX), static_cast<usize>(nY));
     }
 
-    // A disk-backed endpoint makes the full-volume work store disk-backed too, whatever its resolved data format.
-    // A raw fixed-record store (one float32 per cell) keeps that traffic off the deflate codec entirely, since Pass 1
-    // writes the whole volume and Pass 2 reads it all back. When neither endpoint is out-of-core, the working set is
-    // plain resident memory instead, so a disk-backed raw store would add pointless I/O; that route keeps the
-    // resolved in-core data format, matching the prior behavior.
+    // A disk-backed endpoint also makes the full-volume work store disk-backed.
+    // One raw float32 record per cell avoids compression work for the complete write and read passes.
+    // With resident endpoints, the resolved in-core format avoids unnecessary disk I/O.
     if(hasOutOfCoreEndpoint)
     {
       auto scratchResult = detail::CreateSweepTemporaryStore<float32>(vol, slice, m_ShouldCancel, "Signed Maurer distance-map 3D work");
@@ -1159,9 +1277,14 @@ private:
   Result<> Run3D(WorkStoreT& work, int64 nX, int64 nY, int64 nZ, usize slice)
   {
     const float32 spacing[3] = {m_Spacing[0], m_Spacing[1], m_Spacing[2]};
-    if(Result<> result = StreamInitAndTransformXY(work, nX, nY, nZ, slice, spacing); result.invalid())
+    bool hasBoundary = false;
+    if(Result<> result = StreamInitAndTransformXY(work, nX, nY, nZ, slice, spacing, hasBoundary); result.invalid())
     {
       return result;
+    }
+    if(m_ShouldCancel)
+    {
+      return {};
     }
 
     if(nZ == 1)
@@ -1171,13 +1294,20 @@ private:
       {
         return result;
       }
-      if(!m_Squared)
+      if(!m_Squared || !hasBoundary)
       {
         auto finalizeValues = [&](const Range& valueRange) {
           for(usize index = valueRange.min(); index < valueRange.max(); ++index)
           {
-            const float32 magnitude = std::sqrt(std::abs(plane[index]));
-            plane[index] = std::signbit(plane[index]) ? -magnitude : magnitude;
+            if(m_Squared)
+            {
+              plane[index] = std::abs(plane[index]);
+            }
+            else
+            {
+              const float32 magnitude = std::sqrt(std::abs(plane[index]));
+              plane[index] = std::signbit(plane[index]) ? -magnitude : magnitude;
+            }
           }
         };
         ParallelDataAlgorithm finalizeParallelAlgorithm;
@@ -1214,9 +1344,8 @@ private:
       const usize valuesPerPlaneBlock = yCount * m_Dims[0];
       const usize batchValues = valuesPerPlaneBlock * m_Dims[2];
       slab.resize(batchValues);
-      // `work` exposes only flat linear offsets (no multi-dimensional extent API), so the Y-band is gathered with one
-      // contiguous per-Z transfer: for a fixed z, X columns [0, nX) of Y rows [yBegin, yBegin+yCount) are contiguous
-      // in the [Z][Y][X] row-major tuple layout the work store was sized with.
+      // The work store exposes flat offsets. One transfer gathers the contiguous Y band from each Z plane.
+      // The Z-Y-X layout keeps all X values for the selected Y rows contiguous.
       for(usize z = 0; z < static_cast<usize>(nZ); ++z)
       {
         if(m_ShouldCancel)
@@ -1262,13 +1391,20 @@ private:
       {
         return {};
       }
-      if(!m_Squared)
+      if(!m_Squared || !hasBoundary)
       {
         auto finalizeValues = [&](const Range& valueRange) {
           for(usize index = valueRange.min(); index < valueRange.max(); ++index)
           {
-            const float32 magnitude = std::sqrt(std::abs(slab[index]));
-            slab[index] = std::signbit(slab[index]) ? -magnitude : magnitude;
+            if(m_Squared)
+            {
+              slab[index] = std::abs(slab[index]);
+            }
+            else
+            {
+              const float32 magnitude = std::sqrt(std::abs(slab[index]));
+              slab[index] = std::signbit(slab[index]) ? -magnitude : magnitude;
+            }
           }
         };
         ParallelDataAlgorithm finalizeParallelAlgorithm;
@@ -1708,19 +1844,22 @@ private:
             detail::ExecuteMaurer2DParallel(columnCount, unpackRecords);
           }
           auto processColumns = [&](const Range& range) {
+            // Raw pointers avoid the per-element span contract check during finalization.
+            float32* columnsData = columns.data();
+            const uint8* insideValuesData = insideValues.data();
             std::vector<float32> g(ny);
             std::vector<float32> h(ny);
             for(usize localX = range.min(); localX < range.max(); ++localX)
             {
-              auto line = nonstd::span<float32>(columns.data() + localX * ny, ny);
-              auto lineInside = nonstd::span<const uint8>(insideValues.data() + localX * ny, ny);
-              detail::Voronoi1D(line, lineInside, ny, m_InsidePos, m_UseSpacing, m_Spacing[1], g, h);
+              float32* lineData = columnsData + localX * ny;
+              const uint8* lineInsideData = insideValuesData + localX * ny;
+              detail::Voronoi1D(nonstd::span<float32>(lineData, ny), nonstd::span<const uint8>(lineInsideData, ny), ny, m_InsidePos, m_UseSpacing, m_Spacing[1], g, h);
               if(!m_Squared)
               {
                 for(usize y = 0; y < ny; ++y)
                 {
-                  const float32 magnitude = std::sqrt(std::abs(line[y]));
-                  line[y] = ((lineInside[y] != 0) == m_InsidePos) ? magnitude : -magnitude;
+                  const float32 magnitude = std::sqrt(std::abs(lineData[y]));
+                  lineData[y] = ((lineInsideData[y] != 0) == m_InsidePos) ? magnitude : -magnitude;
                 }
               }
             }
@@ -1798,12 +1937,15 @@ private:
       {
         const usize offset = x * ny;
         auto writeOutputY = [&](usize blockBegin, nonstd::span<float32> values, nonstd::span<const uint8> insideValues) {
+          // Raw pointers avoid the per-element span contract check during finalization.
+          float32* valuesData = values.data();
+          const uint8* insideValuesData = insideValues.data();
           if(!m_Squared)
           {
             for(usize index = 0; index < values.size(); ++index)
             {
-              const float32 magnitude = std::sqrt(std::abs(values[index]));
-              values[index] = ((insideValues[index] != 0) == m_InsidePos) ? magnitude : -magnitude;
+              const float32 magnitude = std::sqrt(std::abs(valuesData[index]));
+              valuesData[index] = ((insideValuesData[index] != 0) == m_InsidePos) ? magnitude : -magnitude;
             }
           }
           const Extent outputExtent({0, static_cast<uint64>(blockBegin), static_cast<uint64>(x)}, {0, static_cast<uint64>(blockBegin + values.size() - 1), static_cast<uint64>(x)});
@@ -1820,16 +1962,30 @@ private:
     return {};
   }
 
-  // Build each signed feature plane with a rolling three-input-plane window, apply X and Y while it is resident, and
-  // write the transformed plane to the work store once. Every write is a flat per-Z-plane copyFromBuffer, so this
-  // compiles against either the raw fixed-record scratch or a real AbstractDataStore<float32> (see @ref Run3D).
+  /**
+   * @brief Initializes and transforms each resident XY plane before one bulk work-store write.
+   * @tparam WorkStoreT Store type that provides flat bulk transfers.
+   * @param work Receives each transformed plane.
+   * @param nX Number of X values.
+   * @param nY Number of Y values.
+   * @param nZ Number of Z values.
+   * @param slice Number of values in one XY plane.
+   * @param spacing Image spacing in X-Y-Z order.
+   * @param hasBoundary Receives true when the complete scan finds a boundary voxel.
+   * @return An error from an input read or work-store write.
+   *
+   * The rolling input window keeps store I/O serial. Parallel workers access only resident plane buffers.
+   */
   template <class WorkStoreT>
-  Result<> StreamInitAndTransformXY(WorkStoreT& work, int64 nX, int64 nY, int64 nZ, usize slice, const float32 spacing[3])
+  Result<> StreamInitAndTransformXY(WorkStoreT& work, int64 nX, int64 nY, int64 nZ, usize slice, const float32 spacing[3], bool& hasBoundary)
   {
     constexpr float32 k_Max = std::numeric_limits<float32>::max();
     const bool is2D = (nZ == 1);
     std::vector<T> prev(slice), cur(slice), next(slice);
     std::vector<float32> featurePlane(slice);
+    const std::array<int64, 9> adjacentPlaneOffsets = {0, -1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
+    const std::array<int64, 8> currentPlaneOffsets = {-1, 1, -nX, nX, -nX - 1, -nX + 1, nX - 1, nX + 1};
+    std::atomic_bool boundaryFound{false};
     auto flat2d = [nX](int64 x, int64 y) { return static_cast<usize>(y * nX + x); };
 
     for(int64 z = 0; z < nZ; ++z)
@@ -1862,42 +2018,102 @@ private:
             return;
           }
           const int64 y = static_cast<int64>(yIndex);
-          for(int64 x = 0; x < nX; ++x)
-          {
+          const T* prevData = prev.data();
+          const T* curData = cur.data();
+          const T* nextData = next.data();
+          float32* featurePlaneData = featurePlane.data();
+          bool rowHasBoundary = false;
+          auto initializeBoundedVoxel = [&](int64 x) {
             const usize p2d = flat2d(x, y);
-            const bool obj = cur[p2d] != m_Bg;
-            if(!obj)
-            {
-              featurePlane[p2d] = detail::MaurerSignedValue(k_Max, false, m_InsidePos);
-              continue;
-            }
+            const bool obj = curData[p2d] != m_Bg;
             bool boundary = false;
-            const int64 wzLo = is2D ? 0 : -1;
-            const int64 wzHi = is2D ? 0 : 1;
-            for(int64 wz = wzLo; wz <= wzHi && !boundary; ++wz)
+            if(obj)
             {
-              for(int64 wy = -1; wy <= 1 && !boundary; ++wy)
+              const int64 wzLo = is2D ? 0 : -1;
+              const int64 wzHi = is2D ? 0 : 1;
+              for(int64 wz = wzLo; wz <= wzHi && !boundary; ++wz)
               {
-                for(int64 wx = -1; wx <= 1 && !boundary; ++wx)
+                for(int64 wy = -1; wy <= 1 && !boundary; ++wy)
                 {
-                  if(wx == 0 && wy == 0 && wz == 0)
+                  for(int64 wx = -1; wx <= 1 && !boundary; ++wx)
                   {
-                    continue;
-                  }
-                  const int64 ax = x + wx, ay = y + wy;
-                  if(ax < 0 || ay < 0 || ax >= nX || ay >= nY || (wz < 0 && !hasPrev) || (wz > 0 && !hasNext))
-                  {
-                    continue; // ITK's BinaryContour IGNORES out-of-bounds neighbors (the image border is not background)
-                  }
-                  const T nv = (wz == 0) ? cur[flat2d(ax, ay)] : (wz < 0) ? prev[flat2d(ax, ay)] : next[flat2d(ax, ay)];
-                  if(nv == m_Bg)
-                  {
-                    boundary = true;
+                    if(wx == 0 && wy == 0 && wz == 0)
+                    {
+                      continue;
+                    }
+                    const int64 ax = x + wx;
+                    const int64 ay = y + wy;
+                    if(ax < 0 || ay < 0 || ax >= nX || ay >= nY || (wz < 0 && !hasPrev) || (wz > 0 && !hasNext))
+                    {
+                      continue; // ITK ignores out-of-bounds neighbors because the image border is not background.
+                    }
+                    const T neighborValue = (wz == 0) ? curData[flat2d(ax, ay)] : (wz < 0) ? prevData[flat2d(ax, ay)] : nextData[flat2d(ax, ay)];
+                    if(neighborValue == m_Bg)
+                    {
+                      boundary = true;
+                    }
                   }
                 }
               }
             }
-            featurePlane[p2d] = detail::MaurerSignedValue(boundary ? 0.0f : k_Max, true, m_InsidePos);
+            featurePlaneData[p2d] = detail::MaurerSignedValue(boundary ? 0.0f : k_Max, obj, m_InsidePos);
+            if(boundary)
+            {
+              rowHasBoundary = true;
+            }
+          };
+
+          const bool isInteriorRow = hasPrev && hasNext && y >= 1 && y < nY - 1 && nX > 2;
+          if(!isInteriorRow)
+          {
+            for(int64 x = 0; x < nX; ++x)
+            {
+              initializeBoundedVoxel(x);
+            }
+          }
+          else
+          {
+            initializeBoundedVoxel(0);
+            for(int64 x = 1; x < nX - 1; ++x)
+            {
+              const usize p2d = flat2d(x, y);
+              const bool obj = curData[p2d] != m_Bg;
+              bool boundary = false;
+              if(obj)
+              {
+                const int64 center = static_cast<int64>(p2d);
+                for(const int64 offset : adjacentPlaneOffsets)
+                {
+                  const usize neighborIndex = static_cast<usize>(center + offset);
+                  if(prevData[neighborIndex] == m_Bg || nextData[neighborIndex] == m_Bg)
+                  {
+                    boundary = true;
+                    break;
+                  }
+                }
+                if(!boundary)
+                {
+                  for(const int64 offset : currentPlaneOffsets)
+                  {
+                    if(curData[static_cast<usize>(center + offset)] == m_Bg)
+                    {
+                      boundary = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              featurePlaneData[p2d] = detail::MaurerSignedValue(boundary ? 0.0f : k_Max, obj, m_InsidePos);
+              if(boundary)
+              {
+                rowHasBoundary = true;
+              }
+            }
+            initializeBoundedVoxel(nX - 1);
+          }
+          if(rowHasBoundary && !boundaryFound.load(std::memory_order_relaxed))
+          {
+            boundaryFound.store(true, std::memory_order_relaxed);
           }
         }
       };
@@ -1974,6 +2190,7 @@ private:
         }
       }
     }
+    hasBoundary = boundaryFound.load(std::memory_order_relaxed);
     return {};
   }
 
@@ -2070,9 +2287,23 @@ private:
 };
 
 /**
- * @brief Signed Maurer distance transform, dispatched by whether the input/output arrays are disk-backed. In-core
- * arrays use the resident algorithm directly. The OOC wrapper uses it only after a complete shared working-memory
- * reservation and otherwise retains the bounded slab engine. Output is float32 regardless of input type @p T.
+ * @brief Dispatches the signed Maurer distance transform for the input and output storage types.
+ * @tparam T Integer input value type.
+ * @param inStore Provides input values.
+ * @param outStore Receives float32 distance values.
+ * @param dims Image dimensions in X-Y-Z order.
+ * @param backgroundValue Value that identifies background voxels.
+ * @param insideIsPositive Selects a positive result for inside voxels when true.
+ * @param squaredDistance Keeps squared distance magnitudes when true.
+ * @param useSpacing Applies physical image spacing when true.
+ * @param spacing Physical image spacing in X-Y-Z order.
+ * @param inArray Identifies the input storage route.
+ * @param outArray Identifies the output storage route.
+ * @param shouldCancel Stops processing between bounded work units when true.
+ * @param messageHandler Receives algorithm messages.
+ * @return An empty result on success or cancellation, or an error for invalid sizes or transfers.
+ *
+ * Resident arrays use the in-core algorithm. Other routes require a complete memory grant or use bounded slabs.
  */
 template <class T>
 Result<> ApplySignedMaurerDistanceMap(const AbstractDataStore<T>& inStore, AbstractDataStore<float32>& outStore, const SizeVec3& dims, T backgroundValue, bool insideIsPositive, bool squaredDistance,

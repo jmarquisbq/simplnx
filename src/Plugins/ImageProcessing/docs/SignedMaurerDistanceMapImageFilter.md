@@ -34,17 +34,15 @@ Maurer's algorithm is described in Calvin R. Maurer Jr., Rensheng Qi, and Vijay 
 
 ## Algorithm
 
-The filter identifies object-boundary voxels, then applies Maurer's one-dimensional Voronoi transform along each active image axis. The final pass applies the requested sign convention and optionally converts squared distances to Euclidean distances.
-
 ### In-Core Path
 
-The input, float32 transform values, and inside/outside mask are kept in memory. Independent one-dimensional lines are processed in parallel, with a barrier between axis passes.
+A contiguous in-memory `DataStore` input is borrowed. Any other in-memory store is copied once. The filter owns one float32 work volume. Each work value encodes the inside or outside state in its sign. The boundary scan uses a bounds-free interior fast path and checks image borders separately. The filter processes independent one-dimensional lines in parallel and waits between axis passes. When requested, the filter applies the square root to the work volume in place.
 
 ### Out-of-Core Path
 
-For a three-dimensional disk-backed image, the filter first asks the shared cache-memory budget for enough temporary memory to hold the complete input, float32 transform values, and inside/outside mask. The request is calculated from the current image dimensions and input type. The fast resident path runs only when that request is granted completely; for a `512 x 512 x 128` uint8 image it uses about 192 MiB.
+On the complete-grant route, resident memory holds an input copy and the float32 work volume. A `512 x 512 x 128` uint8 image needs about 160 MiB.
 
-If the complete request is unavailable, allocation fails, or the image is truly two-dimensional, the filter uses its bounded disk-streamed path. Its X and Y passes stream one Z plane at a time, while the Z pass batches consecutive Y rows across all Z planes. This fallback remains usable when the full dataset is much larger than memory. All temporary-memory requests share the application cache budget and remain subject to its aggregate 25% limit.
+On the bounded route, the X and Y passes stream one Z plane at a time into raw scratch storage. Each scratch value contains the encoded sign. The Z pass batches consecutive Y rows across all Z planes and writes each batch as one extent. All resident-memory requests share the application cache budget and its 25% limit.
 
 % Auto generated parameter table will be inserted here
 
