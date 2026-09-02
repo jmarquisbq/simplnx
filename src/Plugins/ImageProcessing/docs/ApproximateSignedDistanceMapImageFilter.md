@@ -28,13 +28,13 @@ The filter runs two sequential stages: Iso Contour Distance creates the narrow s
 
 ### In-Core Path
 
-Resident arrays use the parallel IsoContour gather and the existing two-plane resident chamfer scan. Optional sign inversion occurs as each backward-finalized plane is written.
+Resident arrays use the parallel IsoContour gather. Fast Chamfer runs in place on the array as a parallel wavefront over full-width row groups, without plane copies. Optional sign inversion occurs after each row group is final in the backward sweep.
 
 ### Out-of-Core Path
 
-For the certified `512 x 512 x 128` uint8 image, Iso Contour and Fast Chamfer may request complete resident working states of 160 MiB and 130 MiB respectively. They run one after another, so these reservations do not overlap. Each fast path requires a complete shared grant and performs bulk store transfers.
+For the certified `512 x 512 x 128` uint8 image, Iso Contour and Fast Chamfer may request complete resident working states of 160 MiB and 128 MiB respectively. They run one after another, so these reservations do not overlap. Each fast path requires a complete shared grant and performs bulk store transfers.
 
-If a stage receives only a partial grant or allocation fails, that stage alone uses its existing bounded algorithm: rolling planes for 3-D IsoContour or a temporary-record chamfer scan. The sign correction remains fused into the chamfer fallback's final writes. True 2-D retains the bounded row/tile implementations. The filter therefore remains usable when its full dataset is much larger than memory, and all requests remain subject to the shared aggregate 25% limit.
+If a stage receives only a partial grant or allocation fails, the stage uses a bounded algorithm. IsoContour uses rolling planes. Fast Chamfer uses a temporary-record scan that processes 16-plane blocks with the same parallel row-group wavefront inside each block. Sign correction occurs after each backward row group is final. True 2-D uses the bounded row and tile implementations. The filter remains usable when the full dataset is much larger than memory. All requests remain subject to the shared aggregate 25% limit.
 
 % Auto generated parameter table will be inserted here
 

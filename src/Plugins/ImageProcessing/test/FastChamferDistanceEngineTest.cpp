@@ -3,16 +3,21 @@
 #include "simplnx/Common/Array.hpp"
 #include "simplnx/Common/Types.hpp"
 #include "simplnx/DataStructure/DataStore.hpp"
+#include "simplnx/DataStructure/IO/Generic/ITemporaryRecordStore.hpp"
 #include "simplnx/Filter/IFilter.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
 #include "simplnx/Utilities/CacheMemoryBudgetManager.hpp"
+#include "simplnx/Utilities/DataStoreUtilities.hpp"
 
 #include <catch2/catch.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <limits>
+#include <random>
 #include <vector>
 
 using namespace nx::core;
@@ -47,6 +52,320 @@ std::vector<float32> RunChamfer(std::vector<float32> field, usize dx, usize dy, 
   }
   return out;
 }
+
+struct ReferenceChamferNeighbor
+{
+  int32 offsetX = 0;
+  int32 offsetY = 0;
+  int32 offsetZ = 0;
+  float32 weight = 0.0f;
+};
+
+std::vector<ReferenceChamferNeighbor> MakeReferenceForwardNeighbors()
+{
+  const std::array<float32, 3> weights = {kW0, kW1, kW2};
+  std::vector<ReferenceChamferNeighbor> neighbors;
+  neighbors.reserve(13);
+  for(int32 offsetZ = -1; offsetZ <= 1; ++offsetZ)
+  {
+    for(int32 offsetY = -1; offsetY <= 1; ++offsetY)
+    {
+      for(int32 offsetX = -1; offsetX <= 1; ++offsetX)
+      {
+        if(9 * offsetZ + 3 * offsetY + offsetX <= 0)
+        {
+          continue;
+        }
+        const usize weightIndex = static_cast<usize>(std::abs(offsetX) + std::abs(offsetY) + std::abs(offsetZ) - 1);
+        neighbors.push_back({offsetX, offsetY, offsetZ, weights[weightIndex]});
+      }
+    }
+  }
+  return neighbors;
+}
+
+std::vector<float32> ReferenceChamfer(std::vector<float32> field, usize dx, usize dy, usize dz, float32 maxDist, bool negate)
+{
+  const std::vector<ReferenceChamferNeighbor> forwardNeighbors = MakeReferenceForwardNeighbors();
+  std::vector<ReferenceChamferNeighbor> backwardNeighbors;
+  backwardNeighbors.reserve(forwardNeighbors.size());
+  for(const ReferenceChamferNeighbor& neighbor : forwardNeighbors)
+  {
+    backwardNeighbors.push_back({-neighbor.offsetX, -neighbor.offsetY, -neighbor.offsetZ, neighbor.weight});
+  }
+
+  for(usize z = 0; z < dz; ++z)
+  {
+    for(usize y = 0; y < dy; ++y)
+    {
+      for(usize x = 0; x < dx; ++x)
+      {
+        const float32 current = field[FlatIndex(x, y, z, dx, dy)];
+        if(current >= maxDist || current <= -maxDist)
+        {
+          continue;
+        }
+        const bool updatePositive = current > -kW0;
+        const bool updateNegative = current < kW0;
+        for(const ReferenceChamferNeighbor& neighbor : forwardNeighbors)
+        {
+          const int64 targetX = static_cast<int64>(x) + neighbor.offsetX;
+          const int64 targetY = static_cast<int64>(y) + neighbor.offsetY;
+          const int64 targetZ = static_cast<int64>(z) + neighbor.offsetZ;
+          if(targetX < 0 || targetX >= static_cast<int64>(dx) || targetY < 0 || targetY >= static_cast<int64>(dy) || targetZ < 0 || targetZ >= static_cast<int64>(dz))
+          {
+            continue;
+          }
+          float32& target = field[FlatIndex(static_cast<usize>(targetX), static_cast<usize>(targetY), static_cast<usize>(targetZ), dx, dy)];
+          const float32 positiveCandidate = current + neighbor.weight;
+          if(updatePositive && positiveCandidate < target)
+          {
+            target = positiveCandidate;
+          }
+          const float32 negativeCandidate = current - neighbor.weight;
+          if(updateNegative && negativeCandidate > target)
+          {
+            target = negativeCandidate;
+          }
+        }
+      }
+    }
+  }
+
+  for(usize z = dz; z-- > 0;)
+  {
+    for(usize y = dy; y-- > 0;)
+    {
+      for(usize x = dx; x-- > 0;)
+      {
+        const float32 current = field[FlatIndex(x, y, z, dx, dy)];
+        if(current >= maxDist || current <= -maxDist)
+        {
+          continue;
+        }
+        const bool updatePositive = current > -kW0;
+        const bool updateNegative = current < kW0;
+        for(const ReferenceChamferNeighbor& neighbor : backwardNeighbors)
+        {
+          const int64 targetX = static_cast<int64>(x) + neighbor.offsetX;
+          const int64 targetY = static_cast<int64>(y) + neighbor.offsetY;
+          const int64 targetZ = static_cast<int64>(z) + neighbor.offsetZ;
+          if(targetX < 0 || targetX >= static_cast<int64>(dx) || targetY < 0 || targetY >= static_cast<int64>(dy) || targetZ < 0 || targetZ >= static_cast<int64>(dz))
+          {
+            continue;
+          }
+          float32& target = field[FlatIndex(static_cast<usize>(targetX), static_cast<usize>(targetY), static_cast<usize>(targetZ), dx, dy)];
+          const float32 positiveCandidate = current + neighbor.weight;
+          if(updatePositive && positiveCandidate < target)
+          {
+            target = positiveCandidate;
+          }
+          const float32 negativeCandidate = current - neighbor.weight;
+          if(updateNegative && negativeCandidate > target)
+          {
+            target = negativeCandidate;
+          }
+        }
+      }
+    }
+  }
+
+  if(negate)
+  {
+    for(float32& value : field)
+    {
+      value = -value;
+    }
+  }
+  return field;
+}
+
+std::vector<float32> RunChamferEngine(const std::vector<float32>& field, usize dx, usize dy, usize dz, float32 maxDist, bool negate, usize rowGroupRows)
+{
+  DataStore<float32> store(ShapeType{dz, dy, dx}, ShapeType{1}, 0.0f);
+  for(usize index = 0; index < field.size(); ++index)
+  {
+    store.setValue(index, field[index]);
+  }
+  std::atomic_bool shouldCancel{false};
+  IFilter::MessageHandler messageHandler{};
+  FastChamferDistance engine(store, SizeVec3{dx, dy, dz}, maxDist, shouldCancel, messageHandler, ImageProcessing::detail::k_Chamfer2DResidentLimit, negate, rowGroupRows);
+  const Result<> result = engine();
+  REQUIRE(result.valid());
+  std::vector<float32> output(field.size());
+  for(usize index = 0; index < output.size(); ++index)
+  {
+    output[index] = store.getValue(index);
+  }
+  return output;
+}
+
+void RequireBitIdentical(const std::vector<float32>& actual, const std::vector<float32>& expected)
+{
+  REQUIRE(actual.size() == expected.size());
+  for(usize index = 0; index < actual.size(); ++index)
+  {
+    CAPTURE(index);
+    REQUIRE(std::bit_cast<uint32>(actual[index]) == std::bit_cast<uint32>(expected[index]));
+  }
+}
+
+std::vector<float32> MakeBandField(usize dx, usize dy, usize dz, float32 maxDist, uint32 seed)
+{
+  std::mt19937 generator(seed);
+  std::uniform_real_distribution<float32> distribution(-3.0f, 3.0f);
+  std::vector<float32> field(dx * dy * dz);
+  const usize boundaryPeriod = std::max<usize>(1, dx / 2);
+  for(usize z = 0; z < dz; ++z)
+  {
+    for(usize y = 0; y < dy; ++y)
+    {
+      const usize boundaryX = dx / 3 + ((2 * y + z) % boundaryPeriod);
+      for(usize x = 0; x < dx; ++x)
+      {
+        float32 value = distribution(generator);
+        if(x < boundaryX && boundaryX - x > 1)
+        {
+          value = -(maxDist + 1.0f);
+        }
+        else if(x > boundaryX && x - boundaryX > 1)
+        {
+          value = maxDist + 1.0f;
+        }
+        field[FlatIndex(x, y, z, dx, dy)] = value;
+      }
+    }
+  }
+  return field;
+}
+
+std::vector<float32> MakeRandomField(usize dx, usize dy, usize dz, float32 maxDist, uint32 seed)
+{
+  std::mt19937 generator(seed);
+  std::uniform_real_distribution<float32> distribution(-maxDist - 2.0f, maxDist + 2.0f);
+  std::vector<float32> field(dx * dy * dz);
+  for(float32& value : field)
+  {
+    value = distribution(generator);
+  }
+
+  const std::array<float32, 7> replacements = {+0.0f, -0.0f, kW0, -kW0, maxDist, -maxDist, 0.5f * kW0};
+  usize replacementIndex = 0;
+  for(usize index = 0; index < field.size(); index += 7)
+  {
+    field[index] = replacements[replacementIndex % replacements.size()];
+    ++replacementIndex;
+  }
+  return field;
+}
+
+template <class T>
+class TransferCountingDataStore : public DataStore<T>
+{
+public:
+  using DataStore<T>::DataStore;
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
+  {
+    m_ReadValues += buffer.size();
+    return DataStore<T>::copyIntoBuffer(startIndex, buffer);
+  }
+
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
+  {
+    m_WrittenValues += buffer.size();
+    return DataStore<T>::copyFromBuffer(startIndex, buffer);
+  }
+
+  [[nodiscard]] usize readValues() const noexcept
+  {
+    return m_ReadValues;
+  }
+
+  [[nodiscard]] usize writtenValues() const noexcept
+  {
+    return m_WrittenValues;
+  }
+
+private:
+  mutable usize m_ReadValues = 0;
+  usize m_WrittenValues = 0;
+};
+
+template <class T>
+class OocReportingDataStore : public DataStore<T>
+{
+public:
+  using DataStore<T>::DataStore;
+
+  IDataStore::StoreType getStoreType() const override
+  {
+    return IDataStore::StoreType::OutOfCore;
+  }
+
+  Result<> copyIntoBuffer(usize startIndex, nonstd::span<T> buffer) const override
+  {
+    ++m_ReadCount;
+    return DataStore<T>::copyIntoBuffer(startIndex, buffer);
+  }
+
+  Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
+  {
+    ++m_WriteCount;
+    return DataStore<T>::copyFromBuffer(startIndex, buffer);
+  }
+
+  [[nodiscard]] usize readCount() const noexcept
+  {
+    return m_ReadCount;
+  }
+
+  [[nodiscard]] usize writeCount() const noexcept
+  {
+    return m_WriteCount;
+  }
+
+private:
+  mutable usize m_ReadCount = 0;
+  usize m_WriteCount = 0;
+};
+
+template <class StoreT>
+std::vector<float32> ReadStoreValues(const StoreT& store)
+{
+  std::vector<float32> values(store.getSize());
+  for(usize index = 0; index < values.size(); ++index)
+  {
+    values[index] = store.getValue(index);
+  }
+  return values;
+}
+
+// ScopedBudget sets the shared working-memory budget for one test.
+// The destructor restores the previous budget after normal completion or a failed assertion.
+class ScopedBudget
+{
+public:
+  explicit ScopedBudget(uint64 budgetBytes)
+  : m_Manager(CacheMemoryBudgetManager::instance())
+  , m_PreviousBudget(m_Manager.budgetBytes())
+  {
+    m_Manager.clear();
+    m_Manager.setBudgetBytes(budgetBytes);
+  }
+  ~ScopedBudget()
+  {
+    m_Manager.setBudgetBytes(m_PreviousBudget);
+  }
+  ScopedBudget(const ScopedBudget&) = delete;
+  ScopedBudget(ScopedBudget&&) = delete;
+  ScopedBudget& operator=(const ScopedBudget&) = delete;
+  ScopedBudget& operator=(ScopedBudget&&) = delete;
+
+private:
+  CacheMemoryBudgetManager& m_Manager;
+  uint64 m_PreviousBudget;
+};
 } // namespace
 
 // A single 0-seed in a large (frozen) positive field: the two-pass chamfer computes the EXACT optimized-chamfer
@@ -194,7 +513,7 @@ TEST_CASE("ImageProcessing::FastChamferDistanceEngine: resident state requires a
 
   auto requiredResult = ImageProcessing::detail::CalculateFastChamferResidentWorkingMemoryBytes(dims);
   SIMPLNX_RESULT_REQUIRE_VALID(requiredResult);
-  REQUIRE(requiredResult.value() == (valueCount + 2 * sliceValues) * sizeof(float32));
+  REQUIRE(requiredResult.value() == valueCount * sizeof(float32));
   SIMPLNX_RESULT_REQUIRE_INVALID(ImageProcessing::detail::CalculateFastChamferResidentWorkingMemoryBytes(SizeVec3{std::numeric_limits<usize>::max(), 2, 2}));
 
   REQUIRE(ImageProcessing::detail::ShouldUseFastChamferResidentState(dims));
@@ -280,4 +599,155 @@ TEST_CASE("ImageProcessing::FastChamferDistanceEngine: 2D planner rejects invali
   REQUIRE(zeroX.overflow);
   REQUIRE_FALSE(zeroY.valid);
   REQUIRE(zeroY.overflow);
+}
+
+TEST_CASE("ImageProcessing::FastChamferDistanceEngine: row-group wavefront is bit-identical to the serial recurrence", "[ImageProcessing][FastChamferDistanceEngine]")
+{
+  STATIC_REQUIRE(ImageProcessing::detail::k_ChamferRowGroupRows == 8);
+  const std::array<SizeVec3, 12> dimensions = {SizeVec3{1, 1, 1}, SizeVec3{1, 1, 5}, SizeVec3{5, 1, 1},    SizeVec3{1, 7, 1},  SizeVec3{2, 2, 2},  SizeVec3{3, 3, 3},
+                                               SizeVec3{7, 6, 5}, SizeVec3{9, 8, 1}, SizeVec3{17, 13, 11}, SizeVec3{33, 9, 7}, SizeVec3{5, 40, 3}, SizeVec3{6, 30, 20}};
+  for(const SizeVec3& dims : dimensions)
+  {
+    const usize dx = dims[0];
+    const usize dy = dims[1];
+    const usize dz = dims[2];
+    DYNAMIC_SECTION("dimensions " << dx << " x " << dy << " x " << dz)
+    {
+      const std::array<usize, 5> rowGroupCounts = {1, 2, 3, 8, dy + 5};
+      for(const usize rowGroupRows : rowGroupCounts)
+      {
+        for(const bool negate : {false, true})
+        {
+          for(const float32 maxDist : {2.0f, 50.0f})
+          {
+            for(const bool useBandField : {true, false})
+            {
+              const char* family = useBandField ? "band" : "random";
+              CAPTURE(rowGroupRows, negate, maxDist, family);
+              const std::vector<float32> field = useBandField ? MakeBandField(dx, dy, dz, maxDist, 0xBADC0DEu) : MakeRandomField(dx, dy, dz, maxDist, 0xC0FFEEu);
+              const std::vector<float32> expected = ReferenceChamfer(field, dx, dy, dz, maxDist, negate);
+              const std::vector<float32> actual = RunChamferEngine(field, dx, dy, dz, maxDist, negate, rowGroupRows);
+              RequireBitIdentical(actual, expected);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("ImageProcessing::FastChamferDistanceEngine: in-core resident path performs no bulk transfers", "[ImageProcessing][FastChamferDistanceEngine]")
+{
+  constexpr usize dimX = 17;
+  constexpr usize dimY = 13;
+  constexpr usize dimZ = 11;
+  constexpr float32 kMaxDist = 50.0f;
+  const std::vector<float32> field = MakeRandomField(dimX, dimY, dimZ, kMaxDist, 0x13579BDFu);
+  const std::vector<float32> expected = ReferenceChamfer(field, dimX, dimY, dimZ, kMaxDist, false);
+  TransferCountingDataStore<float32> store(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f);
+  for(usize index = 0; index < field.size(); ++index)
+  {
+    store.setValue(index, field[index]);
+  }
+
+  std::atomic_bool shouldCancel{false};
+  IFilter::MessageHandler messageHandler{};
+  const Result<> result = ApplyFastChamferDistance(store, SizeVec3{dimX, dimY, dimZ}, kMaxDist, shouldCancel, messageHandler);
+  REQUIRE(result.valid());
+  REQUIRE(store.readValues() == 0);
+  REQUIRE(store.writtenValues() == 0);
+  RequireBitIdentical(ReadStoreValues(store), expected);
+}
+
+TEST_CASE("ImageProcessing::FastChamferDistanceEngine: pre-cancelled run leaves the store untouched", "[ImageProcessing][FastChamferDistanceEngine]")
+{
+  constexpr usize dimX = 9;
+  constexpr usize dimY = 8;
+  constexpr usize dimZ = 7;
+  constexpr float32 kPoison = 77.0f;
+  TransferCountingDataStore<float32> store(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, kPoison);
+  std::atomic_bool shouldCancel{true};
+  IFilter::MessageHandler messageHandler{};
+
+  const Result<> result = ApplyFastChamferDistance(store, SizeVec3{dimX, dimY, dimZ}, 50.0f, shouldCancel, messageHandler);
+  REQUIRE(result.valid());
+  for(const float32 value : store)
+  {
+    REQUIRE(value == kPoison);
+  }
+  REQUIRE(store.readValues() == 0);
+  REQUIRE(store.writtenValues() == 0);
+}
+
+TEST_CASE("ImageProcessing::FastChamferDistanceEngine: bounded 3-D route matches the serial recurrence across plane blocks", "[ImageProcessing][FastChamferDistanceEngine][WorkingMemory]")
+{
+  TemporaryRecordStoreConfig config;
+  config.recordSize = 4;
+  config.maxRecordsPerBatch = 1;
+  config.initialRecordCount = 1;
+  {
+    auto scratchResult = DataStoreUtilities::CreateTemporaryRecordStore(config);
+    if(scratchResult.invalid())
+    {
+      SUCCEED("no temporary record store provider in this build configuration");
+      return;
+    }
+  }
+
+  constexpr usize dimX = 7;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 40;
+  constexpr float32 kMaxDist = 50.0f;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<float32> field = MakeRandomField(dimX, dimY, dimZ, kMaxDist, 0x2468ACE0u);
+  const ScopedBudget budget(4096);
+
+  for(const bool negate : {false, true})
+  {
+    CAPTURE(negate);
+    OocReportingDataStore<float32> store(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f);
+    for(usize index = 0; index < field.size(); ++index)
+    {
+      store.setValue(index, field[index]);
+    }
+    std::atomic_bool shouldCancel{false};
+    IFilter::MessageHandler messageHandler{};
+    FastChamferDistance engine(store, dims, kMaxDist, shouldCancel, messageHandler, ImageProcessing::detail::k_Chamfer2DResidentLimit, negate);
+    const Result<> result = engine();
+    REQUIRE(result.valid());
+    RequireBitIdentical(ReadStoreValues(store), ReferenceChamfer(field, dimX, dimY, dimZ, kMaxDist, negate));
+    REQUIRE(store.readCount() == 3);
+    REQUIRE(store.writeCount() == 3);
+    REQUIRE(CacheMemoryBudgetManager::instance().reservedWorkingMemoryBytes() == 0);
+  }
+}
+
+TEST_CASE("ImageProcessing::FastChamferDistanceEngine: complete-grant route copies the volume once and matches", "[ImageProcessing][FastChamferDistanceEngine][WorkingMemory]")
+{
+  constexpr usize dimX = 7;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 40;
+  constexpr float32 kMaxDist = 50.0f;
+  const SizeVec3 dims{dimX, dimY, dimZ};
+  const std::vector<float32> field = MakeRandomField(dimX, dimY, dimZ, kMaxDist, 0x2468ACE0u);
+  const ScopedBudget budget(1024ULL * 1024ULL * 1024ULL);
+
+  for(const bool negate : {false, true})
+  {
+    CAPTURE(negate);
+    OocReportingDataStore<float32> store(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, 0.0f);
+    for(usize index = 0; index < field.size(); ++index)
+    {
+      store.setValue(index, field[index]);
+    }
+    std::atomic_bool shouldCancel{false};
+    IFilter::MessageHandler messageHandler{};
+    FastChamferDistance engine(store, dims, kMaxDist, shouldCancel, messageHandler, ImageProcessing::detail::k_Chamfer2DResidentLimit, negate);
+    const Result<> result = engine();
+    REQUIRE(result.valid());
+    RequireBitIdentical(ReadStoreValues(store), ReferenceChamfer(field, dimX, dimY, dimZ, kMaxDist, negate));
+    REQUIRE(store.readCount() == 1);
+    REQUIRE(store.writeCount() == 1);
+    REQUIRE(CacheMemoryBudgetManager::instance().reservedWorkingMemoryBytes() == 0);
+  }
 }
