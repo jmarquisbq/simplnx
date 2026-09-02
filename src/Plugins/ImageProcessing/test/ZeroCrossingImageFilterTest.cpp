@@ -33,11 +33,9 @@ const Uuid k_LegacyZCUuid = *Uuid::FromString("89a14057-776a-4e35-80b6-69361e078
 
 using ZCFilter = ZeroCrossingImageFilter;
 
-// Sets the standard geom/input/output keys + the Foreground/Background values on a shared Arguments, runs preflight
-// + execute, and requires both succeed. Reuses ZCFilter::k_*_Key for BOTH the new and the legacy ITK filter --
-// correct only because the new filter deliberately reuses the legacy key strings ("input_image_geometry_path",
-// "input_image_data_path", "output_array_name", "foreground_value", "background_value").
-void RunZC(IFilter& filter, DataStructure& ds, const DataPath& inputPath, uint8 foregroundValue, uint8 backgroundValue, const std::string& outputName = "Output")
+// The helper uses the shared parameter keys for the current and legacy filters.
+void RunZC(IFilter& filter, DataStructure& ds, const DataPath& inputPath, uint8 foregroundValue, uint8 backgroundValue, UnitTest::AlgorithmTestScope* scope = nullptr,
+           const std::string& outputName = "Output")
 {
   const DataPath geomPath = inputPath.getParent().getParent();
   Arguments args;
@@ -48,7 +46,7 @@ void RunZC(IFilter& filter, DataStructure& ds, const DataPath& inputPath, uint8 
   args.insertOrAssign(ZCFilter::k_BackgroundValue_Key, std::make_any<uint8>(backgroundValue));
   auto preflightResult = filter.preflight(ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.outputActions);
-  auto executeResult = filter.execute(ds, args);
+  auto executeResult = scope == nullptr ? filter.execute(ds, args) : scope->executeFilter(filter, ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 }
 
@@ -85,12 +83,10 @@ std::vector<T> MakeZeroCrossingField(usize dimX, usize dimY, usize dimZ)
   return v;
 }
 
-// A signed field with the type-MINIMUM value adjacent to positive values -> exercises the shared absT(INT_MIN) edge.
-// absT wraps abs(INT_MIN) back to INT_MIN (static_cast<T>(-INT_MIN) overflows to INT_MIN); ITK's itk::Math::abs result
-// is likewise stored back into the InputImagePixelType in itkZeroCrossingImageFilter.hxx, so ITK wraps identically --
-// the "shared UB" this field pins. A 3x3(x3) block of INT_MIN sits in a +100 field, so every INT_MIN voxel has
-// positive axial neighbors (a genuine sign change) in x and y (and z when dimZ>1). Values stay in range for every
-// signed integer type (int8 min -128, +100 < 127).
+// A signed field with the type-MINIMUM value adjacent to positive values exercises the magnitude of the minimum.
+// ITK wraps the minimum magnitude for int8 and int16. ITK uses the exact unsigned magnitude for int32 and int64.
+// A 3x3(x3) block of the minimum sits in a +100 field. The boundary voxels of the block have positive axial
+// neighbors, which is a genuine sign change. Values stay in range for every signed integer type (+100 < 127).
 template <class T>
 std::vector<T> MakeIntMinField(usize dimX, usize dimY, usize dimZ)
 {
@@ -112,17 +108,29 @@ std::vector<T> MakeIntMinField(usize dimX, usize dimY, usize dimZ)
   return v;
 }
 
-// Run new + legacy on the same field/params and require the uint8 outputs match EXACTLY (byte-identical marker
-// VALUES -- the first live-ITK gate on the axial sign-change stencil engine). Also asserts the field is non-vacuous
-// (has at least one foreground marker) so an all-background parity pass cannot masquerade as success.
+// Requires the new output to match the legacy output exactly and to contain at least one crossing.
+void RequireMatchesLegacy(const IDataArray& newOut, const IDataArray& legacyOut, uint8 foregroundValue)
+{
+  REQUIRE(newOut.getDataType() == DataType::uint8);
+  REQUIRE(newOut.getDataType() == legacyOut.getDataType());
+  const auto& store = newOut.getIDataStoreRefAs<AbstractDataStore<uint8>>();
+  usize foregroundCount = 0;
+  for(usize index = 0; index < store.getSize(); ++index)
+  {
+    if(store.getValue(index) == foregroundValue)
+    {
+      ++foregroundCount;
+    }
+  }
+  REQUIRE(foregroundCount > 0);
+  UnitTest::CompareDataArrays<uint8>(newOut, legacyOut);
+}
+
+// A 3-D field runs once per registered in-memory algorithm scenario. A single-slice field has one shared route and
+// runs once without an algorithm scope.
 template <class T>
 void RequireParity(const std::vector<T>& field, usize dx, usize dy, usize dz, uint8 foregroundValue, uint8 backgroundValue)
 {
-  DataStructure newDs;
-  const DataPath newInput = rt::BuildImageFromPattern<T>(newDs, dx, dy, dz, field);
-  ZCFilter newFilter;
-  RunZC(newFilter, newDs, newInput, foregroundValue, backgroundValue);
-
   IFilter::UniquePointer legacyFilter = Application::Instance()->getFilterList()->createFilter(k_LegacyZCUuid);
   REQUIRE(legacyFilter != nullptr);
   DataStructure legacyDs;
@@ -130,24 +138,31 @@ void RequireParity(const std::vector<T>& field, usize dx, usize dy, usize dz, ui
   RunZC(*legacyFilter, legacyDs, legacyInput, foregroundValue, backgroundValue);
 
   const DataPath outputPath({"Image Geometry", "CellData", "Output"});
-  const auto& newOut = newDs.getDataRefAs<IDataArray>(outputPath);
   const auto& legacyOut = legacyDs.getDataRefAs<IDataArray>(outputPath);
-  REQUIRE(newOut.getDataType() == DataType::uint8);
-  REQUIRE(newOut.getDataType() == legacyOut.getDataType());
-
-  // Non-vacuous guard: the crafted field must actually contain zero crossings.
-  const auto& store = newOut.getIDataStoreRefAs<AbstractDataStore<uint8>>();
-  usize fgCount = 0;
-  for(usize i = 0; i < store.getSize(); ++i)
+  if(dz == 1)
   {
-    if(store.getValue(i) == foregroundValue)
-    {
-      ++fgCount;
-    }
+    DataStructure newDs;
+    const DataPath newInput = rt::BuildImageFromPattern<T>(newDs, dx, dy, dz, field);
+    ZCFilter newFilter;
+    RunZC(newFilter, newDs, newInput, foregroundValue, backgroundValue);
+    RequireMatchesLegacy(newDs.getDataRefAs<IDataArray>(outputPath), legacyOut, foregroundValue);
+    return;
   }
-  REQUIRE(fgCount > 0);
 
-  UnitTest::CompareDataArrays<uint8>(newOut, legacyOut); // EXACT -- marker values must byte-match live ITK
+  for(const auto scenario : UnitTest::SelectAlgorithmTestScenariosForInMemoryStores())
+  {
+    CAPTURE(scenario);
+    UnitTest::AlgorithmTestScope scope(scenario);
+    DataStructure newDs;
+    const DataPath newInput = rt::BuildImageFromPattern<T>(newDs, dx, dy, dz, field);
+    scope.requireExpectedStore(newDs.getDataRefAs<IDataArray>(newInput));
+    ZCFilter newFilter;
+    RunZC(newFilter, newDs, newInput, foregroundValue, backgroundValue, &scope);
+
+    const auto& newOut = newDs.getDataRefAs<IDataArray>(outputPath);
+    scope.requireExpectedStore(newOut);
+    RequireMatchesLegacy(newOut, legacyOut, foregroundValue);
+  }
 }
 } // namespace
 
@@ -238,10 +253,11 @@ TEST_CASE("ImageProcessing::ZeroCrossingImageFilter: preflight guards", "[ImageP
 }
 
 // -----------------------------------------------------------------------------
-// (4) INT_MIN corner: a signed field with the type-minimum value adjacent to a positive value. The shared absT wraps
-//     abs(INT_MIN) back to INT_MIN (static_cast<T>(-INT_MIN) overflows); ITK's itk::Math::abs result is likewise
-//     stored back into the InputImagePixelType in itkZeroCrossingImageFilter.hxx, so ITK wraps identically. This case
-//     pins that the shared INT_MIN UB truly matches live ITK. Signed INTEGER types only (float has no such corner).
+// (4) INT_MIN corner uses a type-minimum value next to a positive value.
+//     The magnitude model wraps int8 and int16 minima to negative pixel values.
+//     The model compares int32 and int64 minima as exact unsigned magnitudes.
+//     The result must match live ITK for every signed integer width.
+//     This test uses integer types because floating-point types do not have this corner case.
 // -----------------------------------------------------------------------------
 TEMPLATE_TEST_CASE("ImageProcessing::ZeroCrossingImageFilter: INT_MIN adjacent to positive matches live ITK", "[ImageProcessing][ZeroCrossingImageFilter]", int8, int16, int32, int64)
 {

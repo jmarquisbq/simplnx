@@ -15,13 +15,13 @@
 #include <fmt/format.h>
 #include <nonstd/span.hpp>
 
-#include <array>
+#include <algorithm>
 #include <atomic>
 #include <limits>
+#include <memory>
 #include <new>
-#include <optional>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace nx::core::ImageProcessing
 {
@@ -47,24 +47,29 @@ inline bool ZeroCrossingCheckedAdd(usize left, usize right, usize& sum)
   return true;
 }
 
-struct ZeroCrossingResidentMemoryAllocation
-{
-  CacheMemoryBudgetManager::WorkingMemoryReservation reservation;
-  usize requiredBytes = 0;
+/// Approximate number of input values processed by one parallel dispatch of the direct 3-D route.
+inline constexpr usize k_ZeroCrossingDirectGroupValues = usize{16} << 20;
 
-  [[nodiscard]] bool holdsCompleteState() const noexcept
-  {
-    return requiredBytes > 0 && reservation.sizeBytes() == requiredBytes;
-  }
+/**
+ * @struct ZeroCrossingSlabPlan
+ * @brief Stores the core depth and buffer sizes for one 3-D slab.
+ */
+struct ZeroCrossingSlabPlan
+{
+  usize corePlanes = 0;
+  usize inputPlanes = 0;
+  usize inputBytes = 0;
+  usize outputBytes = 0;
 };
 
-inline bool ShouldUseZeroCrossingResidentState(const SizeVec3& dims)
-{
-  return dims[2] > 1;
-}
-
+/**
+ * @brief Calculates the useful memory for complete 3-D input and output buffers.
+ * @tparam T Specifies the signed input value type.
+ * @param dims Image dimensions in XYZ order.
+ * @return Useful bytes, or error -8761 if the calculation overflows. An empty dimension returns zero.
+ */
 template <class T>
-Result<usize> CalculateZeroCrossingResidentWorkingMemoryBytes(const SizeVec3& dims)
+Result<usize> ZeroCrossingSlabUsefulBytes(const SizeVec3& dims)
 {
   if(dims[0] == 0 || dims[1] == 0 || dims[2] == 0)
   {
@@ -73,34 +78,199 @@ Result<usize> CalculateZeroCrossingResidentWorkingMemoryBytes(const SizeVec3& di
 
   usize sliceValues = 0;
   usize volumeValues = 0;
-  usize residentValueBytes = 0;
-  usize residentBytes = 0;
-  usize rollingInputBytes = 0;
-  usize rollingValueBytes = 0;
-  usize rollingBytes = 0;
-  usize requiredBytes = 0;
-  if(!ZeroCrossingCheckedMultiply(dims[0], dims[1], sliceValues) || !ZeroCrossingCheckedMultiply(sliceValues, dims[2], volumeValues) ||
-     !ZeroCrossingCheckedAdd(sizeof(T), sizeof(uint8), residentValueBytes) || !ZeroCrossingCheckedMultiply(volumeValues, residentValueBytes, residentBytes) ||
-     !ZeroCrossingCheckedMultiply(sizeof(T), usize{3}, rollingInputBytes) || !ZeroCrossingCheckedAdd(rollingInputBytes, sizeof(uint8), rollingValueBytes) ||
-     !ZeroCrossingCheckedMultiply(sliceValues, rollingValueBytes, rollingBytes) || !ZeroCrossingCheckedAdd(residentBytes, rollingBytes, requiredBytes))
+  usize valueBytes = 0;
+  usize usefulBytes = 0;
+  if(!ZeroCrossingCheckedMultiply(dims[0], dims[1], sliceValues) || !ZeroCrossingCheckedMultiply(sliceValues, dims[2], volumeValues) || !ZeroCrossingCheckedAdd(sizeof(T), sizeof(uint8), valueBytes) ||
+     !ZeroCrossingCheckedMultiply(volumeValues, valueBytes, usefulBytes))
   {
-    return MakeErrorResult<usize>(
-        -8761, fmt::format("Zero crossing dimensions ({}) and input element size ({} bytes) overflow while sizing the resident input, uint8 output, and rolling-plane working state.",
-                           StringUtilities::formatDimensions3D(dims), sizeof(T)));
+    return MakeErrorResult<usize>(-8761, fmt::format("Zero crossing dimensions ({}) and input element size ({} bytes) overflow while sizing the complete input and uint8 output buffers.",
+                                                     StringUtilities::formatDimensions3D(dims), sizeof(T)));
   }
-  return {requiredBytes};
+  return {usefulBytes};
 }
 
+/**
+ * @brief Plans a 3-D slab from the shared working-memory grant.
+ * @tparam T Specifies the signed input value type.
+ * @param dims Image dimensions in XYZ order. The dimensions must have a valid useful-byte calculation.
+ * @param grantBytes Working-memory grant in bytes.
+ * @return Core depth, input depth, and buffer sizes for one slab.
+ *
+ * The grant controls the core depth so slab memory stays bounded by the shared budget when the minimum fits.
+ * A small grant uses the minimum three input planes and one output plane, even when that footprint exceeds the grant.
+ * A complete grant removes halo storage and permits one bulk read and one bulk write.
+ */
 template <class T>
-Result<ZeroCrossingResidentMemoryAllocation> ReserveZeroCrossingResidentWorkingMemory(const SizeVec3& dims)
+ZeroCrossingSlabPlan PlanZeroCrossingSlab(const SizeVec3& dims, uint64 grantBytes)
 {
-  auto requiredResult = CalculateZeroCrossingResidentWorkingMemoryBytes<T>(dims);
-  if(requiredResult.invalid())
+  if(dims[0] == 0 || dims[1] == 0 || dims[2] == 0)
   {
-    return ConvertInvalidResult<ZeroCrossingResidentMemoryAllocation>(std::move(requiredResult));
+    return {};
   }
-  auto reservation = ReserveWorkingMemory(requiredResult.value(), requiredResult.value());
-  return {ZeroCrossingResidentMemoryAllocation{std::move(reservation), requiredResult.value()}};
+
+  const usize sliceValues = dims[0] * dims[1];
+  const usize inputPlaneBytes = sliceValues * sizeof(T);
+  const usize outputPlaneBytes = sliceValues * sizeof(uint8);
+  const usize usefulBytes = dims[2] * (inputPlaneBytes + outputPlaneBytes);
+  if(grantBytes >= usefulBytes)
+  {
+    return {.corePlanes = dims[2], .inputPlanes = dims[2], .inputBytes = dims[2] * inputPlaneBytes, .outputBytes = dims[2] * outputPlaneBytes};
+  }
+
+  const uint64 haloBytes = uint64{2} * inputPlaneBytes;
+  const uint64 corePlaneBytes = inputPlaneBytes + outputPlaneBytes;
+  const usize fittingCorePlanes = grantBytes > haloBytes ? static_cast<usize>((grantBytes - haloBytes) / corePlaneBytes) : usize{0};
+  const usize corePlanes = std::max<usize>(usize{1}, fittingCorePlanes);
+  return {.corePlanes = corePlanes, .inputPlanes = corePlanes + 2, .inputBytes = (corePlanes + 2) * inputPlaneBytes, .outputBytes = corePlanes * outputPlaneBytes};
+}
+
+/**
+ * @brief Selects the type that carries a zero-crossing magnitude for input type T.
+ * @tparam T Specifies the signed input value type.
+ *
+ * ITK keeps T for integer types narrower than int. The minimum magnitude therefore wraps to a negative value.
+ * For int and wider types, ITK compares the exact unsigned magnitude. Floating-point types keep T.
+ */
+template <class T>
+using ZeroCrossingMagnitudeType = std::conditional_t<std::is_integral_v<T> && (sizeof(T) >= sizeof(int32)), std::make_unsigned_t<std::conditional_t<std::is_integral_v<T>, T, int32>>, T>;
+
+/**
+ * @brief Returns the magnitude of a value as ITK compares it.
+ * @tparam T Specifies the signed input value type.
+ * @param value Input value.
+ * @return The magnitude in ZeroCrossingMagnitudeType<T>. The minimum of a narrow integer type wraps to a negative value.
+ *
+ * Integer negation runs in the unsigned domain, which is defined for the minimum value. Types narrower than int cast
+ * the exact magnitude back to T, which wraps the minimum to itself. Wider types keep the exact unsigned magnitude.
+ */
+template <class T>
+inline ZeroCrossingMagnitudeType<T> ZeroCrossingMagnitude(T value)
+{
+  if constexpr(std::is_integral_v<T>)
+  {
+    using Unsigned = std::make_unsigned_t<T>;
+    const Unsigned magnitude = value < T{} ? static_cast<Unsigned>(Unsigned{0} - static_cast<Unsigned>(value)) : static_cast<Unsigned>(value);
+    return static_cast<ZeroCrossingMagnitudeType<T>>(magnitude);
+  }
+  else
+  {
+    return value < T{} ? -value : value;
+  }
+}
+
+/**
+ * @brief Tests one axial neighbor for a zero crossing that the center owns.
+ * @tparam T Specifies the signed input value type.
+ * @param c Center value.
+ * @param n Neighbor value.
+ * @param positiveDirection One for the +X, +Y, and +Z neighbors, which win magnitude ties; zero otherwise.
+ * @return One when the pair changes sign and the center is the closer-to-zero side, otherwise zero.
+ *
+ * The predicate combines 0/1 masks with bitwise operators. A voxel evaluates all six neighbors without branches.
+ * The masks give the same result as the short-circuit rule, including for NaN and signed zero.
+ * The magnitude uses a defined wrap, so its unconditional evaluation is safe for every value.
+ */
+template <class T>
+inline uint32 ZeroCrossingCrosses(T c, T n, uint32 positiveDirection)
+{
+  const uint32 centerNegative = static_cast<uint32>(c < T{});
+  const uint32 centerPositive = static_cast<uint32>(c > T{});
+  const uint32 centerZero = static_cast<uint32>(c == T{});
+  const uint32 neighborNegative = static_cast<uint32>(n < T{});
+  const uint32 neighborPositive = static_cast<uint32>(n > T{});
+  const uint32 neighborZero = static_cast<uint32>(n == T{});
+  const uint32 signChange = (centerNegative & neighborPositive) | (centerPositive & neighborNegative) | (centerZero & (neighborZero ^ uint32{1})) | ((centerZero ^ uint32{1}) & neighborZero);
+  const ZeroCrossingMagnitudeType<T> centerMagnitude = ZeroCrossingMagnitude(c);
+  const ZeroCrossingMagnitudeType<T> neighborMagnitude = ZeroCrossingMagnitude(n);
+  const uint32 magnitudeLess = static_cast<uint32>(centerMagnitude < neighborMagnitude);
+  const uint32 magnitudeEqual = static_cast<uint32>(centerMagnitude == neighborMagnitude);
+  return signChange & (magnitudeLess | (magnitudeEqual & positiveDirection));
+}
+
+/**
+ * @brief Evaluates one voxel of a 3-D row against its six axial neighbors.
+ * @tparam T Specifies the signed input value type.
+ * @param previousPlaneRow Row at the negative Z neighbor.
+ * @param previousRow Row at the negative Y neighbor.
+ * @param row Current input row.
+ * @param nextRow Row at the positive Y neighbor.
+ * @param nextPlaneRow Row at the positive Z neighbor.
+ * @param x Column of the voxel.
+ * @param negativeX Column of the negative X neighbor, clamped at the row start.
+ * @param positiveX Column of the positive X neighbor, clamped at the row end.
+ * @return Nonzero when any neighbor forms a crossing that the voxel owns.
+ */
+template <class T>
+inline uint32 ZeroCrossingHitAt(const T* previousPlaneRow, const T* previousRow, const T* row, const T* nextRow, const T* nextPlaneRow, usize x, usize negativeX, usize positiveX)
+{
+  const T center = row[x];
+  uint32 hit = ZeroCrossingCrosses(center, row[negativeX], uint32{0});
+  hit |= ZeroCrossingCrosses(center, previousRow[x], uint32{0});
+  hit |= ZeroCrossingCrosses(center, previousPlaneRow[x], uint32{0});
+  hit |= ZeroCrossingCrosses(center, row[positiveX], uint32{1});
+  hit |= ZeroCrossingCrosses(center, nextRow[x], uint32{1});
+  hit |= ZeroCrossingCrosses(center, nextPlaneRow[x], uint32{1});
+  return hit;
+}
+
+/**
+ * @brief Evaluates one 3-D row with the six axial neighbors.
+ * @tparam T Specifies the signed input value type.
+ * @param previousPlaneRow Row at the negative Z neighbor, clamped to the current row at the boundary.
+ * @param previousRow Row at the negative Y neighbor, clamped to the current row at the boundary.
+ * @param row Current input row.
+ * @param nextRow Row at the positive Y neighbor, clamped to the current row at the boundary.
+ * @param nextPlaneRow Row at the positive Z neighbor, clamped to the current row at the boundary.
+ * @param output Receives the output labels for the current row.
+ * @param nx Number of values in each row.
+ * @param foreground Label for a detected crossing.
+ * @param background Label for a value without a crossing.
+ * @pre All row pointers and the output point to at least nx values.
+ *
+ * The border columns use clamped X neighbors. The interior loop reads the six neighbors at fixed offsets and carries
+ * no per-column branches, so the compiler can vectorize it.
+ */
+template <class T>
+inline void ZeroCrossingRow(const T* previousPlaneRow, const T* previousRow, const T* row, const T* nextRow, const T* nextPlaneRow, uint8* output, usize nx, uint8 foreground, uint8 background)
+{
+  if(nx < 3)
+  {
+    for(usize x = 0; x < nx; ++x)
+    {
+      const usize negativeX = x > 0 ? x - 1 : 0;
+      const usize positiveX = x + 1 < nx ? x + 1 : nx - 1;
+      const uint32 hit = ZeroCrossingHitAt(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, x, negativeX, positiveX);
+      output[x] = hit != 0 ? foreground : background;
+    }
+    return;
+  }
+
+  const uint32 firstHit = ZeroCrossingHitAt(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, 0, 0, 1);
+  output[0] = firstHit != 0 ? foreground : background;
+
+  const T* const negativeZ = previousPlaneRow;
+  const T* const negativeY = previousRow;
+  const T* const center = row;
+  const T* const positiveY = nextRow;
+  const T* const positiveZ = nextPlaneRow;
+  uint8* const labels = output;
+  const uint8 foregroundLabel = foreground;
+  const uint8 backgroundLabel = background;
+  const usize lastX = nx - 1;
+  for(usize x = 1; x < lastX; ++x)
+  {
+    const T c = center[x];
+    uint32 hit = ZeroCrossingCrosses(c, center[x - 1], uint32{0});
+    hit |= ZeroCrossingCrosses(c, negativeY[x], uint32{0});
+    hit |= ZeroCrossingCrosses(c, negativeZ[x], uint32{0});
+    hit |= ZeroCrossingCrosses(c, center[x + 1], uint32{1});
+    hit |= ZeroCrossingCrosses(c, positiveY[x], uint32{1});
+    hit |= ZeroCrossingCrosses(c, positiveZ[x], uint32{1});
+    labels[x] = hit != 0 ? foregroundLabel : backgroundLabel;
+  }
+
+  const uint32 lastHit = ZeroCrossingHitAt(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, lastX, lastX - 1, lastX);
+  output[lastX] = lastHit != 0 ? foreground : background;
 }
 
 template <class T>
@@ -124,7 +294,6 @@ struct ZeroCrossing2DBlockBody
     const int64 maxX = static_cast<int64>(dimX) - 1;
     const int64 maxY = static_cast<int64>(dimY) - 1;
     const auto clamp = [](int64 value, int64 upper) { return value < 0 ? int64{0} : (value > upper ? upper : value); };
-    const auto absolute = [](T value) -> T { return value < T{} ? static_cast<T>(-value) : value; };
     for(usize tuple = range.min(); tuple < range.max(); ++tuple)
     {
       const usize localX = tuple % outputWidth;
@@ -143,8 +312,8 @@ struct ZeroCrossing2DBlockBody
         {
           return false;
         }
-        const T centerMagnitude = absolute(center);
-        const T neighborMagnitude = absolute(neighbor);
+        const ZeroCrossingMagnitudeType<T> centerMagnitude = ZeroCrossingMagnitude(center);
+        const ZeroCrossingMagnitudeType<T> neighborMagnitude = ZeroCrossingMagnitude(neighbor);
         return centerMagnitude < neighborMagnitude || (centerMagnitude == neighborMagnitude && positiveDirection);
       };
 
@@ -157,15 +326,23 @@ struct ZeroCrossing2DBlockBody
 };
 } // namespace detail
 
-// ITK-free port of ZeroCrossingImageFilter: single streamed pass. For each voxel, output = backgroundValue unless it
-// forms a zero-crossing with one of its 2*effDim axial face neighbors (x±1,y±1,z±1), in which case foregroundValue.
-// ZeroCrossing test (itkZeroCrossingImageFilter.hxx): sign change between center `c` and neighbor `n` (opposite sides
-// of zero; exact-zero on one side & nonzero on the other counts) AND the center is the closer-to-zero side --
-// |c| < |n|, or |c| == |n| and `n` is the +stride (positive-direction) neighbor (ITK's `i >= ImageDimension`
-// tie-break). |·| in T. ZeroFluxNeumann (edge-clamp) boundary. A true-3-D call with a real OOC endpoint first tries
-// one budgeted full-volume transfer in each direction and otherwise uses a rolling 3-plane Z window. True 2D uses
-// checked fixed-capacity row blocks or overwide X tiles. `messageHandler` is currently unused (progress deferred);
-// kept for facade signature parity.
+/**
+ * @brief Finds axial zero crossings with storage-specific execution routes.
+ * @tparam T Specifies the signed input value type.
+ * @param inStore Input scalar store.
+ * @param outStore Output uint8 label store.
+ * @param dims Image dimensions in XYZ order.
+ * @param foregroundValue Label for a detected crossing.
+ * @param backgroundValue Label for a value without a crossing.
+ * @param shouldCancel Stops work before 3-D processing, between direct-route plane groups, or between slabs.
+ * @param messageHandler Reserved for facade consistency. This function does not send messages.
+ * @param target2DBytes Target working-memory size for single-slice processing, in bytes.
+ * @return An error for overflow, failed allocation, or failed transfer. Cancellation returns a valid result.
+ *
+ * The direct 3-D route reads and writes in-memory spans through parallel rows.
+ * The slab route uses a budget-derived depth and performs one bulk read and one bulk write per slab.
+ * Single-slice images use checked row blocks or X tiles with bounded buffers.
+ */
 template <class T>
 Result<> ApplyZeroCrossing(const AbstractDataStore<T>& inStore, AbstractDataStore<uint8>& outStore, const SizeVec3& dims, uint8 foregroundValue, uint8 backgroundValue,
                            const std::atomic_bool& shouldCancel, const IFilter::MessageHandler& messageHandler, usize target2DBytes = detail::k_RadiusOneStencil2DTargetBytes)
@@ -190,136 +367,122 @@ Result<> ApplyZeroCrossing(const AbstractDataStore<T>& inStore, AbstractDataStor
         });
   }
 
+  // The single-slice route above is one shared implementation, so only the 3-D routes record an algorithm path.
   const bool usesOutOfCoreStore = inStore.getStoreType() == IDataStore::StoreType::OutOfCore || outStore.getStoreType() == IDataStore::StoreType::OutOfCore;
-  if(usesOutOfCoreStore && !ForceInCoreAlgorithm() && detail::ShouldUseZeroCrossingResidentState(dims))
+  const auto* inMemoryInput = dynamic_cast<const DataStore<T>*>(&inStore);
+  auto* inMemoryOutput = dynamic_cast<DataStore<uint8>*>(&outStore);
+  const bool direct = !usesOutOfCoreStore && inMemoryInput != nullptr && inMemoryOutput != nullptr && !ForceOocAlgorithm();
+  RecordAlgorithmPathExecution(direct ? AlgorithmPath::InCore : AlgorithmPath::OutOfCore, usesOutOfCoreStore);
+  if(shouldCancel)
   {
-    auto allocationResult = detail::ReserveZeroCrossingResidentWorkingMemory<T>(dims);
-    if(allocationResult.invalid())
+    return {};
+  }
+
+  const usize nX = dims[0];
+  const usize nY = dims[1];
+  const usize nZ = dims[2];
+  if(nX == 0 || nY == 0 || nZ == 0)
+  {
+    return {};
+  }
+  const usize slice = nX * nY;
+  static_cast<void>(messageHandler);
+
+  if(direct)
+  {
+    const T* values = inMemoryInput->createSpan().data();
+    uint8* output = inMemoryOutput->createSpan().data();
+    // Planes are dispatched in groups of about k_ZeroCrossingDirectGroupValues values. A group is large enough that
+    // the parallel dispatch cost is negligible, and the cancellation check between groups stays responsive.
+    const usize planesPerGroup = std::max<usize>(usize{1}, detail::k_ZeroCrossingDirectGroupValues / slice);
+    for(usize zBegin = 0; zBegin < nZ; zBegin += planesPerGroup)
     {
-      return ConvertInvalidResult<void>(std::move(allocationResult));
-    }
-    auto allocation = std::move(allocationResult.value());
-    if(allocation.holdsCompleteState())
-    {
-      try
+      if(shouldCancel)
       {
-        DataStore<T> residentInput(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, std::nullopt);
-        DataStore<uint8> residentOutput(ShapeType{dims[2], dims[1], dims[0]}, ShapeType{1}, std::nullopt);
-        if(Result<> result = inStore.copyIntoBuffer(0, residentInput.createSpan()); result.invalid())
-        {
-          return result;
-        }
-        if(Result<> result = ApplyZeroCrossing(residentInput, residentOutput, dims, foregroundValue, backgroundValue, shouldCancel, messageHandler, target2DBytes); result.invalid())
-        {
-          return result;
-        }
-        if(shouldCancel)
-        {
-          return {};
-        }
-        const auto outputSpan = residentOutput.createSpan();
-        return outStore.copyFromBuffer(0, nonstd::span<const uint8>(outputSpan.data(), outputSpan.size()));
-      } catch(const std::bad_alloc&)
-      {
-        // Release the complete-state reservation before entering the rolling-plane fallback.
+        return {};
       }
+      const usize zEnd = std::min(nZ, zBegin + planesPerGroup);
+      ParallelDataAlgorithm parallelAlgorithm;
+      parallelAlgorithm.setRange(0, (zEnd - zBegin) * nY);
+      parallelAlgorithm.execute([values, output, zBegin, nX, nY, nZ, slice, foregroundValue, backgroundValue](const Range& range) {
+        for(usize index = range.min(); index < range.max(); ++index)
+        {
+          const usize z = zBegin + index / nY;
+          const usize y = index % nY;
+          const usize zPrevious = z > 0 ? z - 1 : z;
+          const usize zNext = z + 1 < nZ ? z + 1 : z;
+          const usize yPrevious = y > 0 ? y - 1 : y;
+          const usize yNext = y + 1 < nY ? y + 1 : y;
+          const T* plane = values + z * slice;
+          detail::ZeroCrossingRow(values + zPrevious * slice + y * nX, plane + yPrevious * nX, plane + y * nX, plane + yNext * nX, values + zNext * slice + y * nX, output + z * slice + y * nX, nX,
+                                  foregroundValue, backgroundValue);
+        }
+      });
     }
+    return {};
   }
 
-  const int64 nX = static_cast<int64>(dims[0]);
-  const int64 nY = static_cast<int64>(dims[1]);
-  const int64 nZ = static_cast<int64>(dims[2]);
-  const usize slice = static_cast<usize>(nX) * static_cast<usize>(nY);
-  const uint32 effDim = (nZ > 1) ? 3u : 2u;
-
-  auto clampi = [](int64 v, int64 hi) { return v < 0 ? int64{0} : (v > hi ? hi : v); };
-  auto absT = [](T v) -> T { return v < T{} ? static_cast<T>(-v) : v; }; // itk::Math::abs in T (matches ITK; INT_MIN edge is ITK's too)
-
-  // 3-plane rolling input window: win[0]=z-1, win[1]=z, win[2]=z+1 (clamped). For 2D (nZ==1) all three alias plane 0.
-  std::array<std::vector<T>, 3> win;
-  for(auto& p : win)
+  auto usefulResult = detail::ZeroCrossingSlabUsefulBytes<T>(dims);
+  if(usefulResult.invalid())
   {
-    p.resize(slice);
+    return ConvertInvalidResult<void>(std::move(usefulResult));
   }
-  std::vector<uint8> outPlane(slice);
+  auto reservation = ReserveWorkingMemory(usefulResult.value(), usefulResult.value());
+  const detail::ZeroCrossingSlabPlan plan = detail::PlanZeroCrossingSlab<T>(dims, reservation.sizeBytes());
 
-  auto loadPlane = [&](std::vector<T>& dst, int64 zWanted) -> Result<> {
-    const int64 zc = clampi(zWanted, nZ - 1);
-    return inStore.copyIntoBuffer(static_cast<usize>(zc) * slice, nonstd::span<T>(dst.data(), slice));
-  };
-
-  for(int64 dz = -1; dz <= 1; ++dz)
+  std::unique_ptr<T[]> input;
+  std::unique_ptr<uint8[]> output;
+  try
   {
-    if(Result<> r = loadPlane(win[static_cast<usize>(dz + 1)], dz); r.invalid())
-    {
-      return r;
-    }
+    input = std::make_unique_for_overwrite<T[]>(plan.inputPlanes * slice);
+    output = std::make_unique_for_overwrite<uint8[]>(plan.corePlanes * slice);
+  } catch(const std::bad_alloc&)
+  {
+    return MakeErrorResult(
+        -8762,
+        fmt::format("Zero crossing could not allocate the planned slab with {} input planes ({} bytes) and {} output planes ({} bytes). The working-memory grant is {} bytes for dimensions ({}).",
+                    plan.inputPlanes, plan.inputBytes, plan.corePlanes, plan.outputBytes, reservation.sizeBytes(), StringUtilities::formatDimensions3D(dims)));
   }
 
-  for(int64 z = 0; z < nZ; ++z)
+  for(usize z0 = 0; z0 < nZ; z0 += plan.corePlanes)
   {
     if(shouldCancel)
     {
       return {};
     }
-    const auto& pm = win[0]; // z-1
-    const auto& p0 = win[1]; // z
-    const auto& pp = win[2]; // z+1
-    auto zeroCrossingRows = [&](const Range& rowRange) {
-      for(usize yu = rowRange.min(); yu < rowRange.max(); ++yu)
-      {
-        const int64 y = static_cast<int64>(yu);
-        for(int64 x = 0; x < nX; ++x)
-        {
-          const auto at = [&](const std::vector<T>& pl, int64 xx, int64 yy) { return pl[static_cast<usize>(clampi(yy, nY - 1) * nX + clampi(xx, nX - 1))]; };
-          const T c = p0[static_cast<usize>(y * nX + x)];
-          const T zero = T{};
-
-          // Test one axial neighbor `n`; `positiveDir` = the neighbor is a +stride (ITK i>=d) neighbor (wins |c|==|n| ties).
-          auto crosses = [&](T n, bool positiveDir) -> bool {
-            const bool signChange = ((c < zero) && (n > zero)) || ((c > zero) && (n < zero)) || ((c == zero) && (n != zero)) || ((c != zero) && (n == zero));
-            if(!signChange)
-            {
-              return false;
-            }
-            const T ac = absT(c);
-            const T an = absT(n);
-            return (ac < an) || (ac == an && positiveDir);
-          };
-
-          // ITK order: negX,negY(,negZ) [positiveDir=false] then posX,posY(,posZ) [positiveDir=true]. Any hit -> fg.
-          bool hit = crosses(at(p0, x - 1, y), false) || crosses(at(p0, x, y - 1), false);
-          if(!hit && effDim == 3)
-          {
-            hit = crosses(at(pm, x, y), false);
-          }
-          if(!hit)
-          {
-            hit = crosses(at(p0, x + 1, y), true) || crosses(at(p0, x, y + 1), true);
-          }
-          if(!hit && effDim == 3)
-          {
-            hit = crosses(at(pp, x, y), true);
-          }
-          outPlane[static_cast<usize>(y * nX + x)] = hit ? foregroundValue : backgroundValue;
-        }
-      }
-    };
-    ParallelDataAlgorithm parallelAlgorithm;
-    parallelAlgorithm.setRange(0, static_cast<usize>(nY));
-    parallelAlgorithm.execute(zeroCrossingRows);
-    if(Result<> r = outStore.copyFromBuffer(static_cast<usize>(z) * slice, nonstd::span<const uint8>(outPlane.data(), slice)); r.invalid())
+    const usize zLo = z0 > 0 ? z0 - 1 : 0;
+    const usize count = std::min(nZ, z0 + plan.corePlanes);
+    const usize zHi = std::min(nZ, count + 1);
+    const usize inputValueCount = (zHi - zLo) * slice;
+    if(Result<> result = inStore.copyIntoBuffer(zLo * slice, nonstd::span<T>(input.get(), inputValueCount)); result.invalid())
     {
-      return r;
+      return result;
     }
-    if(z + 1 < nZ)
-    {
-      std::swap(win[0], win[1]);
-      std::swap(win[1], win[2]);
-      if(Result<> r = loadPlane(win[2], z + 2); r.invalid())
+
+    ParallelDataAlgorithm parallelAlgorithm;
+    parallelAlgorithm.setRange(0, (count - z0) * nY);
+    parallelAlgorithm.execute([inputValues = input.get(), outputValues = output.get(), z0, zLo, zHi, nX, nY, slice, foregroundValue, backgroundValue](const Range& range) {
+      for(usize index = range.min(); index < range.max(); ++index)
       {
-        return r;
+        const usize z = z0 + index / nY;
+        const usize y = index % nY;
+        const usize zPrevious = z > zLo ? z - 1 : zLo;
+        const usize zNext = z + 1 < zHi ? z + 1 : zHi - 1;
+        const usize yPrevious = y > 0 ? y - 1 : y;
+        const usize yNext = y + 1 < nY ? y + 1 : y;
+        const T* row = inputValues + (z - zLo) * slice + y * nX;
+        const T* previousPlaneRow = inputValues + (zPrevious - zLo) * slice + y * nX;
+        const T* previousRow = inputValues + (z - zLo) * slice + yPrevious * nX;
+        const T* nextRow = inputValues + (z - zLo) * slice + yNext * nX;
+        const T* nextPlaneRow = inputValues + (zNext - zLo) * slice + y * nX;
+        detail::ZeroCrossingRow(previousPlaneRow, previousRow, row, nextRow, nextPlaneRow, outputValues + (z - z0) * slice + y * nX, nX, foregroundValue, backgroundValue);
       }
+    });
+
+    const usize outputValueCount = (count - z0) * slice;
+    if(Result<> result = outStore.copyFromBuffer(z0 * slice, nonstd::span<const uint8>(output.get(), outputValueCount)); result.invalid())
+    {
+      return result;
     }
   }
   return {};

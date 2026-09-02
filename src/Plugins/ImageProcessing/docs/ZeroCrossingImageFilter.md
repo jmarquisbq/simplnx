@@ -22,7 +22,7 @@ Set/Get the label value for non-zero-crossing pixels.
 
 ## Algorithm
 
-For an in-memory 3D image, the filter maintains a rolling three-plane input window and writes one completed output plane at a time. When a 3D input or output is out of core, the filter first asks the shared cache budget for enough temporary memory to hold the complete input, uint8 output, and rolling planes. A complete grant lets the filter read the input once, run the same calculation against resident stores, and write the output once. A partial grant is released immediately and the filter uses the bounded rolling-plane route instead.
+For an in-memory 3D image, the filter evaluates parallel rows directly from the input array into the output array with a branch-free six-neighbor test. An out-of-core image streams plane slabs whose depth comes from the shared working-memory grant. Each slab uses one bulk read and one bulk write. A complete grant permits a single read and write. The minimum slab uses three input planes and one output plane.
 
 For a single-slice image, a checked 64 MiB plan may retain a fitting disk-backed uint8 output plane (up to 48 MiB), stream typed input row blocks through the remaining allowance, and issue one final bulk write. Larger outputs use bounded full-width row blocks or, when a complete row cannot fit, one-row X tiles with clipped halos. Every route preserves the legacy negative-axis-then-positive-axis comparison order, exact-zero behavior, and positive-direction tie rule. Datastore access remains serial and outside the parallel voxel loop.
 
