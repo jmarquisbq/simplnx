@@ -668,6 +668,45 @@ set(SIMPLNX_HDRS
   ${SIMPLNX_SOURCE_DIR}/Utilities/MD5.hpp
 )
 
+# Header-only ImageProcessing implementation details are listed for IDE navigation but are not
+# part of the installed simplnx development headers.
+set(SIMPLNX_IDE_HDRS
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/AdaptiveHistogramEqualizationEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/AxisProjectionEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/BinaryThinningEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/BoxNeighborhoodEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ConnectedComponentEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ContourEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/DanielssonDistanceMapEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/DiscreteGaussianEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/FastChamferDistanceEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/FiniteDifferenceEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/GaussianTemporaryStore.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/GradientMagnitudeEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/HistogramEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ImageProcessingConstants.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ImageProcessingFilterUtilities.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/IsoContourDistanceEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MaskEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MaurerDistanceMapEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MorphologicalReconstructionEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MorphologicalReconstructionOffsets.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MorphologicalReconstructionWavefront.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/MorphologyEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ObjectMorphologyEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/PointwiseEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ProjectionReducers.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/RadiusOneStencil2D.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/RecursiveGaussianEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/RegionalExtremaEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/StreamingStatistics.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/StructuringElement.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/SweepTemporaryStore.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/WatershedExternalMemory.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/WatershedFromMarkersEngine.hpp
+  ${SIMPLNX_SOURCE_DIR}/Utilities/ImageProcessing/ZeroCrossingEngine.hpp
+)
+
 set(SIMPLNX_GENERATED_HEADERS
   ${SIMPLNX_EXPORT_HEADER}
 )
@@ -952,12 +991,17 @@ set(SIMPLNX_ALL_HDRS
 target_sources(simplnx
   PRIVATE
     ${SIMPLNX_ALL_HDRS}
+    ${SIMPLNX_IDE_HDRS}
     ${SIMPLNX_SRCS}
 )
 
 source_group(TREE ${SIMPLNX_SOURCE_DIR} PREFIX "simplnx" FILES ${SIMPLNX_HDRS})
+source_group(TREE ${SIMPLNX_SOURCE_DIR} PREFIX "simplnx" FILES ${SIMPLNX_IDE_HDRS})
 source_group(TREE ${SIMPLNX_GENERATED_HEADER_DIR} PREFIX "simplnx/generated" FILES ${SIMPLNX_GENERATED_HEADERS})
 source_group(TREE ${SIMPLNX_SOURCE_DIR} PREFIX "simplnx" FILES ${SIMPLNX_SRCS})
+# Consumer builds can attach private SimplnxOoc sources after this directory has finished.
+# Keep those late-added sources in their repository path instead of Visual Studio's generic source folders.
+source_group("SimplnxOoc/src/SimplnxOoc" REGULAR_EXPRESSION ".*/src/SimplnxOoc/.*")
 
 set(SIMPLNX_INCLUDE_DIR ${simplnx_SOURCE_DIR}/src)
 

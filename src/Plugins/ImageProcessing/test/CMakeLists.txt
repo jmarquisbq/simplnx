@@ -1,4 +1,12 @@
 set(${PLUGIN_NAME}UnitTest_SRCS
+  AdaptiveHistogramEqualizationFilterTestUtils.hpp
+  ContourFilterTestUtils.hpp
+  ItkGoldenTestUtils.hpp
+  MorphologyFilterTestUtils.hpp
+  ObjectMorphologyFilterTestUtils.hpp
+  ProjectionFilterTestUtils.hpp
+  ReconstructionFilterTestUtils.hpp
+  UnaryFilterTestUtils.hpp
   SmokeTest.cpp
   ExamplePipelineCoverageTest.cpp
   ExamplePipelineExecutionTest.cpp

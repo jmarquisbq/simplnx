@@ -370,6 +370,11 @@ function(create_simplnx_plugin_unit_test)
 
   source_group("test" FILES  ${${ARGS_PLUGIN_NAME}UnitTest_SRCS} ${ARGS_PLUGIN_NAME}_test_main.cpp)
   source_group("Generated" FILES ${SIMPLNX_TEST_DIRS_HEADER} )                                                
+  # OOC consumer builds attach private support and plugin-specific tests after this directory has finished.
+  # Path-based rules keep those late-added sources out of Visual Studio's generic source folders.
+  source_group("SimplnxOoc/test" REGULAR_EXPRESSION ".*/test/OocUnitTestBootstrap\\.cpp$")
+  source_group("SimplnxOoc/test/PluginTests" REGULAR_EXPRESSION ".*/test/PluginTests/[^/]+\\.(cpp|hpp)$")
+  source_group("SimplnxOoc/test/PluginTests/${ARGS_PLUGIN_NAME}" REGULAR_EXPRESSION ".*/test/PluginTests/${ARGS_PLUGIN_NAME}/.*")
 
   include(${simplnx_SOURCE_DIR}/cmake/Utility.cmake)
   simplnx_enable_warnings(TARGET ${UNIT_TEST_TARGET})

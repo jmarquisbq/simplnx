@@ -13,15 +13,26 @@
 # here. Re-find it so Catch2::Catch2 resolves (ItkGoldenTestUtils.hpp / UnitTestCommon.hpp include <catch2/catch.hpp>).
 find_package(Catch2 CONFIG REQUIRED)
 
-add_executable(ImageProcessingBenchmark
+set(IMAGEPROCESSING_BENCHMARK_SOURCES
   main.cpp
   BenchmarkTiling.cpp
+  BenchmarkTiling.hpp
   BenchmarkFilterRegistry.cpp
+  BenchmarkFilterRegistry.hpp
   BenchmarkRunner.cpp
+  BenchmarkRunner.hpp
 )
 
-add_executable(WriteImageBenchmark
+set(WRITE_IMAGE_BENCHMARK_SOURCES
   WriteImageBenchmark.cpp
+)
+
+add_executable(ImageProcessingBenchmark ${IMAGEPROCESSING_BENCHMARK_SOURCES})
+add_executable(WriteImageBenchmark ${WRITE_IMAGE_BENCHMARK_SOURCES})
+
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+  PREFIX "${PLUGIN_NAME}/benchmark"
+  FILES ${IMAGEPROCESSING_BENCHMARK_SOURCES} ${WRITE_IMAGE_BENCHMARK_SOURCES}
 )
 
 # NOTE: we deliberately do NOT link simplnx::UnitTestCommon. That INTERFACE target compiles its Catch2-using .cpp

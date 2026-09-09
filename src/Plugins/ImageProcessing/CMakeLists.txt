@@ -126,6 +126,7 @@ find_package(ZLIB REQUIRED)
 target_link_libraries(${PLUGIN_NAME} PRIVATE ZLIB::ZLIB)
 
 set(PLUGIN_EXTRA_SOURCES
+  "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/ImageProcessingLegacyUUIDMapping.hpp"
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/utils/FijiMontageUtilities.hpp"
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/utils/FijiMontageUtilities.cpp"
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/utils/MetaImageUtilities.hpp"
@@ -144,6 +145,8 @@ set(OLESS_SOURCES
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/oless/oless/pole.cpp"
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/oless/oless/pole.h"
 )
+# The upstream program.cpp and txm_reader.cpp files define standalone executable entry points.
+# They are intentionally excluded from the ImageProcessing plugin target.
 
 target_sources(${PLUGIN_NAME} PRIVATE ${PLUGIN_EXTRA_SOURCES} ${OLESS_SOURCES})
 target_include_directories(${PLUGIN_NAME} PRIVATE "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/oless")
