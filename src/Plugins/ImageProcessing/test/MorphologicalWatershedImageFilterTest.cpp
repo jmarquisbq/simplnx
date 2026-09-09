@@ -175,7 +175,7 @@ inline void RequireExactLabels(const IDataArray& newOut, const std::vector<uint3
   for(usize offset = 0; offset < total && !failed; offset += k_ChunkSize)
   {
     const usize count = std::min(k_ChunkSize, total - offset);
-    store.copyIntoBuffer(offset, nonstd::span<uint32>(buf.get(), count));
+    REQUIRE(store.copyIntoBuffer(offset, nonstd::span<uint32>(buf.get(), count)).valid());
     for(usize i = 0; i < count; ++i)
     {
       if(buf[i] != oracle[offset + i])

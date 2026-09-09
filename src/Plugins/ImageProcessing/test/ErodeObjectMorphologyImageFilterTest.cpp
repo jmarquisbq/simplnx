@@ -198,7 +198,7 @@ TEST_CASE("ImageProcessing::ErodeObjectMorphologyImageFilter: Computed-expected 
     for(usize start = 0; start < input.size(); start += k_ChunkValues)
     {
       const usize count = std::min(k_ChunkValues, input.size() - start);
-      ref.copyFromBuffer(start, nonstd::span<const uint8>(input.data() + start, count));
+      REQUIRE(ref.copyFromBuffer(start, nonstd::span<const uint8>(input.data() + start, count)).valid());
     }
   }
   scope.requireExpectedStore(ds.getDataRefAs<IDataArray>(inputPath));

@@ -142,7 +142,7 @@ std::pair<DataPath, DataPath> BuildGrayscaleAndMarker(DataStructure& ds, usize d
   for(usize start = 0; start < markers.size(); start += k_ChunkValues)
   {
     const usize count = std::min(k_ChunkValues, markers.size() - start);
-    ref.copyFromBuffer(start, nonstd::span<const TLabel>(markers.data() + start, count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const TLabel>(markers.data() + start, count)).valid());
   }
   return {inputPath, markerPath};
 }
@@ -181,7 +181,7 @@ void RequireExactLabels(const IDataArray& newOut, const std::vector<TLabel>& ora
   for(usize offset = 0; offset < total && !failed; offset += k_ChunkSize)
   {
     const usize count = std::min(k_ChunkSize, total - offset);
-    store.copyIntoBuffer(offset, nonstd::span<TLabel>(buf.get(), count));
+    REQUIRE(store.copyIntoBuffer(offset, nonstd::span<TLabel>(buf.get(), count)).valid());
     for(usize i = 0; i < count; ++i)
     {
       if(buf[i] != oracle[offset + i])
@@ -603,7 +603,7 @@ TEST_CASE("ImageProcessing::MorphologicalWatershedFromMarkersImageFilter: ITK re
   auto materialize = [](const IDataArray& arr) {
     const auto& store = arr.getIDataStoreRefAs<AbstractDataStore<uint8>>();
     std::vector<uint8> v(store.getSize());
-    store.copyIntoBuffer(0, nonstd::span<uint8>(v.data(), v.size()));
+    REQUIRE(store.copyIntoBuffer(0, nonstd::span<uint8>(v.data(), v.size())).valid());
     return v;
   };
   const std::vector<uint8> gray = materialize(grayArray);

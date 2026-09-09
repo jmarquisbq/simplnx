@@ -129,7 +129,7 @@ inline DataPath BuildBinaryPatternImage(DataStructure& ds, usize dim, T foregrou
       const usize z = flatIndex / (dim * dim);
       buffer[i] = (((x / 8) + (y / 8) + (z / 8)) % 2 == 0) ? foreground : background;
     }
-    ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)).valid());
   }
   return inputPath;
 }

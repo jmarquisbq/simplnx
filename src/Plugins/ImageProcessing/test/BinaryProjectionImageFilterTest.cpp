@@ -62,7 +62,7 @@ DataPath BuildYCoordImage(DataStructure& ds, usize dim)
       const usize y = (flatIndex / dim) % dim; // value == Y coordinate
       buffer[i] = static_cast<T>(y);
     }
-    ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)).valid());
   }
   return inputPath;
 }

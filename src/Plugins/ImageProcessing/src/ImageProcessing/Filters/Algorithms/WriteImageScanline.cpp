@@ -245,13 +245,14 @@ struct WriteDirectVolumeFunctor
    * @param dataArrayPath Identifies the source array.
    * @param shouldCancel Stops processing between output slices.
    * @param writeSlice Writes one packed output slice.
-   * @return Error from the image writer.
+   * @return Errors and warnings from source I/O or the image writer.
    */
   template <typename T>
   Result<> operator()(const IDataArray& dataArray, usize planeIndex, usize dimX, usize dimY, usize dimZ, usize sliceCount, usize sliceW, usize sliceH, usize numComponents,
                       const DataPath& dataArrayPath, const std::atomic_bool& shouldCancel, const std::function<Result<>(std::vector<uint8>&, usize)>& writeSlice)
   {
     const auto& dataStore = dataArray.template getIDataStoreRefAs<AbstractDataStore<T>>();
+    Result<> accumulatedResult;
     const usize sliceValueCount = sliceW * sliceH * numComponents;
     const uint64 sliceBytes = static_cast<uint64>(sliceValueCount) * sizeof(T);
     const uint64 totalBytes = static_cast<uint64>(dataStore.getSize()) * sizeof(T);
@@ -272,28 +273,47 @@ struct WriteDirectVolumeFunctor
     {
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
 
       const usize groupSliceCount = std::min(slicesPerGroup, sliceCount - firstSlice);
       const usize groupValueCount = groupSliceCount * sliceValueCount;
       const Extent groupExtent = CreateSliceGroupExtent(planeIndex, firstSlice, groupSliceCount, dimX, dimY, dimZ);
-      dataStore.readExtentIntoBuffer(groupExtent, nonstd::span<T>(groupValues.get(), groupValueCount));
+      Result<> readResult = dataStore.readExtentIntoBuffer(groupExtent, nonstd::span<T>(groupValues.get(), groupValueCount));
+      if(readResult.invalid())
+      {
+        const std::string context = fmt::format("Write Image could not read slices [{}..{}] from array '{}'.", firstSlice, firstSlice + groupSliceCount - 1, dataArrayPath.toString());
+        if(readResult.errors().empty())
+        {
+          readResult.errors().push_back({-27027, context});
+        }
+        else
+        {
+          for(Error& error : readResult.errors())
+          {
+            error.message = fmt::format("{} {}", context, error.message);
+          }
+        }
+        return MergeResults(std::move(accumulatedResult), std::move(readResult));
+      }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
 
       for(usize localSliceIndex = 0; localSliceIndex < groupSliceCount; ++localSliceIndex)
       {
         if(shouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
         CopySliceFromGroup(nonstd::span<const T>(groupValues.get(), groupValueCount), sliceBuffer, localSliceIndex, groupSliceCount, planeIndex, dimX, dimY, dimZ, numComponents);
-        if(Result<> result = writeSlice(sliceBuffer, firstSlice + localSliceIndex); result.invalid())
+        Result<> writeResult = writeSlice(sliceBuffer, firstSlice + localSliceIndex);
+        if(writeResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(writeResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
       }
     }
-    return {};
+    return accumulatedResult;
   }
 };
 
@@ -344,17 +364,19 @@ struct ColorizeVolumeFunctor
    * @param controlPoints Color-control values.
    * @param numControlColors Number of control colors.
    * @param maskArray Optional Boolean or uint8 mask array.
+   * @param maskArrayPath Identifies the optional mask array.
    * @param invalidColor RGB value for masked pixels.
    * @param shouldCancel Stops processing between output slices.
    * @param writeSlice Writes one packed RGB output slice.
-   * @return Error from source I/O or the image writer.
+   * @return Errors and warnings from source I/O or the image writer.
    */
   template <typename T>
   Result<> operator()(const IDataArray& dataArrayRef, usize planeIndex, usize dimX, usize dimY, usize dimZ, usize sliceCount, usize sliceW, usize sliceH, const DataPath& dataArrayPath,
-                      const std::vector<float32>& binPoints, const std::vector<float32>& controlPoints, usize numControlColors, const IDataArray* maskArray, const std::vector<uint8>& invalidColor,
-                      const std::atomic_bool& shouldCancel, const std::function<Result<>(std::vector<uint8>&, usize)>& writeSlice)
+                      const std::vector<float32>& binPoints, const std::vector<float32>& controlPoints, usize numControlColors, const IDataArray* maskArray, const DataPath& maskArrayPath,
+                      const std::vector<uint8>& invalidColor, const std::atomic_bool& shouldCancel, const std::function<Result<>(std::vector<uint8>&, usize)>& writeSlice)
   {
     const auto& dataStore = dataArrayRef.template getIDataStoreRefAs<AbstractDataStore<T>>();
+    Result<> accumulatedResult;
     const usize numTuples = dataStore.getNumberOfTuples();
     if(numTuples == 0)
     {
@@ -370,11 +392,29 @@ struct ColorizeVolumeFunctor
     bool initialized = false;
     for(usize offset = 0; offset < numTuples; offset += pageElements)
     {
-      const usize count = std::min(pageElements, numTuples - offset);
-      if(Result<> result = dataStore.copyIntoBuffer(offset, nonstd::span<T>(valuePage.get(), count)); result.invalid())
+      if(shouldCancel)
       {
-        return result;
+        return accumulatedResult;
       }
+      const usize count = std::min(pageElements, numTuples - offset);
+      Result<> readResult = dataStore.copyIntoBuffer(offset, nonstd::span<T>(valuePage.get(), count));
+      if(readResult.invalid())
+      {
+        const std::string context = fmt::format("Write Image could not read values [{}..{}] from array '{}'.", offset, offset + count - 1, dataArrayPath.toString());
+        if(readResult.errors().empty())
+        {
+          readResult.errors().push_back({-27027, context});
+        }
+        else
+        {
+          for(Error& error : readResult.errors())
+          {
+            error.message = fmt::format("{} {}", context, error.message);
+          }
+        }
+        return MergeResults(std::move(accumulatedResult), std::move(readResult));
+      }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
       for(usize i = 0; i < count; ++i)
       {
         if(!initialized)
@@ -402,10 +442,11 @@ struct ColorizeVolumeFunctor
     const usize slicesPerGroup = CalculateSlicesPerGroup(planeIndex, sliceCount, groupSliceBytes, workingMemory.sizeBytes());
     if(slicesPerGroup == 0)
     {
-      return MakeErrorResult(-27026,
-                             fmt::format("Write Image cannot reserve one source slice for array '{}'. The scalar and mask buffers require {} bytes, but the working-memory manager granted {} bytes. "
-                                         "Increase the cache memory budget or reduce the image slice dimensions.",
-                                         dataArrayPath.toString(), groupSliceBytes, workingMemory.sizeBytes()));
+      return MergeResults(
+          std::move(accumulatedResult),
+          MakeErrorResult(-27026, fmt::format("Write Image cannot reserve one source slice for array '{}'. The scalar and mask buffers require {} bytes, but the working-memory manager granted {} "
+                                              "bytes. Increase the cache memory budget or reduce the image slice dimensions.",
+                                              dataArrayPath.toString(), groupSliceBytes, workingMemory.sizeBytes())));
     }
 
     std::unique_ptr<T[]> groupValues = std::make_unique<T[]>(slicesPerGroup * pixelCount);
@@ -429,27 +470,78 @@ struct ColorizeVolumeFunctor
     {
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
 
       const usize groupSliceCount = std::min(slicesPerGroup, sliceCount - firstSlice);
       const usize groupValueCount = groupSliceCount * pixelCount;
       const Extent groupExtent = CreateSliceGroupExtent(planeIndex, firstSlice, groupSliceCount, dimX, dimY, dimZ);
-      dataStore.readExtentIntoBuffer(groupExtent, nonstd::span<T>(groupValues.get(), groupValueCount));
+      Result<> readResult = dataStore.readExtentIntoBuffer(groupExtent, nonstd::span<T>(groupValues.get(), groupValueCount));
+      if(readResult.invalid())
+      {
+        const std::string context = fmt::format("Write Image could not read slices [{}..{}] from array '{}'.", firstSlice, firstSlice + groupSliceCount - 1, dataArrayPath.toString());
+        if(readResult.errors().empty())
+        {
+          readResult.errors().push_back({-27027, context});
+        }
+        else
+        {
+          for(Error& error : readResult.errors())
+          {
+            error.message = fmt::format("{} {}", context, error.message);
+          }
+        }
+        return MergeResults(std::move(accumulatedResult), std::move(readResult));
+      }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
       if(booleanMaskValues != nullptr)
       {
-        maskArray->getIDataStoreRefAs<AbstractDataStore<bool>>().readExtentIntoBuffer(groupExtent, nonstd::span<bool>(booleanMaskValues.get(), groupValueCount));
+        Result<> maskReadResult = maskArray->getIDataStoreRefAs<AbstractDataStore<bool>>().readExtentIntoBuffer(groupExtent, nonstd::span<bool>(booleanMaskValues.get(), groupValueCount));
+        if(maskReadResult.invalid())
+        {
+          const std::string context = fmt::format("Write Image could not read slices [{}..{}] from mask array '{}'.", firstSlice, firstSlice + groupSliceCount - 1, maskArrayPath.toString());
+          if(maskReadResult.errors().empty())
+          {
+            maskReadResult.errors().push_back({-27028, context});
+          }
+          else
+          {
+            for(Error& error : maskReadResult.errors())
+            {
+              error.message = fmt::format("{} {}", context, error.message);
+            }
+          }
+          return MergeResults(std::move(accumulatedResult), std::move(maskReadResult));
+        }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(maskReadResult));
       }
       else if(uint8MaskValues != nullptr)
       {
-        maskArray->getIDataStoreRefAs<AbstractDataStore<uint8>>().readExtentIntoBuffer(groupExtent, nonstd::span<uint8>(uint8MaskValues.get(), groupValueCount));
+        Result<> maskReadResult = maskArray->getIDataStoreRefAs<AbstractDataStore<uint8>>().readExtentIntoBuffer(groupExtent, nonstd::span<uint8>(uint8MaskValues.get(), groupValueCount));
+        if(maskReadResult.invalid())
+        {
+          const std::string context = fmt::format("Write Image could not read slices [{}..{}] from mask array '{}'.", firstSlice, firstSlice + groupSliceCount - 1, maskArrayPath.toString());
+          if(maskReadResult.errors().empty())
+          {
+            maskReadResult.errors().push_back({-27028, context});
+          }
+          else
+          {
+            for(Error& error : maskReadResult.errors())
+            {
+              error.message = fmt::format("{} {}", context, error.message);
+            }
+          }
+          return MergeResults(std::move(accumulatedResult), std::move(maskReadResult));
+        }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(maskReadResult));
       }
 
       for(usize localSliceIndex = 0; localSliceIndex < groupSliceCount; ++localSliceIndex)
       {
         if(shouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
 
         for(usize row = 0; row < sliceH; ++row)
@@ -477,13 +569,15 @@ struct ColorizeVolumeFunctor
           }
         }
 
-        if(Result<> result = writeSlice(sliceBuffer, firstSlice + localSliceIndex); result.invalid())
+        Result<> writeResult = writeSlice(sliceBuffer, firstSlice + localSliceIndex);
+        if(writeResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(writeResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
       }
     }
-    return {};
+    return accumulatedResult;
   }
 };
 } // namespace
@@ -638,7 +732,7 @@ Result<> WriteImageScanline::operator()()
     {
       return writeResult;
     }
-    return atomicFile.commit();
+    return MergeResults(std::move(writeResult), atomicFile.commit());
   };
 
   if(m_InputValues.createColorTable)
@@ -669,7 +763,8 @@ Result<> WriteImageScanline::operator()()
     }
 
     return ExecuteDataFunction(ColorizeVolumeFunctor{}, dataType, imageArray, m_InputValues.planeIndex, dimX, dimY, dimZ, sliceCount, sliceW, sliceH, m_InputValues.imageDataArrayPath, binPoints,
-                               controlPoints, numControlColors, maskArrayPtr, m_InputValues.invalidColor, m_ShouldCancel, std::function<Result<>(std::vector<uint8>&, usize)>(writeSlice));
+                               controlPoints, numControlColors, maskArrayPtr, m_InputValues.maskArrayPath, m_InputValues.invalidColor, m_ShouldCancel,
+                               std::function<Result<>(std::vector<uint8>&, usize)>(writeSlice));
   }
 
   return ExecuteDataFunction(WriteDirectVolumeFunctor{}, dataType, imageArray, m_InputValues.planeIndex, dimX, dimY, dimZ, sliceCount, sliceW, sliceH, nComp, m_InputValues.imageDataArrayPath,

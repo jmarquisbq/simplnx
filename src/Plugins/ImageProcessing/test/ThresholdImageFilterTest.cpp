@@ -65,7 +65,7 @@ DataPath BuildRampImage(DataStructure& ds, usize dimX, usize dimY, usize dimZ)
     {
       buffer[i] = static_cast<float32>(start + i);
     }
-    ref.copyFromBuffer(start, nonstd::span<const float32>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const float32>(buffer.get(), count)).valid());
   }
   std::cout << "  [build] done" << std::endl;
   return inputPath;

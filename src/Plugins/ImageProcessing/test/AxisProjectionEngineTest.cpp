@@ -137,6 +137,10 @@ public:
       return MakeErrorResult(m_ReadErrorCode, "Injected axis-projection input read failure");
     }
     Result<> result = DataStore<T>::copyIntoBuffer(startIndex, buffer);
+    if(result.valid() && m_WarnReadCall != 0 && m_ReadCount == m_WarnReadCall)
+    {
+      result.warnings().push_back({m_ReadWarningCode, "Injected axis-projection input read warning"});
+    }
     if(result.valid() && m_CancelAfterReadCall != 0 && m_ReadCount == m_CancelAfterReadCall && m_ShouldCancel != nullptr)
     {
       *m_ShouldCancel = true;
@@ -144,41 +148,51 @@ public:
     return result;
   }
 
-  std::vector<T> readExtent(const Extent& extent) const override
+  Result<std::vector<T>> readExtent(const Extent& extent) const override
   {
     ++m_ReadCount;
     ++m_ExtentReadCount;
     if(m_FailReadCall != 0 && m_ReadCount == m_FailReadCall)
     {
-      throw std::runtime_error("Injected axis-projection extent read failure");
+      return MakeErrorResult<std::vector<T>>(m_ReadErrorCode, "Injected axis-projection extent read failure");
     }
-    auto values = DataStore<T>::readExtent(extent);
-    m_MaxReadValues = std::max(m_MaxReadValues, values.size());
-    if(m_CancelAfterReadCall != 0 && m_ReadCount == m_CancelAfterReadCall && m_ShouldCancel != nullptr)
+    Result<std::vector<T>> result = DataStore<T>::readExtent(extent);
+    if(result.valid())
     {
-      *m_ShouldCancel = true;
+      m_MaxReadValues = std::max(m_MaxReadValues, result.value().size());
+      if(m_WarnReadCall != 0 && m_ReadCount == m_WarnReadCall)
+      {
+        result.warnings().push_back({m_ReadWarningCode, "Injected axis-projection extent read warning"});
+      }
+      if(m_CancelAfterReadCall != 0 && m_ReadCount == m_CancelAfterReadCall && m_ShouldCancel != nullptr)
+      {
+        *m_ShouldCancel = true;
+      }
     }
-    return values;
+    return result;
   }
 
-  std::vector<std::vector<T>> readExtents(nonstd::span<const Extent> extents) const override
+  Result<std::vector<std::vector<T>>> readExtents(nonstd::span<const Extent> extents) const override
   {
     ++m_ReadCount;
     ++m_ExtentFamilyReadCount;
     if(m_FailReadCall != 0 && m_ReadCount == m_FailReadCall)
     {
-      throw std::runtime_error("Injected axis-projection extent read failure");
+      return MakeErrorResult<std::vector<std::vector<T>>>(m_ReadErrorCode, "Injected axis-projection extent read failure");
     }
-    auto values = DataStore<T>::readExtents(extents);
-    for(const auto& extentValues : values)
+    Result<std::vector<std::vector<T>>> result = DataStore<T>::readExtents(extents);
+    if(result.valid())
     {
-      m_MaxReadValues = std::max(m_MaxReadValues, extentValues.size());
+      for(const auto& extentValues : result.value())
+      {
+        m_MaxReadValues = std::max(m_MaxReadValues, extentValues.size());
+      }
+      if(m_CancelAfterReadCall != 0 && m_ReadCount == m_CancelAfterReadCall && m_ShouldCancel != nullptr)
+      {
+        *m_ShouldCancel = true;
+      }
     }
-    if(m_CancelAfterReadCall != 0 && m_ReadCount == m_CancelAfterReadCall && m_ShouldCancel != nullptr)
-    {
-      *m_ShouldCancel = true;
-    }
-    return values;
+    return result;
   }
 
   Result<> copyFromBuffer(usize startIndex, nonstd::span<const T> buffer) override
@@ -192,6 +206,10 @@ public:
     Result<> result = DataStore<T>::copyFromBuffer(startIndex, buffer);
     if(result.valid())
     {
+      if(m_WarnWriteCall != 0 && m_WriteCount == m_WarnWriteCall)
+      {
+        result.warnings().push_back({m_WriteWarningCode, "Injected axis-projection output write warning"});
+      }
       m_WrittenValues += buffer.size();
     }
     return result;
@@ -221,10 +239,22 @@ public:
     m_ReadErrorCode = errorCode;
   }
 
+  void warnRead(usize readCall, int32 warningCode)
+  {
+    m_WarnReadCall = readCall;
+    m_ReadWarningCode = warningCode;
+  }
+
   void failWrite(usize writeCall, int32 errorCode)
   {
     m_FailWriteCall = writeCall;
     m_WriteErrorCode = errorCode;
+  }
+
+  void warnWrite(usize writeCall, int32 warningCode)
+  {
+    m_WarnWriteCall = writeCall;
+    m_WriteWarningCode = warningCode;
   }
 
   usize maxReadValues() const noexcept
@@ -270,9 +300,13 @@ private:
   usize m_CancelAfterReadCall = 0;
   std::atomic_bool* m_ShouldCancel = nullptr;
   usize m_FailReadCall = 0;
+  usize m_WarnReadCall = 0;
   usize m_FailWriteCall = 0;
+  usize m_WarnWriteCall = 0;
   int32 m_ReadErrorCode = -9901;
+  int32 m_ReadWarningCode = -9903;
   int32 m_WriteErrorCode = -9902;
+  int32 m_WriteWarningCode = -9904;
 };
 
 struct FakeExternalSortControl
@@ -1032,6 +1066,49 @@ TEST_CASE("ImageProcessing::AxisProjectionEngine: associative bounded cancellati
     REQUIRE(outputStore.writtenValues() == 0);
   }
 
+  SECTION("associative Y input warnings propagate")
+  {
+    std::atomic_bool shouldCancel{false};
+    inputStore.warnRead(1, -9903);
+    const Result<> result = projection_detail::ApplyAxisProjection2D(inputStore, outputStore, shapeResult.value(), 1, MeanReduce{}, shouldCancel, k_Target);
+    REQUIRE(result.valid());
+    REQUIRE(std::any_of(result.warnings().cbegin(), result.warnings().cend(), [](const Warning& warning) { return warning.code == -9903; }));
+  }
+
+  SECTION("associative Y output warnings propagate")
+  {
+    std::atomic_bool shouldCancel{false};
+    outputStore.warnWrite(1, -9904);
+    const Result<> result = projection_detail::ApplyAxisProjection2D(inputStore, outputStore, shapeResult.value(), 1, MeanReduce{}, shouldCancel, k_Target);
+    REQUIRE(result.valid());
+    REQUIRE(std::any_of(result.warnings().cbegin(), result.warnings().cend(), [](const Warning& warning) { return warning.code == -9904; }));
+  }
+
+  SECTION("Median Y extent failure keeps the provider code and adds context")
+  {
+    const usize workerCount = projection_detail::AxisProjectionMedianWorkerCount(k_DimX);
+    const usize medianTarget = projection_detail::k_AxisProjection2DMetadataBytes + workerCount * k_DimY * sizeof(int32) + k_DimX * (k_DimY * sizeof(int32) + sizeof(float64));
+    std::atomic_bool shouldCancel{false};
+    inputStore.failRead(1, -9901);
+    const Result<> result = projection_detail::ApplyAxisProjection2D(inputStore, outputStore, shapeResult.value(), 1, MedianReduce{}, shouldCancel, medianTarget);
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -9901);
+    REQUIRE(result.errors().front().message.find("Median Y extent read failed") != std::string::npos);
+    REQUIRE(outputStore.writtenValues() == 0);
+  }
+
+  SECTION("Median Y extent warning propagates")
+  {
+    const usize workerCount = projection_detail::AxisProjectionMedianWorkerCount(k_DimX);
+    const usize medianTarget = projection_detail::k_AxisProjection2DMetadataBytes + workerCount * k_DimY * sizeof(int32) + k_DimX * (k_DimY * sizeof(int32) + sizeof(float64));
+    std::atomic_bool shouldCancel{false};
+    inputStore.warnRead(1, -9903);
+    const Result<> result = projection_detail::ApplyAxisProjection2D(inputStore, outputStore, shapeResult.value(), 1, MedianReduce{}, shouldCancel, medianTarget);
+    REQUIRE(result.valid());
+    REQUIRE(result.warnings().size() == 1);
+    REQUIRE(result.warnings().front().code == -9903);
+  }
+
   SECTION("output failure propagates")
   {
     std::atomic_bool shouldCancel{false};
@@ -1039,6 +1116,7 @@ TEST_CASE("ImageProcessing::AxisProjectionEngine: associative bounded cancellati
     const Result<> result = projection_detail::ApplyAxisProjection2D(inputStore, outputStore, shapeResult.value(), 1, MeanReduce{}, shouldCancel, k_Target);
     REQUIRE(result.invalid());
     REQUIRE(result.errors()[0].code == -9902);
+    REQUIRE(result.errors()[0].message.find("output write failed for X columns") != std::string::npos);
   }
 }
 

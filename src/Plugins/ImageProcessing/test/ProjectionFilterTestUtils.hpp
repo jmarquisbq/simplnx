@@ -150,8 +150,8 @@ inline void CompareFloat64ArraysWithinTolerance(const IDataArray& computed, cons
   for(usize offset = 0; offset < totalSize && !failed; offset += k_ChunkSize)
   {
     const usize count = std::min(k_ChunkSize, totalSize - offset);
-    computedStore.copyIntoBuffer(offset, nonstd::span<float64>(computedBuf.get(), count));
-    expectedStore.copyIntoBuffer(offset, nonstd::span<float64>(expectedBuf.get(), count));
+    REQUIRE(computedStore.copyIntoBuffer(offset, nonstd::span<float64>(computedBuf.get(), count)).valid());
+    REQUIRE(expectedStore.copyIntoBuffer(offset, nonstd::span<float64>(expectedBuf.get(), count)).valid());
     for(usize i = 0; i < count; ++i)
     {
       const float64 a = computedBuf[i];

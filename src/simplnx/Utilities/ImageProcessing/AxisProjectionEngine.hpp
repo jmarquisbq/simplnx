@@ -33,6 +33,7 @@
 #include <exception>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -745,6 +746,7 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
   std::vector<TIn> inputBuffer(plan.inputValues);
   std::vector<TOut> outputBuffer(plan.outputValues);
   std::vector<StateType> states(plan.stateSlots);
+  Result<> accumulatedResult;
 
   if(plan.route == AxisProjection2DRoute::AssociativeYRows)
   {
@@ -752,18 +754,19 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
     {
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
       const usize rowCount = std::min(plan.blockRows, shape.dimY - yStart);
       const usize inputCount = rowCount * shape.dimX;
       Result<> readResult = in.copyIntoBuffer(yStart * shape.dimX, nonstd::span<TIn>(inputBuffer.data(), inputCount));
       if(readResult.invalid())
       {
-        return readResult;
+        return MergeResults(std::move(accumulatedResult), std::move(readResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
 
       auto accumulateColumns = [&](const Range& range) {
@@ -785,7 +788,7 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
       parallelAlgorithm.execute(accumulateColumns);
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
     }
 
@@ -800,16 +803,32 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
     parallelAlgorithm.execute(finalizeColumns);
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    return out.copyFromBuffer(0, nonstd::span<const TOut>(outputBuffer.data(), shape.dimX));
+    Result<> writeResult = out.copyFromBuffer(0, nonstd::span<const TOut>(outputBuffer.data(), shape.dimX));
+    if(writeResult.invalid())
+    {
+      const std::string context = fmt::format("Axis projection associative Y output write failed for X columns [0, {}].", shape.dimX - 1);
+      if(writeResult.errors().empty())
+      {
+        writeResult.errors().push_back({-8754, context});
+      }
+      else
+      {
+        for(Error& error : writeResult.errors())
+        {
+          error.message = fmt::format("{} {}", context, error.message);
+        }
+      }
+    }
+    return MergeResults(std::move(accumulatedResult), std::move(writeResult));
   }
 
   for(usize xStart = 0; xStart < shape.dimX; xStart += plan.tileColumns)
   {
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
     const usize tileColumns = std::min(plan.tileColumns, shape.dimX - xStart);
     std::fill(states.begin(), states.begin() + tileColumns, StateType{});
@@ -818,11 +837,12 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
       Result<> readResult = in.copyIntoBuffer(y * shape.dimX + xStart, nonstd::span<TIn>(inputBuffer.data(), tileColumns));
       if(readResult.invalid())
       {
-        return readResult;
+        return MergeResults(std::move(accumulatedResult), std::move(readResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
       for(usize localX = 0; localX < tileColumns; ++localX)
       {
@@ -841,15 +861,28 @@ Result<> ApplyAssociativeProjection2DY(const AbstractDataStore<TIn>& in, Abstrac
     parallelAlgorithm.execute(finalizeTile);
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
     Result<> writeResult = out.copyFromBuffer(xStart, nonstd::span<const TOut>(outputBuffer.data(), tileColumns));
     if(writeResult.invalid())
     {
-      return writeResult;
+      const std::string context = fmt::format("Axis projection associative Y output write failed for X columns [{}, {}].", xStart, xStart + tileColumns - 1);
+      if(writeResult.errors().empty())
+      {
+        writeResult.errors().push_back({-8754, context});
+      }
+      else
+      {
+        for(Error& error : writeResult.errors())
+        {
+          error.message = fmt::format("{} {}", context, error.message);
+        }
+      }
+      return MergeResults(std::move(accumulatedResult), std::move(writeResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
   }
-  return {};
+  return accumulatedResult;
 }
 
 template <class TIn, class TOut, class ReduceFn>
@@ -907,32 +940,57 @@ Result<> ApplyMedianProjection2DYTiles(const AbstractDataStore<TIn>& in, Abstrac
                                        const AxisProjection2DPlan& plan)
 {
   std::vector<TOut> outputBuffer(plan.outputValues);
+  Result<> result;
   for(usize xStart = 0; xStart < shape.dimX; xStart += plan.tileColumns)
   {
     if(shouldCancel)
     {
-      return {};
+      return result;
     }
     const usize tileColumns = std::min(plan.tileColumns, shape.dimX - xStart);
     const Extent tileExtent(std::vector<uint64>{0, 0, static_cast<uint64>(xStart)}, std::vector<uint64>{0, static_cast<uint64>(shape.dimY - 1), static_cast<uint64>(xStart + tileColumns - 1)});
-    std::vector<TIn> rowMajorTile;
+    Result<std::vector<TIn>> readResult;
     try
     {
-      rowMajorTile = in.readExtent(tileExtent);
+      readResult = in.readExtent(tileExtent);
     } catch(const std::exception& exception)
     {
-      return MakeErrorResult(-8753, fmt::format("Axis projection Median Y extent read failed for X columns [{}, {}] in dimensions {}: {}", xStart, xStart + tileColumns - 1,
-                                                StringUtilities::formatDimensions3D(SizeVec3{shape.dimX, shape.dimY, shape.dimZ}), exception.what()));
+      return MergeResults(std::move(result),
+                          MakeErrorResult(-8753, fmt::format("Axis projection Median Y extent read failed for X columns [{}, {}] in dimensions {}: {}", xStart, xStart + tileColumns - 1,
+                                                             StringUtilities::formatDimensions3D(SizeVec3{shape.dimX, shape.dimY, shape.dimZ}), exception.what())));
+    } catch(...)
+    {
+      return MergeResults(std::move(result), MakeErrorResult(-8753, fmt::format("Axis projection Median Y extent read failed for X columns [{}, {}] in dimensions {} with an unknown exception.",
+                                                                                xStart, xStart + tileColumns - 1, StringUtilities::formatDimensions3D(SizeVec3{shape.dimX, shape.dimY, shape.dimZ}))));
     }
+    if(readResult.invalid())
+    {
+      const std::string context = fmt::format("Axis projection Median Y extent read failed for X columns [{}, {}] in dimensions {}.", xStart, xStart + tileColumns - 1,
+                                              StringUtilities::formatDimensions3D(SizeVec3{shape.dimX, shape.dimY, shape.dimZ}));
+      if(readResult.errors().empty())
+      {
+        readResult.errors().push_back({-8753, context});
+      }
+      else
+      {
+        for(Error& error : readResult.errors())
+        {
+          error.message = fmt::format("{} {}", context, error.message);
+        }
+      }
+      return MergeResults(std::move(result), ConvertResult(std::move(readResult)));
+    }
+    std::vector<TIn> rowMajorTile = std::move(readResult.value());
+    result.warnings().insert(result.warnings().end(), std::make_move_iterator(readResult.warnings().begin()), std::make_move_iterator(readResult.warnings().end()));
     if(shouldCancel)
     {
-      return {};
+      return result;
     }
     const usize tileValues = tileColumns * shape.dimY;
     if(rowMajorTile.size() != tileValues)
     {
-      return MakeErrorResult(-8753,
-                             fmt::format("Axis projection Median Y extent read returned {} of {} values for X columns [{}, {}].", rowMajorTile.size(), tileValues, xStart, xStart + tileColumns - 1));
+      return MergeResults(std::move(result), MakeErrorResult(-8753, fmt::format("Axis projection Median Y extent read returned {} of {} values for X columns [{}, {}].", rowMajorTile.size(),
+                                                                                tileValues, xStart, xStart + tileColumns - 1)));
     }
     if(plan.stateSlots == 0)
     {
@@ -981,7 +1039,7 @@ Result<> ApplyMedianProjection2DYTiles(const AbstractDataStore<TIn>& in, Abstrac
         {
           if(shouldCancel)
           {
-            return {};
+            return result;
           }
           reduceColumn(localX, pencil);
         }
@@ -989,15 +1047,28 @@ Result<> ApplyMedianProjection2DYTiles(const AbstractDataStore<TIn>& in, Abstrac
     }
     if(shouldCancel)
     {
-      return {};
+      return result;
     }
     Result<> writeResult = out.copyFromBuffer(xStart, nonstd::span<const TOut>(outputBuffer.data(), tileColumns));
     if(writeResult.invalid())
     {
-      return writeResult;
+      const std::string context = fmt::format("Axis projection Median Y output write failed for X columns [{}, {}].", xStart, xStart + tileColumns - 1);
+      if(writeResult.errors().empty())
+      {
+        writeResult.errors().push_back({-8754, context});
+      }
+      else
+      {
+        for(Error& error : writeResult.errors())
+        {
+          error.message = fmt::format("{} {}", context, error.message);
+        }
+      }
+      return MergeResults(std::move(result), std::move(writeResult));
     }
+    result = MergeResults(std::move(result), std::move(writeResult));
   }
-  return {};
+  return result;
 }
 
 template <class TIn, class TOut, class ReduceFn>

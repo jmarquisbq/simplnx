@@ -382,7 +382,7 @@ Result<> RunMaurerIoCallSafely(Callable&& callable, std::string_view context)
  * @param values Values for the complete extent.
  * @param shouldCancel Skips the store call when cancellation is set.
  * @param context Identifies the transfer that failed.
- * @return An empty result on success or cancellation, or an error for a provider exception.
+ * @return Store errors and warnings, or an empty result after cancellation.
  */
 template <class U>
 Result<> WriteExtentSafely(AbstractDataStore<U>& store, const Extent& extent, nonstd::span<const U> values, const std::atomic_bool& shouldCancel, std::string_view context)
@@ -391,17 +391,101 @@ Result<> WriteExtentSafely(AbstractDataStore<U>& store, const Extent& extent, no
   {
     return {};
   }
+  Result<> result = RunMaurerIoCallSafely([&store, &extent, values]() { return store.writeExtent(extent, values); }, context);
+  if(result.invalid() && (result.errors().empty() || (result.errors().front().code != -8370 && result.errors().front().code != -8371)))
+  {
+    const std::string errorContext = fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}.", context);
+    if(result.errors().empty())
+    {
+      result.errors().push_back({-8358, errorContext});
+    }
+    else
+    {
+      for(Error& error : result.errors())
+      {
+        error.message = fmt::format("{} {}", errorContext, error.message);
+      }
+    }
+  }
+  return result;
+}
+
+inline Result<> WriteMaurerTemporaryRecordsSafely(ITemporaryRecordStore& store, uint64 recordOffset, uint64 recordCount, nonstd::span<const std::byte> records, const std::atomic_bool& shouldCancel,
+                                                  std::string_view context)
+{
+  if(shouldCancel)
+  {
+    return {};
+  }
   try
   {
-    store.writeExtent(extent, values);
+    Result<> result = store.write(recordOffset, recordCount, records, shouldCancel);
+    if(result.invalid())
+    {
+      const std::string errorContext = fmt::format("Signed Maurer distance-map temporary-record write failed for {}.", context);
+      if(result.errors().empty())
+      {
+        result.errors().push_back({-8358, errorContext});
+      }
+      else
+      {
+        for(Error& error : result.errors())
+        {
+          error.message = fmt::format("{} {}", errorContext, error.message);
+        }
+      }
+    }
+    return result;
   } catch(const std::exception& exception)
   {
-    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, exception.what()));
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map temporary-record write failed for {}: {}", context, exception.what()));
   } catch(...)
   {
-    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {} with an unknown exception.", context));
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map temporary-record write failed for {} with an unknown exception.", context));
   }
-  return {};
+}
+
+inline Result<> ReadMaurerTemporaryRecordsSafely(const ITemporaryRecordStore& store, uint64 recordOffset, uint64 recordCount, nonstd::span<std::byte> records, const std::atomic_bool& shouldCancel,
+                                                 std::string_view context)
+{
+  if(shouldCancel)
+  {
+    return {};
+  }
+  try
+  {
+    Result<uint64> result = store.read(recordOffset, recordCount, records, shouldCancel);
+    if(result.invalid())
+    {
+      const std::string errorContext = fmt::format("Signed Maurer distance-map temporary-record read failed for {}.", context);
+      if(result.errors().empty())
+      {
+        result.errors().push_back({-8358, errorContext});
+      }
+      else
+      {
+        for(Error& error : result.errors())
+        {
+          error.message = fmt::format("{} {}", errorContext, error.message);
+        }
+      }
+      return ConvertResult(std::move(result));
+    }
+    const uint64 readCount = result.value();
+    Result<> diagnostics = ConvertResult(std::move(result));
+    if(readCount != recordCount)
+    {
+      return MergeResults(std::move(diagnostics),
+                          MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map temporary-record read failed for {}: returned {} of {} records.", context, readCount, recordCount)));
+    }
+    return diagnostics;
+  } catch(const std::exception& exception)
+  {
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map temporary-record read failed for {}: {}", context, exception.what()));
+  } catch(...)
+  {
+    return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map temporary-record read failed for {} with an unknown exception.", context));
+  }
 }
 
 inline bool Maurer2DDirectXPeak(usize nx, usize rows, usize inputBytes, usize& peak)
@@ -739,89 +823,102 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
   std::vector<float32> sourceBlock(capacity);
   std::vector<uint8> insideBlock(capacity);
   std::vector<float32> outputBlock(capacity);
+  Result<> accumulatedResult;
   usize envelopeBegin = std::numeric_limits<usize>::max();
   usize envelopeCount = 0;
   bool envelopeDirty = false;
 
   auto flushEnvelope = [&]() -> Result<> {
+    Result<> accumulatedResult;
     if(!envelopeDirty)
     {
-      return {};
+      return accumulatedResult;
     }
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = gStore.copyFromBuffer(envelopeBegin, nonstd::span<const float32>(gBlock.data(), envelopeCount)); result.invalid())
+    Result<> gWriteResult = gStore.copyFromBuffer(envelopeBegin, nonstd::span<const float32>(gBlock.data(), envelopeCount));
+    if(gWriteResult.invalid())
     {
-      return result;
+      return gWriteResult;
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(gWriteResult));
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = hStore.copyFromBuffer(envelopeBegin, nonstd::span<const float32>(hBlock.data(), envelopeCount)); result.invalid())
+    Result<> hWriteResult = hStore.copyFromBuffer(envelopeBegin, nonstd::span<const float32>(hBlock.data(), envelopeCount));
+    if(hWriteResult.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(hWriteResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(hWriteResult));
     envelopeDirty = false;
-    return {};
+    return accumulatedResult;
   };
 
   auto loadEnvelope = [&](usize index) -> Result<> {
+    Result<> accumulatedResult;
     const MaurerLineChunk chunk = GetMaurerLineChunk(index, nd, blockValues);
     if(chunk.begin == envelopeBegin)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = flushEnvelope(); result.invalid())
+    Result<> flushResult = flushEnvelope();
+    if(flushResult.invalid())
     {
-      return result;
+      return flushResult;
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(flushResult));
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
     envelopeBegin = chunk.begin;
     envelopeCount = chunk.count;
-    if(Result<> result = gStore.copyIntoBuffer(chunk.begin, nonstd::span<float32>(gBlock.data(), chunk.count)); result.invalid())
+    Result<> gReadResult = gStore.copyIntoBuffer(chunk.begin, nonstd::span<float32>(gBlock.data(), chunk.count));
+    if(gReadResult.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(gReadResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(gReadResult));
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    return hStore.copyIntoBuffer(chunk.begin, nonstd::span<float32>(hBlock.data(), chunk.count));
+    return MergeResults(std::move(accumulatedResult), hStore.copyIntoBuffer(chunk.begin, nonstd::span<float32>(hBlock.data(), chunk.count)));
   };
 
   auto readEnvelope = [&](usize index, float32& gValue, float32& hValue) -> Result<> {
-    if(Result<> result = loadEnvelope(index); result.invalid())
+    Result<> loadResult = loadEnvelope(index);
+    if(loadResult.invalid())
     {
-      return result;
+      return loadResult;
     }
     if(shouldCancel)
     {
-      return {};
+      return loadResult;
     }
     gValue = gBlock[index - envelopeBegin];
     hValue = hBlock[index - envelopeBegin];
-    return {};
+    return loadResult;
   };
 
   auto writeEnvelope = [&](usize index, float32 gValue, float32 hValue) -> Result<> {
-    if(Result<> result = loadEnvelope(index); result.invalid())
+    Result<> loadResult = loadEnvelope(index);
+    if(loadResult.invalid())
     {
-      return result;
+      return loadResult;
     }
     if(shouldCancel)
     {
-      return {};
+      return loadResult;
     }
     gBlock[index - envelopeBegin] = gValue;
     hBlock[index - envelopeBegin] = hValue;
     envelopeDirty = true;
-    return {};
+    return loadResult;
   };
 
   int64 envelopeTop = -1;
@@ -830,12 +927,14 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
     const MaurerLineChunk queryChunk = GetMaurerLineChunk(queryBegin, nd, blockValues);
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = source.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count)); result.invalid())
+    Result<> sourceReadResult = source.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count));
+    if(sourceReadResult.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(sourceReadResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(sourceReadResult));
     for(usize localIndex = 0; localIndex < queryChunk.count; ++localIndex)
     {
       const usize queryIndex = queryChunk.begin + localIndex;
@@ -857,21 +956,25 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
           float32 previousCoordinate = 0.0f;
           float32 topDistance = 0.0f;
           float32 topCoordinate = 0.0f;
-          if(Result<> result = readEnvelope(static_cast<usize>(envelopeTop - 1), previousDistance, previousCoordinate); result.invalid())
+          Result<> previousReadResult = readEnvelope(static_cast<usize>(envelopeTop - 1), previousDistance, previousCoordinate);
+          if(previousReadResult.invalid())
           {
-            return result;
+            return MergeResults(std::move(accumulatedResult), std::move(previousReadResult));
           }
+          accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(previousReadResult));
           if(shouldCancel)
           {
-            return {};
+            return accumulatedResult;
           }
-          if(Result<> result = readEnvelope(static_cast<usize>(envelopeTop), topDistance, topCoordinate); result.invalid())
+          Result<> topReadResult = readEnvelope(static_cast<usize>(envelopeTop), topDistance, topCoordinate);
+          if(topReadResult.invalid())
           {
-            return result;
+            return MergeResults(std::move(accumulatedResult), std::move(topReadResult));
           }
+          accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(topReadResult));
           if(shouldCancel)
           {
-            return {};
+            return accumulatedResult;
           }
           if(!MaurerRemove(previousDistance, topDistance, distance, previousCoordinate, topCoordinate, coordinate))
           {
@@ -881,13 +984,15 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
         }
         ++envelopeTop;
       }
-      if(Result<> result = writeEnvelope(static_cast<usize>(envelopeTop), distance, coordinate); result.invalid())
+      Result<> envelopeWriteResult = writeEnvelope(static_cast<usize>(envelopeTop), distance, coordinate);
+      if(envelopeWriteResult.invalid())
       {
-        return result;
+        return MergeResults(std::move(accumulatedResult), std::move(envelopeWriteResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(envelopeWriteResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
     }
     queryBegin = queryChunk.begin + queryChunk.count;
@@ -900,31 +1005,37 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
       const MaurerLineChunk queryChunk = GetMaurerLineChunk(queryBegin, nd, blockValues);
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
-      if(Result<> result = source.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count)); result.invalid())
+      Result<> sourceReadResult = source.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count));
+      if(sourceReadResult.invalid())
       {
-        return result;
+        return MergeResults(std::move(accumulatedResult), std::move(sourceReadResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(sourceReadResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
-      if(Result<> result = inside.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<uint8>(insideBlock.data(), queryChunk.count)); result.invalid())
+      Result<> insideReadResult = inside.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<uint8>(insideBlock.data(), queryChunk.count));
+      if(insideReadResult.invalid())
       {
-        return result;
+        return MergeResults(std::move(accumulatedResult), std::move(insideReadResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(insideReadResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
-      if(Result<> result = outputSink(queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count), nonstd::span<const uint8>(insideBlock.data(), queryChunk.count)); result.invalid())
+      Result<> sinkResult = outputSink(queryChunk.begin, nonstd::span<float32>(sourceBlock.data(), queryChunk.count), nonstd::span<const uint8>(insideBlock.data(), queryChunk.count));
+      if(sinkResult.invalid())
       {
-        return result;
+        return MergeResults(std::move(accumulatedResult), std::move(sinkResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(sinkResult));
       queryBegin = queryChunk.begin + queryChunk.count;
     }
-    return flushEnvelope();
+    return MergeResults(std::move(accumulatedResult), flushEnvelope());
   }
 
   const int64 envelopeSize = envelopeTop;
@@ -934,38 +1045,44 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
     const MaurerLineChunk queryChunk = GetMaurerLineChunk(queryBegin, nd, blockValues);
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = inside.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<uint8>(insideBlock.data(), queryChunk.count)); result.invalid())
+    Result<> insideReadResult = inside.copyIntoBuffer(offset + queryChunk.begin, nonstd::span<uint8>(insideBlock.data(), queryChunk.count));
+    if(insideReadResult.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(insideReadResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(insideReadResult));
     for(usize localIndex = 0; localIndex < queryChunk.count; ++localIndex)
     {
       const usize queryIndex = queryChunk.begin + localIndex;
       const float32 coordinate = useSpacing ? static_cast<float32>(static_cast<float64>(queryIndex) * static_cast<float64>(spacingD)) : static_cast<float32>(queryIndex);
       float32 currentDistance = 0.0f;
       float32 currentCoordinate = 0.0f;
-      if(Result<> result = readEnvelope(static_cast<usize>(envelopeTop), currentDistance, currentCoordinate); result.invalid())
+      Result<> currentReadResult = readEnvelope(static_cast<usize>(envelopeTop), currentDistance, currentCoordinate);
+      if(currentReadResult.invalid())
       {
-        return result;
+        return MergeResults(std::move(accumulatedResult), std::move(currentReadResult));
       }
+      accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(currentReadResult));
       if(shouldCancel)
       {
-        return {};
+        return accumulatedResult;
       }
       float32 distance = std::abs(currentDistance) + (currentCoordinate - coordinate) * (currentCoordinate - coordinate);
       while(envelopeTop < envelopeSize)
       {
         float32 nextDistance = 0.0f;
         float32 nextCoordinate = 0.0f;
-        if(Result<> result = readEnvelope(static_cast<usize>(envelopeTop + 1), nextDistance, nextCoordinate); result.invalid())
+        Result<> nextReadResult = readEnvelope(static_cast<usize>(envelopeTop + 1), nextDistance, nextCoordinate);
+        if(nextReadResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(nextReadResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(nextReadResult));
         if(shouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
         const float32 candidate = std::abs(nextDistance) + (nextCoordinate - coordinate) * (nextCoordinate - coordinate);
         if(distance <= candidate)
@@ -979,15 +1096,17 @@ Result<> ExternalVoronoi1DToSink(const AbstractDataStore<float32>& source, const
     }
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    if(Result<> result = outputSink(queryChunk.begin, nonstd::span<float32>(outputBlock.data(), queryChunk.count), nonstd::span<const uint8>(insideBlock.data(), queryChunk.count)); result.invalid())
+    Result<> sinkResult = outputSink(queryChunk.begin, nonstd::span<float32>(outputBlock.data(), queryChunk.count), nonstd::span<const uint8>(insideBlock.data(), queryChunk.count));
+    if(sinkResult.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(sinkResult));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(sinkResult));
     queryBegin = queryChunk.begin + queryChunk.count;
   }
-  return flushEnvelope();
+  return MergeResults(std::move(accumulatedResult), flushEnvelope());
 }
 
 inline Result<> ExternalVoronoi1D(const AbstractDataStore<float32>& source, const AbstractDataStore<uint8>& inside, usize offset, usize nd, bool insideIsPositive, bool useSpacing, float32 spacingD,
@@ -1199,21 +1318,23 @@ Result<> GatherMaurer3DZBatch(const WorkStoreT& workStore, nonstd::span<float32>
 {
   const usize valuesPerPlaneBlock = yCount * dims[0];
   float32* stagingData = stagingBuffer.data();
+  Result<> accumulatedResult;
   for(usize z = 0; z < dims[2]; ++z)
   {
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
     const usize planeRowOffset = (z * dims[1] + yBegin) * dims[0];
     Result<> result = RunMaurerIoCallSafely([&]() { return workStore.copyIntoBuffer(planeRowOffset, nonstd::span<float32>(stagingData + z * valuesPerPlaneBlock, valuesPerPlaneBlock)); },
                                             "3D Z-pass scratch gather");
     if(result.invalid())
     {
-      return result;
+      return MergeResults(std::move(accumulatedResult), std::move(result));
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(result));
   }
-  return {};
+  return accumulatedResult;
 }
 
 /**
@@ -1490,13 +1611,16 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
   const usize nX = parameters.dims[0];
   const usize nY = parameters.dims[1];
   const usize nZ = parameters.dims[2];
+  Result<> accumulatedResult;
   if(nZ == 1)
   {
     std::vector<float32> plane(nX * nY);
-    if(Result<> result = RunMaurerIoCallSafely([&]() { return workStore.copyIntoBuffer(0, nonstd::span<float32>(plane.data(), plane.size())); }, "2D XY scratch plane read"); result.invalid())
+    Result<> readResult = RunMaurerIoCallSafely([&]() { return workStore.copyIntoBuffer(0, nonstd::span<float32>(plane.data(), plane.size())); }, "2D XY scratch plane read");
+    if(readResult.invalid())
     {
-      return result;
+      return readResult;
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
     if(!parameters.squaredDistance || !hasBoundary)
     {
       auto finalizeValues = [&](const Range& valueRange) {
@@ -1520,9 +1644,10 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
     }
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
-    return RunMaurerIoCallSafely([&]() { return outputStore.copyFromBuffer(0, nonstd::span<const float32>(plane.data(), plane.size())); }, "2D output plane write");
+    return MergeResults(std::move(accumulatedResult),
+                        RunMaurerIoCallSafely([&]() { return outputStore.copyFromBuffer(0, nonstd::span<const float32>(plane.data(), plane.size())); }, "2D output plane write"));
   }
 
   usize maxYRows = parameters.maxYRows;
@@ -1549,13 +1674,15 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
   std::vector<float32>* other = &stagingB;
   const usize batchCount = 1 + (nY - 1) / maxYRows;
   const usize firstYCount = std::min(maxYRows, nY);
-  if(Result<> result = GatherMaurer3DZBatch(workStore, nonstd::span<float32>(current->data(), current->size()), parameters.dims, 0, firstYCount, shouldCancel); result.invalid())
+  Result<> firstGatherResult = GatherMaurer3DZBatch(workStore, nonstd::span<float32>(current->data(), current->size()), parameters.dims, 0, firstYCount, shouldCancel);
+  if(firstGatherResult.invalid())
   {
-    return result;
+    return firstGatherResult;
   }
+  accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(firstGatherResult));
   if(shouldCancel)
   {
-    return {};
+    return accumulatedResult;
   }
 
   for(usize batchIndex = 0; batchIndex < batchCount; ++batchIndex)
@@ -1567,24 +1694,27 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
     MaurerIoWorker ioWorker;
     // The I/O thread exclusively owns other until join. Compute workers exclusively own current during this interval.
     ioWorker.start([&, batchIndex, other]() -> Result<> {
+      Result<> workerResult;
       if(batchIndex > 0)
       {
         const usize previousYBegin = (batchIndex - 1) * maxYRows;
         const usize previousYCount = std::min(maxYRows, nY - previousYBegin);
         const usize previousBatchValues = previousYCount * nX * nZ;
         const Extent previousExtent({0, static_cast<uint64>(previousYBegin), 0}, {static_cast<uint64>(nZ - 1), static_cast<uint64>(previousYBegin + previousYCount - 1), static_cast<uint64>(nX - 1)});
-        if(Result<> result = WriteExtentSafely(outputStore, previousExtent, nonstd::span<const float32>(other->data(), previousBatchValues), shouldCancel, "3D Z-pass output"); result.invalid())
+        Result<> writeResult = WriteExtentSafely(outputStore, previousExtent, nonstd::span<const float32>(other->data(), previousBatchValues), shouldCancel, "3D Z-pass output");
+        if(writeResult.invalid())
         {
-          return result;
+          return writeResult;
         }
+        workerResult = MergeResults(std::move(workerResult), std::move(writeResult));
       }
       if(batchIndex + 1 < batchCount)
       {
         const usize nextYBegin = (batchIndex + 1) * maxYRows;
         const usize nextYCount = std::min(maxYRows, nY - nextYBegin);
-        return GatherMaurer3DZBatch(workStore, nonstd::span<float32>(other->data(), other->size()), parameters.dims, nextYBegin, nextYCount, shouldCancel);
+        return MergeResults(std::move(workerResult), GatherMaurer3DZBatch(workStore, nonstd::span<float32>(other->data(), other->size()), parameters.dims, nextYBegin, nextYCount, shouldCancel));
       }
-      return {};
+      return workerResult;
     });
 
     auto transformZLines = [&](const Range& lineRange) {
@@ -1635,11 +1765,12 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
     ioWorker.join();
     if(ioWorker.result().invalid())
     {
-      return ioWorker.result();
+      return MergeResults(std::move(accumulatedResult), ioWorker.result());
     }
+    accumulatedResult = MergeResults(std::move(accumulatedResult), ioWorker.result());
     if(shouldCancel)
     {
-      return {};
+      return accumulatedResult;
     }
     if(batchIndex + 1 < batchCount)
     {
@@ -1652,7 +1783,7 @@ Result<> RunMaurer3DZPass(const WorkStoreT& workStore, AbstractDataStore<float32
   const usize lastYCount = nY - lastYBegin;
   const usize lastBatchValues = lastYCount * nX * nZ;
   const Extent lastExtent({0, static_cast<uint64>(lastYBegin), 0}, {static_cast<uint64>(nZ - 1), static_cast<uint64>(lastYBegin + lastYCount - 1), static_cast<uint64>(nX - 1)});
-  return WriteExtentSafely(outputStore, lastExtent, nonstd::span<const float32>(current->data(), lastBatchValues), shouldCancel, "3D Z-pass output");
+  return MergeResults(std::move(accumulatedResult), WriteExtentSafely(outputStore, lastExtent, nonstd::span<const float32>(current->data(), lastBatchValues), shouldCancel, "3D Z-pass output"));
 }
 } // namespace detail
 
@@ -1954,53 +2085,9 @@ private:
     return fmt::format("{} (provider code {})", error.message, error.code);
   }
 
-  Result<> WriteTemporaryRecordsSafely(ITemporaryRecordStore& store, uint64 recordOffset, uint64 recordCount, nonstd::span<const std::byte> records, std::string_view context)
-  {
-    if(m_ShouldCancel)
-    {
-      return {};
-    }
-    try
-    {
-      Result<> result = store.write(recordOffset, recordCount, records, m_ShouldCancel);
-      if(result.invalid())
-      {
-        return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, DescribeResultError(result)));
-      }
-    } catch(const std::exception& exception)
-    {
-      return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, exception.what()));
-    }
-    return {};
-  }
-
-  Result<> ReadTemporaryRecordsSafely(const ITemporaryRecordStore& store, uint64 recordOffset, uint64 recordCount, nonstd::span<std::byte> records, std::string_view context)
-  {
-    if(m_ShouldCancel)
-    {
-      return {};
-    }
-    try
-    {
-      Result<uint64> result = store.read(recordOffset, recordCount, records, m_ShouldCancel);
-      if(result.invalid())
-      {
-        return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, DescribeResultError(result)));
-      }
-      if(result.value() != recordCount)
-      {
-        return MakeErrorResult(-8358,
-                               fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: temporary record read returned {} of {} records", context, result.value(), recordCount));
-      }
-    } catch(const std::exception& exception)
-    {
-      return MakeErrorResult(-8358, fmt::format("Signed Maurer distance-map bulk extent transfer failed for {}: {}", context, exception.what()));
-    }
-    return {};
-  }
-
   Result<> RunBounded2D(usize nx, usize ny)
   {
+    Result<> accumulatedResult;
     const detail::Maurer2DBufferPlan plan = detail::BuildMaurer2DBufferPlan(nx, ny, sizeof(T), m_ResidentLimit2D);
     if(plan.overflow)
     {
@@ -2099,7 +2186,7 @@ private:
       {
         if(m_ShouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
         const usize rowCount = std::min(directRowBatchRows, ny - yBegin);
         const usize haloBegin = yBegin == 0 ? 0 : yBegin - 1;
@@ -2109,10 +2196,12 @@ private:
         std::vector<uint8> rowInside(rowCount * nx, 0);
         {
           std::vector<T> input(haloRows * nx);
-          if(Result<> result = m_In.copyIntoBuffer(haloBegin * nx, nonstd::span<T>(input.data(), input.size())); result.invalid())
+          Result<> readResult = m_In.copyIntoBuffer(haloBegin * nx, nonstd::span<T>(input.data(), input.size()));
+          if(readResult.invalid())
           {
-            return result;
+            return MergeResults(std::move(accumulatedResult), std::move(readResult));
           }
+          accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
           auto processRows = [&](const Range& range) {
             std::vector<float32> g(nx);
             std::vector<float32> h(nx);
@@ -2170,11 +2259,12 @@ private:
                 transposed[x * rowCount + localY] = rowWork[localY * nx + x];
               }
             }
-            if(Result<> result = detail::WriteExtentSafely(*transposedWork, transposedExtent, nonstd::span<const float32>(transposed.data(), transposed.size()), m_ShouldCancel, "2D work transpose");
-               result.invalid())
+            Result<> writeResult = detail::WriteExtentSafely(*transposedWork, transposedExtent, nonstd::span<const float32>(transposed.data(), transposed.size()), m_ShouldCancel, "2D work transpose");
+            if(writeResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(writeResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
           }
           std::vector<float32>().swap(rowWork);
           {
@@ -2186,11 +2276,13 @@ private:
                 transposed[x * rowCount + localY] = rowInside[localY * nx + x];
               }
             }
-            if(Result<> result = detail::WriteExtentSafely(*transposedInside, transposedExtent, nonstd::span<const uint8>(transposed.data(), transposed.size()), m_ShouldCancel, "2D inside transpose");
-               result.invalid())
+            Result<> writeResult =
+                detail::WriteExtentSafely(*transposedInside, transposedExtent, nonstd::span<const uint8>(transposed.data(), transposed.size()), m_ShouldCancel, "2D inside transpose");
+            if(writeResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(writeResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
           }
         }
         else
@@ -2213,12 +2305,13 @@ private:
               }
             };
             detail::ExecuteMaurer2DParallel(columnCount, packRecords);
-            if(Result<> result = WriteTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<const std::byte>(recordBytes.data(), recordBytes.size()),
-                                                             "2D direct-transpose write");
-               result.invalid())
+            Result<> writeResult = detail::WriteMaurerTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount,
+                                                                             nonstd::span<const std::byte>(recordBytes.data(), recordBytes.size()), m_ShouldCancel, "2D direct-transpose write");
+            if(writeResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(writeResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
           }
         }
       }
@@ -2236,7 +2329,7 @@ private:
           {
             if(m_ShouldCancel)
             {
-              return {};
+              return accumulatedResult;
             }
             const detail::MaurerLineChunk chunk = detail::GetMaurerLineChunk(xBegin, nx, blockValues);
             const usize xHaloBegin = chunk.begin == 0 ? 0 : chunk.begin - 1;
@@ -2248,10 +2341,12 @@ private:
             std::vector<T> input(yHaloCount * xHaloCount);
             for(usize haloY = 0; haloY < yHaloCount; ++haloY)
             {
-              if(Result<> result = m_In.copyIntoBuffer((yHaloBegin + haloY) * nx + xHaloBegin, nonstd::span<T>(input.data() + haloY * xHaloCount, xHaloCount)); result.invalid())
+              Result<> readResult = m_In.copyIntoBuffer((yHaloBegin + haloY) * nx + xHaloBegin, nonstd::span<T>(input.data() + haloY * xHaloCount, xHaloCount));
+              if(readResult.invalid())
               {
-                return result;
+                return MergeResults(std::move(accumulatedResult), std::move(readResult));
               }
+              accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
             }
             for(usize localX = 0; localX < chunk.count; ++localX)
             {
@@ -2286,20 +2381,26 @@ private:
               }
               feature[localX] = boundary ? 0.0f : k_Max;
             }
-            if(Result<> result = xLine->copyFromBuffer(chunk.begin, nonstd::span<const float32>(feature.data(), chunk.count)); result.invalid())
+            Result<> lineWriteResult = xLine->copyFromBuffer(chunk.begin, nonstd::span<const float32>(feature.data(), chunk.count));
+            if(lineWriteResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(lineWriteResult));
             }
-            if(Result<> result = xInside->copyFromBuffer(chunk.begin, nonstd::span<const uint8>(insideValues.data(), chunk.count)); result.invalid())
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(lineWriteResult));
+            Result<> insideWriteResult = xInside->copyFromBuffer(chunk.begin, nonstd::span<const uint8>(insideValues.data(), chunk.count));
+            if(insideWriteResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(insideWriteResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(insideWriteResult));
             const Extent insideExtent({0, static_cast<uint64>(chunk.begin), static_cast<uint64>(y)}, {0, static_cast<uint64>(chunk.begin + chunk.count - 1), static_cast<uint64>(y)});
-            if(Result<> result = detail::WriteExtentSafely(*transposedInside, insideExtent, nonstd::span<const uint8>(insideValues.data(), chunk.count), m_ShouldCancel, "2D spill-X inside transpose");
-               result.invalid())
+            Result<> writeResult =
+                detail::WriteExtentSafely(*transposedInside, insideExtent, nonstd::span<const uint8>(insideValues.data(), chunk.count), m_ShouldCancel, "2D spill-X inside transpose");
+            if(writeResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(writeResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
             xBegin = chunk.begin + chunk.count;
           }
         }
@@ -2307,11 +2408,13 @@ private:
           const Extent workExtent({0, static_cast<uint64>(blockBegin), static_cast<uint64>(y)}, {0, static_cast<uint64>(blockBegin + values.size() - 1), static_cast<uint64>(y)});
           return detail::WriteExtentSafely(*transposedWork, workExtent, nonstd::span<const float32>(values.data(), values.size()), m_ShouldCancel, "2D spill-X work transpose");
         };
-        if(Result<> result = detail::ExternalVoronoi1DToSink(*xLine, *xInside, 0, nx, m_InsidePos, m_UseSpacing, m_Spacing[0], blockValues, *envelopeG, *envelopeH, writeTransposedX, m_ShouldCancel);
-           result.invalid())
+        Result<> xTransformResult =
+            detail::ExternalVoronoi1DToSink(*xLine, *xInside, 0, nx, m_InsidePos, m_UseSpacing, m_Spacing[0], blockValues, *envelopeG, *envelopeH, writeTransposedX, m_ShouldCancel);
+        if(xTransformResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(xTransformResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(xTransformResult));
       }
     }
 
@@ -2322,7 +2425,7 @@ private:
       {
         if(m_ShouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
         const usize columnCount = std::min(plan.columnBatchCols, nx - xBegin);
         std::vector<float32> columns(columnCount * ny);
@@ -2333,12 +2436,13 @@ private:
             const usize rowCount = std::min(directRowBatchRows, ny - yBegin);
             const usize batchRecordOffset = (yBegin / directRowBatchRows) * nx;
             std::vector<std::byte> recordBytes(columnCount * directRecordSize);
-            if(Result<> result =
-                   ReadTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<std::byte>(recordBytes.data(), recordBytes.size()), "2D direct-transpose read");
-               result.invalid())
+            Result<> readResult = detail::ReadMaurerTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<std::byte>(recordBytes.data(), recordBytes.size()),
+                                                                           m_ShouldCancel, "2D direct-transpose read");
+            if(readResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(readResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
             auto unpackRecords = [&](const Range& range) {
               for(usize localX = range.min(); localX < range.max(); ++localX)
               {
@@ -2392,12 +2496,13 @@ private:
               }
             };
             detail::ExecuteMaurer2DParallel(columnCount, packRecords);
-            if(Result<> result = WriteTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<const std::byte>(recordBytes.data(), recordBytes.size()),
-                                                             "2D transformed-record write");
-               result.invalid())
+            Result<> writeResult = detail::WriteMaurerTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount,
+                                                                             nonstd::span<const std::byte>(recordBytes.data(), recordBytes.size()), m_ShouldCancel, "2D transformed-record write");
+            if(writeResult.invalid())
             {
-              return result;
+              return MergeResults(std::move(accumulatedResult), std::move(writeResult));
             }
+            accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(writeResult));
           }
         }
       }
@@ -2406,7 +2511,7 @@ private:
       {
         if(m_ShouldCancel)
         {
-          return {};
+          return accumulatedResult;
         }
         const usize rowCount = std::min(directRowBatchRows, ny - yBegin);
         const usize batchRecordOffset = (yBegin / directRowBatchRows) * nx;
@@ -2415,12 +2520,13 @@ private:
         {
           const usize columnCount = std::min(plan.columnBatchCols, nx - xBegin);
           std::vector<std::byte> recordBytes(columnCount * directRecordSize);
-          if(Result<> result =
-                 ReadTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<std::byte>(recordBytes.data(), recordBytes.size()), "2D final-output record read");
-             result.invalid())
+          Result<> readResult = detail::ReadMaurerTemporaryRecordsSafely(*directRecords, batchRecordOffset + xBegin, columnCount, nonstd::span<std::byte>(recordBytes.data(), recordBytes.size()),
+                                                                         m_ShouldCancel, "2D final-output record read");
+          if(readResult.invalid())
           {
-            return result;
+            return MergeResults(std::move(accumulatedResult), std::move(readResult));
           }
+          accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(readResult));
           auto unpackOutput = [&](const Range& range) {
             for(usize localX = range.min(); localX < range.max(); ++localX)
             {
@@ -2433,10 +2539,12 @@ private:
           };
           detail::ExecuteMaurer2DParallel(columnCount, unpackOutput);
         }
-        if(Result<> result = m_Out.copyFromBuffer(yBegin * nx, nonstd::span<const float32>(output.data(), output.size())); result.invalid())
+        Result<> outputWriteResult = m_Out.copyFromBuffer(yBegin * nx, nonstd::span<const float32>(output.data(), output.size()));
+        if(outputWriteResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(outputWriteResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(outputWriteResult));
       }
     }
     else
@@ -2460,15 +2568,16 @@ private:
           const Extent outputExtent({0, static_cast<uint64>(blockBegin), static_cast<uint64>(x)}, {0, static_cast<uint64>(blockBegin + values.size() - 1), static_cast<uint64>(x)});
           return detail::WriteExtentSafely(m_Out, outputExtent, nonstd::span<const float32>(values.data(), values.size()), m_ShouldCancel, "2D spill-Y output");
         };
-        if(Result<> result = detail::ExternalVoronoi1DToSink(*transposedWork, *transposedInside, offset, ny, m_InsidePos, m_UseSpacing, m_Spacing[1], blockValues, *envelopeG, *envelopeH, writeOutputY,
-                                                             m_ShouldCancel);
-           result.invalid())
+        Result<> yTransformResult =
+            detail::ExternalVoronoi1DToSink(*transposedWork, *transposedInside, offset, ny, m_InsidePos, m_UseSpacing, m_Spacing[1], blockValues, *envelopeG, *envelopeH, writeOutputY, m_ShouldCancel);
+        if(yTransformResult.invalid())
         {
-          return result;
+          return MergeResults(std::move(accumulatedResult), std::move(yTransformResult));
         }
+        accumulatedResult = MergeResults(std::move(accumulatedResult), std::move(yTransformResult));
       }
     }
-    return {};
+    return accumulatedResult;
   }
 
   const AbstractDataStore<T>& m_In;

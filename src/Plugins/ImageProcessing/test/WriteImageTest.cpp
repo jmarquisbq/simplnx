@@ -1,5 +1,6 @@
 #include <catch2/catch.hpp>
 
+#include "ImageProcessing/Filters/Algorithms/WriteImageScanline.hpp"
 #include "ImageProcessing/Filters/ReadImageFilter.hpp"
 #include "ImageProcessing/Filters/ReadImageStackFilter.hpp"
 #include "ImageProcessing/Filters/ReadMhaFileFilter.hpp"
@@ -23,10 +24,12 @@
 #include "simplnx/Utilities/ColorTableUtilities.hpp"
 #include "simplnx/Utilities/ImageProcessing/WorkingMemory.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <string>
 #include <system_error>
@@ -55,23 +58,42 @@ class ExtentCountingDataStore : public DataStore<T>
 public:
   using DataStore<T>::DataStore;
 
-  std::vector<T> readExtent(const Extent& extent) const override
+  Result<std::vector<T>> readExtent(const Extent& extent) const override
   {
     m_ReturnedExtentReadCount++;
     m_InsideReturnedExtentRead = true;
-    std::vector<T> values = DataStore<T>::readExtent(extent);
+    Result<std::vector<T>> result = DataStore<T>::readExtent(extent);
     m_InsideReturnedExtentRead = false;
-    return values;
+    return result;
   }
 
-  void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
+  Result<> readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
   {
     if(!m_InsideReturnedExtentRead)
     {
       m_CallerProvidedExtentReadCount++;
       m_MaxCallerProvidedExtentValues = std::max(m_MaxCallerProvidedExtentValues, destination.size());
     }
-    DataStore<T>::readExtentIntoBuffer(extent, destination);
+    if(m_ResultErrorCode.has_value())
+    {
+      return MakeErrorResult(*m_ResultErrorCode, "Injected Write Image extent read failure.");
+    }
+    Result<> result = DataStore<T>::readExtentIntoBuffer(extent, destination);
+    if(result.valid() && m_ResultWarningCode.has_value())
+    {
+      result.warnings().push_back({*m_ResultWarningCode, "Injected Write Image extent read warning."});
+    }
+    return result;
+  }
+
+  void failExtentRead(int32 errorCode)
+  {
+    m_ResultErrorCode = errorCode;
+  }
+
+  void warnExtentRead(int32 warningCode)
+  {
+    m_ResultWarningCode = warningCode;
   }
 
   usize returnedExtentReadCount() const noexcept
@@ -90,6 +112,8 @@ public:
   }
 
 private:
+  std::optional<int32> m_ResultErrorCode;
+  std::optional<int32> m_ResultWarningCode;
   mutable bool m_InsideReturnedExtentRead = false;
   mutable usize m_ReturnedExtentReadCount = 0;
   mutable usize m_CallerProvidedExtentReadCount = 0;
@@ -1906,6 +1930,73 @@ TEST_CASE("ImageProcessing::WriteImageFilter: groups YZ slices into caller-owned
     outputFileCount++;
   }
   REQUIRE(outputFileCount == dimX);
+}
+
+TEST_CASE("ImageProcessing::WriteImageScanline propagates source extent diagnostics", "[ImageProcessing][WriteImageFilter][OOC]")
+{
+  auto app = Application::GetOrCreateInstance();
+  constexpr usize dimX = 8;
+  constexpr usize dimY = 6;
+  constexpr usize dimZ = 4;
+  const DataPath geomPath({"ImageGeometry"});
+  const DataPath scalarPath = geomPath.createChildPath("CellData").createChildPath("Scalar");
+  const DataPath maskPath = geomPath.createChildPath("CellData").createChildPath("Mask");
+
+  DataStructure dataStructure;
+  auto* imageGeomPtr = ImageGeom::Create(dataStructure, geomPath.getTargetName());
+  imageGeomPtr->setDimensions({dimX, dimY, dimZ});
+  auto* cellAmPtr = AttributeMatrix::Create(dataStructure, "CellData", {dimZ, dimY, dimX}, imageGeomPtr->getId());
+  imageGeomPtr->setCellData(*cellAmPtr);
+
+  auto sourceStore = std::make_shared<ExtentCountingDataStore<uint8>>(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{0});
+  auto maskStore = std::make_shared<ExtentCountingDataStore<uint8>>(ShapeType{dimZ, dimY, dimX}, ShapeType{1}, uint8{1});
+  REQUIRE(DataArray<uint8>::Create(dataStructure, scalarPath.getTargetName(), sourceStore, cellAmPtr->getId()) != nullptr);
+  REQUIRE(DataArray<uint8>::Create(dataStructure, maskPath.getTargetName(), maskStore, cellAmPtr->getId()) != nullptr);
+
+  ScopedTempDir tempDir(k_BinaryTestOutputDir);
+  WriteImageInputValues inputValues;
+  inputValues.outputFilePath = tempDir.path() / "slice.tif";
+  inputValues.planeIndex = k_YZPlane;
+  inputValues.imageGeometryPath = geomPath;
+  inputValues.imageDataArrayPath = scalarPath;
+  std::atomic_bool shouldCancel{false};
+  IFilter::MessageHandler messageHandler;
+  ImageProcessing::ScopedWorkingMemoryTuningOverride workingMemoryOverride(48);
+
+  SECTION("error keeps its code and adds the DataPath")
+  {
+    sourceStore->failExtentRead(-27090);
+    WriteImageScanline writer(dataStructure, messageHandler, shouldCancel, inputValues);
+    const Result<> result = writer();
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -27090);
+    REQUIRE(result.errors().front().message.find(scalarPath.toString()) != std::string::npos);
+  }
+
+  SECTION("warnings propagate")
+  {
+    sourceStore->warnExtentRead(-27091);
+    WriteImageScanline writer(dataStructure, messageHandler, shouldCancel, inputValues);
+    const Result<> result = writer();
+    REQUIRE(result.valid());
+    REQUIRE_FALSE(result.warnings().empty());
+    REQUIRE(std::all_of(result.warnings().cbegin(), result.warnings().cend(), [](const Warning& warning) { return warning.code == -27091; }));
+  }
+
+  SECTION("mask errors keep their code and add the mask DataPath")
+  {
+    inputValues.createColorTable = true;
+    inputValues.presetName = ColorTableUtilities::GetDefaultRGBPresetName();
+    inputValues.useMask = true;
+    inputValues.maskArrayPath = maskPath;
+    inputValues.invalidColor = {10, 20, 30};
+    maskStore->failExtentRead(-27092);
+    WriteImageScanline writer(dataStructure, messageHandler, shouldCancel, inputValues);
+    const Result<> result = writer();
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -27092);
+    REQUIRE(result.errors().front().message.find(maskPath.toString()) != std::string::npos);
+  }
 }
 
 TEST_CASE("ImageProcessing::WriteImageFilter: groups color and mask YZ slices into caller-owned bounded extents", "[ImageProcessing][WriteImageFilter][OOC]")

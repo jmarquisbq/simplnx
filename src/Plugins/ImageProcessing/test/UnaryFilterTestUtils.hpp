@@ -62,7 +62,7 @@ inline DataPath BuildRampImage(DataStructure& ds, usize dim, double startValue =
     {
       buffer[i] = static_cast<T>(startValue + step * static_cast<double>(start + i));
     }
-    ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)).valid());
   }
   return inputPath;
 }

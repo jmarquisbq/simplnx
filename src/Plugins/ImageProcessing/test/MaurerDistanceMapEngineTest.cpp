@@ -101,9 +101,9 @@ public:
     return m_Store.getComponentShape();
   }
 
-  void resizeTuples(const ShapeType& tupleShape) override
+  Result<> resizeTuples(const ShapeType& tupleShape) override
   {
-    m_Store.resizeTuples(tupleShape);
+    return m_Store.resizeTuples(tupleShape);
   }
 
   DataType getDataType() const override
@@ -182,29 +182,29 @@ public:
     return m_Store.copyFromBuffer(startIndex, buffer);
   }
 
-  std::vector<T> readExtent(const Extent& extent) const override
+  Result<std::vector<T>> readExtent(const Extent& extent) const override
   {
     return m_Store.readExtent(extent);
   }
 
-  void readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
+  Result<> readExtentIntoBuffer(const Extent& extent, nonstd::span<T> destination) const override
   {
-    m_Store.readExtentIntoBuffer(extent, destination);
+    return m_Store.readExtentIntoBuffer(extent, destination);
   }
 
-  void readExtentsIntoBuffers(nonstd::span<const Extent> extents, nonstd::span<nonstd::span<T>> destinations) const override
+  Result<> readExtentsIntoBuffers(nonstd::span<const Extent> extents, nonstd::span<nonstd::span<T>> destinations) const override
   {
-    m_Store.readExtentsIntoBuffers(extents, destinations);
+    return m_Store.readExtentsIntoBuffers(extents, destinations);
   }
 
-  std::vector<std::vector<T>> readExtents(nonstd::span<const Extent> extents) const override
+  Result<std::vector<std::vector<T>>> readExtents(nonstd::span<const Extent> extents) const override
   {
     return m_Store.readExtents(extents);
   }
 
-  void writeExtent(const Extent& extent, nonstd::span<const T> data) override
+  Result<> writeExtent(const Extent& extent, nonstd::span<const T> data) override
   {
-    m_Store.writeExtent(extent, data);
+    return m_Store.writeExtent(extent, data);
   }
 
   value_type at(usize index) const override
@@ -381,10 +381,10 @@ public:
     return DataStore<T>::copyFromBuffer(startIndex, buffer);
   }
 
-  void writeExtent(const Extent& extent, nonstd::span<const T> data) override
+  Result<> writeExtent(const Extent& extent, nonstd::span<const T> data) override
   {
     ++m_ExtentWriteCount;
-    DataStore<T>::writeExtent(extent, data);
+    return DataStore<T>::writeExtent(extent, data);
   }
 
   [[nodiscard]] usize flatWriteCount() const noexcept
@@ -560,11 +560,21 @@ public:
       return MakeErrorResult(-8399, "Injected Maurer work read failure.");
     }
     Result<> result = DataStore<float32>::copyIntoBuffer(startIndex, buffer);
+    if(result.valid() && m_WarnAtRead == readOrdinal)
+    {
+      result.warnings().push_back({m_ReadWarningCode, "Injected Maurer work read warning."});
+    }
     if(m_CancelAtRead == readOrdinal)
     {
       m_ShouldCancel.store(true);
     }
     return result;
+  }
+
+  void warnRead(usize readOrdinal, int32 warningCode)
+  {
+    m_WarnAtRead = readOrdinal;
+    m_ReadWarningCode = warningCode;
   }
 
   Result<> copyFromBuffer(usize startIndex, nonstd::span<const float32> buffer) override
@@ -591,6 +601,8 @@ private:
   std::optional<usize> m_CancelAtRead;
   std::optional<usize> m_ThrowAtRead;
   std::optional<usize> m_ThrowAtWrite;
+  std::optional<usize> m_WarnAtRead;
+  int32 m_ReadWarningCode = -8395;
   mutable std::atomic<usize> m_ReadCount{0};
   std::atomic<usize> m_WriteCount{0};
 };
@@ -615,7 +627,7 @@ public:
     return DataStore<float32>::copyFromBuffer(startIndex, buffer);
   }
 
-  void writeExtent(const Extent& extent, nonstd::span<const float32> data) override
+  Result<> writeExtent(const Extent& extent, nonstd::span<const float32> data) override
   {
     ActiveCallScope scope(m_Log);
     const usize extentOrdinal = m_ExtentCount.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -624,12 +636,37 @@ public:
     {
       throw std::runtime_error("Injected Maurer output extent exception.");
     }
-    DataStore<float32>::writeExtent(extent, data);
+    if(m_ResultErrorAtExtent == extentOrdinal)
+    {
+      return MakeErrorResult(m_ResultErrorCode, "Injected Maurer output extent result failure.");
+    }
+    Result<> result = DataStore<float32>::writeExtent(extent, data);
+    if(result.invalid())
+    {
+      return result;
+    }
+    if(m_ResultWarningAtExtent == extentOrdinal)
+    {
+      result.warnings().push_back({m_ResultWarningCode, "Injected Maurer output extent warning."});
+    }
     m_CompletedExtentCount.fetch_add(1, std::memory_order_relaxed);
     if(m_CancelAtExtent == extentOrdinal)
     {
       m_ShouldCancel.store(true);
     }
+    return result;
+  }
+
+  void failExtentWithResult(usize extentOrdinal, int32 errorCode)
+  {
+    m_ResultErrorAtExtent = extentOrdinal;
+    m_ResultErrorCode = errorCode;
+  }
+
+  void warnExtentWithResult(usize extentOrdinal, int32 warningCode)
+  {
+    m_ResultWarningAtExtent = extentOrdinal;
+    m_ResultWarningCode = warningCode;
   }
 
   [[nodiscard]] usize flatWriteCount() const noexcept
@@ -647,10 +684,193 @@ private:
   std::atomic_bool& m_ShouldCancel;
   std::optional<usize> m_CancelAtExtent;
   std::optional<usize> m_ThrowAtExtent;
+  std::optional<usize> m_ResultErrorAtExtent;
+  std::optional<usize> m_ResultWarningAtExtent;
+  int32 m_ResultErrorCode = -8397;
+  int32 m_ResultWarningCode = -8396;
   std::atomic<usize> m_FlatWriteCount{0};
   std::atomic<usize> m_ExtentCount{0};
   std::atomic<usize> m_CompletedExtentCount{0};
 };
+
+template <class T>
+class OocRecordingInputStore : public RecordingInputStore<T>
+{
+public:
+  using RecordingInputStore<T>::RecordingInputStore;
+
+  IDataStore::StoreType getStoreType() const override
+  {
+    return IDataStore::StoreType::OutOfCore;
+  }
+
+  std::string getDataFormat() const override
+  {
+    return "HDF5-OOC";
+  }
+};
+
+class OocRecordingOutputStore : public RecordingOutputStore
+{
+public:
+  using RecordingOutputStore::RecordingOutputStore;
+
+  IDataStore::StoreType getStoreType() const override
+  {
+    return IDataStore::StoreType::OutOfCore;
+  }
+
+  std::string getDataFormat() const override
+  {
+    return "HDF5-OOC";
+  }
+};
+
+class ResultInjectingTemporaryRecordStore : public ITemporaryRecordStore
+{
+public:
+  uint64 recordSize() const override
+  {
+    return 4;
+  }
+
+  uint64 recordCount() const override
+  {
+    return 2;
+  }
+
+  uint64 maxRecordsPerBatch() const override
+  {
+    return 2;
+  }
+
+  bool isReadOnly() const override
+  {
+    return false;
+  }
+
+  Result<uint64> read(uint64, uint64 requestedRecordCount, nonstd::span<std::byte>, const std::atomic_bool&) const override
+  {
+    if(readErrorCode.has_value())
+    {
+      return MakeErrorResult<uint64>(*readErrorCode, "Injected Maurer temporary-record read failure.");
+    }
+    Result<uint64> result = {shortRead && requestedRecordCount > 0 ? requestedRecordCount - 1 : requestedRecordCount};
+    if(readWarningCode.has_value())
+    {
+      result.warnings().push_back({*readWarningCode, "Injected Maurer temporary-record read warning."});
+    }
+    return result;
+  }
+
+  Result<> write(uint64, uint64, nonstd::span<const std::byte>, const std::atomic_bool&) override
+  {
+    if(writeErrorCode.has_value())
+    {
+      return MakeErrorResult(*writeErrorCode, "Injected Maurer temporary-record write failure.");
+    }
+    Result<> result;
+    if(writeWarningCode.has_value())
+    {
+      result.warnings().push_back({*writeWarningCode, "Injected Maurer temporary-record write warning."});
+    }
+    return result;
+  }
+
+  Result<> fill(uint64, uint64, nonstd::span<const std::byte>, const std::atomic_bool&) override
+  {
+    return {};
+  }
+
+  Result<> resize(uint64, const std::atomic_bool&) override
+  {
+    return {};
+  }
+
+  std::optional<int32> readErrorCode;
+  std::optional<int32> readWarningCode;
+  std::optional<int32> writeErrorCode;
+  std::optional<int32> writeWarningCode;
+  bool shortRead = false;
+};
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: extent Result diagnostics propagate", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingOutputStore outputStore(ShapeType{1, 1, 2}, ShapeType{1}, 0.0F, log, shouldCancel);
+  const Extent extent({0, 0, 0}, {0, 0, 1});
+  const std::array<float32, 2> values = {1.0F, 2.0F};
+
+  SECTION("error keeps its code and adds phase context")
+  {
+    outputStore.failExtentWithResult(1, -8397);
+    const Result<> result = ImageProcessing::detail::WriteExtentSafely(outputStore, extent, nonstd::span<const float32>(values.data(), values.size()), shouldCancel, "test output extent");
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -8397);
+    REQUIRE(result.errors().front().message.find("test output extent") != std::string::npos);
+  }
+
+  SECTION("warning propagates")
+  {
+    outputStore.warnExtentWithResult(1, -8396);
+    const Result<> result = ImageProcessing::detail::WriteExtentSafely(outputStore, extent, nonstd::span<const float32>(values.data(), values.size()), shouldCancel, "test output extent");
+    REQUIRE(result.valid());
+    REQUIRE(result.warnings().size() == 1);
+    REQUIRE(result.warnings().front().code == -8396);
+  }
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: temporary-record Result diagnostics propagate", "[ImageProcessing][MaurerDistanceMapEngine]")
+{
+  ResultInjectingTemporaryRecordStore store;
+  std::array<std::byte, 8> records = {};
+  const std::atomic_bool shouldCancel{false};
+
+  SECTION("write warning propagates")
+  {
+    store.writeWarningCode = -8392;
+    const Result<> result = ImageProcessing::detail::WriteMaurerTemporaryRecordsSafely(store, 0, 2, records, shouldCancel, "test records");
+    REQUIRE(result.valid());
+    REQUIRE(result.warnings().front().code == -8392);
+  }
+
+  SECTION("write error keeps its code and adds context")
+  {
+    store.writeErrorCode = -8391;
+    const Result<> result = ImageProcessing::detail::WriteMaurerTemporaryRecordsSafely(store, 0, 2, records, shouldCancel, "test records");
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -8391);
+    REQUIRE(result.errors().front().message.find("test records") != std::string::npos);
+  }
+
+  SECTION("read warning propagates")
+  {
+    store.readWarningCode = -8390;
+    const Result<> result = ImageProcessing::detail::ReadMaurerTemporaryRecordsSafely(store, 0, 2, records, shouldCancel, "test records");
+    REQUIRE(result.valid());
+    REQUIRE(result.warnings().front().code == -8390);
+  }
+
+  SECTION("read error keeps its code and adds context")
+  {
+    store.readErrorCode = -8389;
+    const Result<> result = ImageProcessing::detail::ReadMaurerTemporaryRecordsSafely(store, 0, 2, records, shouldCancel, "test records");
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -8389);
+    REQUIRE(result.errors().front().message.find("test records") != std::string::npos);
+  }
+
+  SECTION("short read adds an error without dropping warnings")
+  {
+    store.shortRead = true;
+    store.readWarningCode = -8388;
+    const Result<> result = ImageProcessing::detail::ReadMaurerTemporaryRecordsSafely(store, 0, 2, records, shouldCancel, "test records");
+    REQUIRE(result.invalid());
+    REQUIRE(result.errors().front().code == -8358);
+    REQUIRE(result.warnings().front().code == -8388);
+  }
+}
 
 struct SeamResults
 {
@@ -1228,6 +1448,40 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: 2D planner selects spill li
   REQUIRE(forcedY.residentBytes <= kSmallTestLimit);
 }
 
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: bounded 2D spill routes propagate output warnings", "[ImageProcessing][MaurerDistanceMapEngine][OOC]")
+{
+#if SIMPLNX_TEST_ALGORITHM_PATH == 1
+  UnitTest::LoadPlugins();
+  constexpr usize kResidentLimit = 8192;
+  const std::array<SizeVec3, 2> dimensions = {SizeVec3{100, 8, 1}, SizeVec3{8, 100, 1}};
+  for(const SizeVec3& dims : dimensions)
+  {
+    const ImageProcessing::detail::Maurer2DBufferPlan plan = ImageProcessing::detail::BuildMaurer2DBufferPlan(dims[0], dims[1], sizeof(uint8), kResidentLimit);
+    REQUIRE(plan.valid);
+    REQUIRE(plan.spillX == (dims[0] > dims[1]));
+    REQUIRE(plan.spillY);
+    CAPTURE(dims, plan.spillX, plan.spillY);
+
+    TransferLog log;
+    std::atomic_bool shouldCancel{false};
+    OocRecordingInputStore<uint8> inputStore(ShapeType{1, dims[1], dims[0]}, ShapeType{1}, uint8{0}, log, shouldCancel);
+    OocRecordingOutputStore outputStore(ShapeType{1, dims[1], dims[0]}, ShapeType{1}, -999.0F, log, shouldCancel);
+    for(usize index = 0; index < inputStore.getSize(); ++index)
+    {
+      inputStore.setValue(index, index % 5 == 0 ? uint8{1} : uint8{0});
+    }
+    outputStore.warnExtentWithResult(1, -8393);
+    IFilter::MessageHandler messageHandler;
+    MaurerDistanceSlab<uint8> engine(inputStore, outputStore, dims, uint8{0}, false, true, false, FloatVec3{1.0F, 1.0F, 1.0F}, shouldCancel, messageHandler, kResidentLimit);
+
+    const Result<> result = engine();
+
+    REQUIRE(result.valid());
+    REQUIRE(std::any_of(result.warnings().cbegin(), result.warnings().cend(), [](const Warning& warning) { return warning.code == -8393; }));
+  }
+#endif
+}
+
 TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: 2D planner rejects overflow", "[ImageProcessing][MaurerDistanceMapEngine]")
 {
   const auto overflow = ImageProcessing::detail::BuildMaurer2DBufferPlan(std::numeric_limits<usize>::max(), std::numeric_limits<usize>::max(), sizeof(uint8));
@@ -1589,6 +1843,22 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: bounded 3D Z pass transfers
   REQUIRE(outputStore.flatWriteCount() == 0);
   REQUIRE(manager.reservedWorkingMemoryBytes() == 0);
   manager.setBudgetBytes(previousBudget);
+}
+
+TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: bounded 3D Z pass propagates scratch-read warnings", "[ImageProcessing][MaurerDistanceMapEngine][WorkingMemory]")
+{
+  const SizeVec3 dims{3, 2, 2};
+  TransferLog log;
+  std::atomic_bool shouldCancel{false};
+  RecordingWorkStore workStore(ShapeType{2, 2, 3}, ShapeType{1}, 0.0F, log, shouldCancel);
+  RecordingOutputStore outputStore(ShapeType{2, 2, 3}, ShapeType{1}, -999.0F, log, shouldCancel);
+  workStore.warnRead(1, -8395);
+  const ImageProcessing::detail::Maurer3DSlabParameters<uint8> parameters{dims, uint8{0}, false, true, false, FloatVec3{1.0F, 1.0F, 1.0F}, 1, 1};
+
+  const Result<> result = ImageProcessing::detail::RunMaurer3DZPass<uint8>(workStore, outputStore, parameters, shouldCancel, true);
+
+  REQUIRE(result.valid());
+  REQUIRE(std::any_of(result.warnings().cbegin(), result.warnings().cend(), [](const Warning& warning) { return warning.code == -8395; }));
 }
 
 TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: XY stream and Z pass transfer exact ranges", "[ImageProcessing][MaurerDistanceMapEngine]")
@@ -2085,6 +2355,35 @@ TEST_CASE("ImageProcessing::MaurerDistanceMapEngine: external envelope matches r
       }
     }
   }
+
+  DataStore<float32> warningSource(ShapeType{sources[1].size()}, ShapeType{1}, 0.0f);
+  DataStore<uint8> warningInside(ShapeType{inside.size()}, ShapeType{1}, 0);
+  TransferLog warningLog;
+  std::atomic_bool warningShouldCancel{false};
+  RecordingWorkStore warningG(ShapeType{sources[1].size()}, ShapeType{1}, 0.0f, warningLog, warningShouldCancel);
+  DataStore<float32> warningH(ShapeType{sources[1].size()}, ShapeType{1}, 0.0f);
+  REQUIRE(warningSource.copyFromBuffer(0, sources[1]).valid());
+  REQUIRE(warningInside.copyFromBuffer(0, inside).valid());
+  warningG.warnRead(1, -8395);
+  auto warningSink = [](usize, nonstd::span<float32>, nonstd::span<const uint8>) {
+    Result<> result;
+    result.warnings().push_back({-8394, "Injected Maurer external sink warning."});
+    return result;
+  };
+  const Result<> warningResult =
+      ImageProcessing::detail::ExternalVoronoi1DToSink(warningSource, warningInside, 0, sources[1].size(), false, false, 1.0f, 3, warningG, warningH, warningSink, warningShouldCancel);
+  REQUIRE(warningResult.valid());
+  REQUIRE(std::any_of(warningResult.warnings().cbegin(), warningResult.warnings().cend(), [](const Warning& warning) { return warning.code == -8394; }));
+  REQUIRE(std::any_of(warningResult.warnings().cbegin(), warningResult.warnings().cend(), [](const Warning& warning) { return warning.code == -8395; }));
+
+  TransferLog errorLog;
+  std::atomic_bool errorShouldCancel{false};
+  RecordingWorkStore errorG(ShapeType{sources[1].size()}, ShapeType{1}, 0.0f, errorLog, errorShouldCancel, 1);
+  DataStore<float32> errorH(ShapeType{sources[1].size()}, ShapeType{1}, 0.0f);
+  const Result<> errorResult =
+      ImageProcessing::detail::ExternalVoronoi1DToSink(warningSource, warningInside, 0, sources[1].size(), false, false, 1.0f, 3, errorG, errorH, warningSink, errorShouldCancel);
+  REQUIRE(errorResult.invalid());
+  REQUIRE(errorResult.errors().front().code == -8399);
 
   DataStore<float32> cancelledSource(ShapeType{sources.front().size()}, ShapeType{1}, 0.0f);
   DataStore<uint8> cancelledInside(ShapeType{inside.size()}, ShapeType{1}, 0);

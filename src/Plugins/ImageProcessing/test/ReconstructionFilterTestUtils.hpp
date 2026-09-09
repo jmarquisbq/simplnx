@@ -191,7 +191,7 @@ inline DataPath BuildImageFromPattern(DataStructure& ds, usize dimX, usize dimY,
   for(usize start = 0; start < pattern.size(); start += k_ChunkValues)
   {
     const usize count = std::min(k_ChunkValues, pattern.size() - start);
-    ref.copyFromBuffer(start, nonstd::span<const T>(pattern.data() + start, count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(pattern.data() + start, count)).valid());
   }
   return inputPath;
 }
@@ -393,8 +393,8 @@ inline void RequireExactFloat32(const IDataArray& left, const IDataArray& right)
   for(usize offset = 0; offset < total && !failed; offset += k_ChunkSize)
   {
     const usize count = std::min(k_ChunkSize, total - offset);
-    a.copyIntoBuffer(offset, nonstd::span<float32>(bufA.get(), count));
-    b.copyIntoBuffer(offset, nonstd::span<float32>(bufB.get(), count));
+    REQUIRE(a.copyIntoBuffer(offset, nonstd::span<float32>(bufA.get(), count)).valid());
+    REQUIRE(b.copyIntoBuffer(offset, nonstd::span<float32>(bufB.get(), count)).valid());
     for(usize i = 0; i < count; ++i)
     {
       if(bufA[i] == bufB[i])
@@ -443,8 +443,8 @@ inline void RequireExact(const IDataArray& left, const IDataArray& right)
   for(usize offset = 0; offset < total && !failed; offset += k_ChunkSize)
   {
     const usize count = std::min(k_ChunkSize, total - offset);
-    a.copyIntoBuffer(offset, nonstd::span<T>(bufA.get(), count));
-    b.copyIntoBuffer(offset, nonstd::span<T>(bufB.get(), count));
+    REQUIRE(a.copyIntoBuffer(offset, nonstd::span<T>(bufA.get(), count)).valid());
+    REQUIRE(b.copyIntoBuffer(offset, nonstd::span<T>(bufB.get(), count)).valid());
     for(usize i = 0; i < count; ++i)
     {
       if(bufA[i] == bufB[i])

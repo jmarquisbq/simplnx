@@ -233,7 +233,7 @@ inline DataPath BuildBinaryContourImageBulk(DataStructure& ds, usize dim, T fore
       const usize z = flatIndex / (dim * dim);
       buffer[i] = (((x / 8) + (y / 8) + (z / 8)) % 2 == 0) ? foreground : background;
     }
-    ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)).valid());
   }
   return inputPath;
 }
@@ -275,7 +275,7 @@ inline DataPath BuildMultiLabelContourImageBulk(DataStructure& ds, usize dim)
       const usize z = flatIndex / (dim * dim);
       buffer[i] = static_cast<T>(((x / 8) + (y / 8) + (z / 8)) % 4); // 0(bg),1,2,3
     }
-    ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count));
+    REQUIRE(ref.copyFromBuffer(start, nonstd::span<const T>(buffer.get(), count)).valid());
   }
   return inputPath;
 }
