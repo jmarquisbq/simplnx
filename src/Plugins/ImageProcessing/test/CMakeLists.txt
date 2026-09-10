@@ -9,7 +9,6 @@ set(${PLUGIN_NAME}UnitTest_SRCS
   UnaryFilterTestUtils.hpp
   SmokeTest.cpp
   ExamplePipelineCoverageTest.cpp
-  ExamplePipelineExecutionTest.cpp
   ItkGoldenTestUtilsSelfTest.cpp
   ApplyPointwiseTest.cpp
   WorkingMemoryTest.cpp
@@ -132,6 +131,10 @@ set(${PLUGIN_NAME}UnitTest_SRCS
   WriteImageTest.cpp
 )
 
+if(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES)
+  list(APPEND ${PLUGIN_NAME}UnitTest_SRCS ExamplePipelineExecutionTest.cpp)
+endif()
+
 create_simplnx_plugin_unit_test(PLUGIN_NAME ${PLUGIN_NAME}
                                 FILTER_LIST ${${PLUGIN_NAME}UnitTest_SRCS})
 
@@ -163,25 +166,27 @@ if(MSVC)
   target_compile_definitions(${PLUGIN_NAME}UnitTest PRIVATE _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING)
 endif()
 
-# Register each real-world pipeline as an independent nxrunner test.
-include(${simplnx_SOURCE_DIR}/cmake/Utility.cmake)
-set(PREBUILT_PIPELINE_NAMES)
-foreach(example_name IN LISTS ${PLUGIN_NAME}_EXAMPLE_PIPELINE_NAMES)
-  list(APPEND PREBUILT_PIPELINE_NAMES "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/${example_name}/${example_name}.d3dpipeline")
-endforeach()
-create_pipeline_tests(PLUGIN_NAME ${PLUGIN_NAME} PIPELINE_LIST ${PREBUILT_PIPELINE_NAMES})
+# Register each real-world pipeline as an independent nxrunner test when its input data is enabled.
+if(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES)
+  include(${simplnx_SOURCE_DIR}/cmake/Utility.cmake)
+  set(PREBUILT_PIPELINE_NAMES)
+  foreach(example_name IN LISTS ${PLUGIN_NAME}_EXAMPLE_PIPELINE_NAMES)
+    list(APPEND PREBUILT_PIPELINE_NAMES "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/${example_name}/${example_name}.d3dpipeline")
+  endforeach()
+  create_pipeline_tests(PLUGIN_NAME ${PLUGIN_NAME} PIPELINE_LIST ${PREBUILT_PIPELINE_NAMES})
 
-if(SIMPLNX_BUILD_PYTHON)
-  AddPythonTest(
-    NAME "PYTHON::${PLUGIN_NAME}::GenerateAndRunExamples"
-    FILE "${${PLUGIN_NAME}_SOURCE_DIR}/test/GenerateAndRunExamplePipelines.py"
-    PYTHONPATH "$<TARGET_FILE_DIR:simplnx>"
-  )
-  set_tests_properties("PYTHON::${PLUGIN_NAME}::GenerateAndRunExamples" PROPERTIES
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:simplnx>"
-    RUN_SERIAL TRUE
-    LABELS "${PLUGIN_NAME};ExamplePipelines;Python"
-  )
+  if(SIMPLNX_BUILD_PYTHON)
+    AddPythonTest(
+      NAME "PYTHON::${PLUGIN_NAME}::GenerateAndRunExamples"
+      FILE "${${PLUGIN_NAME}_SOURCE_DIR}/test/GenerateAndRunExamplePipelines.py"
+      PYTHONPATH "$<TARGET_FILE_DIR:simplnx>"
+    )
+    set_tests_properties("PYTHON::${PLUGIN_NAME}::GenerateAndRunExamples" PROPERTIES
+      WORKING_DIRECTORY "$<TARGET_FILE_DIR:simplnx>"
+      RUN_SERIAL TRUE
+      LABELS "${PLUGIN_NAME};ExamplePipelines;Python"
+    )
+  endif()
 endif()
 
 AddPythonTest(

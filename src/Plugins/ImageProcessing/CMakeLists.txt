@@ -125,6 +125,10 @@ create_simplnx_plugin(NAME ${PLUGIN_NAME}
 find_package(ZLIB REQUIRED)
 target_link_libraries(${PLUGIN_NAME} PRIVATE ZLIB::ZLIB)
 
+if(MSVC)
+  target_compile_options(${PLUGIN_NAME} PRIVATE /bigobj)
+endif()
+
 set(PLUGIN_EXTRA_SOURCES
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/ImageProcessingLegacyUUIDMapping.hpp"
   "${${PLUGIN_NAME}_SOURCE_DIR}/src/${PLUGIN_NAME}/utils/FijiMontageUtilities.hpp"
@@ -181,6 +185,13 @@ foreach(example_name IN LISTS ${PLUGIN_NAME}_EXAMPLE_PIPELINE_NAMES)
   )
 endforeach()
 
+option(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES
+       "Download and install the ImageProcessing real-world example pipelines and data"
+       OFF)
+if(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES AND NOT SIMPLNX_DOWNLOAD_TEST_FILES)
+  message(FATAL_ERROR "SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES requires SIMPLNX_DOWNLOAD_TEST_FILES=ON.")
+endif()
+
 if(SIMPLNX_BUILD_TESTS)
   enable_testing()
   add_subdirectory(${${PLUGIN_NAME}_SOURCE_DIR}/test)
@@ -203,7 +214,7 @@ else()
   set(CX_CONFIG_DIR ".")
 endif()
 
-if(EXISTS "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines")
+if(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES AND EXISTS "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines")
   set(PIPELINE_DEST_DIR "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CX_CONFIG_DIR}/pipelines/Image_Processing")
   set(OBSOLETE_EXAMPLE_PYTHON_FILES)
   set(OBSOLETE_EXAMPLE_DIRECTORIES)
@@ -238,7 +249,7 @@ endif()
 include(${simplnx_SOURCE_DIR}/cmake/Utility.cmake)
 set(DATA_DEST_DIR "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/${CX_CONFIG_DIR}/Data")
 
-if(EXISTS "${DREAM3D_DATA_DIR}" AND SIMPLNX_DOWNLOAD_TEST_FILES)
+if(SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES AND EXISTS "${DREAM3D_DATA_DIR}")
   download_test_data(DREAM3D_DATA_DIR ${DREAM3D_DATA_DIR}
     ARCHIVE_NAME ImageProcessing_Examples_v1.tar.gz
     SHA512 9bd8174a6c00041b042cd2482ad7a1d2e5df9ffb567a180c93fad34a91b1815c544c3b37481b66f1ffc8f7ad58b7bcbf2446df037d9a5933f534b2761b3df766

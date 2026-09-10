@@ -14,11 +14,11 @@ Each numbered example has its own source folder. The folder contains three files
 
 `PythonGeneration.yaml` is at the suite root. Each pipeline YAML references it. The file tells an LLM, MCP server, developer, or test how to generate temporary Python from the authoritative pipeline. Persistent Python sidecars are not stored.
 
-CMake flattens the three files from all 16 source folders into the runtime and installed `Image_Processing` directory. This keeps the DREAM3D-NX bookmark list flat.
+When `SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES=ON`, CMake flattens the three files from all 16 source folders into the runtime and installed `Image_Processing` directory. This keeps the DREAM3D-NX bookmark list flat.
 
 ## Input data
 
-The pipelines read from `Data/ImageProcessing_Examples`. CMake downloads and verifies `ImageProcessing_Examples_v1.tar.gz` before it copies the directory into the runtime data folder.
+The runtime and install example bundle is opt-in. Configure with `SIMPLNX_IMAGEPROCESSING_ENABLE_EXAMPLES=ON` and `SIMPLNX_DOWNLOAD_TEST_FILES=ON`. CMake then downloads and verifies `ImageProcessing_Examples_v1.tar.gz` before it copies the pipelines and their input directory into the runtime and install locations.
 
 The archive `Provenance.json` file identifies each source, checksum, transformation, data type, dimension, spacing, unit, and consuming pipeline. The archive prefers original paper data, then compatible paper-linked data, then deterministic paper-inspired synthesis. Synthetic inputs are not experimental measurements.
 

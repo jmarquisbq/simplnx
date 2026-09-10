@@ -289,7 +289,7 @@ inline Result<WatershedTiledRecordLayout> CreateWatershedTiledRecordLayout(const
       return MakeErrorResult<WatershedTiledRecordLayout>(
           -79072, fmt::format("External watershed 3-D tiled layout requires records per page divisible by {}. Records per page: {}.", k_TileX * k_TileY, recordsPerPage));
     }
-    layout.tileDimensions = {k_TileX, k_TileY, recordsPerPage / (k_TileX * k_TileY)};
+    layout.tileDimensions.setValues(k_TileX, k_TileY, recordsPerPage / (k_TileX * k_TileY));
   }
   else
   {
@@ -299,16 +299,16 @@ inline Result<WatershedTiledRecordLayout> CreateWatershedTiledRecordLayout(const
       return MakeErrorResult<WatershedTiledRecordLayout>(-79072,
                                                          fmt::format("External watershed 2-D tiled layout requires records per page divisible by {}. Records per page: {}.", k_TileX, recordsPerPage));
     }
-    layout.tileDimensions = {k_TileX, recordsPerPage / k_TileX, 1};
+    layout.tileDimensions.setValues(k_TileX, recordsPerPage / k_TileX, 1);
   }
   if(layout.tileDimensions[2] == 0)
   {
     return MakeErrorResult<WatershedTiledRecordLayout>(-79072, fmt::format("External watershed tiled layout has zero tile depth. Records per page: {}.", recordsPerPage));
   }
 
-  layout.tileCounts = {dimensions[0] / layout.tileDimensions[0] + static_cast<usize>(dimensions[0] % layout.tileDimensions[0] != 0),
-                       dimensions[1] / layout.tileDimensions[1] + static_cast<usize>(dimensions[1] % layout.tileDimensions[1] != 0),
-                       dimensions[2] / layout.tileDimensions[2] + static_cast<usize>(dimensions[2] % layout.tileDimensions[2] != 0)};
+  layout.tileCounts.setValues(dimensions[0] / layout.tileDimensions[0] + static_cast<usize>(dimensions[0] % layout.tileDimensions[0] != 0),
+                              dimensions[1] / layout.tileDimensions[1] + static_cast<usize>(dimensions[1] % layout.tileDimensions[1] != 0),
+                              dimensions[2] / layout.tileDimensions[2] + static_cast<usize>(dimensions[2] % layout.tileDimensions[2] != 0));
   usize logicalSlice = 0;
   usize tileCount = 0;
   if(!TryMultiplyWatershedSize(dimensions[0], dimensions[1], logicalSlice) || !TryMultiplyWatershedSize(logicalSlice, dimensions[2], layout.logicalRecordCount) ||
