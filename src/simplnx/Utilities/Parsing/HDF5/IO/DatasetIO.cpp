@@ -310,8 +310,14 @@ int32 DatasetIO::getCompressionLevel() const noexcept
 
 DatasetIO& DatasetIO::operator=(DatasetIO&& rhs) noexcept
 {
+  if(this == &rhs)
+  {
+    return *this;
+  }
+
+  close();
   m_CompressionLevel = rhs.m_CompressionLevel;
-  moveObj(std::move(rhs));
+  ObjectIO::operator=(std::move(rhs));
   return *this;
 }
 

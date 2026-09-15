@@ -138,6 +138,27 @@ int64 CountHdf5DatatypeIds()
   return static_cast<int64>(H5Fget_obj_count(H5F_OBJ_ALL, H5F_OBJ_DATATYPE));
 }
 
+/**
+ * @brief Returns the number of open HDF5 dataset identifiers.
+ * @return Open dataset count, or a negative HDF5 error status.
+ */
+int64 CountHdf5DatasetIds()
+{
+  std::lock_guard<std::mutex> lock(HDF5::Support::ApiLock());
+  return static_cast<int64>(H5Fget_obj_count(H5F_OBJ_ALL, H5F_OBJ_DATASET));
+}
+
+/**
+ * @brief Tests whether an HDF5 identifier is valid.
+ * @param id Identifies the HDF5 object to test.
+ * @return True if HDF5 reports a valid identifier.
+ */
+bool IsHdf5IdValid(hid_t id)
+{
+  std::lock_guard<std::mutex> lock(HDF5::Support::ApiLock());
+  return H5Iis_valid(id) > 0;
+}
+
 namespace Constants
 {
 const fs::path k_DataDir = "test/data";
@@ -1328,6 +1349,127 @@ TEST_CASE("DatasetIO: value getters release temporary datatype handles", "[simpl
     REQUIRE(type.close() >= 0);
     CHECK(CountHdf5DatatypeIds() == baseline);
   }
+}
+
+TEST_CASE("DatasetIO: move assignment preserves single dataset ownership", "[simplnx][HDF5][DatasetIO][Lifetime]")
+{
+  const fs::path path = GetDataDir() / "dataset_move_assignment_lifetime.h5";
+  fs::create_directories(path.parent_path());
+  DatatypeFixtureFile cleanup{path};
+  const std::vector<int32> firstValues{11};
+  const std::vector<int32> secondValues{22};
+  const int64 initialDatasetCount = CountHdf5DatasetIds();
+  REQUIRE(initialDatasetCount >= 0);
+
+  {
+    auto file = HDF5::FileIO::WriteFile(path);
+    REQUIRE(file.isValid());
+    {
+      auto first = file.createDataset("first");
+      REQUIRE(first.writeSpan<int32>({firstValues.size()}, nonstd::span<const int32>(firstValues.data(), firstValues.size())).valid());
+      auto second = file.createDataset("second");
+      REQUIRE(second.writeSpan<int32>({secondValues.size()}, nonstd::span<const int32>(secondValues.data(), secondValues.size())).valid());
+    }
+    REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+
+    {
+      auto destination = file.openDataset("first");
+      auto source = file.openDataset("second");
+      const hid_t displacedId = destination.getId();
+      const hid_t transferredId = source.getId();
+      REQUIRE(displacedId > 0);
+      REQUIRE(transferredId > 0);
+      REQUIRE(CountHdf5DatasetIds() == initialDatasetCount + 2);
+      source.setCompressionLevel(6);
+
+      destination = std::move(source);
+
+      CHECK_FALSE(source.isValid());
+      CHECK(destination.getId() == transferredId);
+      CHECK(destination.getCompressionLevel() == 6);
+      CHECK_FALSE(IsHdf5IdValid(displacedId));
+      CHECK(IsHdf5IdValid(transferredId));
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount + 1);
+    }
+    REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+
+    {
+      HDF5::DatasetIO destination;
+      auto source = file.openDataset("first");
+      const hid_t transferredId = source.getId();
+      REQUIRE(transferredId > 0);
+      REQUIRE(CountHdf5DatasetIds() == initialDatasetCount + 1);
+
+      destination = std::move(source);
+
+      CHECK_FALSE(source.isValid());
+      CHECK(destination.getId() == transferredId);
+      CHECK(IsHdf5IdValid(transferredId));
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount + 1);
+    }
+    REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+
+    {
+      auto destination = file.openDataset("first");
+      auto source = file.openDataset("second");
+      const hid_t displacedId = destination.getId();
+      REQUIRE(displacedId > 0);
+      REQUIRE(CountHdf5DatasetIds() == initialDatasetCount + 1);
+
+      destination = std::move(source);
+
+      CHECK_FALSE(source.isValid());
+      CHECK_FALSE(destination.isValid());
+      CHECK(destination.getNamePath() == "second");
+      CHECK_FALSE(IsHdf5IdValid(displacedId));
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount);
+      CHECK(destination.getId() > 0);
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount + 1);
+    }
+    REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+
+    {
+      HDF5::DatasetIO destination;
+      HDF5::DatasetIO source;
+
+      destination = std::move(source);
+
+      CHECK_FALSE(source.isValid());
+      CHECK_FALSE(destination.isValid());
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount);
+    }
+
+    {
+      auto dataset = file.openDataset("first");
+      const hid_t originalId = dataset.getId();
+      REQUIRE(originalId > 0);
+      dataset.setCompressionLevel(4);
+      auto* alias = &dataset;
+
+      dataset = std::move(*alias);
+
+      CHECK(dataset.getId() == originalId);
+      CHECK(dataset.getCompressionLevel() == 4);
+      CHECK(IsHdf5IdValid(originalId));
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount + 1);
+    }
+    REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+
+    {
+      auto dataset = file.openDataset("second");
+      auto* alias = &dataset;
+
+      dataset = std::move(*alias);
+
+      CHECK_FALSE(dataset.isValid());
+      CHECK(dataset.getNamePath() == "second");
+      CHECK(CountHdf5DatasetIds() == initialDatasetCount);
+    }
+  }
+
+  REQUIRE(CountHdf5DatasetIds() == initialDatasetCount);
+  auto replacement = HDF5::FileIO::WriteFile(path);
+  REQUIRE(replacement.isValid());
 }
 
 TEST_CASE("HDF5 ApiLock serializes access via H5SUPPORT_MUTEX_LOCK", "[simplnx][HDF5]")
