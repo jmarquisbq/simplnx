@@ -47,9 +47,10 @@ struct SIMPLNXCORE_EXPORT CropImageGeometryInputValues
  * @class CropImageGeometry
  * @brief Copies an inclusive voxel region to a smaller ImageGeom.
  *
- * Each array task reads up to 32 complete source Z slices. It extracts cropped
- * rows in memory and writes one destination slab. This reduces HDF5 operations
- * at the cost of source-slice scratch for each concurrently processed array.
+ * Resident pairs copy selected rows directly.
+ * Other pairs use buffers with a 1 MiB total cap for
+ * each task.
+ * Storage backends and caches can allocate more memory.
  */
 class SIMPLNXCORE_EXPORT CropImageGeometry
 {
@@ -58,7 +59,7 @@ public:
    * @brief Initializes image-geometry cropping.
    * @param dataStructure Contains source and destination geometry.
    * @param mesgHandler Receives per-array progress messages.
-   * @param shouldCancel Signals cancellation between slab transfers.
+   * @param shouldCancel Signals cancellation between row or slab transfers.
    * @param inputValues Identifies paths, options, and effective bounds.
    * @pre All arguments and the inputValues object outlive this executor.
    */
@@ -72,15 +73,15 @@ public:
 
   /**
    * @brief Copies cell arrays and optionally renumbers feature data.
-   * @return Success, or a bounds, feature-validation, deep-copy, or renumbering error.
+   * @return Success, or a validation, transfer, deep-copy, or feature-processing error.
    *
-   * Cell-array tasks can run concurrently across arrays. Their bulk-transfer
-   * Result values are not inspected. A failed read can therefore lead to
-   * invalid output without an error result.
+   * Cell-array tasks can run concurrently across separate arrays. The shared
+   * task result propagates the first transfer error.
    *
-   * Cancellation returns success. Each destination array is filled before its
-   * first slab copy, and completed slabs remain. Structural and feature changes
-   * made before a later cancellation also remain.
+   * Cancellation returns success.
+   * Each started task fills
+   * its destination before transfers.
+   * Completed transfers and prior structural changes remain.
    */
   Result<> operator()();
 

@@ -1,6 +1,7 @@
 #include "CropImageGeometry.hpp"
 
 #include "simplnx/DataStructure/DataArray.hpp"
+#include "simplnx/DataStructure/DataStore.hpp"
 #include "simplnx/DataStructure/Geometry/ImageGeom.hpp"
 #include "simplnx/DataStructure/StringArray.hpp"
 #include "simplnx/Utilities/DataArrayUtilities.hpp"
@@ -8,26 +9,37 @@
 #include "simplnx/Utilities/ParallelTaskAlgorithm.hpp"
 #include "simplnx/Utilities/SamplingUtils.hpp"
 
+#include <algorithm>
 #include <cstring>
+#include <initializer_list>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
 
 using namespace nx::core;
 
 namespace
 {
 const std::string k_TempGeometryName = ".cropped_image_geometry";
-// A larger source slab reduces HDF5 calls but increases scratch for each array task.
-constexpr uint64 k_ZSliceBatch = 32;
+constexpr usize k_CropScratchBytes = 1024 * 1024;
+constexpr usize k_ZSliceBatch = 32;
 
 /**
  * @class CropImageGeomDataArray
- * @brief Copies one cell array through Z-slice slab transfers.
+ * @brief Copies one cropped cell array with storage-specific transfers.
  * @tparam T Cell-array value type.
  *
- * Per-task scratch is at most 32 source slices plus 32 cropped destination
- * slices. ParallelTaskAlgorithm can run several array tasks at the same time,
- * so total scratch is the sum of active tasks.
+ * Resident pairs copy selected rows directly.
+ * Other pairs use buffers with a 1 MiB
+ * total cap for each task.
+ * Storage backends and caches can allocate more memory.
  *
- * Cancellation or an error leaves the destination fill value and completed slabs.
+ * Parallel tasks own separate array pairs.
+ * The shared task result propagates the first transfer error.
+ *
+ * Cancellation keeps completed transfers.
  */
 template <typename T>
 class CropImageGeomDataArray
@@ -39,13 +51,15 @@ public:
    * @param newCellArray Receives cropped cell tuples.
    * @param srcImageGeom Supplies source dimensions.
    * @param bounds Specifies half-open XYZ crop bounds.
-   * @param shouldCancel Stops before a later Z slab.
-   * @param taskResult Stores the first bulk-I/O error from all array tasks.
+   * @param shouldCancel Stops the task between row or slab transfers.
+   * @param taskResult Stores the first validation or transfer error.
    */
   CropImageGeomDataArray(const IDataArray& oldCellArray, IDataArray& newCellArray, const ImageGeom& srcImageGeom, std::array<uint64, 6> bounds, const std::atomic_bool& shouldCancel,
                          CopyFromArray::ParallelTaskResult& taskResult)
   : m_OldCellStore(oldCellArray.template getIDataStoreRefAs<AbstractDataStore<T>>())
   , m_NewCellStore(newCellArray.template getIDataStoreRefAs<AbstractDataStore<T>>())
+  , m_SourceArrayName(oldCellArray.getName())
+  , m_DestinationArrayName(newCellArray.getName())
   , m_SrcImageGeom(srcImageGeom)
   , m_Bounds(bounds)
   , m_ShouldCancel(shouldCancel)
@@ -70,6 +84,10 @@ protected:
   {
     const usize numComps = m_OldCellStore.getNumberOfComponents();
 
+    if(m_ShouldCancel || m_TaskResult.shouldAbort())
+    {
+      return;
+    }
     m_NewCellStore.fill(static_cast<T>(-1));
 
     const auto srcDims = m_SrcImageGeom.getDimensions();
@@ -84,81 +102,181 @@ protected:
     const uint64 yMax = m_Bounds[3];
     const uint64 zMin = m_Bounds[4];
     const uint64 zMax = m_Bounds[5];
+
+    if(xMin >= xMax || xMax > srcDimX || yMin >= yMax || yMax > srcDimY || zMin >= zMax || zMax > srcDimZ)
+    {
+      m_TaskResult.store(MakeErrorResult(-953, fmt::format("Cannot crop source array '{}' with XYZ dimensions [{}, {}, {}]. The internal half-open XYZ bounds are [{}, {}), [{}, {}), and [{}, {}). "
+                                                           "Select bounds inside the source geometry.",
+                                                           m_SourceArrayName, srcDimX, srcDimY, srcDimZ, xMin, xMax, yMin, yMax, zMin, zMax)));
+      return;
+    }
+
     const uint64 cropX = xMax - xMin;
     const uint64 cropY = yMax - yMin;
     const uint64 cropZ = zMax - zMin;
-
-    // Read full source slices and extract cropped rows before one slab write.
-    const uint64 srcSliceTuples = srcDimX * srcDimY;
-    const uint64 dstSliceTuples = cropX * cropY;
-    const uint64 rowTuples = cropX;
-    const uint64 rowElements = rowTuples * numComps;
-    const usize rowBytes = rowElements * sizeof(T);
-
-    // Do not allocate a full batch for a shallow crop.
-    const uint64 initialBatch = std::min<uint64>(k_ZSliceBatch, cropZ);
-    auto srcSlab = std::make_unique<T[]>(initialBatch * srcSliceTuples * numComps);
-    auto dstSlab = std::make_unique<T[]>(initialBatch * dstSliceTuples * numComps);
-    uint64 allocatedBatch = initialBatch;
-
-    for(uint64 zStart = zMin; zStart < zMax; zStart += k_ZSliceBatch)
-    {
-      if(m_ShouldCancel || m_TaskResult.shouldAbort())
+    const auto checkedProduct = [](std::initializer_list<uint64> factors) -> std::optional<usize> {
+      usize product = 1;
+      for(const uint64 factor : factors)
       {
-        return;
-      }
-      const uint64 batch = std::min<uint64>(k_ZSliceBatch, zMax - zStart);
-
-      // Reuse slab buffers. Grow only when a later batch is larger.
-      if(batch > allocatedBatch)
-      {
-        srcSlab = std::make_unique<T[]>(batch * srcSliceTuples * numComps);
-        dstSlab = std::make_unique<T[]>(batch * dstSliceTuples * numComps);
-        allocatedBatch = batch;
-      }
-
-      const usize srcSlabElements = batch * srcSliceTuples * numComps;
-      const usize dstSlabElements = batch * dstSliceTuples * numComps;
-
-      // Read consecutive source slices in one transfer.
-      const uint64 srcStartTuple = zStart * srcSliceTuples;
-      Result<> readResult = m_OldCellStore.copyIntoBuffer(srcStartTuple * numComps, nonstd::span<T>(srcSlab.get(), srcSlabElements));
-      if(readResult.invalid())
-      {
-        m_TaskResult.store(std::move(readResult));
-        return;
-      }
-
-      // Extract cropped rows from the resident source slab.
-      for(uint64 dz = 0; dz < batch; dz++)
-      {
-        const T* const srcSliceBase = srcSlab.get() + dz * srcSliceTuples * numComps;
-        T* const dstSliceBase = dstSlab.get() + dz * dstSliceTuples * numComps;
-        for(uint64 yIdx = 0; yIdx < cropY; yIdx++)
+        if(factor == 0 || factor > (std::numeric_limits<usize>::max)() / product)
         {
-          const T* const srcRow = srcSliceBase + ((yMin + yIdx) * srcDimX + xMin) * numComps;
-          T* const dstRow = dstSliceBase + (yIdx * cropX) * numComps;
-          std::memcpy(dstRow, srcRow, rowBytes);
+          return std::nullopt;
+        }
+        product *= static_cast<usize>(factor);
+      }
+      return product;
+    };
+    const auto sourceValues = checkedProduct({srcDimX, srcDimY, srcDimZ, numComps});
+    const auto destinationValues = checkedProduct({cropX, cropY, cropZ, numComps});
+    const usize destinationNumComps = m_NewCellStore.getNumberOfComponents();
+    if(!sourceValues.has_value() || !destinationValues.has_value() || *sourceValues != m_OldCellStore.getSize() || *destinationValues != m_NewCellStore.getSize() || destinationNumComps != numComps)
+    {
+      m_TaskResult.store(MakeErrorResult(
+          -953,
+          fmt::format("Cannot crop source array '{}' with XYZ dimensions [{}, {}, {}] to destination array '{}' with XYZ dimensions [{}, {}, {}]. The source store has {} components and {} "
+                      "values. The destination store has {} components and {} values. Make each array shape match its image geometry before cropping.",
+                      m_SourceArrayName, srcDimX, srcDimY, srcDimZ, m_DestinationArrayName, cropX, cropY, cropZ, numComps, m_OldCellStore.getSize(), destinationNumComps, m_NewCellStore.getSize())));
+      return;
+    }
+
+    const usize sourceDimX = static_cast<usize>(srcDimX);
+    const usize sourceDimY = static_cast<usize>(srcDimY);
+    const usize xMinIndex = static_cast<usize>(xMin);
+    const usize yMinIndex = static_cast<usize>(yMin);
+    const usize yMaxIndex = static_cast<usize>(yMax);
+    const usize zMinIndex = static_cast<usize>(zMin);
+    const usize zMaxIndex = static_cast<usize>(zMax);
+    const usize cropDimX = static_cast<usize>(cropX);
+    const usize cropDimY = static_cast<usize>(cropY);
+    const usize cropDimZ = static_cast<usize>(cropZ);
+    const usize sourceSliceTuples = sourceDimX * sourceDimY;
+    const usize destinationSliceTuples = cropDimX * cropDimY;
+    const usize rowElements = cropDimX * numComps;
+
+    const auto* sourceStore = dynamic_cast<const DataStore<T>*>(&m_OldCellStore);
+    auto* destinationStore = dynamic_cast<DataStore<T>*>(&m_NewCellStore);
+    if(m_OldCellStore.getStoreType() == IDataStore::StoreType::InMemory && m_NewCellStore.getStoreType() == IDataStore::StoreType::InMemory && sourceStore != nullptr && destinationStore != nullptr)
+    {
+      const T* sourceData = sourceStore->data();
+      T* destinationData = destinationStore->data();
+      for(usize zIndex = zMinIndex; zIndex < zMaxIndex; ++zIndex)
+      {
+        for(usize yIndex = yMinIndex; yIndex < yMaxIndex; ++yIndex)
+        {
+          if(m_ShouldCancel || m_TaskResult.shouldAbort())
+          {
+            return;
+          }
+          const usize sourceOffset = ((zIndex * sourceDimY + yIndex) * sourceDimX + xMinIndex) * numComps;
+          const usize destinationOffset = ((zIndex - zMinIndex) * cropDimY + yIndex - yMinIndex) * rowElements;
+          std::copy_n(sourceData + sourceOffset, rowElements, destinationData + destinationOffset);
         }
       }
+      return;
+    }
 
-      // Write consecutive destination slices in one transfer.
-      const uint64 dstStartTuple = (zStart - zMin) * dstSliceTuples;
-      Result<> writeResult = m_NewCellStore.copyFromBuffer(dstStartTuple * numComps, nonstd::span<const T>(dstSlab.get(), dstSlabElements));
-      if(writeResult.invalid())
+    constexpr usize maxScratchValues = k_CropScratchBytes / sizeof(T);
+    const bool sourceSliceFits = sourceSliceTuples <= maxScratchValues / numComps;
+    const bool destinationSliceFits = destinationSliceTuples <= maxScratchValues / numComps;
+    usize batchLimit = 0;
+    if(sourceSliceFits && destinationSliceFits)
+    {
+      const usize sourceSliceValues = sourceSliceTuples * numComps;
+      const usize destinationSliceValues = destinationSliceTuples * numComps;
+      if(sourceSliceValues <= maxScratchValues - destinationSliceValues)
       {
-        m_TaskResult.store(std::move(writeResult));
-        return;
+        const usize combinedSliceValues = sourceSliceValues + destinationSliceValues;
+        batchLimit = (std::min)(k_ZSliceBatch, maxScratchValues / combinedSliceValues);
       }
     }
 
-    // Copy bounds already constrain Z. Suppress the unused dimension value.
-    (void)srcDimZ;
+    if(batchLimit > 0)
+    {
+      const usize initialBatch = (std::min)(batchLimit, cropDimZ);
+      auto sourceSlab = std::make_unique<T[]>(initialBatch * sourceSliceTuples * numComps);
+      auto destinationSlab = std::make_unique<T[]>(initialBatch * destinationSliceTuples * numComps);
+      const usize rowBytes = rowElements * sizeof(T);
+
+      for(usize zStart = zMinIndex; zStart < zMaxIndex; zStart += batchLimit)
+      {
+        if(m_ShouldCancel || m_TaskResult.shouldAbort())
+        {
+          return;
+        }
+        const usize batch = (std::min)(batchLimit, zMaxIndex - zStart);
+        const usize sourceSlabElements = batch * sourceSliceTuples * numComps;
+        const usize destinationSlabElements = batch * destinationSliceTuples * numComps;
+
+        Result<> readResult = m_OldCellStore.copyIntoBuffer(zStart * sourceSliceTuples * numComps, nonstd::span<T>(sourceSlab.get(), sourceSlabElements));
+        if(readResult.invalid())
+        {
+          m_TaskResult.store(std::move(readResult));
+          return;
+        }
+
+        // The slab route reduces HDF5 calls when both crop-owned buffers fit the cap.
+        for(usize zOffset = 0; zOffset < batch; ++zOffset)
+        {
+          const T* sourceSlice = sourceSlab.get() + zOffset * sourceSliceTuples * numComps;
+          T* destinationSlice = destinationSlab.get() + zOffset * destinationSliceTuples * numComps;
+          for(usize yOffset = 0; yOffset < cropDimY; ++yOffset)
+          {
+            const T* sourceRow = sourceSlice + ((yMinIndex + yOffset) * sourceDimX + xMinIndex) * numComps;
+            T* destinationRow = destinationSlice + yOffset * rowElements;
+            std::memcpy(destinationRow, sourceRow, rowBytes);
+          }
+        }
+
+        Result<> writeResult = m_NewCellStore.copyFromBuffer((zStart - zMinIndex) * destinationSliceTuples * numComps, nonstd::span<const T>(destinationSlab.get(), destinationSlabElements));
+        if(writeResult.invalid())
+        {
+          m_TaskResult.store(std::move(writeResult));
+          return;
+        }
+      }
+      return;
+    }
+
+    // Align segments to complete tuples when one tuple fits. Wider tuples must split at flat value offsets.
+    const usize segmentValues = numComps <= maxScratchValues ? (maxScratchValues / numComps) * numComps : maxScratchValues;
+    const usize bufferValues = (std::min)(rowElements, segmentValues);
+    auto buffer = std::make_unique<T[]>(bufferValues);
+    for(usize zIndex = zMinIndex; zIndex < zMaxIndex; ++zIndex)
+    {
+      for(usize yIndex = yMinIndex; yIndex < yMaxIndex; ++yIndex)
+      {
+        const usize sourceOffset = ((zIndex * sourceDimY + yIndex) * sourceDimX + xMinIndex) * numComps;
+        const usize destinationOffset = ((zIndex - zMinIndex) * cropDimY + yIndex - yMinIndex) * rowElements;
+        for(usize rowValue = 0; rowValue < rowElements;)
+        {
+          if(m_ShouldCancel || m_TaskResult.shouldAbort())
+          {
+            return;
+          }
+          const usize count = (std::min)(bufferValues, rowElements - rowValue);
+          Result<> readResult = m_OldCellStore.copyIntoBuffer(sourceOffset + rowValue, nonstd::span<T>(buffer.get(), count));
+          if(readResult.invalid())
+          {
+            m_TaskResult.store(std::move(readResult));
+            return;
+          }
+          Result<> writeResult = m_NewCellStore.copyFromBuffer(destinationOffset + rowValue, nonstd::span<const T>(buffer.get(), count));
+          if(writeResult.invalid())
+          {
+            m_TaskResult.store(std::move(writeResult));
+            return;
+          }
+          rowValue += count;
+        }
+      }
+    }
   }
 
 private:
   const AbstractDataStore<T>& m_OldCellStore;
   AbstractDataStore<T>& m_NewCellStore;
+  std::string m_SourceArrayName;
+  std::string m_DestinationArrayName;
   const ImageGeom& m_SrcImageGeom;
   std::array<uint64, 6> m_Bounds;
   const std::atomic_bool& m_ShouldCancel;
