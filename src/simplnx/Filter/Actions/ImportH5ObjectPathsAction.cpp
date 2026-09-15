@@ -77,10 +77,25 @@ Result<> ImportH5ObjectPathsAction::apply(DataStructure& dataStructure, Mode mod
 {
   static constexpr StringLiteral prefix = "ImportH5ObjectPathsAction: ";
 
-  // Preflight uses a stat-validated metadata cache to avoid repeated HDF5
-  // hierarchy scans. Execute loads resolver-selected stores before merging.
-  auto result = (mode == Mode::Preflight) ? DREAM3D::Dream3dPreflightCache::Instance().fetch(m_H5FilePath) : DREAM3D::LoadDataStructure(m_H5FilePath);
-
+  // Execute materializes selected objects before the merge. Preflight uses cached metadata.
+  auto result = DREAM3D::Dream3dPreflightCache::Instance().fetch(m_H5FilePath);
+  if(result.invalid())
+  {
+    return ConvertResult(std::move(result));
+  }
+  if(mode == Mode::Execute)
+  {
+    std::vector<DataPath> selectedPaths;
+    selectedPaths.reserve(m_Paths.size());
+    for(const auto& path : m_Paths)
+    {
+      if(result.value().containsData(path))
+      {
+        selectedPaths.push_back(path);
+      }
+    }
+    result = DREAM3D::LoadDataStructureArrays(m_H5FilePath, selectedPaths);
+  }
   if(result.invalid())
   {
     return ConvertResult(std::move(result));

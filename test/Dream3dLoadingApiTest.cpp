@@ -1,3 +1,4 @@
+#include "simplnx/Core/Application.hpp"
 #include "simplnx/DataStructure/AttributeMatrix.hpp"
 #include "simplnx/DataStructure/DataArray.hpp"
 #include "simplnx/DataStructure/DataGroup.hpp"
@@ -5,6 +6,10 @@
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/DataStructure/EmptyDataStore.hpp"
 #include "simplnx/DataStructure/IDataStore.hpp"
+#include "simplnx/DataStructure/IO/Generic/DataIOCollection.hpp"
+#include "simplnx/DataStructure/IO/HDF5/DataArrayIO.hpp"
+#include "simplnx/DataStructure/IO/HDF5/DataIOManager.hpp"
+#include "simplnx/Filter/Actions/ImportH5ObjectPathsAction.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
 #include "simplnx/Utilities/Parsing/DREAM3D/Dream3dIO.hpp"
 
@@ -12,6 +17,7 @@
 
 #include <catch2/catch.hpp>
 
+#include <atomic>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -55,6 +61,48 @@ const DataPath k_GroupBPath({k_GroupBName});
 const DataPath k_AttrMatBPath({k_GroupBName, k_AttrMatBName});
 const DataPath k_ArrayB1Path({k_GroupBName, k_AttrMatBName, k_ArrayB1Name});
 const DataPath k_ArrayB2Path({k_GroupBName, k_AttrMatBName, k_ArrayB2Name});
+
+std::atomic_size_t g_ExcludedMaterializations = 0;
+
+class ImportSelectionFloatArrayIO : public HDF5::Float32ArrayIO
+{
+public:
+  Result<> finishImportingData(DataStructure& dataStructure, const DataPath& dataPath, const group_reader_type& parentGroupReader) const override
+  {
+    if(dataPath == k_LargeArrayPath)
+    {
+      ++g_ExcludedMaterializations;
+    }
+    return HDF5::Float32ArrayIO::finishImportingData(dataStructure, dataPath, parentGroupReader);
+  }
+};
+
+struct ScopedImportSelectionManager
+{
+  DataIOCollection& collection;
+  std::shared_ptr<IDataIOManager> original;
+
+  explicit ScopedImportSelectionManager(DataIOCollection& ioCollection)
+  : collection(ioCollection)
+  , original(collection.getManager("HDF5"))
+  {
+    REQUIRE(original != nullptr);
+    auto replacement = std::make_shared<HDF5::DataIOManager>();
+    replacement->addFactory<ImportSelectionFloatArrayIO>();
+    auto result = collection.addIOManager(replacement);
+    SIMPLNX_RESULT_REQUIRE_VALID(result);
+  }
+
+  ~ScopedImportSelectionManager()
+  {
+    (void)collection.addIOManager(original);
+  }
+
+  ScopedImportSelectionManager(const ScopedImportSelectionManager&) = delete;
+  ScopedImportSelectionManager(ScopedImportSelectionManager&&) = delete;
+  ScopedImportSelectionManager& operator=(const ScopedImportSelectionManager&) = delete;
+  ScopedImportSelectionManager& operator=(ScopedImportSelectionManager&&) = delete;
+};
 
 // The helpers create and clean temporary DREAM3D files.
 
@@ -377,6 +425,182 @@ TEST_CASE("Dream3dLoadingApi: LoadDataStructureArrays prune verification")
   CHECK(ds.getDataAs<DataGroup>(k_GroupBPath) == nullptr);
   CHECK(ds.getDataAs<Float32Array>(k_ArrayB1Path) == nullptr);
   CHECK(ds.getDataAs<Float32Array>(k_ArrayB2Path) == nullptr);
+}
+
+TEST_CASE("ImportH5ObjectPathsAction avoids excluded materialization", "[simplnx][Dream3dLoadingApi][SelectiveImport]")
+{
+  UnitTest::LoadPlugins();
+  const UnitTest::PreferencesSentinel preferences(DataStorageMode::ForceInCore, 0);
+  auto source = CreateSimpleTestDataStructure();
+  const auto filePath = WriteTestFile(source, "Dream3dLoadingApiTest_ActionSelection.dream3d");
+  ScopedTempFile fileGuard(filePath);
+  auto& collection = Application::GetOrCreateInstance()->getIOCollection();
+  const auto originalManager = collection.getManager("HDF5");
+  {
+    ScopedImportSelectionManager managerGuard(collection);
+    g_ExcludedMaterializations = 0;
+    auto fullLoad = DREAM3D::LoadDataStructure(filePath);
+    SIMPLNX_RESULT_REQUIRE_VALID(fullLoad);
+    REQUIRE(g_ExcludedMaterializations.load() > 0);
+    g_ExcludedMaterializations = 0;
+
+    const ImportH5ObjectPathsAction action(filePath, {k_GroupPath, k_SmallAMPath, k_SmallArrayPath});
+    DataStructure destination;
+    auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+    SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+    CHECK(g_ExcludedMaterializations.load() == 0);
+    REQUIRE(destination.containsData(k_SmallArrayPath));
+    CHECK_FALSE(destination.containsData(k_LargeArrayPath));
+    CHECK_FALSE(destination.containsData(k_LargeAMPath));
+    Int32Array* selectedArrayPtr = nullptr;
+    REQUIRE_NOTHROW(selectedArrayPtr = &destination.getDataRefAs<Int32Array>(k_SmallArrayPath));
+    REQUIRE(selectedArrayPtr != nullptr);
+    for(usize valueIndex = 0; valueIndex < k_SmallArraySize; ++valueIndex)
+    {
+      CHECK(selectedArrayPtr->getDataStoreRef().getValue(valueIndex) == static_cast<int32>(valueIndex * 3));
+    }
+    UnitTest::CheckArraysInheritTupleDims(destination);
+  }
+  CHECK(collection.getManager("HDF5") == originalManager);
+}
+
+TEST_CASE("ImportH5ObjectPathsAction selection semantics", "[simplnx][Dream3dLoadingApi][SelectiveImport]")
+{
+  UnitTest::LoadPlugins();
+  const UnitTest::PreferencesSentinel preferences(DataStorageMode::ForceInCore, 0);
+  auto source = CreateSimpleTestDataStructure();
+  const auto filePath = WriteTestFile(source, "Dream3dLoadingApiTest_ActionSelectionSemantics.dream3d");
+  ScopedTempFile fileGuard(filePath);
+  auto& collection = Application::GetOrCreateInstance()->getIOCollection();
+  const auto originalManager = collection.getManager("HDF5");
+  {
+    ScopedImportSelectionManager managerGuard(collection);
+    g_ExcludedMaterializations = 0;
+
+    SECTION("Preflight")
+    {
+      const ImportH5ObjectPathsAction action(filePath, {k_GroupPath, k_SmallAMPath, k_SmallArrayPath});
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Preflight);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      CHECK(g_ExcludedMaterializations.load() == 0);
+      REQUIRE(destination.containsData(k_SmallArrayPath));
+      IDataArray* selectedArrayPtr = nullptr;
+      REQUIRE_NOTHROW(selectedArrayPtr = &destination.getDataRefAs<IDataArray>(k_SmallArrayPath));
+      REQUIRE(selectedArrayPtr != nullptr);
+      CHECK(selectedArrayPtr->getStoreType() == IDataStore::StoreType::Empty);
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Group shell")
+    {
+      const ImportH5ObjectPathsAction action(filePath, {k_GroupPath});
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      CHECK(g_ExcludedMaterializations.load() == 0);
+      REQUIRE(destination.containsData(k_GroupPath));
+      CHECK_FALSE(destination.containsData(k_SmallAMPath));
+      CHECK_FALSE(destination.containsData(k_LargeAMPath));
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Missing path")
+    {
+      const DataPath missingPath({"Missing"});
+      const ImportH5ObjectPathsAction action(filePath, {k_GroupPath, k_SmallAMPath, k_SmallArrayPath, missingPath});
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      CHECK(g_ExcludedMaterializations.load() == 0);
+      REQUIRE(destination.containsData(k_SmallArrayPath));
+      CHECK_FALSE(destination.containsData(missingPath));
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Empty selection")
+    {
+      const ImportH5ObjectPathsAction action(filePath, {});
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      CHECK(destination.getAllDataPaths().empty());
+      CHECK(g_ExcludedMaterializations.load() == 0);
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Existing target")
+    {
+      DataStructure destination;
+      REQUIRE(DataGroup::Create(destination, k_GroupName) != nullptr);
+      const ImportH5ObjectPathsAction action(filePath, {k_GroupPath, k_SmallAMPath, k_SmallArrayPath});
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      REQUIRE(importResult.invalid());
+      REQUIRE_FALSE(importResult.errors().empty());
+      CHECK(importResult.errors()[0].code == -6203);
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Duplicate selection")
+    {
+      const ImportH5ObjectPathsAction action(filePath, {k_GroupPath, k_GroupPath});
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      REQUIRE(importResult.invalid());
+      REQUIRE_FALSE(importResult.errors().empty());
+      CHECK(importResult.errors()[0].code == -6203);
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Full selection")
+    {
+      const ImportH5ObjectPathsAction action(filePath, source.getAllDataPaths());
+      DataStructure destination;
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      REQUIRE(destination.containsData(k_SmallArrayPath));
+      REQUIRE(destination.containsData(k_LargeArrayPath));
+
+      Int32Array* smallArrayPtr = nullptr;
+      REQUIRE_NOTHROW(smallArrayPtr = &destination.getDataRefAs<Int32Array>(k_SmallArrayPath));
+      REQUIRE(smallArrayPtr != nullptr);
+      for(usize valueIndex = 0; valueIndex < k_SmallArraySize; ++valueIndex)
+      {
+        CHECK(smallArrayPtr->getDataStoreRef().getValue(valueIndex) == static_cast<int32>(valueIndex * 3));
+      }
+
+      Float32Array* largeArrayPtr = nullptr;
+      REQUIRE_NOTHROW(largeArrayPtr = &destination.getDataRefAs<Float32Array>(k_LargeArrayPath));
+      REQUIRE(largeArrayPtr != nullptr);
+      for(usize valueIndex = 0; valueIndex < k_LargeArraySize; ++valueIndex)
+      {
+        CHECK(largeArrayPtr->getDataStoreRef().getValue(valueIndex) == Approx(static_cast<float32>(valueIndex) * 1.5f));
+      }
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+
+    SECTION("Parent supplied by destination")
+    {
+      DataStructure destination;
+      auto* destinationGroup = DataGroup::Create(destination, k_GroupName);
+      REQUIRE(destinationGroup != nullptr);
+      const auto destinationGroupId = destinationGroup->getId();
+      const ImportH5ObjectPathsAction action(filePath, {k_SmallAMPath, k_SmallArrayPath});
+      auto importResult = action.apply(destination, IDataAction::Mode::Execute);
+      SIMPLNX_RESULT_REQUIRE_VALID(importResult);
+      CHECK(g_ExcludedMaterializations.load() == 0);
+      REQUIRE(destination.containsData(k_SmallAMPath));
+      REQUIRE(destination.containsData(k_SmallArrayPath));
+      CHECK_FALSE(destination.containsData(k_LargeAMPath));
+      CHECK(destination.getAllDataPaths().size() == 3);
+      DataGroup* retainedGroupPtr = nullptr;
+      REQUIRE_NOTHROW(retainedGroupPtr = &destination.getDataRefAs<DataGroup>(k_GroupPath));
+      REQUIRE(retainedGroupPtr != nullptr);
+      CHECK(retainedGroupPtr->getId() == destinationGroupId);
+      UnitTest::CheckArraysInheritTupleDims(destination);
+    }
+  }
+  CHECK(collection.getManager("HDF5") == originalManager);
 }
 
 TEST_CASE("Dream3dLoadingApi: Recovery file with user data path redirect")
