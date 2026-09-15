@@ -6,6 +6,7 @@
 #include "simplnx/DataStructure/DataStore.hpp"
 #include "simplnx/DataStructure/DataStructure.hpp"
 #include "simplnx/DataStructure/EmptyDataStore.hpp"
+#include "simplnx/DataStructure/IO/Generic/InMemoryFormatResolver.hpp"
 #include "simplnx/UnitTest/UnitTestCommon.hpp"
 #include "simplnx/Utilities/ArrayCreationUtilities.hpp"
 #include "simplnx/Utilities/DataArrayUtilities.hpp"
@@ -18,6 +19,8 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -41,6 +44,27 @@ public:
   {
     return MakeErrorResult(-6035, fmt::format("Test store resize to shape [{}] failed: injected failure", fmt::join(tupleShape, ", ")));
   }
+};
+
+class RecordingFormatResolver final : public IDataStoreFormatResolver
+{
+public:
+  std::string resolveFormat(const DataStructure&, const DataPath& arrayPath, DataType, uint64) const override
+  {
+    const std::scoped_lock lock(m_Mutex);
+    m_RequestedPaths.push_back(arrayPath);
+    return {};
+  }
+
+  std::vector<DataPath> requestedPaths() const
+  {
+    const std::scoped_lock lock(m_Mutex);
+    return m_RequestedPaths;
+  }
+
+private:
+  mutable std::mutex m_Mutex;
+  mutable std::vector<DataPath> m_RequestedPaths;
 };
 } // namespace
 
@@ -156,6 +180,118 @@ TEST_CASE("nx::core::IDataStore getPlannedStoreType", "[simplnx][DataStore]")
   EmptyDataStore<int32> emptyOutOfCore(ShapeType{4}, ShapeType{1}, "SomeOutOfCoreFormat");
   REQUIRE(emptyOutOfCore.getStoreType() == IDataStore::StoreType::Empty);
   REQUIRE(emptyOutOfCore.getPlannedStoreType() == IDataStore::StoreType::OutOfCore);
+}
+
+TEMPLATE_TEST_CASE("DataArray deepCopy preserves resident initialization", "[simplnx][DataArray][DeepCopyInitialization]", int32, float32, bool)
+{
+  DataStructure dataStructure;
+  dataStructure.setFormatResolver(std::make_shared<InMemoryFormatResolver>());
+  const std::optional<TestType> initValue = GENERATE(std::optional<TestType>{TestType{1}}, std::optional<TestType>{});
+  CAPTURE(initValue.has_value());
+
+  auto* sourceAMPtr = AttributeMatrix::Create(dataStructure, "Source", {1});
+  REQUIRE(sourceAMPtr != nullptr);
+  auto sourceStore = std::make_shared<DataStore<TestType>>(ShapeType{1}, ShapeType{2}, initValue);
+  sourceStore->setValue(0, TestType{0});
+  sourceStore->setValue(1, TestType{1});
+  auto* sourceArrayPtr = DataArray<TestType>::Create(dataStructure, "Values", sourceStore, sourceAMPtr->getId());
+  REQUIRE(sourceArrayPtr != nullptr);
+
+  auto copy = sourceAMPtr->deepCopy(DataPath({"Copy"}));
+  REQUIRE(copy != nullptr);
+  AttributeMatrix* copyAMPtr = nullptr;
+  DataArray<TestType>* copyArrayPtr = nullptr;
+  REQUIRE_NOTHROW(copyAMPtr = &dataStructure.getDataRefAs<AttributeMatrix>(DataPath({"Copy"})));
+  REQUIRE_NOTHROW(copyArrayPtr = &dataStructure.getDataRefAs<DataArray<TestType>>(DataPath({"Copy", "Values"})));
+  REQUIRE(copyArrayPtr->getIDataStore() != sourceArrayPtr->getIDataStore());
+  const auto* copyStorePtr = dynamic_cast<const DataStore<TestType>*>(copyArrayPtr->getIDataStore());
+  REQUIRE(copyStorePtr != nullptr);
+  CHECK(copyStorePtr->getInitValue() == initValue);
+
+  const Result<> resizeResult = copyAMPtr->resizeTuples({4});
+  SIMPLNX_RESULT_REQUIRE_VALID(resizeResult);
+  CHECK(copyArrayPtr->getDataStoreRef().getValue(0) == TestType{0});
+  CHECK(copyArrayPtr->getDataStoreRef().getValue(1) == TestType{1});
+  const TestType expectedGrowthValue = initValue.value_or(GetMudflap<TestType>());
+  for(usize valueIndex = 2; valueIndex < 8; ++valueIndex)
+  {
+    CHECK(copyArrayPtr->getDataStoreRef().getValue(valueIndex) == expectedGrowthValue);
+  }
+
+  CHECK(sourceArrayPtr->getNumberOfTuples() == 1);
+  CHECK(sourceArrayPtr->getDataStoreRef().getValue(0) == TestType{0});
+  CHECK(sourceArrayPtr->getDataStoreRef().getValue(1) == TestType{1});
+  UnitTest::CheckArraysInheritTupleDims(dataStructure);
+}
+
+TEST_CASE("DataArray deepCopy preserves signed initialization and destination behavior", "[simplnx][DataArray][DeepCopyInitialization]")
+{
+  DataStructure dataStructure;
+  auto resolver = std::make_shared<RecordingFormatResolver>();
+  dataStructure.setFormatResolver(resolver);
+  const DataPath sourcePath({"Source"});
+  const DataPath copyPath({"Copy"});
+  auto sourceStore = std::make_shared<DataStore<int32>>(ShapeType{1}, ShapeType{1}, std::optional<int32>{-1});
+  sourceStore->setValue(0, 7);
+  auto* sourceArrayPtr = DataArray<int32>::Create(dataStructure, sourcePath.getTargetName(), sourceStore);
+  REQUIRE(sourceArrayPtr != nullptr);
+
+  auto firstCopy = sourceArrayPtr->deepCopy(copyPath);
+  REQUIRE(firstCopy != nullptr);
+  DataArray<int32>* copyArrayPtr = nullptr;
+  REQUIRE_NOTHROW(copyArrayPtr = &dataStructure.getDataRefAs<DataArray<int32>>(copyPath));
+  REQUIRE(copyArrayPtr->getIDataStore() != sourceArrayPtr->getIDataStore());
+  const std::vector<DataPath> expectedRequests = {copyPath};
+  CHECK(resolver->requestedPaths() == expectedRequests);
+
+  const Result<> resizeResult = copyArrayPtr->resizeTuples({4});
+  SIMPLNX_RESULT_REQUIRE_VALID(resizeResult);
+  const std::array<int32, 4> expectedValues = {7, -1, -1, -1};
+  for(usize valueIndex = 0; valueIndex < expectedValues.size(); ++valueIndex)
+  {
+    CHECK(copyArrayPtr->getDataStoreRef().getValue(valueIndex) == expectedValues[valueIndex]);
+  }
+  CHECK(sourceArrayPtr->getNumberOfTuples() == 1);
+  CHECK(sourceArrayPtr->getDataStoreRef().getValue(0) == 7);
+
+  auto collision = sourceArrayPtr->deepCopy(copyPath);
+  CHECK(collision == nullptr);
+  CHECK(dataStructure.getDataAs<DataArray<int32>>(copyPath) == copyArrayPtr);
+  CHECK(copyArrayPtr->getNumberOfTuples() == 4);
+  for(usize valueIndex = 0; valueIndex < expectedValues.size(); ++valueIndex)
+  {
+    CHECK(copyArrayPtr->getDataStoreRef().getValue(valueIndex) == expectedValues[valueIndex]);
+  }
+  CHECK(resolver->requestedPaths() == expectedRequests);
+  UnitTest::CheckArraysInheritTupleDims(dataStructure);
+}
+
+TEST_CASE("DataArray deepCopy preserves Empty store metadata", "[simplnx][DataArray][DeepCopyInitialization]")
+{
+  DataStructure dataStructure;
+  auto sourceStore = std::make_shared<EmptyDataStore<int32>>(ShapeType{1}, ShapeType{2}, "planned-format");
+  auto* sourceArrayPtr = DataArray<int32>::Create(dataStructure, "Source", sourceStore);
+  REQUIRE(sourceArrayPtr != nullptr);
+
+  auto copy = sourceArrayPtr->deepCopy(DataPath({"Copy"}));
+  REQUIRE(copy != nullptr);
+  DataArray<int32>* copyArrayPtr = nullptr;
+  REQUIRE_NOTHROW(copyArrayPtr = &dataStructure.getDataRefAs<DataArray<int32>>(DataPath({"Copy"})));
+  REQUIRE(copyArrayPtr->getIDataStore() != sourceArrayPtr->getIDataStore());
+
+  const auto* sourceEmptyStorePtr = sourceArrayPtr->getIDataStoreAs<EmptyDataStore<int32>>();
+  const auto* copyEmptyStorePtr = copyArrayPtr->getIDataStoreAs<EmptyDataStore<int32>>();
+  REQUIRE(sourceEmptyStorePtr != nullptr);
+  REQUIRE(copyEmptyStorePtr != nullptr);
+  CHECK(copyEmptyStorePtr->getStoreType() == IDataStore::StoreType::Empty);
+  CHECK(copyEmptyStorePtr->getPlannedStoreType() == IDataStore::StoreType::OutOfCore);
+  CHECK(copyEmptyStorePtr->getTupleShape() == ShapeType{1});
+  CHECK(copyEmptyStorePtr->getComponentShape() == ShapeType{2});
+  CHECK(copyEmptyStorePtr->dataFormat() == "planned-format");
+  CHECK(copyEmptyStorePtr->getTupleShape() == sourceEmptyStorePtr->getTupleShape());
+  CHECK(copyEmptyStorePtr->getComponentShape() == sourceEmptyStorePtr->getComponentShape());
+  CHECK(copyEmptyStorePtr->dataFormat() == sourceEmptyStorePtr->dataFormat());
+  UnitTest::CheckArraysInheritTupleDims(dataStructure);
 }
 
 TEST_CASE("nx::core::DataArray Copy TupleTest", "[simplnx][DataArray]")

@@ -233,6 +233,24 @@ public:
   }
 
   /**
+   * @brief Returns the value that initializes elements when the store grows.
+   * @return Initialization value, or no value if growth uses the mudflap value.
+   */
+  std::optional<T> getInitValue() const
+  {
+    return m_InitValue;
+  }
+
+  /**
+   * @brief Sets the policy for values added when the store grows.
+   * @param value Initialization value, or no value to use the mudflap value.
+   */
+  void setInitValue(std::optional<T> value)
+  {
+    m_InitValue = value;
+  }
+
+  /**
    * @brief Sets the value used when the store grows.
    * @param value Value that initializes new elements.
    */

@@ -223,7 +223,18 @@ public:
       // does not. Resolve that destination's storage, then transfer through
       // bounded bulk pages so an OOC array never materializes in full.
       dataStore = DataStoreUtilities::CreateDataStore<T>(dataStruct, copyPath, getTupleShape(), getComponentShape());
-      if(dataStore == nullptr || dataStore->copyFrom(0, *getDataStore(), 0, getNumberOfTuples()).invalid())
+      if(dataStore == nullptr)
+      {
+        return nullptr;
+      }
+      const auto* sourceStorePtr = dynamic_cast<const DataStore<T>*>(getDataStore());
+      auto* destinationStorePtr = dynamic_cast<DataStore<T>*>(dataStore.get());
+      if(sourceStorePtr != nullptr && destinationStorePtr != nullptr && sourceStorePtr->getStoreType() == IDataStore::StoreType::InMemory &&
+         destinationStorePtr->getStoreType() == IDataStore::StoreType::InMemory)
+      {
+        destinationStorePtr->setInitValue(sourceStorePtr->getInitValue());
+      }
+      if(dataStore->copyFrom(0, *getDataStore(), 0, getNumberOfTuples()).invalid())
       {
         return nullptr;
       }
