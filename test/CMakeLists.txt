@@ -64,6 +64,7 @@ set(SIMPLNX_TEST_SRCS
   SimplJsonConversionTest.cpp
   DataStoreFormatResolverTest.cpp
   DataStorageModeMigrationTest.cpp
+  TiffImageIOTest.cpp
 )
 
 add_executable(simplnx_test

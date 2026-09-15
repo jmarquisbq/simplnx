@@ -13,9 +13,12 @@ namespace nx::core
  *
  * Supports uint8, uint16, and float32 pixel types.
  * Reads scanlines or tiles and writes scanlines.
- * Captures libtiff error messages with a per-handle error handler.
- * The reader does not normalize the TIFF Orientation tag. Top-to-bottom output
- * requires input whose stored row order is top-to-bottom.
+ * Captures
+ * libtiff error messages with a per-handle error handler.
+ * Tiled uint8 reads apply libtiff photometric conversion.
+ * The reader normalizes these tiles to TOPLEFT with mirror-only handling for
+ * transposed tags.
+ * Stripped input and other tiled types retain stored sample interpretation and row order.
  */
 class SIMPLNX_EXPORT TiffImageIO : public IImageIO
 {

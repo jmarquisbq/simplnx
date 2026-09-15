@@ -1,14 +1,18 @@
 #include "TiffImageIO.hpp"
 
 #include "simplnx/Common/Result.hpp"
+#include "simplnx/Common/ScopeGuard.hpp"
 #include "simplnx/Common/TypesUtility.hpp"
 
 #include <tiffio.h>
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <cstring>
+#include <limits>
 
 using namespace nx::core;
 
@@ -142,6 +146,103 @@ Result<DataType> DetermineTiffDataType(TIFF* tiff)
                                    fmt::format("Unsupported TIFF pixel format: bits-per-sample={}, sample-format={}. Supported combinations are (8, UINT), (16, UINT), (32, IEEEFP).", bitsPerSample,
                                                static_cast<int>(sampleFormat)));
 }
+
+// Decode each uint8 tile through libtiff's RGBA converter.
+// Reuse one tile raster and one converted row to keep memory bounded.
+Result<> ReadTiledUInt8Rows(TiffFile& tiffFile, const std::string& pathStr, uint32_t width, uint32_t height, uint16_t samplesPerPixel, const IImageIO::ReadRowCallback& callback)
+{
+  TIFF* tiff = tiffFile.get();
+  if(samplesPerPixel == 0 || samplesPerPixel > 4)
+  {
+    return MakeErrorResult(k_ErrorUnsupportedFormat,
+                           fmt::format("Tiled uint8 TIFF '{}' has {} samples per pixel. The RGBA decoder supports component counts from 1 through 4.", pathStr, samplesPerPixel));
+  }
+
+  uint32_t tileWidth = 0;
+  uint32_t tileHeight = 0;
+  if(TIFFGetField(tiff, TIFFTAG_TILEWIDTH, &tileWidth) == 0 || TIFFGetField(tiff, TIFFTAG_TILELENGTH, &tileHeight) == 0 || tileWidth == 0 || tileHeight == 0)
+  {
+    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("Failed to read valid TIFF tile dimensions from '{}': {}", pathStr, tiffFile.errorMessage()));
+  }
+
+  constexpr usize k_MaxUSize = std::numeric_limits<usize>::max();
+  if(static_cast<usize>(tileWidth) > k_MaxUSize / static_cast<usize>(tileHeight))
+  {
+    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("TIFF '{}' tile dimensions {} by {} overflow the platform element-count limit.", pathStr, tileWidth, tileHeight));
+  }
+  const usize tilePixelCount = static_cast<usize>(tileWidth) * static_cast<usize>(tileHeight);
+  if(tilePixelCount > k_MaxUSize / sizeof(uint32))
+  {
+    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("TIFF '{}' tile dimensions {} by {} require more RGBA bytes than the platform supports.", pathStr, tileWidth, tileHeight));
+  }
+  if(static_cast<usize>(tileWidth) > k_MaxUSize / static_cast<usize>(samplesPerPixel))
+  {
+    return MakeErrorResult(k_ErrorReadMetadataFailed, fmt::format("TIFF '{}' tile width {} and component count {} overflow the platform row-element limit.", pathStr, tileWidth, samplesPerPixel));
+  }
+
+  constexpr uint32_t k_MaxSignedOffset = static_cast<uint32_t>(std::numeric_limits<int>::max());
+  if((width > 0 && width - 1 > k_MaxSignedOffset) || (height > 0 && height - 1 > k_MaxSignedOffset))
+  {
+    return MakeErrorResult(k_ErrorUnsupportedFormat,
+                           fmt::format("Tiled uint8 TIFF '{}' dimensions {} by {} exceed the RGBA decoder's signed offset limit of {}.", pathStr, width, height, k_MaxSignedOffset));
+  }
+
+  char errorMessage[1024] = {};
+  TIFFRGBAImage image = {};
+  if(TIFFRGBAImageBegin(&image, tiff, 0, errorMessage) == 0)
+  {
+    const std::string_view diagnostic = errorMessage[0] == '\0' ? tiffFile.errorMessage() : std::string_view{errorMessage};
+    return MakeErrorResult(k_ErrorReadPixelFailed, fmt::format("Failed to initialize the tiled uint8 TIFF decoder for '{}': {}", pathStr, diagnostic));
+  }
+  auto imageGuard = MakeScopeGuard([&image]() noexcept { TIFFRGBAImageEnd(&image); });
+  image.req_orientation = ORIENTATION_TOPLEFT;
+
+  uint16_t orientation = ORIENTATION_TOPLEFT;
+  TIFFGetFieldDefaulted(tiff, TIFFTAG_ORIENTATION, &orientation);
+  const bool flipX = orientation == ORIENTATION_TOPRIGHT || orientation == ORIENTATION_BOTRIGHT || orientation == ORIENTATION_RIGHTTOP || orientation == ORIENTATION_RIGHTBOT;
+  const bool flipY = orientation == ORIENTATION_BOTRIGHT || orientation == ORIENTATION_BOTLEFT || orientation == ORIENTATION_RIGHTBOT || orientation == ORIENTATION_LEFTBOT;
+
+  std::vector<uint32> rgbaTile(tilePixelCount);
+  std::vector<uint8> convertedRow(static_cast<usize>(tileWidth) * samplesPerPixel);
+  for(uint32_t tileY = 0; tileY < height; tileY += tileHeight)
+  {
+    for(uint32_t tileX = 0; tileX < width; tileX += tileWidth)
+    {
+      const uint32_t validWidth = std::min(tileWidth, width - tileX);
+      const uint32_t validHeight = std::min(tileHeight, height - tileY);
+
+      image.row_offset = static_cast<int>(tileY);
+      image.col_offset = static_cast<int>(tileX);
+      if(TIFFRGBAImageGet(&image, rgbaTile.data(), validWidth, validHeight) == 0)
+      {
+        return MakeErrorResult(k_ErrorReadPixelFailed, fmt::format("Failed to decode tiled TIFF '{}' at ({}, {}): {}", pathStr, tileX, tileY, tiffFile.errorMessage()));
+      }
+
+      // libtiff mirrors pixels inside each region. This origin mapping completes the mirror across the full image.
+      const usize outputColumn = flipX ? static_cast<usize>(width - tileX - validWidth) : static_cast<usize>(tileX);
+      const usize outputRow = flipY ? static_cast<usize>(height - tileY - validHeight) : static_cast<usize>(tileY);
+      for(usize localRow = 0; localRow < validHeight; ++localRow)
+      {
+        const usize rgbaRowOffset = localRow * validWidth;
+        for(usize localColumn = 0; localColumn < validWidth; ++localColumn)
+        {
+          const uint32 rgba = rgbaTile[rgbaRowOffset + localColumn];
+          const std::array<uint8, 4> components = {static_cast<uint8>(TIFFGetR(rgba)), static_cast<uint8>(TIFFGetG(rgba)), static_cast<uint8>(TIFFGetB(rgba)), static_cast<uint8>(TIFFGetA(rgba))};
+          const usize destinationOffset = localColumn * samplesPerPixel;
+          std::copy_n(components.begin(), samplesPerPixel, convertedRow.begin() + destinationOffset);
+        }
+
+        Result<> result = callback(outputRow + localRow, outputColumn, validWidth, std::span<const uint8>(convertedRow.data(), static_cast<usize>(validWidth) * samplesPerPixel));
+        if(result.invalid())
+        {
+          return result;
+        }
+      }
+    }
+  }
+
+  return {};
+}
 } // namespace
 
 Result<ImageMetadata> TiffImageIO::readMetadata(const std::filesystem::path& filePath) const
@@ -272,6 +373,11 @@ Result<> TiffImageIO::readPixelDataRows(const std::filesystem::path& filePath, c
   }
   const usize bytesPerElement = GetDataTypeSize(dataTypeResult.value());
   const usize pixelBytes = static_cast<usize>(samplesPerPixel) * bytesPerElement;
+
+  if(TIFFIsTiled(tiff) != 0 && dataTypeResult.value() == DataType::uint8)
+  {
+    return ReadTiledUInt8Rows(tiffFile, pathStr, width, height, samplesPerPixel, callback);
+  }
 
   uint16_t planarConfig = PLANARCONFIG_CONTIG;
   TIFFGetFieldDefaulted(tiff, TIFFTAG_PLANARCONFIG, &planarConfig);
