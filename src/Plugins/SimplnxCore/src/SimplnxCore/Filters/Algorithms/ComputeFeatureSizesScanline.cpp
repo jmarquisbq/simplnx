@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <memory>
+#include <vector>
 
 using namespace nx::core;
 
@@ -54,6 +55,126 @@ Result<> ValidateFeatureIdsInScanlinePass(const std::string& featureIdsName, con
   }
 
   return {};
+}
+
+/**
+ * @brief Writes one contiguous feature-output block.
+ * @param featureStart Identifies the first feature in the block.
+ * @param featureCount Number of features in the block.
+ * @param[in]
+ * numElementsBuffer Feature counts.
+ * @param volumesBuffer Supplies feature areas or volumes.
+ * @param equivalentDiametersBuffer Supplies feature equivalent diameters.
+ * @param[out] numElements
+ * Output counts.
+ * @param volumes Receives feature areas or volumes.
+ * @param equivalentDiameters Receives feature equivalent diameters.
+ * @return Success, or the first output-store write error.
+
+ */
+Result<> WriteFeatureOutputBlock(usize featureStart, usize featureCount, const std::vector<int32>& numElementsBuffer, const std::vector<float32>& volumesBuffer,
+                                 const std::vector<float32>& equivalentDiametersBuffer, Int32AbstractDataStore& numElements, Float32AbstractDataStore& volumes,
+                                 Float32AbstractDataStore& equivalentDiameters)
+{
+  if(featureCount == 0)
+  {
+    return {};
+  }
+
+  Result<> writeResult = numElements.copyFromBuffer(featureStart, nonstd::span<const int32>(numElementsBuffer.data(), featureCount));
+  if(writeResult.invalid())
+  {
+    return writeResult;
+  }
+
+  writeResult = volumes.copyFromBuffer(featureStart, nonstd::span<const float32>(volumesBuffer.data(), featureCount));
+  if(writeResult.invalid())
+  {
+    return writeResult;
+  }
+
+  return equivalentDiameters.copyFromBuffer(featureStart, nonstd::span<const float32>(equivalentDiametersBuffer.data(), featureCount));
+}
+
+/**
+ * @brief Calculates and writes feature outputs in bounded blocks.
+ * @tparam FeatureSizeFunctorT Calculates one feature area or volume.
+ * @tparam EquivalentDiameterFunctorT Calculates one
+ * equivalent diameter.
+ * @param numFeatures Number of output feature tuples.
+ * @param featureVoxelCounts Supplies voxel counts for all features.
+ * @param featureSizeFunctor Calculates an area or
+ * volume for one feature.
+ * @param equivalentDiameterFunctor Calculates a diameter from an area or volume.
+ * @param numElements Receives feature voxel counts.
+ * @param volumes Receives feature
+ * areas or volumes.
+ * @param equivalentDiameters Receives feature equivalent diameters.
+ * @param throttledMessenger Reports feature progress.
+ * @param shouldCancel Signals cancellation between
+ * features or output blocks.
+ * @return Success, or the first feature-count or output-store write error.
+ *
+ * The function flushes completed features before it returns for cancellation or an invalid
+ * count.
+ */
+template <typename FeatureSizeFunctorT, typename EquivalentDiameterFunctorT>
+Result<> StoreFeatureOutputs(usize numFeatures, const std::vector<uint64>& featureVoxelCounts, FeatureSizeFunctorT&& featureSizeFunctor, EquivalentDiameterFunctorT&& equivalentDiameterFunctor,
+                             Int32AbstractDataStore& numElements, Float32AbstractDataStore& volumes, Float32AbstractDataStore& equivalentDiameters, ThrottledMessenger& throttledMessenger,
+                             const std::atomic_bool& shouldCancel)
+{
+  std::vector<int32> numElementsBuffer(k_ChunkTuples);
+  std::vector<float32> volumesBuffer(k_ChunkTuples);
+  std::vector<float32> equivalentDiametersBuffer(k_ChunkTuples);
+  usize featureStart = 1;
+  usize featureCount = 0;
+
+  auto flushBlock = [&]() -> Result<> {
+    Result<> writeResult = WriteFeatureOutputBlock(featureStart, featureCount, numElementsBuffer, volumesBuffer, equivalentDiametersBuffer, numElements, volumes, equivalentDiameters);
+    if(writeResult.valid())
+    {
+      featureStart += featureCount;
+      featureCount = 0;
+    }
+    return writeResult;
+  };
+
+  for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
+  {
+    if(shouldCancel)
+    {
+      return flushBlock();
+    }
+
+    if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
+    {
+      Result<> writeResult = flushBlock();
+      if(writeResult.invalid())
+      {
+        return writeResult;
+      }
+      return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
+    }
+
+    throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
+
+    const float64 featureSize = featureSizeFunctor(featureIdx);
+    numElementsBuffer[featureCount] = static_cast<int32>(featureVoxelCounts[featureIdx]);
+    volumesBuffer[featureCount] = static_cast<float32>(featureSize);
+    equivalentDiametersBuffer[featureCount] = static_cast<float32>(equivalentDiameterFunctor(featureSize));
+    featureCount++;
+
+    if(featureCount == k_ChunkTuples)
+    {
+      Result<> writeResult = flushBlock();
+      if(writeResult.invalid())
+      {
+        return writeResult;
+      }
+    }
+  }
+
+  return flushBlock();
 }
 
 /**
@@ -136,26 +257,12 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
     const float64 voxelArea = static_cast<float64>(spacing[0]) * static_cast<float64>(spacing[1]) * static_cast<float64>(spacing[2]);
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Area and ECD...");
-    for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
+    Result<> outputResult = StoreFeatureOutputs(
+        numFeatures, featureVoxelCounts, [&featureVoxelCounts, voxelArea](usize featureIdx) { return static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelArea; },
+        [](float64 featureArea) { return 2.0 * std::sqrt(featureArea / k_ECDAreaDenominator); }, numElements, volumes, equivalentDiameters, throttledMessenger, shouldCancel);
+    if(outputResult.invalid() || shouldCancel)
     {
-      if(shouldCancel)
-      {
-        return {};
-      }
-
-      if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
-      {
-        return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
-      }
-
-      throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
-
-      numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
-
-      const float64 newArea = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelArea;
-      volumes.setValue(featureIdx, static_cast<float32>(newArea));
-
-      equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::sqrt(newArea / k_ECDAreaDenominator)));
+      return outputResult;
     }
   }
   else
@@ -165,26 +272,12 @@ Result<> ProcessImageGeom(ImageGeom& imageGeom, Float32AbstractDataStore& volume
     const float64 voxelVolume = spacing[0] * spacing[1] * spacing[2];
 
     msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating Volume and ESD...");
-    for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
+    Result<> outputResult = StoreFeatureOutputs(
+        numFeatures, featureVoxelCounts, [&featureVoxelCounts, voxelVolume](usize featureIdx) { return static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelVolume; },
+        [](float64 featureVolume) { return 2.0 * std::cbrt(featureVolume / k_ESDVolumeDenominator); }, numElements, volumes, equivalentDiameters, throttledMessenger, shouldCancel);
+    if(outputResult.invalid() || shouldCancel)
     {
-      if(shouldCancel)
-      {
-        return {};
-      }
-
-      if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
-      {
-        return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
-      }
-
-      throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
-
-      numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
-
-      const float64 newVolume = static_cast<float64>(featureVoxelCounts[featureIdx]) * voxelVolume;
-      volumes.setValue(featureIdx, static_cast<float32>(newVolume));
-
-      equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(newVolume / k_ESDVolumeDenominator)));
+      return outputResult;
     }
   }
 
@@ -284,23 +377,12 @@ Result<> ProcessRectGridGeom(RectGridGeom& rectGridGeom, Float32AbstractDataStor
   }
 
   msgHelper.sendMessage("Feature Level: Storing Voxel Counts and Calculating ESD...");
-  for(usize featureIdx = 1; featureIdx < numFeatures; featureIdx++)
+  Result<> outputResult = StoreFeatureOutputs(
+      numFeatures, featureVoxelCounts, [&featureVolumes](usize featureIdx) { return featureVolumes[featureIdx]; },
+      [](float64 featureVolume) { return 2.0 * std::cbrt(featureVolume / k_ESDVolumeDenominator); }, numElements, volumes, equivalentDiameters, throttledMessenger, shouldCancel);
+  if(outputResult.invalid() || shouldCancel)
   {
-    if(shouldCancel)
-    {
-      return {};
-    }
-
-    throttledMessenger.sendThrottledMessage([&] { return fmt::format(" - Calculating || {:.2f}% Complete", CalculatePercentComplete(featureIdx, numFeatures)); });
-
-    if(featureVoxelCounts[featureIdx] > k_MaxVoxelCount)
-    {
-      return MakeErrorResult(k_BadFeatureCount, fmt::format("Feature {} contains more voxels ({}) than the 32-bit integer limit ({}).", featureIdx, featureVoxelCounts[featureIdx], k_MaxVoxelCount));
-    }
-
-    numElements.setValue(featureIdx, static_cast<int32>(featureVoxelCounts[featureIdx]));
-    volumes.setValue(featureIdx, static_cast<float32>(featureVolumes[featureIdx]));
-    equivalentDiameters.setValue(featureIdx, static_cast<float32>(2.0 * std::cbrt(featureVolumes[featureIdx] / k_ESDVolumeDenominator)));
+    return outputResult;
   }
 
   if(!saveElementSizes)

@@ -18,13 +18,12 @@ struct ComputeFeatureSizesInputValues;
  * @class ComputeFeatureSizesScanline
  * @brief Computes feature sizes with sequential bulk transfers.
  *
- * Feature IDs use 262,144-tuple chunks. RectGrid execution reads a matching element-size chunk.
- * The two buffers require about two MiB. Feature accumulators remain feature-sized.
+ * Feature IDs use 262,144-tuple chunks. Three matching output buffers require about three MiB.
+ * RectGrid execution also reads a matching element-size chunk. Feature accumulators remain
+ * feature-sized.
  *
  * The scanline traversal retains global raster order. This preserves the serial Kahan accumulation
- * result. Current Feature ID and element-size bulk-I/O Result values are not inspected.
- *
- * A storage failure can leave partial output while the method returns success.
+ * result. The algorithm returns the first bulk read or write error.
  *
  * @see ComputeFeatureSizesDirect.
  */
@@ -53,7 +52,7 @@ public:
 
   /**
    * @brief Computes feature sizes with sequential bulk transfers.
-   * @return Success, or a geometry, Feature ID, or feature-count error.
+   * @return Success, or a geometry, Feature ID, feature-count, or storage error.
    *
    * When a checkpoint observes cancellation, the method returns success. Feature output written
    * before that checkpoint remains. Element-size creation or deletion can remain after cancellation.
