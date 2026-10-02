@@ -20,6 +20,9 @@ Set-Location $work
 foreach ($name in @('Preparation', 'Measurements', 'SurfaceSelection', 'MinimumSize', 'CombinedSelection', 'NeighborRelationships', 'VoxelMesh')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $work "Data\Output\Small_IN100_Examples\$name") | Out-Null
 }
+# Run every example: branches 03–06 each read the measurement checkpoint independently; 07 reads preparation.
+# Running 03 then 04 does not combine their rules; 05 supplies the explicit intersection.
+
 foreach ($relative in @(
     'Small_IN100_Processing\(01) Small IN100 Archive.d3dpipeline',
     'Small_IN100_Examples\(01) Small IN100 Feature Preparation.d3dpipeline',

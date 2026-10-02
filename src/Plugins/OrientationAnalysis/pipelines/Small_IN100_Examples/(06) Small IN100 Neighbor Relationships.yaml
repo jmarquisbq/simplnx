@@ -51,7 +51,7 @@
     }
   ],
   "last_verified": "2026-10-02",
-  "verification_status": "Windows in-core Release isolated preflight/execution passed. Independent input-label oracle matched all packed neighbor IDs, both linked count datasets, physical areas, reductions, box flags, preserved arrays, and 22 CSV numeric columns. Validation-only anisotropic spacing exercised all three perpendicular face-area products. Shared registered chain, install layout, OOC, generated Python, native GUI, and human interpretation remain unverified for this bundle.",
+  "verification_status": "Windows in-core Release isolated preflight/execution passed. Independent input-label oracle matched all packed neighbor IDs, both linked count datasets, physical areas, reductions, box flags, preserved arrays, and 22 CSV numeric columns. Validation-only anisotropic spacing exercised all three perpendicular face-area products. The registered seven-example Windows in-core Release chain passed 1/1 in 18.67 seconds; nested-stage shared content validation passed 7/7. All 30 flat source suite files matched the runtime and staged plugin install copies byte for byte after final prose edits. OOC, generated Python, native GUI, full application installation, and human interpretation remain unverified.",
   "python_generation": {
     "specification_file": "PythonGeneration.yaml",
     "resolve_from": "pipeline_suite_root",
@@ -114,6 +114,8 @@
       "Use final FeatureIds, not twin ParentIds, for this graph.",
       "Include only occupied positive-ID rows in scientific distributions; the CSV retains unused positive rows.",
       "Shared area is in squared geometry length units and has reciprocal directed entries.",
+      "After correcting spacing or units, rerun neighbor computation and list statistics for physical areas; stored areas do not update automatically. Rerun feature measurements when physical sizes, centroids, or shapes are needed. Labels and topology can remain unchanged only when the correction changes geometry metadata without changing cell assignments.",
+      "Unique shared area between positive feature IDs excludes background and exterior faces. Halve directed totals only for the complete positive-positive graph; do not halve a single feature total or an arbitrary subset with missing endpoints.",
       "GeometrySurfaceFeatures marks the image box only; background-adjacent contact uses a different rule.",
       "The publication provides context, not a numerical oracle for this example.",
       "Use one writable CLI working folder; native GUI working-folder behavior remains unverified."
@@ -290,8 +292,7 @@
     "unique_area_um2": 66156.4375,
     "anisotropic_case": "Spacing (0.2, 0.3, 0.5) micrometers; independently verified X/Y/Z perpendicular products on unchanged labels. Inherited physical measurement arrays are not valid for that altered spacing.",
     "unverified": [
-      "shared registered full chain",
-      "runtime and install layout",
+      "full application installation",
       "OOC",
       "generated Python",
       "native GUI behavior",

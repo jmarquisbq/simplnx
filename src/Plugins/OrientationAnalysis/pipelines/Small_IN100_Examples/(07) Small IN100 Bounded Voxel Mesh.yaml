@@ -69,7 +69,7 @@
     }
   ],
   "last_verified": "2026-10-02",
-  "verification_status": "Windows in-core Release isolated preflight/execution and independent HDF5/Abaqus parsing passed. The registered seven-example chain, shared content validation, and flat runtime/staged-install checks passed before final prose updates. OOC, generated Python, native GUI, solver behavior, LengMorph consumer, and human interpretation remain unverified.",
+  "verification_status": "Windows in-core Release isolated preflight/execution and independent HDF5/Abaqus parsing passed. The registered seven-example Windows in-core Release chain passed 1/1 in 18.67 seconds; nested-stage shared content validation passed 7/7. All 30 flat source suite files matched the runtime and staged plugin install copies byte for byte after final prose edits. OOC, generated Python, native GUI, full application installation, solver behavior, LengMorph consumer, and human interpretation remain unverified.",
   "python_generation": {
     "specification_file": "PythonGeneration.yaml",
     "resolve_from": "pipeline_suite_root",
@@ -354,11 +354,12 @@
       "SmallIN100_ROI24_sects.inp": "a1156433a0fbcba3815360d0760e4e0df9c6e81831ea21670b0f69d6d862cc41"
     },
     "shared_chain": "Registered seven-example Windows in-core Release chain passed 1/1 in 18.67 seconds; nested-stage shared validator passed 7/7.",
-    "packaging": "30 source suite files matched both flat runtime and staged-install copies byte for byte before final prose edits; root will refresh copies.",
+    "packaging": "All 30 flat source suite files matched the runtime and staged plugin install copies byte for byte after final prose edits.",
     "unverified": [
       "OOC",
       "generated Python",
       "native GUI",
+      "full application installation",
       "Abaqus solve",
       "LengMorph consumer",
       "human interpretation review"
