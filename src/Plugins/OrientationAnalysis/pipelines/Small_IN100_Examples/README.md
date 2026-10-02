@@ -17,7 +17,7 @@ if (@($sections | Where-Object { -not (Test-Path $_ -PathType Leaf) }).Count -gt
 }
 if (@($sections | Where-Object { -not (Test-Path $_ -PathType Leaf) }).Count -gt 0) { throw 'One or more of the 117 ANG sections are missing.' }
 Set-Location $work
-foreach ($name in @('Preparation', 'Measurements', 'SurfaceSelection', 'MinimumSize', 'CombinedSelection', 'NeighborRelationships')) {
+foreach ($name in @('Preparation', 'Measurements', 'SurfaceSelection', 'MinimumSize', 'CombinedSelection', 'NeighborRelationships', 'VoxelMesh')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $work "Data\Output\Small_IN100_Examples\$name") | Out-Null
 }
 foreach ($relative in @(
@@ -27,7 +27,8 @@ foreach ($relative in @(
     'Small_IN100_Examples\(03) Small IN100 Surface Selection Comparison.d3dpipeline',
     'Small_IN100_Examples\(04) Small IN100 Minimum Size Comparison.d3dpipeline',
     'Small_IN100_Examples\(05) Small IN100 Combined Selection.d3dpipeline',
-    'Small_IN100_Examples\(06) Small IN100 Neighbor Relationships.d3dpipeline'
+    'Small_IN100_Examples\(06) Small IN100 Neighbor Relationships.d3dpipeline',
+    'Small_IN100_Examples\(07) Small IN100 Bounded Voxel Mesh.d3dpipeline'
 )) {
     $pipeline = Join-Path $examples $relative
     & $runner --execute $pipeline
@@ -45,4 +46,8 @@ The preparation copy changes only `EBSDSegmentFeatures.is_periodic` from true to
 
 In the checked measurement checkpoint, background `NumElements[0]=0` and all 2,317 occupied diameters lie in `[0, 10)` µm. The surface rule retained 1,349 valid features and excluded 968. The 2.0 µm reporting cutoff retained 1,526 and excluded 791. Their combined intersection retained 853 valid features. All three selection branches passed isolated preflight and execution; independent checks matched their saved masks, summary statistics, common-bin histograms, CSV values, and unchanged original labels and measurements. Each selection companion gives the observed diameter summaries and a data-derived preview.
 
-The extended registered CTest smoke test passed the archive → preparation → measurement → surface, size, combined selection, and neighbor relationship sequence on a Windows in-core Release snapshot (1/1 in 18.62 seconds). The shared content validator passed 6/6. The neighbor branch also passed isolated preflight/execution and independent graph validation, including a validation-only anisotropic-spacing case. The combined branch passed isolated preflight/execution and independent output checks, including a validation-only empty selection. Separate checks verified the baseline's counts, volumes, diameters, sampled centroids, and CSV values. See the measurement companion for the Windows `-nan(ind)` token produced for unused rows. All 26 source suite files matched both runtime and staged plugin-install copies byte for byte, with no subdirectories; the root reran the neighbor numerical checker and inspected its PNG. OOC, native GUI behavior, full application installation, and human interpretation review remain pending. `FilterCoverage.json` describes only the selected pilot filters. `PythonGeneration.yaml` is a generation specification; Python generation and execution are **not verified**.
+## Bounded voxel mesh branch
+
+The [(07) bounded voxel mesh](%2807%29%20Small%20IN100%20Bounded%20Voxel%20Mesh.md) reads the preparation checkpoint directly; it does not need the feature-measurement checkpoint. It preserves original labels beside compact local labels, crops a measured 24 x 24 x 24 voxel region, and writes a DREAM3D crop and five Abaqus mesh files under VoxelMesh/. Create that directory before preflight. The mesh files are model-input scaffolding: material definitions, loads, and boundary conditions are not supplied, and no Abaqus or LengMorph execution is verified. The older measured-grain summaries must not be interpreted as measurements of the cropped grain fragments.
+
+The registered seven-example Windows in-core Release CTest chain passed 1/1 in 18.67 seconds, and the nested-stage shared content validator passed 7/7. In the checked package snapshot, all 30 suite source files matched flat runtime and staged-install copies byte for byte, with no subdirectories. Independent checks matched the baseline's counts, volumes, diameters, sampled centroids, and CSV values; the selection masks, statistics, histograms, CSV data, and unchanged inputs; and the reciprocal neighbor graph, including a validation-only anisotropic-spacing case. The bounded-mesh checker matched the original crop and relabeling and every exported node, C3D8 element, grain set, and section; a missing output directory produced the writer's expected preflight error. The root reran the mesh and companion checkers and inspected the PNG. The measurement CSV can contain Windows `-nan(ind)` for unused rows; see its companion. OOC, generated Python execution, native GUI behavior, a full application installation, Abaqus solving, LengMorph consumption, and human scientific interpretation remain unverified. `FilterCoverage.json` covers only selected pilot filters, and `PythonGeneration.yaml` is a specification, not execution evidence.

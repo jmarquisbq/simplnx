@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected Small IN100 feature-preparation, measurement, comparison, and neighbor-relationship pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
+  "scope": "Selected Small IN100 feature-preparation, measurement, comparison, neighbor-relationship, and bounded voxel-mesh pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
   "filters": [
     {
       "filter": "EBSDSegmentFeaturesFilter",
@@ -127,6 +127,27 @@
       "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
       "step": 2,
       "purpose": "Reduce each shared-area list to count, mean, largest contact, and total area."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(07) Small IN100 Bounded Voxel Mesh.d3dpipeline",
+      "step": 1,
+      "purpose": "Preserve each original FeatureIds value before local relabeling."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(07) Small IN100 Bounded Voxel Mesh.d3dpipeline",
+      "step": 2,
+      "purpose": "Crop inclusive XYZ voxel bounds and compact the selected FeatureIds."
+    },
+    {
+      "filter": "WriteAbaqusHexahedronFilter",
+      "uuid": "4bc81b8c-1594-409a-89eb-3ea8d8f061b0",
+      "pipeline": "(07) Small IN100 Bounded Voxel Mesh.d3dpipeline",
+      "step": 3,
+      "purpose": "Export connected C3D8 voxel nodes, elements, and compact grain sets."
     }
   ]
 }

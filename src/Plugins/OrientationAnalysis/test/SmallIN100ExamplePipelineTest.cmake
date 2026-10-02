@@ -1,4 +1,4 @@
-# Smoke-test the public Small IN100 archive and six pilot example pipelines.
+# Smoke-test the public Small IN100 archive and seven pilot example pipelines.
 # This checks execution and output presence, not scientific correctness.
 
 foreach(required_var NXRUNNER RAW_DATA_DIR ARCHIVE_PIPELINE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
@@ -14,7 +14,8 @@ foreach(required_path "${NXRUNNER}"
                       "${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline"
                       "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline"
                       "${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline"
-                      "${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline")
+                      "${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline"
+                      "${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")
   if(NOT EXISTS "${required_path}")
     message(FATAL_ERROR "Required executable or pipeline is missing: ${required_path}")
   endif()
@@ -122,6 +123,7 @@ validate_companion("${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison
 validate_companion("${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline")
+validate_companion("${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")
 
 # Check every raw section before staging or running a pipeline.
 foreach(slice RANGE 1 117)
@@ -146,6 +148,7 @@ file(REMOVE
   "${work_root}/minimum-size-preflight.log" "${work_root}/minimum-size-execute.log"
   "${work_root}/combined-selection-preflight.log" "${work_root}/combined-selection-execute.log"
   "${work_root}/neighbor-relationships-preflight.log" "${work_root}/neighbor-relationships-execute.log")
+file(REMOVE "${work_root}/voxel-mesh-preflight.log" "${work_root}/voxel-mesh-execute.log")
 
 set(raw_stage "${work_root}/Data/Small_IN100")
 file(MAKE_DIRECTORY "${raw_stage}")
@@ -174,7 +177,13 @@ set(known_outputs
     "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.csv"
     "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.dream3d"
     "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv"
-    "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d")
+    "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24.inp"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_nodes.inp"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elems.inp"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elset.inp"
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_sects.inp")
 foreach(relative_path IN LISTS known_outputs)
   set(output_path "${work_root}/${relative_path}")
   get_filename_component(output_parent "${output_path}" DIRECTORY)
@@ -297,5 +306,11 @@ endforeach()
 if(NOT neighbor_first_column STREQUAL "Feature_ID")
   message(FATAL_ERROR "Neighbor CSV lacks Feature_ID: ${neighbor_csv}")
 endif()
+
+run_pipeline("voxel-mesh" "${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")
+require_output("Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d")
+foreach(mesh_suffix "" "_nodes" "_elems" "_elset" "_sects")
+  require_output("Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24${mesh_suffix}.inp")
+endforeach()
 
 message(STATUS "Small IN100 example smoke test passed; logs and outputs: ${work_root}")

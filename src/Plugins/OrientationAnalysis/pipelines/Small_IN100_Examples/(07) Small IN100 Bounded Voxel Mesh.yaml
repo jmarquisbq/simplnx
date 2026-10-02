@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Computational mechanics"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "voxel mesh",
+    "Abaqus C3D8",
+    "feature ID provenance",
+    "bounded crop"
+  ],
+  "citations": [
+    {
+      "title": "A method to extract slip system dependent information for crystal plasticity models",
+      "authors": [
+        "Dylan Agius",
+        "Abdullah Al Mamun",
+        "Christopher Truman",
+        "Mahmoud Mostafavi",
+        "David Knowles"
+      ],
+      "year": 2022,
+      "journal": "MethodsX",
+      "doi": "10.1016/j.mex.2022.101763",
+      "url": "https://doi.org/10.1016/j.mex.2022.101763",
+      "scope": "pipeline_workflow",
+      "role": "Illustrative context for a voxel microstructure export used before the paper's separate Python and Fortran calculations.",
+      "dataset": {
+        "availability": "The linked author repository's example_supp.json specifies a synthetic 10 by 10 by 10 voxel recipe; this dimension is from the repository recipe, not the paper text. No fixed measured Small IN100 input or named numerical result was found in the audited author tree. Publisher supplement payloads were not audited. The public Small_IN100 archive is a separate measured source.",
+        "recipe_url": "https://github.com/DylanAgius/LengMorph/blob/main/Additional%20Files/Dream3d%20files/example_supp.json",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The Agius article is CC BY 4.0. Rights to redistribute the separate Small_IN100 raw archive were not established; this bundle includes no raw or processed volume file.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Measured Small IN100-derived ROI differs from the author repository's synthetic example RVE. This runs no LengMorph Python or Fortran, computes no slip distances, verifies no Python consumer contract, and does not solve the Abaqus model."
+      }
+    },
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "filter_algorithm",
+      "role": "Context for the public measured Small IN100 reconstruction used by predecessor pipelines."
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current crop, relabeling, and Abaqus export parameter and file contracts."
+    }
+  ],
+  "last_verified": "2026-10-02",
+  "verification_status": "Windows in-core Release isolated preflight/execution and independent HDF5/Abaqus parsing passed. The registered seven-example chain, shared content validation, and flat runtime/staged-install checks passed before final prose updates. OOC, generated Python, native GUI, solver behavior, LengMorph consumer, and human interpretation remain unverified.",
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "orientationanalysis-smallin100-python-generation-v1"
+  },
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.mex.2022.101763",
+    "paper_url": "https://doi.org/10.1016/j.mex.2022.101763",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Agius et al. Figure 2 voxel-RVE DREAM.3D export preparation; the bundle preview shows the measured-derived ROI labels instead of a paper result.",
+    "target_traits": [
+      "3D measured-derived 24 by 24 by 24 cell ROI",
+      "0.25 micrometer spacing",
+      "source labels preserved beside compact mesh grain labels",
+      "one C3D8 element per voxel"
+    ],
+    "known_differences": "The paper describes a synthetic voxel RVE workflow with subsequent Python/Fortran slip-distance analysis. The linked author's example_supp.json recipe, not the paper text, specifies 10 by 10 by 10 voxels. This ROI comes from separately sourced measured Small IN100; raw-source identity with the paper's data is not established.",
+    "paper_example_recipe_url": "https://github.com/DylanAgius/LengMorph/blob/main/Additional%20Files/Dream3d%20files/example_supp.json",
+    "archive_provenance_file": "README.md",
+    "preparation_checkpoint_sha256": "367b458cf5c57bc9a46a9241df1cd70de2f4f4825b43032c9e98c13b224a7dac",
+    "source_roi_slice_sha256": "b9cd49d9cc3932622d49d80aeb115995445d35aba56b0bbe6a41726fa574e523"
+  },
+  "summary": "Crop a bounded measured Small IN100 region, preserve original IDs, compact mesh grain labels, and export a connected voxel grid as illustrative model-input scaffolding.",
+  "use_cases": [
+    "Inspect voxel-based mesh export from a measured reconstruction",
+    "Trace local grain sets to original feature IDs",
+    "Check crop bounds and mesh geometry before adapting a simulation"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+      "role": "Measured preparation checkpoint with no whole-volume feature measurements."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24.inp",
+      "role": "Master include file for illustrative mesh and grain sections."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_nodes.inp",
+      "role": "One-based voxel grid node coordinates in micrometers."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elems.inp",
+      "role": "C3D8 voxel elements."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elset.inp",
+      "role": "Cube and positive compact grain element sets."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_sects.inp",
+      "role": "Grain section references without material definitions."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d",
+      "role": "Bounded geometry, compact labels, and sliced original-label copy."
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Export a bounded Small IN100 voxel mesh",
+      "Trace compact grain sets to original feature IDs"
+    ],
+    "questions_to_ask": [
+      "Are the ROI bounds in XYZ voxel indices and inclusive?",
+      "Does the changed ROI contain background cells or truncated grains acceptable for the intended analysis?",
+      "Have material definitions, loads, boundary conditions, units, and solver settings been supplied separately?"
+    ],
+    "constraints": [
+      "Run the archive and preparation pipelines first; do not use the whole-volume measurement checkpoint.",
+      "Create the VoxelMesh output directory before preflight.",
+      "Keep original labels and verify the new sorted positive-ID mapping after changing ROI.",
+      "Zero or background cells are still meshed by the writer; inspect any changed ROI for them.",
+      "The .inp files are mesh/model-input scaffolding, not a complete mechanical simulation or verified Abaqus solve.",
+      "Node coordinates are micrometers, but Abaqus does not enforce a unit system.",
+      "Hourglass stiffness 250 is a writer default, not a recommended or calibrated material parameter.",
+      "No LengMorph Python-consumer compatibility or slip-distance result has been established."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "(02) Small IN100 Feature Measurements.d3dpipeline"
+    ]
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+    }
+  ],
+  "parameter_adaptations": [
+    {
+      "filter": "CropImageGeometryFilter",
+      "parameter": "min_voxel/max_voxel",
+      "reference_value": "Whole prepared volume",
+      "example_value": "inclusive XYZ [82,88,46] to [105,111,69]",
+      "reason": "Bound export to 24 cubed interior measured voxels."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "parameter": "renumber_features",
+      "reference_value": false,
+      "example_value": true,
+      "reason": "Create dense grain-set IDs while retaining source labels in FeatureIds_Original."
+    }
+  ],
+  "measurement_labels": {
+    "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
+    "original_ids": "DataContainer/Cell Data/FeatureIds_Original",
+    "feature_matrix": "DataContainer/Cell Feature Data",
+    "not_used": "DataContainer/Cell Data/ParentIds"
+  },
+  "pipeline_file": "(07) Small IN100 Bounded Voxel Mesh.d3dpipeline",
+  "markdown_file": "(07) Small IN100 Bounded Voxel Mesh.md",
+  "title": "Small IN100 Bounded Voxel Mesh",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the preparation checkpoint with an empty feature matrix, before whole-volume measurements.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy original cell IDs into FeatureIds_Original before relabeling.",
+      "paths": [
+        {
+          "parameter": "new_data_path",
+          "value": ""
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": "_Original"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "DataContainer/Cell Data/FeatureIds"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_Original"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Crop inclusive XYZ voxel bounds and compact selected FeatureIds while retaining sliced original labels.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "output_image_geometry_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          82,
+          88,
+          46
+        ],
+        "max_voxel": [
+          105,
+          111,
+          69
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "remove_original_geometry": true,
+        "input_image_geometry_path": "DataContainer",
+        "renumber_features": true,
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "output_image_geometry_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "WriteAbaqusHexahedronFilter",
+      "uuid": "4bc81b8c-1594-409a-89eb-3ea8d8f061b0",
+      "role": "Export a connected C3D8 grid and compact positive-ID grain sets as model-input scaffolding.",
+      "paths": [
+        {
+          "parameter": "output_path",
+          "value": "Data/Output/Small_IN100_Examples/VoxelMesh/"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "write_dummy_node": false,
+        "hourglass_stiffness": 250,
+        "job_name": "SmallIN100_ROI24_illustrative",
+        "output_path": "Data/Output/Small_IN100_Examples/VoxelMesh/",
+        "file_prefix": "SmallIN100_ROI24",
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 4,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save bounded geometry and both label arrays without whole-volume feature measurements.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "validation": {
+    "date": "2026-10-02",
+    "configuration": "Windows in-core Release, isolated controlled nxrunner snapshot",
+    "expected_current_fixture": "24 cubed cells, 23 occupied positive IDs, 13,824 C3D8 elements, 15,625 nodes, 24 feature rows; independently checked against the saved output.",
+    "preflight_execution": "Dedicated isolated CTest passed 2/2; missing-output-directory validation-only preflight returned writer error -1111.",
+    "independent_checks": "Original source hash and slice matched; all 12 other cell-array slices matched byte-for-byte, original labels were preserved, compact IDs followed sorted positives, no stale measurements remained, and all five Abaqus files passed full node, element, corner, volume, include, grain membership and section parsing.",
+    "output_sha256": {
+      "SmallIN100_MeshROI.dream3d": "4b96cff0df8cca80bfbe139ff0602a86e6b63317c32421a4a793089968aa7073",
+      "SmallIN100_ROI24.inp": "20b97ae98f7fba004374c887eec6110e947cd714d309237a7e84868eea83055d",
+      "SmallIN100_ROI24_nodes.inp": "66b8698ebcdedd95d3d1c908545e4c6bdc85325b6bdbcee7d294e4441430b911",
+      "SmallIN100_ROI24_elems.inp": "6c1623ebb3c637f1e0cdffb4e54b9b205007a2ac6b1824d685a9ad0fb38197bb",
+      "SmallIN100_ROI24_elset.inp": "7c06395ac020d61b7a810a8f649f586575c3b590281a7f47fb05ab0cac549f0a",
+      "SmallIN100_ROI24_sects.inp": "a1156433a0fbcba3815360d0760e4e0df9c6e81831ea21670b0f69d6d862cc41"
+    },
+    "shared_chain": "Registered seven-example Windows in-core Release chain passed 1/1 in 18.67 seconds; nested-stage shared validator passed 7/7.",
+    "packaging": "30 source suite files matched both flat runtime and staged-install copies byte for byte before final prose edits; root will refresh copies.",
+    "unverified": [
+      "OOC",
+      "generated Python",
+      "native GUI",
+      "Abaqus solve",
+      "LengMorph consumer",
+      "human interpretation review"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100BoundedVoxelMesh.png",
+    "role": "Data-derived mid-slice label mapping and ROI extent, not a solver or native GUI result."
+  },
+  "dimensional_scope": "A 24-cubed voxel crop of the 117-section 3D measured reconstruction; fragments at crop faces are not complete grain shapes.",
+  "cli_usage": {
+    "instructions": "See README.md#quick-start-117-section-3d-example and create VoxelMesh before preflight.",
+    "working_directory": "A chosen writable folder with the predecessor preparation checkpoint under Data/Output/Small_IN100_Examples/Preparation/.",
+    "relative_path_base": "The CLI resolves relative Data/... paths from its working directory.",
+    "gui_note": "Open with File > Open and adjust relative input/output paths to absolute paths if needed. Native GUI execution remains unverified."
+  }
+}
