@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "scope": "Selected Small IN100 feature-preparation and baseline-measurement pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
+  "filters": [
+    {
+      "filter": "EBSDSegmentFeaturesFilter",
+      "uuid": "1810c2c7-63e3-41db-b204-a5821e6271c0",
+      "pipeline": "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "step": 8,
+      "purpose": "Segment finite-sample EBSD features without periodic face wrapping."
+    },
+    {
+      "filter": "ComputeFeatureCentroidsFilter",
+      "uuid": "c6875ac7-8bdd-4f69-b6ce-82ac09bd3421",
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "step": 1,
+      "purpose": "Locate final reconstructed features from observed voxel centers."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "step": 2,
+      "purpose": "Measure voxel counts, physical volumes, and equivalent diameters."
+    },
+    {
+      "filter": "ComputeShapesFilter",
+      "uuid": "036b17d5-23bb-4a24-9187-c4a8dd918792",
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "step": 3,
+      "purpose": "Measure fitted shape descriptors using final IDs and centroids."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "step": 4,
+      "purpose": "Export direct feature arrays with traceable Feature_ID rows."
+    }
+  ]
+}

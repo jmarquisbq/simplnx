@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Additive manufacturing",
+    "Metallurgy"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "3D microstructure",
+    "feature measurements",
+    "grain segmentation"
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Published Small IN100 reconstruction and feature-statistics workflow; this pilot uses only a subset.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses public Small IN100 data and current NX filters. Periodic segmentation is disabled for a finite sample. It does not recreate all paper Table 2 operations or claim numerical identity with publisher supplements."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current registered UUIDs, parameter keys, and measurement implementations."
+    }
+  ],
+  "last_verified": "2026-10-01",
+  "verification_status": "Windows in-core Release: exact chain passed 6/6 preflight/execution checks; measurement arithmetic passed 6/6 independent checks; CSV matched saved DREAM3D arrays. Runtime copy and staged plugin install each matched all ten source files byte for byte with no nested category. OOC, generated Python, native GUI, full application installation, and human interpretation review remain unverified.",
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "orientationanalysis-smallin100-python-generation-v1"
+  },
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "A 3D EBSD feature map and a per-feature measurement table.",
+    "target_traits": [
+      "117 measured EBSD sections",
+      "189 by 201 image cells per section",
+      "0.25 spacing on each axis",
+      "traceable final feature IDs"
+    ],
+    "known_differences": "Archive identity with the publisher's NiPoly data is unproven. The current NX preparation is not an exact historical reconstruction, and the pilot disables periodic segmentation.",
+    "archive_provenance_file": "README.md"
+  },
+  "summary": "Measures centroids, voxel counts, physical sizes, and fitted shapes of final Small IN100 FeatureIds; exports CSV and DREAM3D.",
+  "use_cases": [
+    "Measure reconstructed features",
+    "Export a traceable per-feature table",
+    "Check size and shape calculations"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+      "role": "Output of the pilot Feature Preparation pipeline."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.csv",
+      "role": "Per-feature table with Feature_ID and direct feature arrays; background row omitted."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "role": "Full measured DataContainer and saved source for later branches."
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Find feature sizes and shapes in Small IN100",
+      "Export feature statistics with traceable IDs"
+    ],
+    "questions_to_ask": [
+      "Does your input have a final FeatureIds array with a matching feature matrix?",
+      "What are the voxel spacing and physical length units?",
+      "Are surface-truncated features acceptable for your analysis?"
+    ],
+    "constraints": [
+      "This pipeline is configured for SmallIN100. Review its input requirements, assumptions, and parameters before using other data.",
+      "Run the pilot Feature Preparation first.",
+      "Use saved FeatureIds, not the twin ParentIds.",
+      "Exclude Feature_ID zero and rows with NumElements zero from scientific summaries.",
+      "Check any nonfinite shape descriptors and surface truncation before drawing material conclusions.",
+      "The published paper is illustrative context, not a numerical oracle.",
+      "For CLI execution, use one writable working folder with all 117 ANG sections under Data/Small_IN100; run the three stages in README order.",
+      "Do not assume the GUI uses the CLI working folder; use absolute input/output file parameters if relative Data paths do not resolve.",
+      "This is a 3D, 117-section workflow. A single EBSD slice cannot establish measured 3D feature volumes."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "../Small_IN100_Processing/(03) Small IN100 Morphological Statistics.d3dpipeline"
+    ]
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+    }
+  ],
+  "parameter_adaptations": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "parameter": "import_data_object.file_path",
+      "reference_value": "Data/Output/Reconstruction/SmallIN100_Final.dream3d",
+      "example_value": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+      "reason": "Measure the finite-sample pilot checkpoint."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "parameter": "export_file_path",
+      "reference_value": "Data/Output/Statistics/SmallIN100_Morph.dream3d",
+      "example_value": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "reason": "Give baseline outputs a distinct path."
+    }
+  ],
+  "measurement_labels": {
+    "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
+    "feature_matrix": "DataContainer/Cell Feature Data",
+    "not_used": "DataContainer/Cell Data/ParentIds"
+  },
+  "pipeline_file": "(02) Small IN100 Feature Measurements.d3dpipeline",
+  "markdown_file": "(02) Small IN100 Feature Measurements.md",
+  "title": "Small IN100 Feature Measurements",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the nonperiodic feature preparation checkpoint. Run the Small IN100 Archive and Feature Preparation pipelines first.",
+      "paths": [
+        {
+          "parameter": "import_data_object.file_path",
+          "value": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeFeatureCentroidsFilter",
+      "uuid": "c6875ac7-8bdd-4f69-b6ce-82ac09bd3421",
+      "role": "Compute mean voxel-center positions for final FeatureIds without wrapping across sample faces.",
+      "paths": [
+        {
+          "parameter": "feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "centroids_array_name": "Centroids",
+        "feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_image_geometry_path": "DataContainer",
+        "is_periodic": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "role": "Count voxels per final FeatureId and compute physical volumes and equivalent sphere diameters.",
+      "paths": [
+        {
+          "parameter": "feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "equivalent_diameters_name": "EquivalentDiameters",
+        "feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_image_geometry_path": "DataContainer",
+        "num_elements_name": "NumElements",
+        "save_element_sizes": false,
+        "volumes_name": "Size Volumes"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "ComputeShapesFilter",
+      "uuid": "036b17d5-23bb-4a24-9187-c4a8dd918792",
+      "role": "Fit shape descriptors from the same final FeatureIds and the new centroids.",
+      "paths": [
+        {
+          "parameter": "centroids_array_path",
+          "value": "DataContainer/Cell Feature Data/Centroids"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "aspect_ratios_array_name": "AspectRatios",
+        "axis_euler_angles_array_name": "AxisEulerAngles",
+        "axis_lengths_array_name": "AxisLengths",
+        "centroids_array_path": "DataContainer/Cell Feature Data/Centroids",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_image_geometry_path": "DataContainer",
+        "omega3s_array_name": "Omega3s",
+        "volumes_array_name": "Shape Volumes"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export direct feature arrays with Feature_ID. Background row zero is omitted; unused positive-ID rows remain.",
+      "paths": [
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "feature_data_file",
+          "value": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.csv"
+        }
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the measured DataContainer for inspection and later comparison branches.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "validation": {
+    "date": "2026-10-01",
+    "configuration": "Windows in-core Release; isolated runtime snapshot",
+    "chain_preflight_execution": "6/6 passed",
+    "measurement_independent_checks": "6/6 passed",
+    "csv_saved_array_check": "2,334 positive-ID rows; 16 numeric columns matched DREAM3D with rtol=1e-6, atol=1e-7, equal nonfinite values",
+    "unverified": [
+      "OOC",
+      "generated Python",
+      "native GUI behavior",
+      "full application installation",
+      "human interpretation review"
+    ],
+    "csv_unused_row_note": "17 positive-ID rows have NumElements=0; Windows CSV writes 51 -nan(ind) tokens in their AxisLengths cells.",
+    "runtime_and_plugin_install": "Verified: both flat categories contained ten files matching source byte for byte.",
+    "tested_source_revisions": {
+      "DREAM3DNX": "00c63b0e00ae99955901e2ad7c7187711bd33953",
+      "simplnx": "07aaee6704ea8c0a35c1d3a8fbd6fb875bdfb36f",
+      "note": "Source revisions recorded in the Task 1 input manifest for the checked runtime snapshot; not a claim about current branch HEAD."
+    }
+  },
+  "result_visual": {
+    "path": "SmallIN100FeatureMeasurements.png",
+    "role": "Data-derived preview; not native GUI proof."
+  },
+  "dimensional_scope": "3D volume reconstructed from 117 serial EBSD sections; a single slice does not support a measured 3D feature volume.",
+  "cli_usage": {
+    "instructions": "See README.md#quick-start-117-section-3d-example for extraction and Windows PowerShell commands.",
+    "working_directory": "A chosen writable folder containing Data/Small_IN100/Slice_1.ang through Slice_117.ang.",
+    "relative_path_base": "The CLI resolves the pipeline's relative Data/... file paths from its working directory.",
+    "gui_note": "Open pipelines with File > Open. If relative file paths do not resolve in the installed layout, set file input and output parameters to absolute paths. Native GUI execution remains unverified."
+  }
+}

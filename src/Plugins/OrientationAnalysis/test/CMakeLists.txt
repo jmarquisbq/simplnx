@@ -432,3 +432,17 @@ if(TARGET ImageProcessing)
 endif()
 
 create_pipeline_tests(PLUGIN_NAME ${PLUGIN_NAME} PIPELINE_LIST ${PREBUILT_PIPELINE_NAMES})
+
+# Run the new example chain in its own output tree, away from the legacy
+# pipeline tests that share and delete their intermediate files.
+add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DRAW_DATA_DIR=$<TARGET_FILE_DIR:nxrunner>/Data/Small_IN100"
+    "-DARCHIVE_PIPELINE=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/SmallIN100ExamplePipelineTest/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100ExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;Small_IN100")
