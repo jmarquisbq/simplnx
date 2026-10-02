@@ -85,6 +85,34 @@
       "pipeline": "(04) Small IN100 Minimum Size Comparison.d3dpipeline",
       "step": 5,
       "purpose": "Compare masked diameters on common bins."
+    },
+    {
+      "filter": "ComputeSurfaceFeaturesFilter",
+      "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948",
+      "pipeline": "(05) Small IN100 Combined Selection.d3dpipeline",
+      "step": 1,
+      "purpose": "Mark image-box and face-adjacent background contact for the combined rule."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(05) Small IN100 Combined Selection.d3dpipeline",
+      "step": 3,
+      "purpose": "Intersect occupied, interior, and inclusive minimum-size conditions."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(05) Small IN100 Combined Selection.d3dpipeline",
+      "step": 5,
+      "purpose": "Compare valid and combined diameter statistics."
+    },
+    {
+      "filter": "ComputeArrayHistogramFilter",
+      "uuid": "c6b6d9e5-301d-4767-abf7-530f5ef5007d",
+      "pipeline": "(05) Small IN100 Combined Selection.d3dpipeline",
+      "step": 7,
+      "purpose": "Compare valid and combined diameter counts on common bins."
     }
   ]
 }

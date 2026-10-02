@@ -1,4 +1,4 @@
-# Smoke-test the public Small IN100 archive and four pilot example pipelines.
+# Smoke-test the public Small IN100 archive and five pilot example pipelines.
 # This checks execution and output presence, not scientific correctness.
 
 foreach(required_var NXRUNNER RAW_DATA_DIR ARCHIVE_PIPELINE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
@@ -12,7 +12,8 @@ foreach(required_path "${NXRUNNER}"
                       "${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline"
                       "${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline"
                       "${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline"
-                      "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
+                      "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline"
+                      "${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline")
   if(NOT EXISTS "${required_path}")
     message(FATAL_ERROR "Required executable or pipeline is missing: ${required_path}")
   endif()
@@ -118,6 +119,7 @@ validate_companion("${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipel
 validate_companion("${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
+validate_companion("${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline")
 
 # Check every raw section before staging or running a pipeline.
 foreach(slice RANGE 1 117)
@@ -139,7 +141,8 @@ file(REMOVE
   "${work_root}/preparation-preflight.log" "${work_root}/preparation-execute.log"
   "${work_root}/measurements-preflight.log" "${work_root}/measurements-execute.log"
   "${work_root}/surface-selection-preflight.log" "${work_root}/surface-selection-execute.log"
-  "${work_root}/minimum-size-preflight.log" "${work_root}/minimum-size-execute.log")
+  "${work_root}/minimum-size-preflight.log" "${work_root}/minimum-size-execute.log"
+  "${work_root}/combined-selection-preflight.log" "${work_root}/combined-selection-execute.log")
 
 set(raw_stage "${work_root}/Data/Small_IN100")
 file(MAKE_DIRECTORY "${raw_stage}")
@@ -164,7 +167,9 @@ set(known_outputs
     "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.csv"
     "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d"
     "Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv"
-    "Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.dream3d")
+    "Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.dream3d"
+    "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.csv"
+    "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.dream3d")
 foreach(relative_path IN LISTS known_outputs)
   set(output_path "${work_root}/${relative_path}")
   get_filename_component(output_parent "${output_path}" DIRECTORY)
@@ -259,5 +264,10 @@ run_pipeline("minimum-size" "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Compar
 require_output("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv")
 require_output("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.dream3d")
 require_comparison_csv("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv" "ReportableFeatures")
+
+run_pipeline("combined-selection" "${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline")
+require_output("Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.csv")
+require_output("Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.dream3d")
+require_comparison_csv("Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.csv" "CombinedFeatures")
 
 message(STATUS "Small IN100 example smoke test passed; logs and outputs: ${work_root}")
