@@ -1,0 +1,208 @@
+{
+  "isDisabled": false,
+  "pinnedParams": [],
+  "version": 1,
+  "workflowParams": [],
+  "name": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the saved feature measurements once; retain final FeatureIds and measured feature rows.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "store_boundary_cells": {
+          "value": false,
+          "version": 1
+        },
+        "store_surface_features": {
+          "value": true,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_array_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "boundary_cells_name": {
+          "value": "BoundaryCells",
+          "version": 1
+        },
+        "number_of_neighbors_name": {
+          "value": "NumNeighbors",
+          "version": 1
+        },
+        "neighbor_list_name": {
+          "value": "NeighborList",
+          "version": 1
+        },
+        "shared_surface_area_list_name": {
+          "value": "SharedSurfaceAreaList",
+          "version": 1
+        },
+        "surface_features_name": {
+          "value": "GeometrySurfaceFeatures",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Build direct positive-ID face contacts, reciprocal neighbor and physical shared-area lists, and image-box flags.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureNeighborsFilter",
+        "uuid": "7177e88c-c3ab-4169-abe9-1fdaff20e598"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "find_minimum": {
+          "value": false,
+          "version": 1
+        },
+        "find_maximum": {
+          "value": true,
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "find_standard_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "find_summation": {
+          "value": true,
+          "version": 1
+        },
+        "input_neighbor_list_path": {
+          "value": "DataContainer/Cell Feature Data/SharedSurfaceAreaList",
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "SharedAreaListLength",
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "Minimum",
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "LargestSharedArea",
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "MeanSharedArea",
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "Median",
+          "version": 1
+        },
+        "standard_deviation_array_name": {
+          "value": "StandardDeviation",
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "TotalSharedArea",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reduce each feature's shared-area list to count, unweighted mean, largest area, and directed total.",
+      "filter": {
+        "name": "nx::core::ComputeNeighborListStatisticsFilter",
+        "uuid": "270a824e-414b-455e-bb7e-b38a0848990d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "feature_data_file": {
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv",
+          "version": 1
+        },
+        "parameters_version": 1,
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Export scalar feature rows only; omit background row zero and packed neighbor lists.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Save the full graph, scalar reductions, original measurements, FeatureIds, and geometry.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ]
+}

@@ -1,0 +1,312 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Additive manufacturing",
+    "Metallurgy"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "3D microstructure",
+    "feature neighbors",
+    "shared contact area"
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Published Small IN100 reconstruction and feature-statistics workflow; this pilot uses only a subset.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses public Small IN100 data and current NX filters. Periodic segmentation is disabled for a finite sample. It does not recreate all paper Table 2 operations or claim numerical identity with publisher supplements."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current registered UUIDs, parameter keys, and measurement implementations."
+    }
+  ],
+  "last_verified": "2026-10-02",
+  "verification_status": "Windows in-core Release isolated preflight/execution passed. Independent input-label oracle matched all packed neighbor IDs, both linked count datasets, physical areas, reductions, box flags, preserved arrays, and 22 CSV numeric columns. Validation-only anisotropic spacing exercised all three perpendicular face-area products. Shared registered chain, install layout, OOC, generated Python, native GUI, and human interpretation remain unverified for this bundle.",
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "orientationanalysis-smallin100-python-generation-v1"
+  },
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Occupied-feature degree and total shared-area distributions.",
+    "target_traits": [
+      "117 measured EBSD sections",
+      "189 by 201 image cells per section",
+      "0.25 spacing on each axis",
+      "traceable final feature IDs"
+    ],
+    "known_differences": "Archive identity with the publisher's NiPoly data is unproven. The current NX preparation is not an exact historical reconstruction, and the pilot disables periodic segmentation.",
+    "archive_provenance_file": "README.md"
+  },
+  "summary": "Measures direct face-sharing contacts and physical shared areas between final Small IN100 FeatureIds.",
+  "use_cases": [
+    "Inspect a segmented feature contact graph",
+    "Compare feature contact counts and shared areas",
+    "Trace reciprocal contact lists to final feature IDs"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "role": "Measured checkpoint from pipeline 02."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv",
+      "role": "Scalar positive-ID feature rows; excludes packed neighbor lists."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+      "role": "Complete image geometry, feature graph, area lists, reductions, and prior measurements."
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Find direct face-sharing features in Small IN100",
+      "Inspect physical contact areas and per-feature connectivity"
+    ],
+    "questions_to_ask": [
+      "Does your input have final FeatureIds indexed by the feature matrix?",
+      "What are the voxel spacing and physical length units?",
+      "Will you exclude unused rows using NumElements>0?"
+    ],
+    "constraints": [
+      "This pipeline is configured for SmallIN100. Review input requirements and contact rules before adapting it.",
+      "Run Archive, Feature Preparation, and Feature Measurements first.",
+      "Use final FeatureIds, not twin ParentIds, for this graph.",
+      "Include only occupied positive-ID rows in scientific distributions; the CSV retains unused positive rows.",
+      "Shared area is in squared geometry length units and has reciprocal directed entries.",
+      "GeometrySurfaceFeatures marks the image box only; background-adjacent contact uses a different rule.",
+      "The publication provides context, not a numerical oracle for this example.",
+      "Use one writable CLI working folder; native GUI working-folder behavior remains unverified."
+    ],
+    "related_pipelines": [
+      "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "(03) Small IN100 Surface Selection Comparison.d3dpipeline"
+    ]
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+    },
+    {
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d"
+    }
+  ],
+  "parameter_adaptations": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "parameter": "import_data_object.file_path",
+      "reference_value": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+      "example_value": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "reason": "Read the measured checkpoint once, downstream of pipeline 02."
+    },
+    {
+      "filter": "ComputeFeatureNeighborsFilter",
+      "parameter": "surface_features_name",
+      "reference_value": "SurfaceFeatures",
+      "example_value": "GeometrySurfaceFeatures",
+      "reason": "Distinguish image-box flags from pipeline 03's broader surface rule."
+    }
+  ],
+  "measurement_labels": {
+    "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
+    "feature_matrix": "DataContainer/Cell Feature Data",
+    "not_used": "DataContainer/Cell Data/ParentIds"
+  },
+  "pipeline_file": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+  "markdown_file": "(06) Small IN100 Neighbor Relationships.md",
+  "title": "Small IN100 Neighbor Relationships",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the saved feature measurements once; retain final FeatureIds and measured feature rows.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeFeatureNeighborsFilter",
+      "uuid": "7177e88c-c3ab-4169-abe9-1fdaff20e598",
+      "role": "Build direct positive-ID face contacts, reciprocal neighbor and physical shared-area lists, and image-box flags.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "cell_feature_array_path",
+          "value": "DataContainer/Cell Feature Data"
+        }
+      ],
+      "key_parameters": {
+        "store_boundary_cells": false,
+        "store_surface_features": true,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_array_path": "DataContainer/Cell Feature Data",
+        "boundary_cells_name": "BoundaryCells",
+        "number_of_neighbors_name": "NumNeighbors",
+        "neighbor_list_name": "NeighborList",
+        "shared_surface_area_list_name": "SharedSurfaceAreaList",
+        "surface_features_name": "GeometrySurfaceFeatures"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeNeighborListStatisticsFilter",
+      "uuid": "270a824e-414b-455e-bb7e-b38a0848990d",
+      "role": "Reduce each feature's shared-area list to count, unweighted mean, largest area, and directed total.",
+      "paths": [
+        {
+          "parameter": "input_neighbor_list_path",
+          "value": "DataContainer/Cell Feature Data/SharedSurfaceAreaList"
+        }
+      ],
+      "key_parameters": {
+        "find_length": true,
+        "find_minimum": false,
+        "find_maximum": true,
+        "find_mean": true,
+        "find_median": false,
+        "find_standard_deviation": false,
+        "find_summation": true,
+        "input_neighbor_list_path": "DataContainer/Cell Feature Data/SharedSurfaceAreaList",
+        "length_array_name": "SharedAreaListLength",
+        "minimum_array_name": "Minimum",
+        "maximum_array_name": "LargestSharedArea",
+        "mean_array_name": "MeanSharedArea",
+        "median_array_name": "Median",
+        "standard_deviation_array_name": "StandardDeviation",
+        "summation_array_name": "TotalSharedArea"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export scalar feature rows only; omit background row zero and packed neighbor lists.",
+      "paths": [
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "feature_data_file",
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv"
+        }
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the full graph, scalar reductions, original measurements, FeatureIds, and geometry.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "validation": {
+    "date": "2026-10-02",
+    "configuration": "Windows in-core Release; isolated controlled nxrunner snapshot",
+    "preflight_execution": "2/2 passed for original bundle; 2/2 passed for validation-only anisotropic case",
+    "independent_checks": "All 14,003 unordered pairs, 28,006 directed entries, linked count companions, packed IDs and float32 areas, reciprocal/sorted rows, four scalar reductions, 448 box flags, original geometry and arrays, and every CSV numeric column matched independent input-label checks.",
+    "occupied_feature_count": 2317,
+    "unused_positive_rows": 17,
+    "unique_area_um2": 66156.4375,
+    "anisotropic_case": "Spacing (0.2, 0.3, 0.5) micrometers; independently verified X/Y/Z perpendicular products on unchanged labels. Inherited physical measurement arrays are not valid for that altered spacing.",
+    "unverified": [
+      "shared registered full chain",
+      "runtime and install layout",
+      "OOC",
+      "generated Python",
+      "native GUI behavior",
+      "human interpretation review"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100NeighborRelationships.png",
+    "role": "Data-derived occupied-feature degree and area preview; not native GUI proof."
+  },
+  "dimensional_scope": "3D volume reconstructed from 117 serial EBSD sections; a single slice does not support a measured 3D feature volume.",
+  "cli_usage": {
+    "instructions": "See README.md#quick-start-117-section-3d-example for extraction and Windows PowerShell commands.",
+    "working_directory": "A chosen writable folder containing Data/Small_IN100/Slice_1.ang through Slice_117.ang.",
+    "relative_path_base": "The CLI resolves the pipeline's relative Data/... file paths from its working directory.",
+    "gui_note": "Open pipelines with File > Open. If relative file paths do not resolve in the installed layout, set file input and output parameters to absolute paths. Native GUI execution remains unverified."
+  }
+}

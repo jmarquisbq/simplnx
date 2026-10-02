@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected Small IN100 feature-preparation, measurement, and controlled-comparison pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
+  "scope": "Selected Small IN100 feature-preparation, measurement, comparison, and neighbor-relationship pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
   "filters": [
     {
       "filter": "EBSDSegmentFeaturesFilter",
@@ -113,6 +113,20 @@
       "pipeline": "(05) Small IN100 Combined Selection.d3dpipeline",
       "step": 7,
       "purpose": "Compare valid and combined diameter counts on common bins."
+    },
+    {
+      "filter": "ComputeFeatureNeighborsFilter",
+      "uuid": "7177e88c-c3ab-4169-abe9-1fdaff20e598",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 1,
+      "purpose": "Build direct face-sharing final-FeatureIds contacts, physical shared-area lists, and image-box flags."
+    },
+    {
+      "filter": "ComputeNeighborListStatisticsFilter",
+      "uuid": "270a824e-414b-455e-bb7e-b38a0848990d",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 2,
+      "purpose": "Reduce each shared-area list to count, mean, largest contact, and total area."
     }
   ]
 }
