@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected Small IN100 feature-preparation and baseline-measurement pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
+  "scope": "Selected Small IN100 feature-preparation, measurement, and controlled-comparison pilot filters only; this is not a coverage inventory of OrientationAnalysis or SimplnxCore.",
   "filters": [
     {
       "filter": "EBSDSegmentFeaturesFilter",
@@ -36,6 +36,55 @@
       "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
       "step": 4,
       "purpose": "Export direct feature arrays with traceable Feature_ID rows."
+    },
+    {
+      "filter": "ComputeSurfaceFeaturesFilter",
+      "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948",
+      "pipeline": "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Mark image-box and face-adjacent background contact."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "step": 2,
+      "purpose": "Create occupied-feature and interior-feature masks."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "step": 4,
+      "purpose": "Compare masked diameter counts and descriptive statistics."
+    },
+    {
+      "filter": "ComputeArrayHistogramFilter",
+      "uuid": "c6b6d9e5-301d-4767-abf7-530f5ef5007d",
+      "pipeline": "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "step": 6,
+      "purpose": "Compare masked diameters on common bins."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(04) Small IN100 Minimum Size Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Create occupied-feature and inclusive minimum-size masks."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(04) Small IN100 Minimum Size Comparison.d3dpipeline",
+      "step": 3,
+      "purpose": "Compare masked diameter counts and descriptive statistics."
+    },
+    {
+      "filter": "ComputeArrayHistogramFilter",
+      "uuid": "c6b6d9e5-301d-4767-abf7-530f5ef5007d",
+      "pipeline": "(04) Small IN100 Minimum Size Comparison.d3dpipeline",
+      "step": 5,
+      "purpose": "Compare masked diameters on common bins."
     }
   ]
 }

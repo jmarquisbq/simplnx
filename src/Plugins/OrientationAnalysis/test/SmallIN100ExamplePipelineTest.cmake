@@ -1,4 +1,4 @@
-# Smoke-test the public Small IN100 archive and the two pilot example pipelines.
+# Smoke-test the public Small IN100 archive and four pilot example pipelines.
 # This checks execution and output presence, not scientific correctness.
 
 foreach(required_var NXRUNNER RAW_DATA_DIR ARCHIVE_PIPELINE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
@@ -10,7 +10,9 @@ endforeach()
 foreach(required_path "${NXRUNNER}"
                       "${ARCHIVE_PIPELINE}"
                       "${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline"
-                      "${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline")
+                      "${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline"
+                      "${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline"
+                      "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
   if(NOT EXISTS "${required_path}")
     message(FATAL_ERROR "Required executable or pipeline is missing: ${required_path}")
   endif()
@@ -20,17 +22,42 @@ endforeach()
 # files use JSON syntax, so CMake can inspect them without a Python dependency.
 function(validate_companion pipeline_path)
   get_filename_component(pipeline_stem "${pipeline_path}" NAME_WE)
+  get_filename_component(pipeline_filename "${pipeline_path}" NAME)
   get_filename_component(pipeline_dir "${pipeline_path}" DIRECTORY)
   set(sidecar_path "${pipeline_dir}/${pipeline_stem}.yaml")
+  set(companion_path "${pipeline_dir}/${pipeline_stem}.md")
+  get_filename_component(companion_filename "${companion_path}" NAME)
   if(NOT EXISTS "${sidecar_path}")
     message(FATAL_ERROR "Missing sidecar for ${pipeline_path}: ${sidecar_path}")
   endif()
+  if(NOT EXISTS "${companion_path}")
+    message(FATAL_ERROR "Missing Markdown companion for ${pipeline_path}: ${companion_path}")
+  endif()
   file(READ "${pipeline_path}" pipeline_json)
   file(READ "${sidecar_path}" sidecar_json)
+  file(READ "${companion_path}" companion_text)
+  string(FIND "${companion_text}" "**Before adapting:**" adaptation_notice)
+  string(FIND "${companion_text}" "## At a glance" glance_heading)
+  string(FIND "${companion_text}" "## Purpose and real-world setting" purpose_heading)
+  string(FIND "${companion_text}" "${pipeline_stem}.d3dpipeline" executable_name)
+  if(adaptation_notice LESS 0 OR glance_heading LESS 0 OR purpose_heading LESS 0 OR executable_name LESS 0)
+    message(FATAL_ERROR "Markdown adaptation notice, At a glance, purpose heading, or executable name is missing: ${companion_path}")
+  endif()
+  if(executable_name GREATER adaptation_notice OR adaptation_notice GREATER glance_heading OR glance_heading GREATER purpose_heading)
+    message(FATAL_ERROR "Markdown executable name, adaptation notice, At a glance, and purpose heading are out of order: ${companion_path}")
+  endif()
   string(JSON step_count ERROR_VARIABLE pipeline_error LENGTH "${pipeline_json}" pipeline)
   string(JSON sidecar_step_count ERROR_VARIABLE sidecar_error LENGTH "${sidecar_json}" steps)
   if(NOT pipeline_error STREQUAL "NOTFOUND" OR NOT sidecar_error STREQUAL "NOTFOUND")
     message(FATAL_ERROR "Invalid pipeline or sidecar JSON: ${pipeline_path}, ${sidecar_path}")
+  endif()
+  string(JSON sidecar_pipeline_file ERROR_VARIABLE pipeline_file_error GET "${sidecar_json}" pipeline_file)
+  string(JSON sidecar_markdown_file ERROR_VARIABLE markdown_file_error GET "${sidecar_json}" markdown_file)
+  if(NOT pipeline_file_error STREQUAL "NOTFOUND" OR NOT sidecar_pipeline_file STREQUAL pipeline_filename)
+    message(FATAL_ERROR "pipeline_file must match ${pipeline_filename}: ${sidecar_path}")
+  endif()
+  if(NOT markdown_file_error STREQUAL "NOTFOUND" OR NOT sidecar_markdown_file STREQUAL companion_filename)
+    message(FATAL_ERROR "markdown_file must match ${companion_filename}: ${sidecar_path}")
   endif()
   if(NOT step_count EQUAL sidecar_step_count)
     message(FATAL_ERROR "Step count differs: ${pipeline_path} has ${step_count}, ${sidecar_path} has ${sidecar_step_count}")
@@ -89,6 +116,8 @@ endfunction()
 
 validate_companion("${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline")
+validate_companion("${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline")
+validate_companion("${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
 
 # Check every raw section before staging or running a pipeline.
 foreach(slice RANGE 1 117)
@@ -108,7 +137,9 @@ endif()
 file(REMOVE
   "${work_root}/archive-preflight.log" "${work_root}/archive-execute.log"
   "${work_root}/preparation-preflight.log" "${work_root}/preparation-execute.log"
-  "${work_root}/measurements-preflight.log" "${work_root}/measurements-execute.log")
+  "${work_root}/measurements-preflight.log" "${work_root}/measurements-execute.log"
+  "${work_root}/surface-selection-preflight.log" "${work_root}/surface-selection-execute.log"
+  "${work_root}/minimum-size-preflight.log" "${work_root}/minimum-size-execute.log")
 
 set(raw_stage "${work_root}/Data/Small_IN100")
 file(MAKE_DIRECTORY "${raw_stage}")
@@ -129,7 +160,11 @@ set(known_outputs
     "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
     "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.xdmf"
     "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.csv"
-    "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d")
+    "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d"
+    "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.csv"
+    "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d"
+    "Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv"
+    "Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.dream3d")
 foreach(relative_path IN LISTS known_outputs)
   set(output_path "${work_root}/${relative_path}")
   get_filename_component(output_parent "${output_path}" DIRECTORY)
@@ -196,5 +231,33 @@ list(FIND columns "NumElements" num_elements_index)
 if(NOT first_column STREQUAL "Feature_ID" OR num_elements_index LESS 0)
   message(FATAL_ERROR "Feature CSV lacks Feature_ID or NumElements header: ${csv_path}")
 endif()
+
+function(require_comparison_csv relative_path selected_mask)
+  set(csv_path "${work_root}/${relative_path}")
+  file(STRINGS "${csv_path}" first_two_lines LIMIT_COUNT 2)
+  list(LENGTH first_two_lines line_count)
+  if(line_count LESS 2)
+    message(FATAL_ERROR "Comparison CSV has no data rows: ${csv_path}")
+  endif()
+  list(GET first_two_lines 0 header)
+  string(REPLACE "," ";" columns "${header}")
+  list(GET columns 0 first_column)
+  list(FIND columns "ValidFeatures" valid_index)
+  list(FIND columns "${selected_mask}" selected_index)
+  list(FIND columns "EquivalentDiameters" diameter_index)
+  if(NOT first_column STREQUAL "Feature_ID" OR valid_index LESS 0 OR selected_index LESS 0 OR diameter_index LESS 0)
+    message(FATAL_ERROR "Comparison CSV lacks Feature_ID, masks, or diameter: ${csv_path}")
+  endif()
+endfunction()
+
+run_pipeline("surface-selection" "${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline")
+require_output("Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.csv")
+require_output("Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d")
+require_comparison_csv("Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.csv" "InteriorFeatures")
+
+run_pipeline("minimum-size" "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline")
+require_output("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv")
+require_output("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.dream3d")
+require_comparison_csv("Data/Output/Small_IN100_Examples/MinimumSize/SmallIN100_MinimumSize.csv" "ReportableFeatures")
 
 message(STATUS "Small IN100 example smoke test passed; logs and outputs: ${work_root}")
