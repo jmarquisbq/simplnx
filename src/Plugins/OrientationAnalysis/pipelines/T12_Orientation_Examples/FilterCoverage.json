@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "scope": "Selected filters in the T12 orientation examples, not all OrientationAnalysis filters.",
+  "filters": [
+    {
+      "filter": "ReadCtfDataFilter",
+      "uuid": "7751923c-afb9-4032-8372-8078325c69a4",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 0,
+      "purpose": "Import the public 2D steel map without rotating its acquisition frame; convert Euler angles from degrees to radians."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 1,
+      "purpose": "Accept pixels only when Phases > 0 AND Error == 0. Keep rejected measurements in the saved arrays but exclude them from segmentation."
+    },
+    {
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 2,
+      "purpose": "Convert radians-based Euler orientations to quaternions for symmetry-aware segmentation and feature averaging."
+    },
+    {
+      "filter": "EBSDSegmentFeaturesFilter",
+      "uuid": "1810c2c7-63e3-41db-b204-a5821e6271c0",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 3,
+      "purpose": "Join face-connected valid pixels within a phase when pairwise misorientation is below 5 degrees. Keep the finite map nonperiodic and feature IDs unrandomized."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 4,
+      "purpose": "Measure every positive feature before reporting selection. With one Z cell and unit Z spacing, the size output is area and the diameter is an equivalent circle diameter."
+    },
+    {
+      "filter": "ComputeAvgOrientationsFilter",
+      "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 5,
+      "purpose": "Compute one symmetry-aware Rodrigues average per positive feature as the fixed reference for later orientation-spread comparisons; do not average Euler components directly."
+    },
+    {
+      "filter": "ComputeIPFColorsFilter",
+      "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 7,
+      "purpose": "Color accepted orientations relative to acquisition Z for visual context only; no loading-axis or strain inference is implied."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "step": 8,
+      "purpose": "Save measured arrays, validity mask, unchanged segmentation, feature sizes, reporting mask, and average orientations as the shared checkpoint."
+    }
+  ]
+}

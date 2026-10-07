@@ -446,3 +446,14 @@ add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100ExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;Small_IN100")
+
+add_test(NAME PIPELINE::OrientationAnalysis::T12_Orientation_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DRAW_DATA_FILE=$<TARGET_FILE_DIR:nxrunner>/Data/T12-MAI-2010/fw-ar-IF1-aptr12-corr.ctf"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/T12_Orientation_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/T12OrientationExamplePipelineTest/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/T12OrientationExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::T12_Orientation_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;T12")
