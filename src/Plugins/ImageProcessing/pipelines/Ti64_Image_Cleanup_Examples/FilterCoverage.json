@@ -43,6 +43,27 @@
       "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
       "step": 5,
       "purpose": "Save source, prepared crop, floating-point arrays, and summary as the shared checkpoint."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) Ti64 Smoothing Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Load the preparation checkpoint with both image geometries, the original intensity, and the common float32 UnitIntensity baseline."
+    },
+    {
+      "filter": "MedianImageFilter",
+      "uuid": "bf4671ab-ebdf-4c4c-a4b1-0cdcaa005d9d",
+      "pipeline": "(02) Ti64 Smoothing Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Median of a 3 by 3 XY neighborhood, including repeated edge values; compare isolated-intensity suppression from the common input."
+    },
+    {
+      "filter": "DiscreteGaussianImageFilter",
+      "uuid": "2ddd8df9-a4d8-44e0-94b3-0776c1cdf096",
+      "pipeline": "(02) Ti64 Smoothing Comparison.d3dpipeline",
+      "step": 2,
+      "purpose": "Discrete Gaussian with variance 1 pixel squared per XY axis; retain a separate output from the original UnitIntensity."
     }
   ]
 }

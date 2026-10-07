@@ -1,0 +1,588 @@
+{
+    "isDisabled":  false,
+    "name":  "(02) Ti64 Smoothing Comparison.d3dpipeline",
+    "pinnedParams":  [
+
+                     ],
+    "pipeline":  [
+                     {
+                         "args":  {
+                                      "import_data_object":  {
+                                                                 "value":  {
+                                                                               "data_paths":  [
+
+                                                                                              ],
+                                                                               "file_path":  "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d",
+                                                                               "path_import_policy":  0
+                                                                           },
+                                                                 "version":  2
+                                                             },
+                                      "parameters_version":  1
+                                  },
+                         "comments":  "Load the preparation checkpoint with both image geometries, the original intensity, and the common float32 UnitIntensity baseline.",
+                         "filter":  {
+                                        "name":  "nx::core::ReadDREAM3DFilter",
+                                        "uuid":  "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+                                    },
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "input_image_data_path":  {
+                                                                    "value":  "Ti64/Cell Data/UnitIntensity",
+                                                                    "version":  1
+                                                                },
+                                      "input_image_geometry_path":  {
+                                                                        "value":  "Ti64",
+                                                                        "version":  1
+                                                                    },
+                                      "output_array_name":  {
+                                                                "value":  "MedianR1",
+                                                                "version":  1
+                                                            },
+                                      "parameters_version":  1,
+                                      "radius":  {
+                                                     "value":  [
+                                                                   1,
+                                                                   1,
+                                                                   0
+                                                               ],
+                                                     "version":  1
+                                                 }
+                                  },
+                         "comments":  "Median of a 3 by 3 XY neighborhood, including repeated edge values; compare isolated-intensity suppression from the common input.",
+                         "filter":  {
+                                        "name":  "nx::core::MedianImageFilter",
+                                        "uuid":  "bf4671ab-ebdf-4c4c-a4b1-0cdcaa005d9d"
+                                    },
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "input_image_data_path":  {
+                                                                    "value":  "Ti64/Cell Data/UnitIntensity",
+                                                                    "version":  1
+                                                                },
+                                      "input_image_geometry_path":  {
+                                                                        "value":  "Ti64",
+                                                                        "version":  1
+                                                                    },
+                                      "maximum_error":  {
+                                                            "value":  [
+                                                                          0.01,
+                                                                          0.01,
+                                                                          0.01
+                                                                      ],
+                                                            "version":  1
+                                                        },
+                                      "maximum_kernel_width":  {
+                                                                   "value":  32,
+                                                                   "version":  1
+                                                               },
+                                      "output_array_name":  {
+                                                                "value":  "GaussianV1",
+                                                                "version":  1
+                                                            },
+                                      "parameters_version":  1,
+                                      "use_image_spacing":  {
+                                                                "value":  false,
+                                                                "version":  1
+                                                            },
+                                      "variance":  {
+                                                       "value":  [
+                                                                     1,
+                                                                     1,
+                                                                     0
+                                                                 ],
+                                                       "version":  1
+                                                   }
+                                  },
+                         "comments":  "Discrete Gaussian with variance 1 pixel squared per XY axis; retain a separate output from the original UnitIntensity.",
+                         "filter":  {
+                                        "name":  "nx::core::DiscreteGaussianImageFilter",
+                                        "uuid":  "2ddd8df9-a4d8-44e0-94b3-0776c1cdf096"
+                                    },
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "input_image_data_path":  {
+                                                                    "value":  "Ti64/Cell Data/UnitIntensity",
+                                                                    "version":  1
+                                                                },
+                                      "input_image_geometry_path":  {
+                                                                        "value":  "Ti64",
+                                                                        "version":  1
+                                                                    },
+                                      "maximum_error":  {
+                                                            "value":  [
+                                                                          0.01,
+                                                                          0.01,
+                                                                          0.01
+                                                                      ],
+                                                            "version":  1
+                                                        },
+                                      "maximum_kernel_width":  {
+                                                                   "value":  32,
+                                                                   "version":  1
+                                                               },
+                                      "output_array_name":  {
+                                                                "value":  "GaussianV4",
+                                                                "version":  1
+                                                            },
+                                      "parameters_version":  1,
+                                      "use_image_spacing":  {
+                                                                "value":  false,
+                                                                "version":  1
+                                                            },
+                                      "variance":  {
+                                                       "value":  [
+                                                                     4,
+                                                                     4,
+                                                                     0
+                                                                 ],
+                                                       "version":  1
+                                                   }
+                                  },
+                         "comments":  "Discrete Gaussian with variance 4 pixel squared per XY axis; change strength while holding method and input fixed.",
+                         "filter":  {
+                                        "name":  "nx::core::DiscreteGaussianImageFilter",
+                                        "uuid":  "2ddd8df9-a4d8-44e0-94b3-0776c1cdf096"
+                                    },
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "selected_array_path":  {
+                                                                  "version":  1,
+                                                                  "value":  "Ti64/Cell Data/MedianR1"
+                                                              },
+                                      "destination_attribute_matrix_path":  {
+                                                                                "version":  1,
+                                                                                "value":  "Ti64/MedianR1Summary"
+                                                                            },
+                                      "use_mask":  {
+                                                       "version":  1,
+                                                       "value":  false
+                                                   },
+                                      "mask_array_path":  {
+                                                              "version":  1,
+                                                              "value":  ""
+                                                          },
+                                      "compute_by_index":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "feature_ids_path":  {
+                                                               "version":  1,
+                                                               "value":  "Cell Data/FeatureIds"
+                                                           },
+                                      "feature_has_data_array_name":  {
+                                                                          "version":  1,
+                                                                          "value":  "FeatureHasData"
+                                                                      },
+                                      "range_type_index":  {
+                                                               "version":  1,
+                                                               "value":  0
+                                                           },
+                                      "range":  {
+                                                    "version":  1,
+                                                    "value":  [
+                                                                  0,
+                                                                  -1
+                                                              ]
+                                                },
+                                      "feature_ids_indexing_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "Reduced Feature Ids Indices"
+                                                                    },
+                                      "find_length":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "length_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Length"
+                                                            },
+                                      "find_min":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "minimum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Minimum"
+                                                             },
+                                      "find_max":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "maximum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Maximum"
+                                                             },
+                                      "find_mean":  {
+                                                        "version":  1,
+                                                        "value":  true
+                                                    },
+                                      "mean_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mean"
+                                                          },
+                                      "find_median":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "median_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Median"
+                                                            },
+                                      "find_mode":  {
+                                                        "version":  1,
+                                                        "value":  false
+                                                    },
+                                      "mode_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mode"
+                                                          },
+                                      "find_std_deviation":  {
+                                                                 "version":  1,
+                                                                 "value":  true
+                                                             },
+                                      "std_deviation_array_name":  {
+                                                                       "version":  1,
+                                                                       "value":  "StandardDeviation"
+                                                                   },
+                                      "find_summation":  {
+                                                             "version":  1,
+                                                             "value":  false
+                                                         },
+                                      "summation_array_name":  {
+                                                                   "version":  1,
+                                                                   "value":  "Summation"
+                                                               },
+                                      "standardize_data":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "standardized_array_name":  {
+                                                                      "version":  1,
+                                                                      "value":  "Standardized"
+                                                                  },
+                                      "find_unique_values":  {
+                                                                 "version":  1,
+                                                                 "value":  false
+                                                             },
+                                      "number_unique_values_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "NumUniqueValues"
+                                                                    },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ComputeArrayStatisticsFilter",
+                                        "uuid":  "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                                    },
+                         "comments":  "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for MedianR1; no mask or feature index.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "selected_array_path":  {
+                                                                  "version":  1,
+                                                                  "value":  "Ti64/Cell Data/GaussianV1"
+                                                              },
+                                      "destination_attribute_matrix_path":  {
+                                                                                "version":  1,
+                                                                                "value":  "Ti64/GaussianV1Summary"
+                                                                            },
+                                      "use_mask":  {
+                                                       "version":  1,
+                                                       "value":  false
+                                                   },
+                                      "mask_array_path":  {
+                                                              "version":  1,
+                                                              "value":  ""
+                                                          },
+                                      "compute_by_index":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "feature_ids_path":  {
+                                                               "version":  1,
+                                                               "value":  "Cell Data/FeatureIds"
+                                                           },
+                                      "feature_has_data_array_name":  {
+                                                                          "version":  1,
+                                                                          "value":  "FeatureHasData"
+                                                                      },
+                                      "range_type_index":  {
+                                                               "version":  1,
+                                                               "value":  0
+                                                           },
+                                      "range":  {
+                                                    "version":  1,
+                                                    "value":  [
+                                                                  0,
+                                                                  -1
+                                                              ]
+                                                },
+                                      "feature_ids_indexing_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "Reduced Feature Ids Indices"
+                                                                    },
+                                      "find_length":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "length_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Length"
+                                                            },
+                                      "find_min":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "minimum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Minimum"
+                                                             },
+                                      "find_max":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "maximum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Maximum"
+                                                             },
+                                      "find_mean":  {
+                                                        "version":  1,
+                                                        "value":  true
+                                                    },
+                                      "mean_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mean"
+                                                          },
+                                      "find_median":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "median_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Median"
+                                                            },
+                                      "find_mode":  {
+                                                        "version":  1,
+                                                        "value":  false
+                                                    },
+                                      "mode_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mode"
+                                                          },
+                                      "find_std_deviation":  {
+                                                                 "version":  1,
+                                                                 "value":  true
+                                                             },
+                                      "std_deviation_array_name":  {
+                                                                       "version":  1,
+                                                                       "value":  "StandardDeviation"
+                                                                   },
+                                      "find_summation":  {
+                                                             "version":  1,
+                                                             "value":  false
+                                                         },
+                                      "summation_array_name":  {
+                                                                   "version":  1,
+                                                                   "value":  "Summation"
+                                                               },
+                                      "standardize_data":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "standardized_array_name":  {
+                                                                      "version":  1,
+                                                                      "value":  "Standardized"
+                                                                  },
+                                      "find_unique_values":  {
+                                                                 "version":  1,
+                                                                 "value":  false
+                                                             },
+                                      "number_unique_values_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "NumUniqueValues"
+                                                                    },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ComputeArrayStatisticsFilter",
+                                        "uuid":  "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                                    },
+                         "comments":  "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for GaussianV1; no mask or feature index.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "selected_array_path":  {
+                                                                  "version":  1,
+                                                                  "value":  "Ti64/Cell Data/GaussianV4"
+                                                              },
+                                      "destination_attribute_matrix_path":  {
+                                                                                "version":  1,
+                                                                                "value":  "Ti64/GaussianV4Summary"
+                                                                            },
+                                      "use_mask":  {
+                                                       "version":  1,
+                                                       "value":  false
+                                                   },
+                                      "mask_array_path":  {
+                                                              "version":  1,
+                                                              "value":  ""
+                                                          },
+                                      "compute_by_index":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "feature_ids_path":  {
+                                                               "version":  1,
+                                                               "value":  "Cell Data/FeatureIds"
+                                                           },
+                                      "feature_has_data_array_name":  {
+                                                                          "version":  1,
+                                                                          "value":  "FeatureHasData"
+                                                                      },
+                                      "range_type_index":  {
+                                                               "version":  1,
+                                                               "value":  0
+                                                           },
+                                      "range":  {
+                                                    "version":  1,
+                                                    "value":  [
+                                                                  0,
+                                                                  -1
+                                                              ]
+                                                },
+                                      "feature_ids_indexing_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "Reduced Feature Ids Indices"
+                                                                    },
+                                      "find_length":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "length_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Length"
+                                                            },
+                                      "find_min":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "minimum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Minimum"
+                                                             },
+                                      "find_max":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "maximum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Maximum"
+                                                             },
+                                      "find_mean":  {
+                                                        "version":  1,
+                                                        "value":  true
+                                                    },
+                                      "mean_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mean"
+                                                          },
+                                      "find_median":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "median_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Median"
+                                                            },
+                                      "find_mode":  {
+                                                        "version":  1,
+                                                        "value":  false
+                                                    },
+                                      "mode_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mode"
+                                                          },
+                                      "find_std_deviation":  {
+                                                                 "version":  1,
+                                                                 "value":  true
+                                                             },
+                                      "std_deviation_array_name":  {
+                                                                       "version":  1,
+                                                                       "value":  "StandardDeviation"
+                                                                   },
+                                      "find_summation":  {
+                                                             "version":  1,
+                                                             "value":  false
+                                                         },
+                                      "summation_array_name":  {
+                                                                   "version":  1,
+                                                                   "value":  "Summation"
+                                                               },
+                                      "standardize_data":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "standardized_array_name":  {
+                                                                      "version":  1,
+                                                                      "value":  "Standardized"
+                                                                  },
+                                      "find_unique_values":  {
+                                                                 "version":  1,
+                                                                 "value":  false
+                                                             },
+                                      "number_unique_values_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "NumUniqueValues"
+                                                                    },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ComputeArrayStatisticsFilter",
+                                        "uuid":  "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                                    },
+                         "comments":  "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for GaussianV4; no mask or feature index.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "export_file_path":  {
+                                                               "version":  1,
+                                                               "value":  "Data/Output/Ti64_Image_Cleanup_Examples/Smoothing/Ti64_SmoothingComparison.dream3d"
+                                                           },
+                                      "write_xdmf_file":  {
+                                                              "version":  1,
+                                                              "value":  false
+                                                          },
+                                      "use_compression":  {
+                                                              "version":  1,
+                                                              "value":  true
+                                                          },
+                                      "compression_level":  {
+                                                                "version":  1,
+                                                                "value":  5
+                                                            },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::WriteDREAM3DFilter",
+                                        "uuid":  "b3a95784-2ced-41ec-8d3d-0242ac130003"
+                                    },
+                         "comments":  "Save both retained geometries, common input and all three smoothing branches with their summaries.",
+                         "isDisabled":  false
+                     }
+                 ],
+    "version":  1,
+    "workflowParams":  [
+
+                       ]
+}

@@ -17,7 +17,9 @@ if(NOT input_sha512 STREQUAL "60519a790b7dc239bcdf934fe12e50c53b5ded3a517a5cbf76
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/ValidatePipelineCompanion.cmake")
-set(pipeline_stems "(01) Ti64 Image Preparation")
+set(pipeline_stems
+  "(01) Ti64 Image Preparation"
+  "(02) Ti64 Smoothing Comparison")
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")
 endforeach()

@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) Ti64 Smoothing Comparison.d3dpipeline",
+  "markdown_file": "(02) Ti64 Smoothing Comparison.md",
+  "title": "Ti64 Smoothing Comparison",
+  "summary": "Compare a 3 by 3 median with two strengths of a discrete Gaussian on the same normalized Ti-6Al-4V micrograph, retaining all source and preparation arrays.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microscopy"
+  ],
+  "use_cases": [
+    "Compare impulse suppression and boundary softening on a measured micrograph",
+    "Inspect the effect of increasing discrete Gaussian variance with the method and input held constant"
+  ],
+  "keywords": [
+    "Ti-6Al-4V",
+    "microstructure",
+    "smoothing",
+    "median",
+    "discrete Gaussian",
+    "sensitivity",
+    "float32",
+    "pixel space"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d",
+      "role": "Preparation checkpoint with the full source image, 596 by 596 Ti64 crop, float32 UnitIntensity, and UnitIntensitySummary."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Smoothing/Ti64_SmoothingComparison.dream3d",
+      "role": "Both input geometries and every preparation array, plus MedianR1, GaussianV1, GaussianV4 and their whole-crop summaries."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-derived-paper-linked",
+    "target_traits": [
+      "604 by 604 full source retained",
+      "596 by 596 prepared Ti64 crop",
+      "three float32 branches from the same UnitIntensity",
+      "uncalibrated pixel coordinates"
+    ],
+    "known_differences": "The median and discrete Gaussian choices illustrate smoothing sensitivity; they do not reproduce the paper's learned boundary-class preprocessing, neural inference, or watershed.",
+    "reference_visual": "Bimodal Ti-6Al-4V micrograph with globular regions, lath colonies, and bright boundaries.",
+    "source_sha512": "6739da11d8d4098ef0f7086b521e9a75a55936b53ce198ac4caf1c802ca1af8a23bb96461e28213a1b6574ad0ab6807775113aeffc90da2eccfc2f7498d7412c",
+    "paper_doi": "10.1007/s10853-023-08901-w",
+    "asset_keys": [
+      "materials/microstructure_grayscale.png"
+    ],
+    "paper_url": "https://doi.org/10.1007/s10853-023-08901-w",
+    "source_url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+    "archive_provenance_file": "Provenance.json"
+  },
+  "python_generation": {
+    "specification_id": "ti64-image-cleanup-python-generation-v1",
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root"
+  },
+  "mcp": {
+    "related_pipelines": [
+      "(01) Ti64 Image Preparation.d3dpipeline",
+      "(03) Ti64 Threshold Sensitivity.d3dpipeline"
+    ],
+    "user_intents": [
+      "Compare median and discrete Gaussian effects on one Ti-6Al-4V grayscale crop",
+      "Choose candidate smoothing settings for later labeled validation"
+    ],
+    "constraints": [
+      "Run Ti64 Image Preparation first and read its checkpoint.",
+      "Apply all three filters independently to Ti64/Cell Data/UnitIntensity.",
+      "Treat the geometry as uncalibrated pixels and variance as pixel squared.",
+      "Do not infer grains, phases, denoising quality, or HADMA accuracy from image statistics alone.",
+      "Read the exact .d3dpipeline arguments as executable authority."
+    ],
+    "questions_to_ask": [
+      "What noise mechanism and boundary preservation requirement does the target image have?",
+      "What labeled or repeated-acquisition reference can evaluate denoising?",
+      "What preprocessing did a downstream trained model use?"
+    ]
+  },
+  "citations": [
+    {
+      "year": 2023,
+      "url": "https://doi.org/10.1007/s10853-023-08901-w",
+      "dataset": {
+        "reproduction_status": "illustrative",
+        "doi": "",
+        "included": true,
+        "reproduction_notes": "Uses the paper-linked image through the preparation checkpoint; median and Gaussian settings are independent teaching choices, not published HADMA processing.",
+        "availability": "Paper-linked public image repackaged as grayscale.",
+        "url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+        "license": "MIT license in source repository; see SourceDataLicense.txt in the data archive."
+      },
+      "doi": "10.1007/s10853-023-08901-w",
+      "journal": "Journal of Materials Science",
+      "role": "Qualitative Ti-6Al-4V microstructure context; native smoothing comparison is illustrative and does not reproduce learned boundary-class inference or watershed.",
+      "scope": "pipeline_workflow",
+      "authors": [
+        "G. Fotos",
+        "A. Campbell",
+        "P. Murray",
+        "E. Yakushina"
+      ],
+      "title": "Deep learning enhanced Watershed for microstructural analysis using a boundary class semantic segmentation"
+    }
+  ],
+  "last_verified": "2026-10-07",
+  "verification_status": "Windows in-memory Release preparation/smoothing chain passed preflight/execution. Independent full-array median matched exactly; both discrete Gaussian arrays matched within 5.97e-8 using independently derived Bessel coefficients. All preparation arrays/geometry and all summary fields passed. Materials interpretation, GUI, OOC and generated Python remain unverified.",
+  "dimensional_scope": "Two-dimensional uncalibrated pixels; no physical length, phase fraction, or grain-size claim.",
+  "steps": [
+    {
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "filter": "ReadDREAM3DFilter",
+      "parameters_version": 1,
+      "role": "Load the preparation checkpoint with both image geometries, the original intensity, and the common float32 UnitIntensity baseline.",
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "index": 0
+    },
+    {
+      "uuid": "bf4671ab-ebdf-4c4c-a4b1-0cdcaa005d9d",
+      "filter": "MedianImageFilter",
+      "parameters_version": 1,
+      "role": "Median of a 3 by 3 XY neighborhood, including repeated edge values; compare isolated-intensity suppression from the common input.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/UnitIntensity",
+        "input_image_geometry_path": "Ti64",
+        "output_array_name": "MedianR1",
+        "radius": [
+          1,
+          1,
+          0
+        ]
+      },
+      "index": 1
+    },
+    {
+      "uuid": "2ddd8df9-a4d8-44e0-94b3-0776c1cdf096",
+      "filter": "DiscreteGaussianImageFilter",
+      "parameters_version": 1,
+      "role": "Discrete Gaussian with variance 1 pixel squared per XY axis; retain a separate output from the original UnitIntensity.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/UnitIntensity",
+        "input_image_geometry_path": "Ti64",
+        "maximum_error": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "maximum_kernel_width": 32,
+        "output_array_name": "GaussianV1",
+        "use_image_spacing": false,
+        "variance": [
+          1,
+          1,
+          0
+        ]
+      },
+      "index": 2
+    },
+    {
+      "uuid": "2ddd8df9-a4d8-44e0-94b3-0776c1cdf096",
+      "filter": "DiscreteGaussianImageFilter",
+      "parameters_version": 1,
+      "role": "Discrete Gaussian with variance 4 pixel squared per XY axis; change strength while holding method and input fixed.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/UnitIntensity",
+        "input_image_geometry_path": "Ti64",
+        "maximum_error": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "maximum_kernel_width": 32,
+        "output_array_name": "GaussianV4",
+        "use_image_spacing": false,
+        "variance": [
+          4,
+          4,
+          0
+        ]
+      },
+      "index": 3
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for MedianR1; no mask or feature index.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/MedianR1",
+        "destination_attribute_matrix_path": "Ti64/MedianR1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 4
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for GaussianV1; no mask or feature index.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/GaussianV1",
+        "destination_attribute_matrix_path": "Ti64/GaussianV1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 5
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Record whole-crop Length, Minimum, Maximum, Mean, Median, and population StandardDeviation for GaussianV4; no mask or feature index.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/GaussianV4",
+        "destination_attribute_matrix_path": "Ti64/GaussianV4Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 6
+    },
+    {
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "filter": "WriteDREAM3DFilter",
+      "parameters_version": 2,
+      "role": "Save both retained geometries, common input and all three smoothing branches with their summaries.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Smoothing/Ti64_SmoothingComparison.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "index": 7
+    }
+  ]
+}
