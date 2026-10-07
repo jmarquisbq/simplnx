@@ -164,6 +164,18 @@ list(APPEND PREBUILT_PIPELINE_NAMES
 
 create_pipeline_tests(PLUGIN_NAME ${PLUGIN_NAME} PIPELINE_LIST ${PREBUILT_PIPELINE_NAMES})
 
+# Keep the chained comparison examples isolated from legacy shared outputs.
+add_test(NAME PIPELINE::ImageProcessing::Ti64_Image_Cleanup_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DRAW_DATA_FILE=$<TARGET_FILE_DIR:nxrunner>/Data/ImageProcessing_Examples/materials/microstructure_grayscale.png"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Ti64_Image_Cleanup_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Ti64Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/Ti64ImageCleanupExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::ImageProcessing::Ti64_Image_Cleanup_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;Ti64")
+
 # Set the PYTHON_EXECUTABLE variable as that will get used when the stub shell script or batch file is created.
 # The `Python3_EXECUTABLE` is usually set in the CMakePresets.json file
 set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")

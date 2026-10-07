@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "scope": "Selected filters in the measured Ti64 cleanup examples.",
+  "filters": [
+    {
+      "filter": "ReadImageFilter",
+      "uuid": "7391288d-3d0b-492e-93c9-e128e05c9737",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the full paper-linked grayscale raster without cropping; preserve uint8 source pixels and use uncalibrated pixel coordinates."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 1,
+      "purpose": "Copy inclusive X/Y pixels 4..599 into Ti64 while retaining the full Source Image."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 2,
+      "purpose": "Copy cropped uint8 intensity to float32 so later image processing does not round intermediate values to integers."
+    },
+    {
+      "filter": "RescaleIntensityImageFilter",
+      "uuid": "30b7dbef-0d41-4feb-9e45-ed4def61eae2",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 3,
+      "purpose": "Normalize the common cropped float32 input to the 0..1 range before subsequent comparison branches."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 4,
+      "purpose": "Summarize normalized intensity over every cropped pixel without a feature index or mask."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Ti64 Image Preparation.d3dpipeline",
+      "step": 5,
+      "purpose": "Save source, prepared crop, floating-point arrays, and summary as the shared checkpoint."
+    }
+  ]
+}

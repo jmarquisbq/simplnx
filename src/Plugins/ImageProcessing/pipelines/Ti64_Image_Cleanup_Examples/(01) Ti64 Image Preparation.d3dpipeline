@@ -1,0 +1,420 @@
+{
+    "isDisabled":  false,
+    "name":  "(01) Ti64 Image Preparation.d3dpipeline",
+    "pinnedParams":  [
+
+                     ],
+    "pipeline":  [
+                     {
+                         "args":  {
+                                      "file_name":  {
+                                                        "version":  1,
+                                                        "value":  "Data/ImageProcessing_Examples/materials/microstructure_grayscale.png"
+                                                    },
+                                      "length_unit_index":  {
+                                                                "version":  1,
+                                                                "value":  28
+                                                            },
+                                      "change_image_data_type":  {
+                                                                     "version":  1,
+                                                                     "value":  false
+                                                                 },
+                                      "image_data_type_index":  {
+                                                                    "version":  1,
+                                                                    "value":  0
+                                                                },
+                                      "change_origin":  {
+                                                            "version":  1,
+                                                            "value":  true
+                                                        },
+                                      "center_origin":  {
+                                                            "version":  1,
+                                                            "value":  false
+                                                        },
+                                      "origin":  {
+                                                     "version":  1,
+                                                     "value":  [
+                                                                   0,
+                                                                   0,
+                                                                   0
+                                                               ]
+                                                 },
+                                      "change_spacing":  {
+                                                             "version":  1,
+                                                             "value":  true
+                                                         },
+                                      "spacing":  {
+                                                      "version":  1,
+                                                      "value":  [
+                                                                    1,
+                                                                    1,
+                                                                    1
+                                                                ]
+                                                  },
+                                      "origin_spacing_processing_index":  {
+                                                                              "version":  1,
+                                                                              "value":  1
+                                                                          },
+                                      "cropping_options":  {
+                                                               "version":  1,
+                                                               "value":  {
+                                                                             "bounds_y_physical":  [
+                                                                                                       0,
+                                                                                                       0
+                                                                                                   ],
+                                                                             "bounds_z_physical":  [
+                                                                                                       0,
+                                                                                                       0
+                                                                                                   ],
+                                                                             "bounds_x_physical":  [
+                                                                                                       0,
+                                                                                                       0
+                                                                                                   ],
+                                                                             "bounds_y_voxels":  [
+                                                                                                     0,
+                                                                                                     0
+                                                                                                 ],
+                                                                             "type":  0,
+                                                                             "crop_x":  true,
+                                                                             "bounds_x_voxels":  [
+                                                                                                     0,
+                                                                                                     0
+                                                                                                 ],
+                                                                             "bounds_z_voxels":  [
+                                                                                                     0,
+                                                                                                     0
+                                                                                                 ],
+                                                                             "crop_y":  true,
+                                                                             "crop_z":  true,
+                                                                             "is_2d":  true
+                                                                         }
+                                                           },
+                                      "output_geometry_path":  {
+                                                                   "version":  1,
+                                                                   "value":  "Source Image"
+                                                               },
+                                      "cell_attribute_matrix_name":  {
+                                                                         "version":  1,
+                                                                         "value":  "Cell Data"
+                                                                     },
+                                      "image_data_array_name":  {
+                                                                    "version":  1,
+                                                                    "value":  "Intensity"
+                                                                },
+                                      "parameters_version":  1
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ReadImageFilter",
+                                        "uuid":  "7391288d-3d0b-492e-93c9-e128e05c9737"
+                                    },
+                         "comments":  "Read the full paper-linked grayscale raster without cropping; preserve uint8 source pixels and use uncalibrated pixel coordinates.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "use_physical_bounds":  {
+                                                                  "version":  1,
+                                                                  "value":  false
+                                                              },
+                                      "crop_x_dim":  {
+                                                         "version":  1,
+                                                         "value":  true
+                                                     },
+                                      "crop_y_dim":  {
+                                                         "version":  1,
+                                                         "value":  true
+                                                     },
+                                      "crop_z_dim":  {
+                                                         "version":  1,
+                                                         "value":  false
+                                                     },
+                                      "min_voxel":  {
+                                                        "version":  1,
+                                                        "value":  [
+                                                                      4,
+                                                                      4,
+                                                                      0
+                                                                  ]
+                                                    },
+                                      "max_voxel":  {
+                                                        "version":  1,
+                                                        "value":  [
+                                                                      599,
+                                                                      599,
+                                                                      0
+                                                                  ]
+                                                    },
+                                      "min_coord":  {
+                                                        "version":  1,
+                                                        "value":  [
+                                                                      0,
+                                                                      0,
+                                                                      0
+                                                                  ]
+                                                    },
+                                      "max_coord":  {
+                                                        "version":  1,
+                                                        "value":  [
+                                                                      0,
+                                                                      0,
+                                                                      0
+                                                                  ]
+                                                    },
+                                      "remove_original_geometry":  {
+                                                                       "version":  1,
+                                                                       "value":  false
+                                                                   },
+                                      "input_image_geometry_path":  {
+                                                                        "version":  1,
+                                                                        "value":  "Source Image"
+                                                                    },
+                                      "renumber_features":  {
+                                                                "version":  1,
+                                                                "value":  false
+                                                            },
+                                      "feature_ids_path":  {
+                                                               "version":  1,
+                                                               "value":  "Cell Data/FeatureIds"
+                                                           },
+                                      "cell_feature_attribute_matrix_path":  {
+                                                                                 "version":  1,
+                                                                                 "value":  "Cell Feature Data"
+                                                                             },
+                                      "output_image_geometry_path":  {
+                                                                         "version":  1,
+                                                                         "value":  "Ti64"
+                                                                     },
+                                      "parameters_version":  1
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::CropImageGeometryFilter",
+                                        "uuid":  "e6476737-4aa7-48ba-a702-3dfab82c96e2"
+                                    },
+                         "comments":  "Copy inclusive X/Y pixels 4..599 into Ti64 while retaining the full Source Image.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "scalar_type_index":  {
+                                                                "version":  1,
+                                                                "value":  8
+                                                            },
+                                      "array_to_convert_path":  {
+                                                                    "version":  1,
+                                                                    "value":  "Ti64/Cell Data/Intensity"
+                                                                },
+                                      "delete_original_array":  {
+                                                                    "version":  1,
+                                                                    "value":  false
+                                                                },
+                                      "converted_array_name":  {
+                                                                   "version":  1,
+                                                                   "value":  "FloatIntensity"
+                                                               },
+                                      "parameters_version":  1
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ConvertDataFilter",
+                                        "uuid":  "6dc586cc-59fb-4ee8-90ff-2d3587da12f5"
+                                    },
+                         "comments":  "Copy cropped uint8 intensity to float32 so later image processing does not round intermediate values to integers.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "input_image_geometry_path":  {
+                                                                        "version":  1,
+                                                                        "value":  "Ti64"
+                                                                    },
+                                      "input_image_data_path":  {
+                                                                    "version":  1,
+                                                                    "value":  "Ti64/Cell Data/FloatIntensity"
+                                                                },
+                                      "output_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "UnitIntensity"
+                                                            },
+                                      "output_minimum":  {
+                                                             "version":  1,
+                                                             "value":  0
+                                                         },
+                                      "output_maximum":  {
+                                                             "version":  1,
+                                                             "value":  1
+                                                         },
+                                      "parameters_version":  1
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::RescaleIntensityImageFilter",
+                                        "uuid":  "30b7dbef-0d41-4feb-9e45-ed4def61eae2"
+                                    },
+                         "comments":  "Normalize the common cropped float32 input to the 0..1 range before subsequent comparison branches.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "selected_array_path":  {
+                                                                  "version":  1,
+                                                                  "value":  "Ti64/Cell Data/UnitIntensity"
+                                                              },
+                                      "destination_attribute_matrix_path":  {
+                                                                                "version":  1,
+                                                                                "value":  "Ti64/UnitIntensitySummary"
+                                                                            },
+                                      "use_mask":  {
+                                                       "version":  1,
+                                                       "value":  false
+                                                   },
+                                      "mask_array_path":  {
+                                                              "version":  1,
+                                                              "value":  ""
+                                                          },
+                                      "compute_by_index":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "feature_ids_path":  {
+                                                               "version":  1,
+                                                               "value":  "Cell Data/FeatureIds"
+                                                           },
+                                      "feature_has_data_array_name":  {
+                                                                          "version":  1,
+                                                                          "value":  "FeatureHasData"
+                                                                      },
+                                      "range_type_index":  {
+                                                               "version":  1,
+                                                               "value":  0
+                                                           },
+                                      "range":  {
+                                                    "version":  1,
+                                                    "value":  [
+                                                                  0,
+                                                                  -1
+                                                              ]
+                                                },
+                                      "feature_ids_indexing_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "Reduced Feature Ids Indices"
+                                                                    },
+                                      "find_length":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "length_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Length"
+                                                            },
+                                      "find_min":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "minimum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Minimum"
+                                                             },
+                                      "find_max":  {
+                                                       "version":  1,
+                                                       "value":  true
+                                                   },
+                                      "maximum_array_name":  {
+                                                                 "version":  1,
+                                                                 "value":  "Maximum"
+                                                             },
+                                      "find_mean":  {
+                                                        "version":  1,
+                                                        "value":  true
+                                                    },
+                                      "mean_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mean"
+                                                          },
+                                      "find_median":  {
+                                                          "version":  1,
+                                                          "value":  true
+                                                      },
+                                      "median_array_name":  {
+                                                                "version":  1,
+                                                                "value":  "Median"
+                                                            },
+                                      "find_mode":  {
+                                                        "version":  1,
+                                                        "value":  false
+                                                    },
+                                      "mode_array_name":  {
+                                                              "version":  1,
+                                                              "value":  "Mode"
+                                                          },
+                                      "find_std_deviation":  {
+                                                                 "version":  1,
+                                                                 "value":  true
+                                                             },
+                                      "std_deviation_array_name":  {
+                                                                       "version":  1,
+                                                                       "value":  "StandardDeviation"
+                                                                   },
+                                      "find_summation":  {
+                                                             "version":  1,
+                                                             "value":  false
+                                                         },
+                                      "summation_array_name":  {
+                                                                   "version":  1,
+                                                                   "value":  "Summation"
+                                                               },
+                                      "standardize_data":  {
+                                                               "version":  1,
+                                                               "value":  false
+                                                           },
+                                      "standardized_array_name":  {
+                                                                      "version":  1,
+                                                                      "value":  "Standardized"
+                                                                  },
+                                      "find_unique_values":  {
+                                                                 "version":  1,
+                                                                 "value":  false
+                                                             },
+                                      "number_unique_values_name":  {
+                                                                        "version":  1,
+                                                                        "value":  "NumUniqueValues"
+                                                                    },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::ComputeArrayStatisticsFilter",
+                                        "uuid":  "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                                    },
+                         "comments":  "Summarize normalized intensity over every cropped pixel without a feature index or mask.",
+                         "isDisabled":  false
+                     },
+                     {
+                         "args":  {
+                                      "export_file_path":  {
+                                                               "version":  1,
+                                                               "value":  "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d"
+                                                           },
+                                      "write_xdmf_file":  {
+                                                              "version":  1,
+                                                              "value":  false
+                                                          },
+                                      "use_compression":  {
+                                                              "version":  1,
+                                                              "value":  true
+                                                          },
+                                      "compression_level":  {
+                                                                "version":  1,
+                                                                "value":  5
+                                                            },
+                                      "parameters_version":  2
+                                  },
+                         "filter":  {
+                                        "name":  "nx::core::WriteDREAM3DFilter",
+                                        "uuid":  "b3a95784-2ced-41ec-8d3d-0242ac130003"
+                                    },
+                         "comments":  "Save source, prepared crop, floating-point arrays, and summary as the shared checkpoint.",
+                         "isDisabled":  false
+                     }
+                 ],
+    "version":  1,
+    "workflowParams":  [
+
+                       ]
+}

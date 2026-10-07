@@ -1,4 +1,4 @@
-# Run the public T12 examples in an isolated working folder.
+# Run the public Ti64 cleanup examples in an isolated working folder.
 # Numerical/scientific interpretation requires additional result checks.
 foreach(required_var NXRUNNER RAW_DATA_FILE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
   if(NOT DEFINED ${required_var} OR "${${required_var}}" STREQUAL "")
@@ -11,11 +11,13 @@ foreach(required_path "${NXRUNNER}" "${RAW_DATA_FILE}")
   endif()
 endforeach()
 
+file(SHA512 "${RAW_DATA_FILE}" input_sha512)
+if(NOT input_sha512 STREQUAL "60519a790b7dc239bcdf934fe12e50c53b5ded3a517a5cbf76671de0c58ab07e709992c07fe58fa554449ab9f86eec3a120fb242884e4916c24c5a43fae97611")
+  message(FATAL_ERROR "Ti64 input PNG differs from the documented public asset: ${RAW_DATA_FILE}")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/ValidatePipelineCompanion.cmake")
-set(pipeline_stems
-  "(01) T12 Orientation Preparation"
-  "(02) T12 Local and Grain Reference Misorientation"
-  "(03) T12 KAM Neighborhood Comparison")
+set(pipeline_stems "(01) Ti64 Image Preparation")
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")
 endforeach()
@@ -27,14 +29,14 @@ cmake_path(IS_PREFIX test_binary_root "${work_root}" NORMALIZE work_inside)
 if(NOT work_inside OR work_root STREQUAL test_binary_root)
   message(FATAL_ERROR "Test work directory must be below the test binary root: ${work_root}")
 endif()
-set(raw_stage "${work_root}/Data/T12-MAI-2010")
+set(raw_stage "${work_root}/Data/ImageProcessing_Examples/materials")
 file(MAKE_DIRECTORY "${raw_stage}")
 file(REAL_PATH "${raw_stage}" raw_stage_real)
 cmake_path(IS_PREFIX work_root "${raw_stage_real}" NORMALIZE raw_inside)
 if(NOT raw_inside)
   message(FATAL_ERROR "Raw staging directory is outside the work directory: ${raw_stage_real}")
 endif()
-file(COPY_FILE "${RAW_DATA_FILE}" "${raw_stage_real}/fw-ar-IF1-aptr12-corr.ctf" ONLY_IF_DIFFERENT)
+file(COPY_FILE "${RAW_DATA_FILE}" "${raw_stage_real}/microstructure_grayscale.png" ONLY_IF_DIFFERENT)
 
 foreach(stem IN LISTS pipeline_stems)
   set(pipeline_path "${EXAMPLE_DIR}/${stem}.d3dpipeline")
@@ -47,8 +49,8 @@ foreach(stem IN LISTS pipeline_stems)
   set(expected_outputs "")
   foreach(index RANGE 0 ${last_output})
     string(JSON relative_path GET "${sidecar_json}" outputs ${index} path)
-    if(NOT relative_path MATCHES "^Data/Output/T12_Orientation_Examples/" OR relative_path MATCHES "(^|/)\\.\\.(/|$)")
-      message(FATAL_ERROR "Output must stay within the T12 example output category: ${relative_path}")
+    if(NOT relative_path MATCHES "^Data/Output/Ti64_Image_Cleanup_Examples/" OR relative_path MATCHES "(^|/)\\.\\.(/|$)")
+      message(FATAL_ERROR "Output must stay within the Ti64 example output category: ${relative_path}")
     endif()
     set(output_path "${work_root}/${relative_path}")
     get_filename_component(output_parent "${output_path}" DIRECTORY)

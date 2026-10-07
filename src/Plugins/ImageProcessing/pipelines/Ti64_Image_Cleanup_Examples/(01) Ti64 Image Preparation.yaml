@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Ti64 Image Preparation.d3dpipeline",
+  "markdown_file": "(01) Ti64 Image Preparation.md",
+  "title": "Ti64 Image Preparation",
+  "summary": "Prepare a paper-linked Ti-6Al-4V grayscale image as one retained source and one float32 normalized crop for later smoothing and threshold comparisons.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microscopy"
+  ],
+  "use_cases": [
+    "Inspect crop and normalization choices before segmentation",
+    "Prepare one common measured-image baseline for smoothing and threshold sensitivity"
+  ],
+  "keywords": [
+    "Ti-6Al-4V",
+    "microstructure",
+    "grayscale",
+    "crop",
+    "normalization",
+    "float32",
+    "pixel space"
+  ],
+  "inputs": [
+    {
+      "path": "Data/ImageProcessing_Examples/materials/microstructure_grayscale.png",
+      "role": "Uncropped 604 by 604 8-bit grayscale image derived from a public paper-linked RGBA source."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d",
+      "role": "Shared checkpoint with source image, prepared crop, float32 intensity, normalized intensity, and whole-crop statistics."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-derived-paper-linked",
+    "target_traits": [
+      "604 by 604 grayscale source",
+      "596 by 596 prepared crop",
+      "full source retained",
+      "float32 common normalized input"
+    ],
+    "known_differences": "The paper's learned boundary-class model and marker-based watershed are omitted. The inset and normalization are teaching choices, not paper parameters.",
+    "reference_visual": "Bimodal Ti-6Al-4V micrograph with globular regions, lath colonies, and bright boundaries.",
+    "source_sha512": "6739da11d8d4098ef0f7086b521e9a75a55936b53ce198ac4caf1c802ca1af8a23bb96461e28213a1b6574ad0ab6807775113aeffc90da2eccfc2f7498d7412c",
+    "paper_doi": "10.1007/s10853-023-08901-w",
+    "asset_keys": [
+      "materials/microstructure_grayscale.png"
+    ],
+    "paper_url": "https://doi.org/10.1007/s10853-023-08901-w",
+    "source_url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+    "archive_provenance_file": "Provenance.json"
+  },
+  "python_generation": {
+    "specification_id": "ti64-image-cleanup-python-generation-v1",
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root"
+  },
+  "mcp": {
+    "related_pipelines": [
+      "(02) Ti64 Smoothing Comparison.d3dpipeline",
+      "(03) Ti64 Threshold Sensitivity.d3dpipeline"
+    ],
+    "user_intents": [
+      "Prepare linked Ti-6Al-4V image for controlled smoothing comparison",
+      "Inspect an uncalibrated crop and normalized intensity"
+    ],
+    "constraints": [
+      "Treat coordinates as uncalibrated pixels.",
+      "Read the exact .d3dpipeline arguments as executable authority.",
+      "Do not report phase fraction, grain labels, or HADMA accuracy from this preparation.",
+      "Keep the original image and the common normalized baseline."
+    ],
+    "questions_to_ask": [
+      "What physical pixel calibration is independently documented?",
+      "Must the partly nonwhite right-edge column be retained?",
+      "Which labeled reference validates a later segmentation?"
+    ]
+  },
+  "citations": [
+    {
+      "year": 2023,
+      "url": "https://doi.org/10.1007/s10853-023-08901-w",
+      "dataset": {
+        "reproduction_status": "illustrative",
+        "doi": "",
+        "included": true,
+        "reproduction_notes": "The source image is retained but paper model inference and validation are not reproduced.",
+        "availability": "Paper-linked public image repackaged as grayscale.",
+        "url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+        "license": "MIT license in source repository; see SourceDataLicense.txt in the data archive."
+      },
+      "doi": "10.1007/s10853-023-08901-w",
+      "journal": "Journal of Materials Science",
+      "role": "Qualitative microstructure context; the learned boundary-class workflow is outside this preparation example.",
+      "scope": "pipeline_workflow",
+      "authors": [
+        "G. Fotos",
+        "A. Campbell",
+        "P. Murray",
+        "E. Yakushina"
+      ],
+      "title": "Deep learning enhanced Watershed for microstructural analysis using a boundary class semantic segmentation"
+    }
+  ],
+  "last_verified": "2026-10-07",
+  "verification_status": "Windows in-memory Release preflight/execution passed. Independent full-array checks exactly matched raw uint8 image, crop, float32 conversion and normalization; geometry and all six summary fields passed. Unknown unit choice is an uncalibrated pixel-space fallback, not physical calibration. Scientific interpretation, GUI, OOC and generated Python remain unverified.",
+  "dimensional_scope": "Two-dimensional uncalibrated pixels; no physical length, phase fraction, or grain-size claim.",
+  "steps": [
+    {
+      "uuid": "7391288d-3d0b-492e-93c9-e128e05c9737",
+      "filter": "ReadImageFilter",
+      "parameters_version": 1,
+      "role": "Read the full paper-linked grayscale raster without cropping; preserve uint8 source pixels and use uncalibrated pixel coordinates.",
+      "key_parameters": {
+        "file_name": "Data/ImageProcessing_Examples/materials/microstructure_grayscale.png",
+        "length_unit_index": 28,
+        "change_image_data_type": false,
+        "image_data_type_index": 0,
+        "change_origin": true,
+        "center_origin": false,
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "change_spacing": true,
+        "spacing": [
+          1,
+          1,
+          1
+        ],
+        "origin_spacing_processing_index": 1,
+        "cropping_options": {
+          "bounds_y_physical": [
+            0,
+            0
+          ],
+          "bounds_z_physical": [
+            0,
+            0
+          ],
+          "bounds_x_physical": [
+            0,
+            0
+          ],
+          "bounds_y_voxels": [
+            0,
+            0
+          ],
+          "type": 0,
+          "crop_x": true,
+          "bounds_x_voxels": [
+            0,
+            0
+          ],
+          "bounds_z_voxels": [
+            0,
+            0
+          ],
+          "crop_y": true,
+          "crop_z": true,
+          "is_2d": true
+        },
+        "output_geometry_path": "Source Image",
+        "cell_attribute_matrix_name": "Cell Data",
+        "image_data_array_name": "Intensity"
+      },
+      "index": 0
+    },
+    {
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "filter": "CropImageGeometryFilter",
+      "parameters_version": 1,
+      "role": "Copy inclusive X/Y pixels 4..599 into Ti64 while retaining the full Source Image.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": false,
+        "min_voxel": [
+          4,
+          4,
+          0
+        ],
+        "max_voxel": [
+          599,
+          599,
+          0
+        ],
+        "min_coord": [
+          0,
+          0,
+          0
+        ],
+        "max_coord": [
+          0,
+          0,
+          0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "Source Image",
+        "renumber_features": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "Cell Feature Data",
+        "output_image_geometry_path": "Ti64"
+      },
+      "index": 1
+    },
+    {
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "filter": "ConvertDataFilter",
+      "parameters_version": 1,
+      "role": "Copy cropped uint8 intensity to float32 so later image processing does not round intermediate values to integers.",
+      "key_parameters": {
+        "scalar_type_index": 8,
+        "array_to_convert_path": "Ti64/Cell Data/Intensity",
+        "delete_original_array": false,
+        "converted_array_name": "FloatIntensity"
+      },
+      "index": 2
+    },
+    {
+      "uuid": "30b7dbef-0d41-4feb-9e45-ed4def61eae2",
+      "filter": "RescaleIntensityImageFilter",
+      "parameters_version": 1,
+      "role": "Normalize the common cropped float32 input to the 0..1 range before subsequent comparison branches.",
+      "key_parameters": {
+        "input_image_geometry_path": "Ti64",
+        "input_image_data_path": "Ti64/Cell Data/FloatIntensity",
+        "output_array_name": "UnitIntensity",
+        "output_minimum": 0,
+        "output_maximum": 1
+      },
+      "index": 3
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Summarize normalized intensity over every cropped pixel without a feature index or mask.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/UnitIntensity",
+        "destination_attribute_matrix_path": "Ti64/UnitIntensitySummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 4
+    },
+    {
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "filter": "WriteDREAM3DFilter",
+      "parameters_version": 2,
+      "role": "Save source, prepared crop, floating-point arrays, and summary as the shared checkpoint.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "index": 5
+    }
+  ]
+}

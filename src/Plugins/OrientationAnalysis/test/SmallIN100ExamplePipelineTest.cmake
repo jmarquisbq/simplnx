@@ -21,7 +21,7 @@ foreach(required_path "${NXRUNNER}"
   endif()
 endforeach()
 
-include("${CMAKE_CURRENT_LIST_DIR}/ValidatePipelineCompanion.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/ValidatePipelineCompanion.cmake")
 
 validate_companion("${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline")
