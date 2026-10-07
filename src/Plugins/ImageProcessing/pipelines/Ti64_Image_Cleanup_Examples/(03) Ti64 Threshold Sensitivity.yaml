@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+  "markdown_file": "(03) Ti64 Threshold Sensitivity.md",
+  "title": "Ti64 Threshold Sensitivity",
+  "summary": "Apply one inclusive normalized-intensity threshold to the original and three smoothed Ti-6Al-4V crop arrays; compare binary pixel selections and whole-crop counts.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microscopy"
+  ],
+  "use_cases": [
+    "Inspect how median and Gaussian smoothing change a fixed brightness selection",
+    "Compare selected-pixel counts and fractions before choosing a separately validated segmentation method"
+  ],
+  "keywords": [
+    "Ti-6Al-4V",
+    "microstructure",
+    "binary threshold",
+    "fixed cutoff",
+    "smoothing sensitivity",
+    "uint8",
+    "uncalibrated pixels"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Smoothing/Ti64_SmoothingComparison.dream3d",
+      "role": "Full smoothing checkpoint with Source Image, Ti64 crop, UnitIntensity, MedianR1, GaussianV1, GaussianV4, and prior summaries."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
+      "role": "Both input geometries and all arrays plus four uint8 Bright* masks and four whole-crop Bright*Summary groups."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-derived-paper-linked",
+    "target_traits": [
+      "604 by 604 full source retained",
+      "596 by 596 prepared Ti64 crop with 355216 cells",
+      "four inputs thresholded independently at inclusive [0.35, 1.0]",
+      "uncalibrated pixel coordinates"
+    ],
+    "known_differences": "The fixed brightness selection is an illustrative native-filter comparison. It does not reproduce learned boundary-class predictions or watershed, and selected pixels have no validated phase or grain identity.",
+    "reference_visual": "Bimodal Ti-6Al-4V micrograph with globular regions, lath colonies, and bright boundaries.",
+    "source_sha512": "6739da11d8d4098ef0f7086b521e9a75a55936b53ce198ac4caf1c802ca1af8a23bb96461e28213a1b6574ad0ab6807775113aeffc90da2eccfc2f7498d7412c",
+    "paper_doi": "10.1007/s10853-023-08901-w",
+    "asset_keys": [
+      "materials/microstructure_grayscale.png"
+    ],
+    "paper_url": "https://doi.org/10.1007/s10853-023-08901-w",
+    "source_url": "https://raw.githubusercontent.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V/master/Images1/image_500.png",
+    "archive_provenance_file": "Data/ImageProcessing_Examples/Provenance.json",
+    "archive_asset_sha512": "60519a790b7dc239bcdf934fe12e50c53b5ded3a517a5cbf76671de0c58ab07e709992c07fe58fa554449ab9f86eec3a120fb242884e4916c24c5a43fae97611"
+  },
+  "python_generation": {
+    "specification_id": "ti64-image-cleanup-python-generation-v1",
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root"
+  },
+  "mcp": {
+    "related_pipelines": [
+      "(01) Ti64 Image Preparation.d3dpipeline",
+      "(02) Ti64 Smoothing Comparison.d3dpipeline"
+    ],
+    "user_intents": [
+      "Compare a fixed bright-pixel selection across original and smoothed Ti-6Al-4V crops",
+      "Inspect mask changes and selected-pixel fractions before a validated segmentation study"
+    ],
+    "constraints": [
+      "Run preparation and smoothing in order before this pipeline.",
+      "Use the same inclusive [0.35, 1.0] rule on all four float32 inputs.",
+      "Interpret 0/1 uint8 Mean as selected-pixel fraction and Summation as count.",
+      "Treat original as the unfiltered normalized crop, not the 604 by 604 source frame.",
+      "Do not infer phase, grain, porosity, or HADMA accuracy from brightness masks.",
+      "Read the .d3dpipeline arguments as executable authority."
+    ],
+    "questions_to_ask": [
+      "What labeled reference identifies the intended structure or phase?",
+      "Does a new image share the prepared 0 to 1 intensity mapping?",
+      "Which downstream boundary and watershed validation would support grain measurements?"
+    ]
+  },
+  "citations": [
+    {
+      "year": 2023,
+      "url": "https://doi.org/10.1007/s10853-023-08901-w",
+      "dataset": {
+        "reproduction_status": "illustrative",
+        "doi": "",
+        "included": true,
+        "reproduction_notes": "Uses the paper-linked image through preparation and smoothing checkpoints; the 0.35 brightness threshold is an independent illustrative choice, not a published HADMA cutoff.",
+        "availability": "Paper-linked public image repackaged as grayscale.",
+        "url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+        "license": "MIT license in source repository; see SourceDataLicense.txt in the data archive."
+      },
+      "doi": "10.1007/s10853-023-08901-w",
+      "journal": "Journal of Materials Science",
+      "role": "Qualitative Ti-6Al-4V microstructure context; fixed native brightness thresholds illustrate preprocessing sensitivity and do not reproduce learned boundary-class inference or watershed.",
+      "scope": "pipeline_workflow",
+      "authors": [
+        "G. Fotos",
+        "A. Campbell",
+        "P. Murray",
+        "E. Yakushina"
+      ],
+      "title": "Deep learning enhanced Watershed for microstructural analysis using a boundary class semantic segmentation"
+    }
+  ],
+  "last_verified": "2026-10-07",
+  "verification_status": "Windows in-memory Release full-chain preflight/execution passed. Every uint8 mask exactly matched independent thresholding of saved inputs and independent smoothing results; all seven summary fields, all 31 predecessor datasets and both geometries passed. Materials interpretation, GUI, OOC and generated Python remain unverified.",
+  "dimensional_scope": "Two-dimensional uncalibrated pixels; selected-pixel fractions are brightness fractions, not physical phase or grain fractions.",
+  "steps": [
+    {
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "filter": "ReadDREAM3DFilter",
+      "parameters_version": 1,
+      "role": "Load the complete smoothing checkpoint, including both geometries, the common prepared crop, and all three smoothed arrays.",
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Smoothing/Ti64_SmoothingComparison.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "index": 0
+    },
+    {
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "filter": "BinaryThresholdImageFilter",
+      "parameters_version": 1,
+      "role": "Select inclusive [0.35, 1.0] brightness from UnitIntensity into uint8 0/1 BrightOriginal.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/UnitIntensity",
+        "input_image_geometry_path": "Ti64",
+        "inside_value": 1,
+        "lower_threshold": 0.35,
+        "output_array_name": "BrightOriginal",
+        "outside_value": 0,
+        "upper_threshold": 1
+      },
+      "index": 1
+    },
+    {
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "filter": "BinaryThresholdImageFilter",
+      "parameters_version": 1,
+      "role": "Select inclusive [0.35, 1.0] brightness from MedianR1 into uint8 0/1 BrightMedianR1.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/MedianR1",
+        "input_image_geometry_path": "Ti64",
+        "inside_value": 1,
+        "lower_threshold": 0.35,
+        "output_array_name": "BrightMedianR1",
+        "outside_value": 0,
+        "upper_threshold": 1
+      },
+      "index": 2
+    },
+    {
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "filter": "BinaryThresholdImageFilter",
+      "parameters_version": 1,
+      "role": "Select inclusive [0.35, 1.0] brightness from GaussianV1 into uint8 0/1 BrightGaussianV1.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/GaussianV1",
+        "input_image_geometry_path": "Ti64",
+        "inside_value": 1,
+        "lower_threshold": 0.35,
+        "output_array_name": "BrightGaussianV1",
+        "outside_value": 0,
+        "upper_threshold": 1
+      },
+      "index": 3
+    },
+    {
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "filter": "BinaryThresholdImageFilter",
+      "parameters_version": 1,
+      "role": "Select inclusive [0.35, 1.0] brightness from GaussianV4 into uint8 0/1 BrightGaussianV4.",
+      "key_parameters": {
+        "input_image_data_path": "Ti64/Cell Data/GaussianV4",
+        "input_image_geometry_path": "Ti64",
+        "inside_value": 1,
+        "lower_threshold": 0.35,
+        "output_array_name": "BrightGaussianV4",
+        "outside_value": 0,
+        "upper_threshold": 1
+      },
+      "index": 4
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Summarize all 355216 cells of BrightOriginal; Summation counts selected pixels and Mean gives their fraction.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/BrightOriginal",
+        "destination_attribute_matrix_path": "Ti64/BrightOriginalSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 5
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Summarize all 355216 cells of BrightMedianR1; Summation counts selected pixels and Mean gives their fraction.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/BrightMedianR1",
+        "destination_attribute_matrix_path": "Ti64/BrightMedianR1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 6
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Summarize all 355216 cells of BrightGaussianV1; Summation counts selected pixels and Mean gives their fraction.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/BrightGaussianV1",
+        "destination_attribute_matrix_path": "Ti64/BrightGaussianV1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 7
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Summarize all 355216 cells of BrightGaussianV4; Summation counts selected pixels and Mean gives their fraction.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/BrightGaussianV4",
+        "destination_attribute_matrix_path": "Ti64/BrightGaussianV4Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 8
+    },
+    {
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "filter": "WriteDREAM3DFilter",
+      "parameters_version": 2,
+      "role": "Save both geometries, all input arrays, four brightness masks, and four whole-crop summaries.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "index": 9
+    }
+  ]
+}

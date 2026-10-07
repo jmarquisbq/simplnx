@@ -53,8 +53,9 @@
       "materials/microstructure_grayscale.png"
     ],
     "paper_url": "https://doi.org/10.1007/s10853-023-08901-w",
-    "source_url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
-    "archive_provenance_file": "Provenance.json"
+    "source_url": "https://raw.githubusercontent.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V/master/Images1/image_500.png",
+    "archive_provenance_file": "Data/ImageProcessing_Examples/Provenance.json",
+    "archive_asset_sha512": "60519a790b7dc239bcdf934fe12e50c53b5ded3a517a5cbf76671de0c58ab07e709992c07fe58fa554449ab9f86eec3a120fb242884e4916c24c5a43fae97611"
   },
   "python_generation": {
     "specification_id": "ti64-image-cleanup-python-generation-v1",

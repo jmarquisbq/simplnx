@@ -18,6 +18,8 @@ Set-Location $work
 if ($LASTEXITCODE -ne 0) { throw 'Preparation failed; inspect the runner output.' }
 & $runner --execute (Join-Path $examples '(02) Ti64 Smoothing Comparison.d3dpipeline')
 if ($LASTEXITCODE -ne 0) { throw 'Smoothing comparison failed; inspect the runner output.' }
+& $runner --execute (Join-Path $examples '(03) Ti64 Threshold Sensitivity.d3dpipeline')
+if ($LASTEXITCODE -ne 0) { throw 'Threshold comparison failed; inspect the runner output.' }
 ```
 
 Relative paths resolve from that CLI working folder. In the GUI, open the pipeline and set absolute file input/output paths if your launch location does not resolve `Data/...`. Use a short working path on Windows to leave room for temporary output filenames.
@@ -27,6 +29,8 @@ Relative paths resolve from that CLI working folder. In the GUI, open the pipeli
 [(01) Image Preparation](%2801%29%20Ti64%20Image%20Preparation.md) retains the full 604 × 604 raster and creates a 596 × 596 crop after removing a four-pixel margin. It converts cropped intensities to floating point and establishes a common 0–1 range. The saved checkpoint is `Data/Output/Ti64_Image_Cleanup_Examples/Preparation/Ti64_Prepared.dream3d`.
 
 [(02) Smoothing Comparison](%2802%29%20Ti64%20Smoothing%20Comparison.md) reads that checkpoint and compares median radius 1 with discrete Gaussian variances 1 and 4. Each filter reads the same normalized input; the outputs are not rescaled or fed into one another. It saves all arrays and their summaries under `Smoothing/Ti64_SmoothingComparison.dream3d` in the same example output root.
+
+[(03) Threshold Sensitivity](%2803%29%20Ti64%20Threshold%20Sensitivity.md) reads the smoothing checkpoint and applies the same 0.35–1.0 interval to all four intensity arrays. It saves brightness masks and count/fraction summaries under `Threshold/Ti64_ThresholdSensitivity.dream3d`. Run **01 → 02 → 03**; each stage depends on the preceding checkpoint. Selected pixels are not automatically a material phase or grain population.
 
 Spatial coordinates are uncalibrated pixels with spacing 1 and unit choice **Unknown**. Intensity is relative image brightness. Neither represents a physical phase identity, material acceptance threshold, or calibrated length. The crop is a documented example choice, not a paper-prescribed region or a representative-volume claim.
 

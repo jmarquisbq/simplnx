@@ -64,6 +64,13 @@
       "pipeline": "(02) Ti64 Smoothing Comparison.d3dpipeline",
       "step": 2,
       "purpose": "Discrete Gaussian with variance 1 pixel squared per XY axis; retain a separate output from the original UnitIntensity."
+    },
+    {
+      "filter": "BinaryThresholdImageFilter",
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 1,
+      "purpose": "Select inclusive [0.35, 1.0] brightness from UnitIntensity into uint8 0/1 BrightOriginal."
     }
   ]
 }
