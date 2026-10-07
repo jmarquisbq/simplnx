@@ -22,6 +22,8 @@ Set-Location $work
 if ($LASTEXITCODE -ne 0) { throw 'Preparation failed; inspect the runner output.' }
 & $runner --execute (Join-Path $examples '(02) T12 Local and Grain Reference Misorientation.d3dpipeline')
 if ($LASTEXITCODE -ne 0) { throw 'Misorientation calculation failed; inspect the runner output.' }
+& $runner --execute (Join-Path $examples '(03) T12 KAM Neighborhood Comparison.d3dpipeline')
+if ($LASTEXITCODE -ne 0) { throw 'Neighborhood comparison failed; inspect the runner output.' }
 ```
 
 Relative input/output paths resolve from the CLI working folder. For the GUI, open the pipeline and set absolute file paths if your launch location does not resolve `Data/...` correctly.
@@ -31,6 +33,8 @@ Relative input/output paths resolve from the CLI working folder. For the GUI, op
 [(01) Orientation Preparation](%2801%29%20T12%20Orientation%20Preparation.md) creates `Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d`. It saves a valid-pixel mask, grain labels, pixel counts and areas, a grain-reporting mask, and average orientations. It keeps rejected measurements and small grains in the saved data, with explicit masks for interpreting them.
 
 [(02) Local and Grain Reference Misorientation](%2802%29%20T12%20Local%20and%20Grain%20Reference%20Misorientation.md) reads that checkpoint. It compares each pixel with nearby orientations in its grain and with its grain-average orientation, then saves pixel maps, grain spreads, clearly separated pixel/grain summaries, and a feature CSV under `Metrics/`. The summaries distinguish equal pixel weighting from equal grain weighting.
+
+[(03) KAM Neighborhood Comparison](%2803%29%20T12%20KAM%20Neighborhood%20Comparison.md) compares two window radii within grains, then permits comparisons across grains in the same phase at the original radius. Results are saved under `Neighborhoods/`. **02 and 03 independently read 01**; 03 does not require 02. All comparisons retain the same prepared labels and orientations.
 
 The source is one BCC iron phase sampled at 0.5 µm in X and Y. The second map in the archive is not required. Do not match pixels or grain IDs between the files from their names alone.
 

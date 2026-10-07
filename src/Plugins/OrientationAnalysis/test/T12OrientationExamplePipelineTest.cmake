@@ -14,7 +14,8 @@ endforeach()
 include("${CMAKE_CURRENT_LIST_DIR}/ValidatePipelineCompanion.cmake")
 set(pipeline_stems
   "(01) T12 Orientation Preparation"
-  "(02) T12 Local and Grain Reference Misorientation")
+  "(02) T12 Local and Grain Reference Misorientation"
+  "(03) T12 KAM Neighborhood Comparison")
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")
 endforeach()

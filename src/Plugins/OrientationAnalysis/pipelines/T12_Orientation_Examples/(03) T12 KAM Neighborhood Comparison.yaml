@@ -1,0 +1,425 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) T12 KAM Neighborhood Comparison.d3dpipeline",
+  "markdown_file": "(03) T12 KAM Neighborhood Comparison.md",
+  "title": "T12 KAM Neighborhood Comparison",
+  "summary": "Compare same-grain radius-one and radius-two KAM with same-phase radius-one KAM on one prepared 2D EBSD map.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Steel manufacturing"
+  ],
+  "use_cases": [
+    "Compare local orientation variation as the same-grain window grows",
+    "Test how allowing same-phase neighbors across grain labels changes KAM"
+  ],
+  "keywords": [
+    "T12",
+    "IF steel",
+    "EBSD",
+    "KAM",
+    "kernel radius",
+    "same grain",
+    "same phase",
+    "2D",
+    "public data"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+      "role": "Complete output of T12 Orientation Preparation with indexed pixels, grain labels, and average quaternions."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Neighborhoods/T12_NeighborhoodComparison.dream3d",
+      "role": "Full T12 checkpoint plus three cell KAM maps and three one-row masked pixel summaries."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "Three aligned KAM maps with invalid pixels distinguished from valid zero-valued pixels and a table of pixel summary statistics.",
+    "target_traits": [
+      "1255 by 911 by 1 measured cells",
+      "0.5 micrometer XY spacing and unit Z spacing",
+      "IndexedPixels mask and preserved FeatureIds",
+      "Cubic phase symmetry from the CTF checkpoint",
+      "ReportableFeatures selects grains with at least four pixels"
+    ],
+    "known_differences": "The paper uses four nearest neighbors; NX square windows include center and diagonals. Radius and grouping comparisons change the neighborhood question. Paper noise reduction, deformation-state assignment, and full multi-map analysis are not reproduced.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-orientation-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare KAM neighborhood radius at fixed same-grain grouping",
+      "Compare same-grain and same-phase KAM at fixed radius",
+      "Save aligned pixel maps and equally weighted indexed-pixel summaries"
+    ],
+    "questions_to_ask": [
+      "Do the checkpoint phase symmetry, grain labels, and validity mask match the acquisition?",
+      "What physical XY reach and neighbor grouping answer the scientific question?",
+      "Should reported statistics weight all indexed pixels or a selected grain population?"
+    ],
+    "constraints": [
+      "Run T12 Orientation Preparation first; this example independently reads its checkpoint and does not require pipeline 02.",
+      "The .d3dpipeline arguments are executable authority; this is illustrative, not a validated acceptance procedure.",
+      "NX windows include center and diagonals, unlike the paper four-neighbor KAM.",
+      "The same-phase variant can cross positive FeatureIds but excludes phase-zero and feature-zero cells.",
+      "All three summaries use IndexedPixels, so they include pixels in grains smaller than four cells.",
+      "Radius and grouping changes preserve source grain labels and do not add a KAM angle cutoff.",
+      "Do not infer GAM, geometrically necessary dislocation density, strain, deformation state, or exact paper reproduction."
+    ],
+    "related_pipelines": []
+  },
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "The paper motivates orientation variation and defines four-neighbor KAM in Equation 3; its five-degree criterion concerns segmentation, not an additional cutoff in these NX KAM variants.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Original paper-linked measured map with current NX filters. The paper noise-reduction method, exact file-to-deformation-state correspondence, complete multi-map analysis, and numerical identity are not established."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current filter UUIDs, parameters, symmetry-aware misorientation implementations, output units, and masked statistics semantics."
+    }
+  ],
+  "last_verified": "2026-10-07",
+  "verification_status": "Windows in-memory Release full-chain preflight/execution passed. Independent cubic-symmetry checks matched 239 stratified KAM samples per variant and all saved summary fields. Both branches preserve every preparation dataset and geometry; the R1 grain map exactly matches pipeline 02. Materials interpretation, GUI, OOC and generated Python execution remain unverified.",
+  "dimensional_scope": "Measured 2D EBSD map. Three symmetry-aware KAM maps in degrees; all summaries weight indexed pixels equally. No 3D, strain, or dislocation-density inference.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the full saved T12 preparation checkpoint, including masks, grain labels, and average quaternions.",
+      "input_paths": [
+        "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d"
+      ],
+      "output_paths": [
+        "T12"
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "role": "Compute radius-one same-grain KAM as the fixed grouping and radius baseline.",
+      "input_paths": [
+        "T12",
+        "T12/Cell Data/FeatureIds",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/Quats",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Cell Data/KAM_R1_Grain"
+      ],
+      "key_parameters": {
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "input_image_geometry_path": "T12",
+        "kernel_average_misorientations_array_name": "KAM_R1_Grain",
+        "kernel_size": [
+          1,
+          1,
+          0
+        ],
+        "quats_array_path": "T12/Cell Data/Quats",
+        "use_feature_ids": true
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 2,
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "role": "Grow the same-grain radius to two cells, changing spatial reach only.",
+      "input_paths": [
+        "T12",
+        "T12/Cell Data/FeatureIds",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/Quats",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Cell Data/KAM_R2_Grain"
+      ],
+      "key_parameters": {
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "input_image_geometry_path": "T12",
+        "kernel_average_misorientations_array_name": "KAM_R2_Grain",
+        "kernel_size": [
+          2,
+          2,
+          0
+        ],
+        "quats_array_path": "T12/Cell Data/Quats",
+        "use_feature_ids": true
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "role": "Keep radius one but admit same-phase cells with other positive FeatureIds.",
+      "input_paths": [
+        "T12",
+        "T12/Cell Data/FeatureIds",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/Quats",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Cell Data/KAM_R1_Phase"
+      ],
+      "key_parameters": {
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "input_image_geometry_path": "T12",
+        "kernel_average_misorientations_array_name": "KAM_R1_Phase",
+        "kernel_size": [
+          1,
+          1,
+          0
+        ],
+        "quats_array_path": "T12/Cell Data/Quats",
+        "use_feature_ids": false
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 4,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Compute one-row, equally weighted IndexedPixels statistics for KAM_R1_Grain; include small grains.",
+      "input_paths": [
+        "T12/Cell Data/KAM_R1_Grain",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "T12/KAM_R1_GrainSummary/Length",
+        "T12/KAM_R1_GrainSummary/Minimum",
+        "T12/KAM_R1_GrainSummary/Maximum",
+        "T12/KAM_R1_GrainSummary/Mean",
+        "T12/KAM_R1_GrainSummary/Median",
+        "T12/KAM_R1_GrainSummary/StandardDeviation"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Data/KAM_R1_Grain",
+        "destination_attribute_matrix_path": "T12/KAM_R1_GrainSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Compute one-row, equally weighted IndexedPixels statistics for KAM_R2_Grain; include small grains.",
+      "input_paths": [
+        "T12/Cell Data/KAM_R2_Grain",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "T12/KAM_R2_GrainSummary/Length",
+        "T12/KAM_R2_GrainSummary/Minimum",
+        "T12/KAM_R2_GrainSummary/Maximum",
+        "T12/KAM_R2_GrainSummary/Mean",
+        "T12/KAM_R2_GrainSummary/Median",
+        "T12/KAM_R2_GrainSummary/StandardDeviation"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Data/KAM_R2_Grain",
+        "destination_attribute_matrix_path": "T12/KAM_R2_GrainSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Compute one-row, equally weighted IndexedPixels statistics for KAM_R1_Phase; include small grains.",
+      "input_paths": [
+        "T12/Cell Data/KAM_R1_Phase",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "T12/KAM_R1_PhaseSummary/Length",
+        "T12/KAM_R1_PhaseSummary/Minimum",
+        "T12/KAM_R1_PhaseSummary/Maximum",
+        "T12/KAM_R1_PhaseSummary/Mean",
+        "T12/KAM_R1_PhaseSummary/Median",
+        "T12/KAM_R1_PhaseSummary/StandardDeviation"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Data/KAM_R1_Phase",
+        "destination_attribute_matrix_path": "T12/KAM_R1_PhaseSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 7,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save source arrays unchanged with three KAM maps and three masked one-row summaries; compression level five, no XDMF.",
+      "input_paths": [
+        "T12"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Neighborhoods/T12_NeighborhoodComparison.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/T12_Orientation_Examples/Neighborhoods/T12_NeighborhoodComparison.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ]
+}
