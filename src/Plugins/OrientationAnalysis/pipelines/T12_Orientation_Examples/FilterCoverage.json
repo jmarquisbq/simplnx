@@ -57,6 +57,41 @@
       "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
       "step": 8,
       "purpose": "Save measured arrays, validity mask, unchanged segmentation, feature sizes, reporting mask, and average orientations as the shared checkpoint."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the full saved T12 preparation checkpoint, including masks, grain labels, and average quaternions."
+    },
+    {
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+      "step": 1,
+      "purpose": "Compare only cells in the same grain and phase within a clipped 3 by 3, single-slice window; output degrees."
+    },
+    {
+      "filter": "ComputeFeatureReferenceMisorientationsFilter",
+      "uuid": "24b54daf-3bf5-4331-93f6-03a49f719bf1",
+      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+      "step": 2,
+      "purpose": "Compare each cell quaternion with its grain AvgQuats; save cell reference angles and per-grain mean spread in degrees."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+      "step": 3,
+      "purpose": "Summarize KAM over indexed pixels; each admitted pixel contributes once."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+      "step": 6,
+      "purpose": "Export positive Feature_ID rows with GrainOrientationSpread, ReportableFeatures, and unchanged feature measurements."
     }
   ]
 }

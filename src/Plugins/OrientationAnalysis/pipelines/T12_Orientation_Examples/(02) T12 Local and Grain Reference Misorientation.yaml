@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
+  "markdown_file": "(02) T12 Local and Grain Reference Misorientation.md",
+  "title": "T12 Local and Grain Reference Misorientation",
+  "summary": "Compare same-grain local orientation differences with grain-average reference differences in one measured 2D IF-steel map, preserving its source arrays.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Steel manufacturing"
+  ],
+  "use_cases": [
+    "Map local and grain-reference misorientation in indexed EBSD pixels",
+    "Compare pixel-weighted angles with equal-grain orientation-spread statistics"
+  ],
+  "keywords": [
+    "T12",
+    "IF steel",
+    "EBSD",
+    "KAM",
+    "grain orientation spread",
+    "GOS",
+    "misorientation",
+    "2D",
+    "public data"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+      "role": "Complete output of T12 Orientation Preparation with indexed pixels, grain labels, and average quaternions."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.csv",
+      "role": "Positive Feature_ID rows with GrainOrientationSpread, ReportableFeatures, and original feature measurements."
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d",
+      "role": "Complete T12 arrays plus two cell misorientation maps, grain spread, and three one-row summaries."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "Side-by-side KAM and grain-reference angle maps with invalid pixels distinguished from zero-valued valid pixels.",
+    "target_traits": [
+      "1255 by 911 by 1 measured cells",
+      "0.5 micrometer XY spacing and unit Z spacing",
+      "IndexedPixels mask and preserved FeatureIds",
+      "Cubic phase symmetry from the CTF checkpoint",
+      "ReportableFeatures selects grains with at least four pixels"
+    ],
+    "known_differences": "The paper KAM uses four nearest neighbors, whereas this NX radius-one window can include the center and diagonals. Its noise reduction, deformation-state assignment, and full multi-map comparisons are not reproduced. This pipeline is illustrative.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-orientation-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare local and grain-reference orientation variation in an indexed EBSD map",
+      "Inspect grain orientation spread while retaining small grains",
+      "Export per-grain metrics and separate masked population summaries"
+    ],
+    "questions_to_ask": [
+      "Does the input checkpoint use radians-based Euler angles, valid quaternions, and the correct phase symmetry?",
+      "Should KAM stay within grain labels, and what physical neighborhood is appropriate?",
+      "Should the report weight cells or grains, and which feature-size threshold is justified?"
+    ],
+    "constraints": [
+      "Run T12 Orientation Preparation first and read its complete checkpoint.",
+      "The .d3dpipeline arguments are executable authority; this is an illustrative example, not a validated acceptance procedure.",
+      "Input Euler angles were converted to radians; both new misorientation filters write degrees.",
+      "KAM is a clipped square neighborhood including center and diagonals, not the paper four-neighbor kernel.",
+      "Pixel summaries use IndexedPixels; grain summary uses ReportableFeatures and weights each selected grain once.",
+      "Feature 0 and small features are retained but not reportable grain rows.",
+      "Do not infer strain, geometrically necessary dislocation density, deformation state, or exact paper reproduction from these metrics."
+    ],
+    "related_pipelines": []
+  },
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "The paper defines grain orientation spread in Equations 1 and 2 and a four-neighbor KAM in Equation 3. Section 2.2 motivates the five-degree grain criterion and minimum four-pixel reporting size; the NX window differs.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Original paper-linked measured map with current NX filters. The paper noise-reduction method, exact file-to-deformation-state correspondence, complete multi-map analysis, and numerical identity are not established."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current filter UUIDs, parameters, symmetry-aware misorientation implementations, output units, and masked statistics semantics."
+    }
+  ],
+  "last_verified": "2026-10-07",
+  "verification_status": "Windows in-memory Release chain preflight/execution passed. Independent cubic-symmetry checks matched all reference angles and grain means, stratified KAM samples, all summary fields, and all feature CSV columns. Input arrays were unchanged. Mean-orientation estimator is not independently reproduced; materials review, GUI, OOC and generated Python execution remain unverified.",
+  "dimensional_scope": "Measured 2D EBSD map. Orientation differences are in degrees. Pixel statistics are cell-weighted; grain spread statistics are equally weighted across reportable grains. No 3D volume or strain inference.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the full saved T12 preparation checkpoint, including masks, grain labels, and average quaternions.",
+      "input_paths": [
+        "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d"
+      ],
+      "output_paths": [
+        "T12"
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "role": "Compare only cells in the same grain and phase within a clipped 3 by 3, single-slice window; output degrees.",
+      "input_paths": [
+        "T12",
+        "T12/Cell Data/FeatureIds",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/Quats",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Cell Data/KAM_R1_Grain"
+      ],
+      "key_parameters": {
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "input_image_geometry_path": "T12",
+        "kernel_average_misorientations_array_name": "KAM_R1_Grain",
+        "kernel_size": [
+          1,
+          1,
+          0
+        ],
+        "quats_array_path": "T12/Cell Data/Quats",
+        "use_feature_ids": true
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 2,
+      "filter": "ComputeFeatureReferenceMisorientationsFilter",
+      "uuid": "24b54daf-3bf5-4331-93f6-03a49f719bf1",
+      "role": "Compare each cell quaternion with its grain AvgQuats; save cell reference angles and per-grain mean spread in degrees.",
+      "input_paths": [
+        "T12/Cell Data/FeatureIds",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/Quats",
+        "T12/Cell Feature Data/AvgQuats",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Cell Data/ReferenceMisorientations",
+        "T12/Cell Feature Data/GrainOrientationSpread"
+      ],
+      "key_parameters": {
+        "avg_quats_array_path": "T12/Cell Feature Data/AvgQuats",
+        "cell_feature_attribute_matrix_path": "T12/Cell Feature Data",
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "feature_avg_misorientations_array_name": "GrainOrientationSpread",
+        "feature_euclidean_center_array_name": "Euclidean Centers",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "feature_reference_misorientations_array_name": "ReferenceMisorientations",
+        "gb_euclidean_distances_array_path": "Cell Data/GBEuclideanDistances",
+        "quats_array_path": "T12/Cell Data/Quats",
+        "reference_orientation_index": 0
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize KAM over indexed pixels; each admitted pixel contributes once.",
+      "input_paths": [
+        "T12/Cell Data/KAM_R1_Grain",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "T12/PixelKAMSummary"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Data/KAM_R1_Grain",
+        "destination_attribute_matrix_path": "T12/PixelKAMSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 4,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize grain-reference misorientation over indexed pixels; each admitted pixel contributes once.",
+      "input_paths": [
+        "T12/Cell Data/ReferenceMisorientations",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "T12/PixelReferenceSummary"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Data/ReferenceMisorientations",
+        "destination_attribute_matrix_path": "T12/PixelReferenceSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize one spread per reportable grain with at least four pixels; each grain contributes once.",
+      "input_paths": [
+        "T12/Cell Feature Data/GrainOrientationSpread",
+        "T12/Cell Feature Data/ReportableFeatures"
+      ],
+      "output_paths": [
+        "T12/GrainGOSSummary"
+      ],
+      "key_parameters": {
+        "selected_array_path": "T12/Cell Feature Data/GrainOrientationSpread",
+        "destination_attribute_matrix_path": "T12/GrainGOSSummary",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Feature Data/ReportableFeatures",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": true,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export positive Feature_ID rows with GrainOrientationSpread, ReportableFeatures, and unchanged feature measurements.",
+      "input_paths": [
+        "T12/Cell Feature Data"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.csv"
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "T12/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save original T12 arrays plus cell maps, grain spread, and the three one-row masked summaries.",
+      "input_paths": [
+        "T12"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ]
+}
