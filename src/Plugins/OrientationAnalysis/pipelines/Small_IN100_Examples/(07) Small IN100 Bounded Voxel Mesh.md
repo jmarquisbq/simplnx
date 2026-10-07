@@ -25,13 +25,15 @@ The checked input has XYZ dimensions `189 × 201 × 117`, spacing `0.25 × 0.25 
 
 The selected current slice contains 23 positive original IDs and no background cells. That is an observation of this checkpoint, not a guarantee for a changed input. The writer meshes **zero/background voxels too**. A background-free ROI was chosen deliberately, but it is not statistically representative. Several grains terminate at crop faces; those fragments are not complete original grain shapes.
 
+The 24-cell side length keeps the export small while retaining multiple features and interfaces; it is a demonstration size, not an estimate of a representative volume. Voxel bounds specify exactly which cells are included. Physical bounds are an alternative when the region is defined in world coordinates, but require checking how those bounds map to cells.
+
 ## Data flow and filter settings
 
 1. `ReadDREAM3D` imports the preparation checkpoint once.
-2. `CopyDataObject` deep-copies cell `FeatureIds` to the same parent using suffix `_Original`, creating `FeatureIds_Original` before the crop.
-3. `CropImageGeometry` uses **voxel**, not physical, bounds; enables X/Y/Z; crops in place; and renumbers the selected `FeatureIds` against `Cell Feature Data`. Every retained cell array, including `FeatureIds_Original`, is sliced. Only selected `FeatureIds` is compacted. The checked original IDs, sorted ascending, map one-to-one to compact IDs `1..23`; feature row 0 remains, giving 24 rows.
-4. `WriteAbaqusHexahedron` writes `DataContainer` with compact cell `FeatureIds`. It writes one C3D8 element per cell and shared grid nodes, with no dummy node. The job name is `SmallIN100_ROI24_illustrative`. Its `hourglass_stiffness=250` is the writer's default illustrative file parameter; it is **not** a calibrated or recommended material parameter.
-5. `WriteDREAM3D` saves `SmallIN100_MeshROI.dream3d` with compression enabled and XDMF disabled.
+2. `CopyDataObject` deep-copies cell `FeatureIds` to the same parent using suffix `_Original`, creating `FeatureIds_Original` before the crop. Keeping this copy makes the source-to-local ID mapping inspectable after renumbering; local IDs alone would lose the source identity.
+3. `CropImageGeometry` uses **voxel**, not physical, bounds; enables X/Y/Z; crops in place; and renumbers the selected `FeatureIds` against `Cell Feature Data`. Every retained cell array, including `FeatureIds_Original`, is sliced. Only selected `FeatureIds` is compacted. The checked original IDs, sorted ascending, map one-to-one to compact IDs `1..23`; feature row 0 remains, giving 24 rows. Compact IDs avoid empty grain sets because this writer emits sets from 1 through the maximum ID. Preserving global IDs is an alternative when a downstream convention requires them, but keep the two ID systems distinct.
+4. `WriteAbaqusHexahedron` writes `DataContainer` with compact cell `FeatureIds`. A volume mesh is chosen to preserve one C3D8 element per cell; a surface-triangle export would describe boundaries rather than fill the volume. Grid nodes are shared between adjacent elements. The optional dummy node is disabled because this example supplies no stress-strain setup that uses it. The job name is `SmallIN100_ROI24_illustrative`. Its `hourglass_stiffness=250` is the writer's default illustrative file parameter; it is **not** a calibrated or recommended material parameter.
+5. `WriteDREAM3D` saves `SmallIN100_MeshROI.dream3d` with compression enabled and XDMF disabled. This retains geometry and both label arrays for tracing mesh grain sets back to the measured reconstruction.
 
 Create `Data/Output/Small_IN100_Examples/VoxelMesh/` in the chosen CLI working folder **before preflight**. The Abaqus writer rejects a missing output directory. All six outputs stay in this folder:
 
@@ -46,9 +48,7 @@ Node coordinates are in **micrometers** because the source geometry uses microme
 
 ![Data-derived mid-slice original-to-compact labels and bounded ROI](SmallIN100BoundedVoxelMesh.png)
 
-The preview compares the same interior Z slice in the two saved arrays and labels the ROI extent. It is neither a solver result nor native GUI rendering. Counts, label IDs, and geometry describe the checked input only.
-
-In a checked Windows in-core Release run, isolated preflight and execution passed, the registered seven-example chain passed, and independent checks matched the source crop, label mapping, and every node, element, grain set, and section reference. The flat runtime and staged-install copies matched the source suite. OOC, generated Python execution, native GUI behavior, Abaqus solving, and LengMorph consumption remain unverified.
+The preview compares the same interior Z slice in the two saved arrays and labels the ROI extent; it is not a solver result. Counts, label IDs, and geometry describe the reference input only.
 
 ## Adaptation and quality checks
 

@@ -19,6 +19,8 @@ Feature size and shape do not show which segmented regions touch. This illustrat
 
 `ComputeFeatureNeighbors` uses the final `DataContainer/Cell Data/FeatureIds`. Two different positive IDs are neighbors when their cells share at least one face. Background ID 0, exterior faces, edge-only contact, and corner-only contact are excluded as graph endpoints. This branch does not wrap opposite image faces or use twin `ParentIds`. Its contacts differ from the temporary neighbors used during cleanup in pipeline 01.
 
+This filter answers a contact question: which regions touch, and over what area? `ComputeNeighborhoods` instead finds nearby features from centroid distances and can include regions that do not touch. Recomputing contacts from the final labels avoids reusing a graph from before cleanup changed the boundaries. Raw EBSD orientations and a surface mesh are not needed for this voxel-face calculation.
+
 Each neighbor list is sorted by ID. `NeighborList` and `SharedSurfaceAreaList` align row by row: an area belongs to the neighbor at the same position. Every undirected pair appears once in each endpoint's row with equal area. For one feature, `TotalSharedArea` already sums all its contacts and needs no halving. To get unique shared area between positive feature IDs, halve the directed sum over the complete positive-positive graph. This excludes background and exterior faces; halving an arbitrary subset with missing endpoints is not valid.
 
 The area is a voxel-face estimate in the geometry length unit squared. This checkpoint has 0.25 µm spacing in X, Y, and Z, so every shared face contributes 0.0625 µm². With anisotropic spacing `(dx, dy, dz)`, faces normal to X, Y, and Z contribute `dy*dz`, `dx*dz`, and `dx*dy`, respectively. These are physical contact areas, not dimensionless face counts or smooth grain-boundary estimates. Resolution, segmentation, and image truncation affect them. If spacing or length units are corrected, rerun neighbor computation and list statistics for physical areas; stored areas do not update automatically. Rerun feature measurements too when physical sizes, centroids, or shapes are needed. Labels and topology can remain unchanged only when the correction changes geometry metadata without changing cell assignments.
@@ -27,15 +29,15 @@ The area is a voxel-face estimate in the geometry length unit squared. This chec
 
 ## Outputs and interpretation
 
-`ComputeNeighborListStatistics` writes `SharedAreaListLength`, `MeanSharedArea`, `LargestSharedArea`, and `TotalSharedArea` for each feature. Length should equal `NumNeighbors`. The mean is the unweighted arithmetic mean of one feature's distinct neighbor areas; it is not a global area-weighted grain statistic. An empty list gives zero scalar reductions, so use `NumElements>0` before interpreting a distribution.
+`ComputeNeighborListStatistics` writes `SharedAreaListLength`, `MeanSharedArea`, `LargestSharedArea`, and `TotalSharedArea` for each feature. Reducing each list separately preserves its association with a feature; flattening the lists would mix features and count both directions of every contact. Length should equal `NumNeighbors`. The mean is the unweighted arithmetic mean of one feature's distinct neighbor areas; it is not a global area-weighted grain statistic.
+
+Use `NumElements>0` to exclude unused feature rows. An occupied feature isolated from other positive IDs can still have an empty neighbor list. The filter writes zero reductions for an empty list: zero total means no positive-feature contact area, but zero mean is a placeholder, not a measured interface size. Handle these rows explicitly when summarizing mean contact areas across features.
 
 - `Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv` contains scalar feature data with `Feature_ID` rows. It omits background row 0 but retains unused positive rows. Neighbor-list export is disabled to keep this table rectangular.
 - `Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d` contains both complete neighbor lists, physical areas, scalar reductions, geometry, labels, and original measurements. XDMF export is disabled.
 
-The plot below shows the degree and total shared-area distributions for occupied positive-ID features from the checked SmallIN100 run. It is a data-derived preview, not evidence of native GUI rendering.
+The plot below shows the degree and total shared-area distributions for occupied positive-ID features from the reference SmallIN100 checkpoint.
 
 ![Occupied-feature neighbor count and total shared area](SmallIN100NeighborRelationships.png)
 
 The checked fixture has 2,317 occupied positive rows and 17 unused positive rows. Its contact graph has 14,003 unique pairs and 28,006 directed entries. The unique shared area between positive feature IDs is 66,156.4375 µm²; summing all feature totals gives twice that value. Occupied degrees range from 1 to 64. The `GeometrySurfaceFeatures` image-box flag marks 448 positive-ID features. These values belong to this input and must be recomputed for another volume.
-
-For the checked Windows in-core Release branch, isolated preflight and execution passed. An independent axis-pair scan of the input labels and spacing matched every saved neighbor ID, packed-list count, shared area, scalar reduction, and image-box flag. Original arrays and geometry were unchanged, and scalar CSV rows matched the saved DREAM3D arrays. An altered-spacing validation case checked the three distinct perpendicular face areas; it did not remeasure the existing physical feature arrays. OOC, generated Python, native GUI behavior, and human interpretation review remain unverified.
