@@ -26,7 +26,15 @@ An electron backscatter diffraction (EBSD) map measures crystal orientation at e
 | Three Attribute Array Statistics | Each one-row matrix, `T12/KAM_R1_GrainSummary`, `T12/KAM_R2_GrainSummary`, or `T12/KAM_R1_PhaseSummary`, masks its cell map with `T12/Cell Data/IndexedPixels`. Each records `Length`, `Minimum`, `Maximum`, `Mean`, `Median`, and population `StandardDeviation` (denominator N). Pixels in grains smaller than four cells are included. Pipeline (02)'s `GrainGOSSummary` instead uses `ReportableFeatures` and weights each reportable grain once. |
 | Write DREAM3D | Save the three maps, summaries, and full checkpoint to `Data/Output/T12_Orientation_Examples/Neighborhoods/T12_NeighborhoodComparison.dream3d`, using compression level 5 and no XDMF sidecar. The maps and summaries are the stable outputs; no CSV is needed. |
 
-The NX square windows include the center pixel with a zero angle and diagonals. The paper's Equation 3 uses **four nearest neighbors**. Thus these three maps compare NX settings; they are not direct numerical reproductions of that paper KAM. A valid pixel with no other qualifying neighbor can have zero KAM, so zero alone is not proof of an undeformed or perfectly uniform region. The **below-5°** criterion in preparation defines grain segmentation; it is not an extra neighbor-angle cutoff applied by these KAM steps.
+## Why this differs from the paper
+
+The NX square windows include the center pixel with a zero angle and diagonals. The paper's Equation 3 uses **four surrounding pixels**. We use the built-in NX filter to compare its supported radius and grain-grouping choices on one fixed input. The larger window and across-grain variant are teaching comparisons, not settings attributed to the paper or proposed improvements to its method.
+
+To reproduce a four-neighbor calculation, add a validated script or filter selecting only the axial neighbors. No radius setting in this filter gives that cross-shaped neighborhood with the center excluded. Confirm how the intended method treats invalid pixels, grain boundaries and map edges, and normalize by its admitted-neighbor rule. Test the added calculation on hand-checkable orientations before applying it to T12. Multiplying the square-window output by a constant cannot remove its diagonal contributions.
+
+Noise reduction and matched deformation maps are also omitted: this branch holds the supplied preparation fixed so changes can be attributed to neighborhood choices. If preprocessing changes, regenerate all three maps from the same revised checkpoint. If comparing deformation states, establish the scan states and spatial/grain correspondence first; feature numbers are not tracking IDs.
+
+A valid pixel with no other qualifying neighbor can have zero KAM, so zero alone is not proof of an undeformed or perfectly uniform region. The **below-5°** criterion in preparation defines grain segmentation; it is not an extra neighbor-angle cutoff applied by these KAM steps.
 
 ## Outputs and interpretation
 
