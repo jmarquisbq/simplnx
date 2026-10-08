@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "scope": "The two T12 import demonstrations only.",
+  "filters": [
+    {
+      "filter": "ReadCSVFileFilter",
+      "uuid": "373be1f8-31cf-49f6-aa5d-e356f4f3f261",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 0,
+      "purpose": "Import seven named scalar columns as explicit numeric types into a 3059-row Attribute Matrix. CSV row zero represents Feature_ID 1."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 1,
+      "purpose": "Count reportable features and calculate their equal-feature mean GOS in degrees; inspect Length and Mean."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 2,
+      "purpose": "Save the imported table and its independently calculated one-row summary."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) T12 Selective DREAM3D Import.d3dpipeline",
+      "step": 0,
+      "purpose": "Include the Reporting group and all its descendants, preserving the feature Attribute Matrix and background row; omit the original T12 tree."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(02) T12 Selective DREAM3D Import.d3dpipeline",
+      "step": 1,
+      "purpose": "Count reportable features and calculate their equal-feature mean GOS in degrees; inspect Length and Mean."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) T12 Selective DREAM3D Import.d3dpipeline",
+      "step": 2,
+      "purpose": "Save the imported table and its independently calculated one-row summary."
+    }
+  ]
+}

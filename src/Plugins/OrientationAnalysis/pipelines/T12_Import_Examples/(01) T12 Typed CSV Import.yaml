@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) T12 Typed CSV Import.d3dpipeline",
+  "markdown_file": "(01) T12 Typed CSV Import.md",
+  "title": "T12 Typed CSV Import",
+  "summary": "Parse the compact T12 feature report with explicit column types, then summarize reportable grain GOS.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Steel manufacturing"
+  ],
+  "use_cases": [
+    "Reimport a feature measurement table",
+    "Compare typed CSV and selective structured imports"
+  ],
+  "keywords": [
+    "T12",
+    "IF steel",
+    "EBSD",
+    "CSV",
+    "feature report",
+    "selective import"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+      "role": "Output of T12 Reporting example 03."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Import_Examples/CSV/T12_CSVImport.dream3d",
+      "role": "Imported table and masked GOS summary."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "Actual imported grain measurements and Float32 diameter round-trip residuals by Feature_ID.",
+    "target_traits": [
+      "1255 by 911 by 1 measured cells",
+      "0.5 micrometer XY spacing and unit Z spacing",
+      "IndexedPixels mask and preserved FeatureIds",
+      "Cubic phase symmetry from the CTF checkpoint",
+      "ReportableFeatures selects grains with at least four pixels"
+    ],
+    "known_differences": "These are NX import demonstrations using the paper-linked map, not paper import methods or numerical reproduction.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-import-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Reuse a T12 feature report with explicit types",
+      "Compare CSV and selective DREAM3D import"
+    ],
+    "questions_to_ask": [
+      "Did Reporting example 03 produce the expected input file?",
+      "Are feature IDs and tuple counts unchanged?"
+    ],
+    "constraints": [
+      "CSV rows 0..3058 correspond to Feature_ID 1..3059; join on Feature_ID.",
+      "Structured import retains background row 0 and imports only Reporting descendants.",
+      "Neither pipeline reconstructs a geometry or validates material acceptance."
+    ],
+    "related_pipelines": [
+      "../T12_Reporting_Examples/(03) T12 Compact Report.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "The paper motivates grain orientation heterogeneity; these typed and selective imports are illustrative NX extensions.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Original paper-linked measured map with current NX filters. The paper noise-reduction method, exact file-to-deformation-state correspondence, complete multi-map analysis, and numerical identity are not established."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current ReadCSV, ReadDREAM3D, masked statistics, and writer behavior and serialized parameter contracts."
+    }
+  ],
+  "last_verified": "2026-10-08",
+  "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadCSVFileFilter",
+      "uuid": "373be1f8-31cf-49f6-aa5d-e356f4f3f261",
+      "parameters_version": 1,
+      "role": "Import seven named scalar columns as explicit numeric types into a 3059-row Attribute Matrix. CSV row zero represents Feature_ID 1.",
+      "input_paths": [
+        "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv"
+      ],
+      "output_paths": [],
+      "key_parameters": {
+        "read_csv_data_object": {
+          "Consecutive Delimiters": false,
+          "Custom Headers": [],
+          "Data Types": [
+            4,
+            8,
+            8,
+            8,
+            4,
+            8,
+            1
+          ],
+          "Delimiters": [
+            ","
+          ],
+          "Header Line": 1,
+          "Header Mode": 0,
+          "Input File Path": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+          "Skipped Array Mask": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ],
+          "Start Import Row": 2,
+          "Tuple Dimensions": [
+            3059
+          ]
+        },
+        "use_existing_group": false,
+        "selected_attribute_matrix_path": "",
+        "created_data_group_path": "ImportedCSV"
+      }
+    },
+    {
+      "index": 1,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "parameters_version": 2,
+      "role": "Count reportable features and calculate their equal-feature mean GOS in degrees; inspect Length and Mean.",
+      "input_paths": [],
+      "output_paths": [],
+      "key_parameters": {
+        "selected_array_path": "ImportedCSV/GrainOrientationSpread",
+        "destination_attribute_matrix_path": "CSVSummary",
+        "use_mask": true,
+        "mask_array_path": "ImportedCSV/ReportableFeatures",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "GOSZScore",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      }
+    },
+    {
+      "index": 2,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "parameters_version": 2,
+      "role": "Save the imported table and its independently calculated one-row summary.",
+      "input_paths": [],
+      "output_paths": [
+        "Data/Output/T12_Import_Examples/CSV/T12_CSVImport.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/T12_Import_Examples/CSV/T12_CSVImport.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      }
+    }
+  ],
+  "import_contract": {
+    "columns": [
+      "Feature_ID:int32",
+      "EquivalentCircleDiameters:float32",
+      "GOSZScore:float32",
+      "GrainOrientationSpread:float32",
+      "NumElements:int32",
+      "PixelAreas:float32",
+      "ReportableFeatures:uint8"
+    ],
+    "header_line": 1,
+    "first_data_line": 2,
+    "delimiter": ",",
+    "tuple_dimensions": [
+      3059
+    ]
+  },
+  "reference_figure": {
+    "file": "T12CSVImport.png",
+    "source": "Actual supplied-data pipeline output",
+    "description": "Actual imported grain measurements and Float32 diameter round-trip residuals by Feature_ID."
+  },
+  "reference_results": {
+    "reportable_feature_count": 1443,
+    "equal_feature_gos_mean_degrees": 2.325058781039112,
+    "rows": 3059,
+    "arrays": 7,
+    "background_included": false,
+    "mask_type": "uint8",
+    "maximum_diameter_roundtrip_error_micrometers": 9.5367431640625e-07
+  }
+}
