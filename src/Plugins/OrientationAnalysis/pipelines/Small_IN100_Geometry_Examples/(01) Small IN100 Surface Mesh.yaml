@@ -1,0 +1,607 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Small IN100 Surface Mesh.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Surface Mesh.md",
+  "title": "Small IN100 Surface Mesh",
+  "summary": "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Computational geometry"
+  ],
+  "use_cases": [
+    "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals."
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "triangle mesh",
+    "SurfaceNets",
+    "FaceLabels",
+    "bounded crop",
+    "geometry"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+      "role": "Required predecessor checkpoint; see README for archive, preparation, and branch order."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+      "role": "Full labeled checkpoint retaining the bounded image and baseline mesh.",
+      "sha256": "3082c47a9eaf8c2ed80e8db1b7c674b1d87a6cbfe88a33e1fa9fc444788d44c8"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson Figure 5 for the measured reconstruction context; Frisken Figure 9 for the accuracy/smoothing tradeoff, not a numerical target for this alloy.",
+    "target_traits": [
+      "24 by 24 by 24 measured-derived cells",
+      "0.25 isotropic source spacing",
+      "Original positive feature labels retained",
+      "Shared internal interfaces and artificial crop caps"
+    ],
+    "known_differences": "Interior crop, modern SurfaceNets, selected smoothing parameters, and optional rigid transform differ from the 2014 case. No exact input identity with the publisher supplement or named paper mesh result is established. No synthetic or medical input from the 2022 paper is used.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "../Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-geometry-python-generation-v1"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds, crop every cell array, and start from the preparation checkpoint without whole-volume feature measurements.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "output_image_geometry_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          82,
+          88,
+          46
+        ],
+        "max_voxel": [
+          105,
+          111,
+          69
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "remove_original_geometry": true,
+        "input_image_geometry_path": "DataContainer",
+        "renumber_features": false,
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "output_image_geometry_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "SurfaceNetsFilter",
+      "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
+      "role": "Create the unsmoothed multi-label baseline. Keep artificial crop caps, original positive FeatureIds, exterior FaceLabels -1, and NodeTypes; no cell or feature attribute transfer. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication.",
+      "paths": [
+        {
+          "parameter": "input_grid_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "input_feature_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "output_triangle_geometry_path",
+          "value": "SurfaceMesh_Raw"
+        }
+      ],
+      "key_parameters": {
+        "input_grid_geometry_path": "DataContainer",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_data_array_paths": [],
+        "input_feature_data_array_paths": [],
+        "output_triangle_geometry_path": "SurfaceMesh_Raw",
+        "vertex_data_group_name": "Vertex Data",
+        "node_types_array_name": "NodeTypes",
+        "face_data_group_name": "Face Data",
+        "face_labels_array_name": "FaceLabels",
+        "apply_smoothing": false,
+        "repair_triangle_winding": true,
+        "bounding_box_skin_mode_index": 0,
+        "smoothing_iterations": 10,
+        "max_distance_from_voxel": 0.5,
+        "relaxation_factor": 0.5
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "SurfaceMesh"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "SurfaceMesh_Raw/Shared Vertex List"
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": "SurfaceMesh_Raw/Shared Faces List"
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "SurfaceMesh",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SurfaceMesh_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SurfaceMesh_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "SurfaceMesh_Raw/Face Data/FaceLabels"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "SurfaceMesh/Face Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "SurfaceMesh_Raw/Face Data/FaceLabels"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SurfaceMesh/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "SurfaceMesh_Raw/Vertex Data/NodeTypes"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "SurfaceMesh/Vertex Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "SurfaceMesh_Raw/Vertex Data/NodeTypes"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SurfaceMesh/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "SurfaceMesh_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "SurfaceMesh_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "SurfaceMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "SurfaceMesh",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "SurfaceMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "SurfaceMesh",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: representation of reconstructed 3D EBSD features as geometric objects and the reconstruction-and-meshing case study; the modern crop and SurfaceNets stages are illustrative adaptations.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Measured-derived Small IN100 crop and modern SurfaceNets are not an exact reproduction of the 2014 reconstruction or meshing results. The 2022 algorithm paper uses medical and synthetic examples, not this alloy crop."
+      }
+    },
+    {
+      "title": "SurfaceNets for Multi-Label Segmentations with Preservation of Sharp Boundaries",
+      "authors": [
+        "Sarah F. Frisken"
+      ],
+      "year": 2022,
+      "journal": "Journal of Computer Graphics Techniques",
+      "volume": 11,
+      "issue": 1,
+      "pages": "34-54",
+      "doi": "",
+      "url": "https://jcgt.org/published/0011/01/03/paper.pdf",
+      "scope": "filter_algorithm",
+      "role": "Sections 3 and 4 explain shared multi-label interfaces, bounded relaxation, and the distinct minimum-area triangulation step. Figure 9 illustrates the smoothing tradeoff; the current implementation does not establish the section 4.4 diagonal-minimization claim.",
+      "verification_sha256": "18b8f5ffe095855fa99d2f31df5491c24ef3040bdf7410376b9f1801285ab2e4"
+    }
+  ],
+  "last_verified": "2026-10-08",
+  "verification_status": "Windows in-memory Release: all three pipelines passed the sequential CTest chain; 108/108 independent full-array and STL checks passed. Saved output figures were generated and visually inspected. No native GUI, OOC, generated-Python, downstream solver, or exact paper-reproduction claim.",
+  "mcp": {
+    "user_intents": [
+      "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals."
+    ],
+    "questions_to_ask": [
+      "Which label array represents the intended features?",
+      "Is the crop and its artificial exterior acceptable?",
+      "What length scale and coordinate frame does the consumer require?"
+    ],
+    "constraints": [
+      "Use FeatureIds, not twin ParentIds.",
+      "Preserve original labels; no feature renumbering and no whole-volume measurement checkpoint.",
+      "Do not call the combined interface network a closed manifold or solver-ready volume mesh.",
+      "Smoothing distance is a per-coordinate cell-space bound, not a physical or radial distance.",
+      "Published meshes explicitly use Micrometer units (index 6), matching the source ImageGeom; when adapting input units, change CreateGeometryFilter length_unit_index consistently without silently rescaling coordinates.",
+      "STL loses labels, NodeTypes, and explicit unit semantics.",
+      "Do not claim exact 2014 reproduction or minimum-area diagonal selection in the current SurfaceNets implementation."
+    ],
+    "related_pipelines": [
+      "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "(03) Small IN100 Surface Transform and Export.d3dpipeline"
+    ]
+  },
+  "result_visual": {
+    "path": "SurfaceMesh.png",
+    "role": "Categorical image section at z=14.625 micrometers and the 1,138-triangle internal interface between original feature IDs 533 and 1719. Other interfaces and crop caps are hidden in the 3D panel; all counts in the footer describe the full mesh.",
+    "sha256": "d48553b43560079f6bc5784f942f79783cf4932437f0f1d18e50c90decb30564",
+    "source_outputs": [
+      {
+        "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+        "sha256": "3082c47a9eaf8c2ed80e8db1b7c674b1d87a6cbfe88a33e1fa9fc444788d44c8"
+      }
+    ],
+    "method": "Matplotlib rendering of saved image/mesh arrays; face-pair selection is for display only. No remeshing, rescaling, or external reference data.",
+    "selected_face_labels": [
+      533,
+      1719
+    ],
+    "selected_triangle_count": 1138,
+    "visual_review": "2026-10-08: labels, units, matched views, captions, margins, and numeric annotations inspected."
+  },
+  "dimensional_scope": "A 24-cubed interior crop from the 117-section measured reconstruction; cropped fragments do not establish whole-grain shapes.",
+  "cli_usage": {
+    "instructions": "See README.md for the exact chain and command pattern. Create the documented output folders before preflight.",
+    "working_directory": "One chosen writable folder containing the predecessor Data/Output tree.",
+    "relative_path_base": "Current CLI working directory",
+    "gui_note": "Open the pipeline through File > Open; set absolute file paths when relative Data paths do not resolve."
+  },
+  "geometry_units": {
+    "input_length_unit_index": 6,
+    "published_length_unit_index": 6,
+    "unit": "Micrometer",
+    "coordinates_rescaled": false,
+    "method": "SurfaceNets temporary mesh -> CreateGeometryFilter Triangle/Copy/Micrometer -> copy FaceLabels and NodeTypes -> delete temporary mesh. Example 03 separately constructs its transformed geometry with explicit Triangle/Copy/Micrometer settings.",
+    "reason": "Current SurfaceNets output retains the default Meter metadata rather than the input ImageGeom units."
+  },
+  "validation": {
+    "date": "2026-10-08",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Geometry_Examples",
+      "passed": true,
+      "elapsed_seconds": 20.38,
+      "pipelines": 3
+    },
+    "independent_checks": {
+      "passed": 108,
+      "total": 108,
+      "scope": "Independent full-array crop, mesh measurement, topology consistency, rigid transform, unit metadata, and binary STL checks. Surface Nets is not independently reimplemented. No manifold or solver-readiness proof."
+    },
+    "pipeline_sha256": "ad52666ecfa8befbf789853532bdb5e6a071c15a6fe79c28e74264ce6371054d",
+    "expected_current_fixture": {
+      "units": 6,
+      "vertices": 6479,
+      "triangles": 14052,
+      "area_total": 439.125,
+      "area_min": 0.03125,
+      "area_max": 0.03125,
+      "area_max_abs_error": 0.0,
+      "normal_max_abs_error": 0.0,
+      "bbox_min_xyz": [
+        20.500003814697266,
+        22.0,
+        11.499996185302734
+      ],
+      "bbox_max_xyz": [
+        26.500003814697266,
+        28.0,
+        17.499996185302734
+      ],
+      "label_pair_count": 94,
+      "outside_triangles": 6912,
+      "node_type_counts": {
+        "2": 2598,
+        "3": 383,
+        "4": 40,
+        "12": 2825,
+        "13": 590,
+        "14": 43
+      },
+      "saved_area_total": 439.125,
+      "area_tolerance_formula": "8 * float32_epsilon * 0.5 * norm(edge1) * norm(edge2)",
+      "area_max_error_fraction_of_tolerance": 0.0
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "downstream solver or printing",
+      "manifoldness and self-intersection freedom",
+      "exact paper-result reproduction"
+    ],
+    "crop": {
+      "dimensions_xyz": [
+        24,
+        24,
+        24
+      ],
+      "origin_xyz": [
+        20.500003814697266,
+        22.0,
+        11.499996185302734
+      ],
+      "spacing_xyz": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "source_feature_ids": [
+        153,
+        460,
+        533,
+        938,
+        962,
+        998,
+        1033,
+        1126,
+        1137,
+        1220,
+        1295,
+        1440,
+        1460,
+        1719,
+        1802,
+        1814,
+        1913,
+        1992,
+        2015,
+        2103,
+        2173,
+        2205,
+        2276
+      ],
+      "source_region_count": 23,
+      "padded_volume_label_pair_count": 94
+    }
+  }
+}

@@ -1,0 +1,346 @@
+{
+  "isDisabled": false,
+  "name": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_grid_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "input_feature_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "output_triangle_geometry_path": {
+          "value": "SmoothedSurfaceMesh_Raw",
+          "version": 1
+        },
+        "vertex_data_group_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "node_types_array_name": {
+          "value": "NodeTypes",
+          "version": 1
+        },
+        "face_data_group_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "face_labels_array_name": {
+          "value": "FaceLabels",
+          "version": 1
+        },
+        "apply_smoothing": {
+          "value": true,
+          "version": 1
+        },
+        "repair_triangle_winding": {
+          "value": true,
+          "version": 1
+        },
+        "bounding_box_skin_mode_index": {
+          "value": 0,
+          "version": 1
+        },
+        "smoothing_iterations": {
+          "value": 10,
+          "version": 1
+        },
+        "max_distance_from_voxel": {
+          "value": 0.5,
+          "version": 1
+        },
+        "relaxation_factor": {
+          "value": 0.5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Regenerate from the same cropped original FeatureIds with 10 relaxation passes, factor 0.5, and a local per-coordinate clamp of 0.5 cell units; preserve SurfaceMesh for comparison. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication.",
+      "filter": {
+        "name": "nx::core::SurfaceNetsFilter",
+        "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "SmoothedSurfaceMesh",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "SmoothedSurfaceMesh_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "SmoothedSurfaceMesh_Raw/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SmoothedSurfaceMesh_Raw/Face Data/FaceLabels"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "SmoothedSurfaceMesh/Face Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SmoothedSurfaceMesh_Raw/Vertex Data/NodeTypes"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "SmoothedSurfaceMesh/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "SmoothedSurfaceMesh_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "SmoothedSurfaceMesh",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "SmoothedFaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "SmoothedSurfaceMesh",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "SmoothedFaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Smoothing/SmallIN100_SurfaceSmoothing.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "scope": "Selected geometry examples only; occurrence coverage is not scientific validation or a complete SimplnxCore inventory.",
+  "filters": [
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 1,
+      "purpose": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds, crop every cell array, and start from the preparation checkpoint without whole-volume feature measurements."
+    },
+    {
+      "filter": "SurfaceNetsFilter",
+      "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 2,
+      "purpose": "Create the unsmoothed multi-label baseline. Keep artificial crop caps, original positive FeatureIds, exterior FaceLabels -1, and NodeTypes; no cell or feature attribute transfer. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 3,
+      "purpose": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 4,
+      "purpose": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 5,
+      "purpose": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 6,
+      "purpose": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 7,
+      "purpose": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 8,
+      "purpose": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network."
+    },
+    {
+      "filter": "SurfaceNetsFilter",
+      "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 1,
+      "purpose": "Regenerate from the same cropped original FeatureIds with 10 relaxation passes, factor 0.5, and a local per-coordinate clamp of 0.5 cell units; preserve SurfaceMesh for comparison. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 2,
+      "purpose": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 3,
+      "purpose": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 4,
+      "purpose": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 5,
+      "purpose": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 6,
+      "purpose": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 7,
+      "purpose": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 1,
+      "purpose": "Construct SurfaceMesh_Transformed by copying the baseline vertices and triangles with explicit Micrometer units (index 6). Geometry deep copy does not preserve the units. The new attribute matrices contain no copied areas or normals."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 2,
+      "purpose": "Copy baseline FaceLabels unchanged into the new micrometer geometry; preserve the original SurfaceMesh."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 3,
+      "purpose": "Copy baseline NodeTypes unchanged into the new micrometer geometry; preserve the original SurfaceMesh."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 4,
+      "purpose": "Apply p_new = Rz(90 degrees) p + [10,0,0] in the inherited coordinate scale, without centering; record the 4 by 4 matrix."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 5,
+      "purpose": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 6,
+      "purpose": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network."
+    },
+    {
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 7,
+      "purpose": "Export all transformed triangles to one binary STL, including internal interfaces and crop caps. STL does not preserve FeatureIds or declare length units."
+    }
+  ]
+}

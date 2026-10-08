@@ -1,0 +1,600 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+  "markdown_file": "(03) Small IN100 Surface Transform and Export.md",
+  "title": "Small IN100 Surface Transform and Export",
+  "summary": "Copy the baseline mesh, apply an explicit rigid coordinate transform, recompute measurements, and export one binary STL while retaining labeled DREAM3D data.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Computational geometry"
+  ],
+  "use_cases": [
+    "Copy the baseline mesh, apply an explicit rigid coordinate transform, recompute measurements, and export one binary STL while retaining labeled DREAM3D data."
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "triangle mesh",
+    "SurfaceNets",
+    "FaceLabels",
+    "bounded crop",
+    "geometry"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+      "role": "Required predecessor checkpoint; see README for archive, preparation, and branch order."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransform.dream3d",
+      "role": "Full labeled checkpoint retaining the bounded image and baseline mesh.",
+      "sha256": "4a419dc325d75bd7f97f7eede8a9e1c4def2cd1691391143eba3d4b57d53d8b0"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransformed.stl",
+      "role": "Single binary STL containing transformed triangles, including internal interfaces and crop caps; no labels or stored units.",
+      "sha256": "f0176d2583aaf79cc8ef58d3c074287d09da3f1b3dd894a1af325c1137caaa6c"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson Figure 5 for the measured reconstruction context; Frisken Figure 9 for the accuracy/smoothing tradeoff, not a numerical target for this alloy.",
+    "target_traits": [
+      "24 by 24 by 24 measured-derived cells",
+      "0.25 isotropic source spacing",
+      "Original positive feature labels retained",
+      "Shared internal interfaces and artificial crop caps"
+    ],
+    "known_differences": "Interior crop, modern SurfaceNets, selected smoothing parameters, and optional rigid transform differ from the 2014 case. No exact input identity with the publisher supplement or named paper mesh result is established. No synthetic or medical input from the 2022 paper is used.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-geometry-python-generation-v1"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Construct SurfaceMesh_Transformed by copying the baseline vertices and triangles with explicit Micrometer units (index 6). Geometry deep copy does not preserve the units. The new attribute matrices contain no copied areas or normals.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "SurfaceMesh_Transformed"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "SurfaceMesh/Shared Vertex List"
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": "SurfaceMesh/Shared Faces List"
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "SurfaceMesh_Transformed",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SurfaceMesh/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SurfaceMesh/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy baseline FaceLabels unchanged into the new micrometer geometry; preserve the original SurfaceMesh.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "SurfaceMesh/Face Data/FaceLabels"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "SurfaceMesh_Transformed/Face Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "SurfaceMesh/Face Data/FaceLabels"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SurfaceMesh_Transformed/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy baseline NodeTypes unchanged into the new micrometer geometry; preserve the original SurfaceMesh.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "SurfaceMesh/Vertex Data/NodeTypes"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "SurfaceMesh_Transformed/Vertex Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "SurfaceMesh/Vertex Data/NodeTypes"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SurfaceMesh_Transformed/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Apply p_new = Rz(90 degrees) p + [10,0,0] in the inherited coordinate scale, without centering; record the 4 by 4 matrix.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "SurfaceMesh_Transformed"
+        },
+        {
+          "parameter": "computed_transformation_matrix_path",
+          "value": ""
+        },
+        {
+          "parameter": "cell_attribute_matrix_path",
+          "value": ""
+        },
+        {
+          "parameter": "output_transform_matrix_path",
+          "value": "SurfaceTransformMatrix"
+        }
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "SurfaceMesh_Transformed",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            0.0,
+            -1.0,
+            0.0,
+            10.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "SurfaceTransformMatrix"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "SurfaceMesh_Transformed"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "SurfaceMesh_Transformed",
+        "triangle_areas_array_name": "TransformedFaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "SurfaceMesh_Transformed"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "SurfaceMesh_Transformed",
+        "output_normals_array_name": "TransformedFaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "role": "Export all transformed triangles to one binary STL, including internal interfaces and crop caps. STL does not preserve FeatureIds or declare length units.",
+      "paths": [
+        {
+          "parameter": "output_stl_file",
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransformed.stl"
+        },
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "SurfaceMesh_Transformed"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": ""
+        },
+        {
+          "parameter": "feature_phases_path",
+          "value": ""
+        },
+        {
+          "parameter": "part_number_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "grouping_type_index": 2,
+        "output_stl_file": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransformed.stl",
+        "output_stl_directory": "",
+        "output_stl_prefix": "SmallIN100_SurfaceTransformed",
+        "input_triangle_geometry_path": "SurfaceMesh_Transformed",
+        "feature_ids_path": "",
+        "feature_phases_path": "",
+        "part_number_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransform.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransform.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: representation of reconstructed 3D EBSD features as geometric objects and the reconstruction-and-meshing case study; the modern crop and SurfaceNets stages are illustrative adaptations.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Measured-derived Small IN100 crop and modern SurfaceNets are not an exact reproduction of the 2014 reconstruction or meshing results. The 2022 algorithm paper uses medical and synthetic examples, not this alloy crop."
+      }
+    },
+    {
+      "title": "SurfaceNets for Multi-Label Segmentations with Preservation of Sharp Boundaries",
+      "authors": [
+        "Sarah F. Frisken"
+      ],
+      "year": 2022,
+      "journal": "Journal of Computer Graphics Techniques",
+      "volume": 11,
+      "issue": 1,
+      "pages": "34-54",
+      "doi": "",
+      "url": "https://jcgt.org/published/0011/01/03/paper.pdf",
+      "scope": "filter_algorithm",
+      "role": "Sections 3 and 4 explain shared multi-label interfaces, bounded relaxation, and the distinct minimum-area triangulation step. Figure 9 illustrates the smoothing tradeoff; the current implementation does not establish the section 4.4 diagonal-minimization claim.",
+      "verification_sha256": "18b8f5ffe095855fa99d2f31df5491c24ef3040bdf7410376b9f1801285ab2e4"
+    }
+  ],
+  "last_verified": "2026-10-08",
+  "verification_status": "Windows in-memory Release: all three pipelines passed the sequential CTest chain; 108/108 independent full-array and STL checks passed. Saved output figures were generated and visually inspected. No native GUI, OOC, generated-Python, downstream solver, or exact paper-reproduction claim.",
+  "mcp": {
+    "user_intents": [
+      "Copy the baseline mesh, apply an explicit rigid coordinate transform, recompute measurements, and export one binary STL while retaining labeled DREAM3D data."
+    ],
+    "questions_to_ask": [
+      "Which label array represents the intended features?",
+      "Is the crop and its artificial exterior acceptable?",
+      "What length scale and coordinate frame does the consumer require?"
+    ],
+    "constraints": [
+      "Use FeatureIds, not twin ParentIds.",
+      "Preserve original labels; no feature renumbering and no whole-volume measurement checkpoint.",
+      "Do not call the combined interface network a closed manifold or solver-ready volume mesh.",
+      "Smoothing distance is a per-coordinate cell-space bound, not a physical or radial distance.",
+      "Published meshes explicitly use Micrometer units (index 6), matching the source ImageGeom; when adapting input units, change CreateGeometryFilter length_unit_index consistently without silently rescaling coordinates.",
+      "STL loses labels, NodeTypes, and explicit unit semantics.",
+      "Do not claim exact 2014 reproduction or minimum-area diagonal selection in the current SurfaceNets implementation."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "(02) Small IN100 Surface Smoothing.d3dpipeline"
+    ]
+  },
+  "result_visual": {
+    "path": "SurfaceTransform.png",
+    "role": "Same original 533/1719 interface before and after the prescribed rigid transform, with equal axis scale and absolute micrometer coordinates. The STL exports the full mesh, not only this displayed interface.",
+    "sha256": "44a54986ce166b65a39b9ad8fed6a1910b36e3e726b47d1147aef2d8de8ded99",
+    "source_outputs": [
+      {
+        "path": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransform.dream3d",
+        "sha256": "4a419dc325d75bd7f97f7eede8a9e1c4def2cd1691391143eba3d4b57d53d8b0"
+      }
+    ],
+    "method": "Matplotlib rendering of saved image/mesh arrays; face-pair selection is for display only. No remeshing, rescaling, or external reference data.",
+    "selected_face_labels": [
+      533,
+      1719
+    ],
+    "selected_triangle_count": 1138,
+    "visual_review": "2026-10-08: labels, units, matched views, captions, margins, and numeric annotations inspected."
+  },
+  "dimensional_scope": "A 24-cubed interior crop from the 117-section measured reconstruction; cropped fragments do not establish whole-grain shapes.",
+  "cli_usage": {
+    "instructions": "See README.md for the exact chain and command pattern. Create the documented output folders before preflight.",
+    "working_directory": "One chosen writable folder containing the predecessor Data/Output tree.",
+    "relative_path_base": "Current CLI working directory",
+    "gui_note": "Open the pipeline through File > Open; set absolute file paths when relative Data paths do not resolve."
+  },
+  "geometry_units": {
+    "input_length_unit_index": 6,
+    "published_length_unit_index": 6,
+    "unit": "Micrometer",
+    "coordinates_rescaled": false,
+    "method": "CreateGeometryFilter constructs SurfaceMesh_Transformed from copied baseline vertices and triangles with explicit Micrometer units; separate copies preserve FaceLabels and NodeTypes. No baseline face areas or normals are copied.",
+    "reason": "Current TriangleGeom deepCopy resets units to default Meter; explicit construction retains the calibrated numerical coordinate scale and records Micrometer units."
+  },
+  "validation": {
+    "date": "2026-10-08",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Geometry_Examples",
+      "passed": true,
+      "elapsed_seconds": 20.38,
+      "pipelines": 3
+    },
+    "independent_checks": {
+      "passed": 108,
+      "total": 108,
+      "scope": "Independent full-array crop, mesh measurement, topology consistency, rigid transform, unit metadata, and binary STL checks. Surface Nets is not independently reimplemented. No manifold or solver-readiness proof."
+    },
+    "pipeline_sha256": "0cf417ec3c8c13c712e42f333c920ec5a355b59c3b62fd7c6fe4d326c489c271",
+    "expected_current_fixture": {
+      "units": 6,
+      "vertices": 6479,
+      "triangles": 14052,
+      "area_total": 439.125,
+      "area_min": 0.03125,
+      "area_max": 0.03125,
+      "area_max_abs_error": 0.0,
+      "normal_max_abs_error": 0.0,
+      "bbox_min_xyz": [
+        -18.0,
+        20.500003814697266,
+        11.499996185302734
+      ],
+      "bbox_max_xyz": [
+        -12.0,
+        26.500003814697266,
+        17.499996185302734
+      ],
+      "label_pair_count": 94,
+      "outside_triangles": 6912,
+      "node_type_counts": {
+        "2": 2598,
+        "3": 383,
+        "4": 40,
+        "12": 2825,
+        "13": 590,
+        "14": 43
+      },
+      "saved_area_total": 439.125,
+      "area_tolerance_formula": "8 * float32_epsilon * 0.5 * norm(edge1) * norm(edge2)",
+      "area_max_error_fraction_of_tolerance": 0.0
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "downstream solver or printing",
+      "manifoldness and self-intersection freedom",
+      "exact paper-result reproduction"
+    ],
+    "transform": {
+      "max_vertex_abs_error": 0.0,
+      "max_area_abs_change": 0.0,
+      "max_normal_rotation_abs_error": 0.0,
+      "matrix": [
+        [
+          0.0,
+          -1.0,
+          0.0,
+          10.0
+        ],
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "stl": {
+      "bytes": 702684,
+      "facets": 14052,
+      "vertex_max_abs_error": 0.0,
+      "normal_max_abs_error": 0.0,
+      "sha256": "f0176d2583aaf79cc8ef58d3c074287d09da3f1b3dd894a1af325c1137caaa6c",
+      "limitation": "STL is unitless and does not preserve feature labels; contains internal interfaces and crop caps."
+    }
+  }
+}

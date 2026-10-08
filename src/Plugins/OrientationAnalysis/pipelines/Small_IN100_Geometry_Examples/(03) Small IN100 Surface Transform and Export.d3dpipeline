@@ -1,0 +1,398 @@
+{
+  "isDisabled": false,
+  "name": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "SurfaceMesh_Transformed",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "SurfaceMesh/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "SurfaceMesh/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Construct SurfaceMesh_Transformed by copying the baseline vertices and triangles with explicit Micrometer units (index 6). Geometry deep copy does not preserve the units. The new attribute matrices contain no copied areas or normals.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SurfaceMesh/Face Data/FaceLabels"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "SurfaceMesh_Transformed/Face Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy baseline FaceLabels unchanged into the new micrometer geometry; preserve the original SurfaceMesh.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SurfaceMesh/Vertex Data/NodeTypes"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "SurfaceMesh_Transformed/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy baseline NodeTypes unchanged into the new micrometer geometry; preserve the original SurfaceMesh.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "SurfaceMesh_Transformed",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              0.0,
+              -1.0,
+              0.0,
+              10.0
+            ],
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "SurfaceTransformMatrix",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Apply p_new = Rz(90 degrees) p + [10,0,0] in the inherited coordinate scale, without centering; record the 4 by 4 matrix.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "SurfaceMesh_Transformed",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "TransformedFaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "SurfaceMesh_Transformed",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "TransformedFaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "grouping_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "output_stl_file": {
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransformed.stl",
+          "version": 1
+        },
+        "output_stl_directory": {
+          "value": "",
+          "version": 1
+        },
+        "output_stl_prefix": {
+          "value": "SmallIN100_SurfaceTransformed",
+          "version": 1
+        },
+        "input_triangle_geometry_path": {
+          "value": "SurfaceMesh_Transformed",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "feature_phases_path": {
+          "value": "",
+          "version": 1
+        },
+        "part_number_path": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export all transformed triangles to one binary STL, including internal interfaces and crop caps. STL does not preserve FeatureIds or declare length units.",
+      "filter": {
+        "name": "nx::core::WriteStlFileFilter",
+        "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Geometry_Examples/Transform/SmallIN100_SurfaceTransform.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
