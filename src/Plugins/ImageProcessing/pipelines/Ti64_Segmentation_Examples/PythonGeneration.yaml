@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "ti64-segmentation-python-generation-v1",
+  "title": "Ti64 segmentation pipeline to Python generation",
+  "source_authority": ".d3dpipeline",
+  "converter_api": "simplnx_utilities.generate_python_pipeline",
+  "required_modules": [
+    "simplnx",
+    "imageprocessing",
+    "simplnx_utilities"
+  ],
+  "working_directory": "Chosen writable CLI working folder containing Data/ImageProcessing_Examples and Data/Output",
+  "output_lifetime": "temporary",
+  "verification_status": "NOT VERIFIED: generation, imports, syntax, structure, and execution have not been tested for these bundles.",
+  "failure_behavior": "Report missing modules, load errors, generation errors, or execution errors. Do not silently substitute handwritten Python.",
+  "regeneration_rule": "Regenerate temporary Python from the authoritative .d3dpipeline after any filter, argument, comment, or path change.",
+  "path_rules": {
+    "pipeline_reference_base": "pipeline_suite_root",
+    "runtime_data_base": "chosen_cli_working_directory",
+    "input_paths": "Preserve Data/Output/Ti64_Image_Cleanup_Examples and Data/Output/Ti64_Segmentation_Examples predecessor paths.",
+    "output_paths": "Preserve Data/Output/Ti64_Segmentation_Examples output paths."
+  },
+  "generation": {
+    "language": "Python",
+    "steps": [
+      "Use the Python environment supplied with the matching DREAM3D-NX application.",
+      "Import simplnx, imageprocessing and simplnx_utilities before loading the pipeline.",
+      "Load the authoritative .d3dpipeline with simplnx.Pipeline.from_file(pipeline_path).",
+      "Call simplnx_utilities.generate_python_pipeline(pipeline).",
+      "Compile the returned program and write it to a temporary .py file.",
+      "Execute after cleanup predecessors and segmentation stage 01 where needed; discard temporary Python after validation."
+    ],
+    "reference_code": [
+      "import simplnx as nx",
+      "import imageprocessing",
+      "import simplnx_utilities",
+      "pipeline = nx.Pipeline.from_file(pipeline_path)",
+      "code = simplnx_utilities.generate_python_pipeline(pipeline)",
+      "compile(code, str(pipeline_path), 'exec')"
+    ]
+  },
+  "validation": {
+    "syntax": "Compile generated text with Python compile().",
+    "structure": "Match generated filter calls and order to enabled pipeline steps.",
+    "paths": "Check each relative path against the source pipeline.",
+    "execution": "Run each generated program after its predecessors and inspect outputs. NOT VERIFIED.",
+    "storage": "Validate OOC separately before claiming OOC support."
+  },
+  "gui_note": "GUI working folders vary. Set absolute paths if relative Data paths do not resolve; native GUI execution is unverified."
+}

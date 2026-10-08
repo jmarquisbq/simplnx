@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "scope": "Selected filters in the Ti64 segmentation examples.",
+  "filters": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 0,
+      "purpose": "Load the complete preceding Ti64 checkpoint."
+    },
+    {
+      "filter": "ConnectedComponentImageFilter",
+      "uuid": "288f782b-9b8f-4734-ae66-15ae4a43db41",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 1,
+      "purpose": "Face-only connectivity on the unchanged BrightOriginal foreground; background stays zero."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 2,
+      "purpose": "Preserve the uint32 label image and copy its values to int32 for indexed core statistics."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 3,
+      "purpose": "Group normalized input intensity by integer region label and count only selected foreground pixels."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 4,
+      "purpose": "Export a normal CSV header and all positive feature ID rows; skip background row zero."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+      "step": 5,
+      "purpose": "Save all predecessor geometries and arrays together with new labels and measurements."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Load the complete preceding Ti64 checkpoint."
+    },
+    {
+      "filter": "ConnectedComponentImageFilter",
+      "uuid": "288f782b-9b8f-4734-ae66-15ae4a43db41",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Corner-inclusive connectivity on the unchanged BrightOriginal foreground; background stays zero."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 2,
+      "purpose": "Preserve the uint32 label image and copy its values to int32 for indexed core statistics."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 3,
+      "purpose": "Group normalized input intensity by integer region label and count only selected foreground pixels."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 4,
+      "purpose": "Export a normal CSV header and all positive feature ID rows; skip background row zero."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "step": 5,
+      "purpose": "Save all predecessor geometries and arrays together with new labels and measurements."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 0,
+      "purpose": "Load the complete preceding Ti64 checkpoint."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 1,
+      "purpose": "Flag original face IDs with PixelCount at least 25; this report does not change the label image."
+    },
+    {
+      "filter": "RelabelComponentImageFilter",
+      "uuid": "de830a9e-1fc0-47fa-9c2d-895366af832a",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 2,
+      "purpose": "Discard face regions smaller than 25 pixels and sort surviving labels by decreasing size."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 3,
+      "purpose": "Preserve the uint32 label image and copy its values to int32 for indexed core statistics."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 4,
+      "purpose": "Mask nonzero cleaned labels so background pixels never enter per-region intensity statistics."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 5,
+      "purpose": "Group normalized input intensity by integer region label and count only selected foreground pixels."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 6,
+      "purpose": "Export a normal CSV header and all positive feature ID rows; skip background row zero."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 7,
+      "purpose": "Save all predecessor geometries and arrays together with new labels and measurements."
+    }
+  ]
+}

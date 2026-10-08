@@ -180,3 +180,14 @@ set_tests_properties(PIPELINE::ImageProcessing::Ti64_Image_Cleanup_Examples
 # The `Python3_EXECUTABLE` is usually set in the CMakePresets.json file
 set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
 AddPythonTest(NAME "PY::ImageProcessing::VerifyExamplePipelineCitations" FILE "${${PLUGIN_NAME}_SOURCE_DIR}/test/VerifyExamplePipelineCitations.py" PYTHONPATH "$<TARGET_FILE_DIR:simplnx>")
+
+# Ti64_Segmentation_Examples example chain
+add_test(NAME PIPELINE::ImageProcessing::Ti64_Segmentation_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Ti64_Segmentation_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Ti64_Segmentation_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/Ti64SegmentationExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::ImageProcessing::Ti64_Segmentation_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Ti64_Segmentation_Examples")

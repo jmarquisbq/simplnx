@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Ti64 Connected Bright Regions.d3dpipeline",
+  "markdown_file": "(01) Ti64 Connected Bright Regions.md",
+  "title": "Ti64 Connected Bright Regions",
+  "summary": "A metallographer can ask how many spatially separate patches a fixed brightness mask contains and how large or bright each patch is. Connected components answer that image question without assuming each patch is a grain, phase, or defect. Here the foreground is exactly the previous `BrightOriginal` array. The pipeline does not smooth, close gaps, alter the intensity threshold, or use the smoothed masks. This keeps every reported patch traceable to one saved binary input.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microscopy"
+  ],
+  "use_cases": [
+    "Compare connected bright regions from a measured image without assigning phase or grain identity"
+  ],
+  "keywords": [
+    "Ti-6Al-4V",
+    "microstructure",
+    "connected components",
+    "pixel labels",
+    "uncalibrated pixels"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
+      "role": "Complete preceding checkpoint"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Ti64_Segmentation_Examples/Connected/Ti64_ConnectedRegions.csv",
+      "role": "Saved segmented image and report"
+    },
+    {
+      "path": "Data/Output/Ti64_Segmentation_Examples/Connected/Ti64_ConnectedRegions.dream3d",
+      "role": "Saved segmented image and report"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-derived-paper-linked",
+    "asset_keys": [
+      "materials/microstructure_grayscale.png"
+    ],
+    "reference_visual": "Bimodal Ti-6Al-4V micrograph with bright boundaries and globular regions.",
+    "target_traits": [
+      "596 by 596 prepared crop",
+      "0/1 BrightOriginal mask",
+      "Uncalibrated pixel coordinates"
+    ],
+    "known_differences": "Illustrative brightness-region labeling; no learned paper predictions, watershed, grain, or phase identity.",
+    "paper_doi": "10.1007/s10853-023-08901-w",
+    "source_sha512": "6739da11d8d4098ef0f7086b521e9a75a55936b53ce198ac4caf1c802ca1af8a23bb96461e28213a1b6574ad0ab6807775113aeffc90da2eccfc2f7498d7412c",
+    "archive_asset_sha512": "60519a790b7dc239bcdf934fe12e50c53b5ded3a517a5cbf76671de0c58ab07e709992c07fe58fa554449ab9f86eec3a120fb242884e4916c24c5a43fae97611",
+    "source_url": "https://raw.githubusercontent.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V/master/Images1/image_500.png",
+    "archive_provenance_file": "Data/ImageProcessing_Examples/Provenance.json"
+  },
+  "python_generation": {
+    "specification_id": "ti64-segmentation-python-generation-v1",
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root"
+  },
+  "mcp": {
+    "related_pipelines": [
+      "(02) Ti64 Connectivity Comparison.d3dpipeline",
+      "(03) Ti64 Minimum Size Cleanup.d3dpipeline"
+    ],
+    "constraints": [
+      "Run documented predecessors first.",
+      "Use uncalibrated pixel units and no material identity claim."
+    ]
+  },
+  "figure_file": "Ti64ConnectedRegions.png",
+  "citations": [
+    {
+      "scope": "pipeline_workflow",
+      "title": "Deep learning enhanced Watershed for microstructural analysis using a boundary class semantic segmentation",
+      "authors": [
+        "G. Fotos",
+        "A. Campbell",
+        "P. Murray",
+        "E. Yakushina"
+      ],
+      "year": 2023,
+      "journal": "Journal of Materials Science",
+      "doi": "10.1007/s10853-023-08901-w",
+      "url": "https://doi.org/10.1007/s10853-023-08901-w",
+      "role": "Ti-6Al-4V context; this connected-bright-region example does not reproduce learned segmentation or watershed.",
+      "dataset": {
+        "reproduction_status": "illustrative",
+        "doi": "",
+        "included": true,
+        "availability": "Paper-linked public image repackaged as grayscale.",
+        "url": "https://github.com/ArunBaskaran/Image-Driven-Machine-Learning-Approach-for-Microstructure-Classification-and-Segmentation-Ti-6Al-4V",
+        "license": "MIT license in source repository; see SourceDataLicense.txt.",
+        "reproduction_notes": "Uses a paper-linked image and independently chosen brightness connectivity and size parameters."
+      }
+    }
+  ],
+  "steps": [
+    {
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "filter": "ReadDREAM3DFilter",
+      "parameters_version": 1,
+      "role": "Load the complete preceding Ti64 checkpoint.",
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "index": 0
+    },
+    {
+      "uuid": "288f782b-9b8f-4734-ae66-15ae4a43db41",
+      "filter": "ConnectedComponentImageFilter",
+      "parameters_version": 1,
+      "role": "Face-only connectivity on the unchanged BrightOriginal foreground; background stays zero.",
+      "key_parameters": {
+        "fully_connected": false,
+        "input_image_geometry_path": "Ti64",
+        "input_image_data_path": "Ti64/Cell Data/BrightOriginal",
+        "output_array_name": "FaceConnectedLabels"
+      },
+      "index": 1
+    },
+    {
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "filter": "ConvertDataFilter",
+      "parameters_version": 1,
+      "role": "Preserve the uint32 label image and copy its values to int32 for indexed core statistics.",
+      "key_parameters": {
+        "scalar_type_index": 4,
+        "array_to_convert_path": "Ti64/Cell Data/FaceConnectedLabels",
+        "delete_original_array": false,
+        "converted_array_name": "FaceRegionIds"
+      },
+      "index": 2
+    },
+    {
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "filter": "ComputeArrayStatisticsFilter",
+      "parameters_version": 2,
+      "role": "Group normalized input intensity by integer region label and count only selected foreground pixels.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/UnitIntensity",
+        "destination_attribute_matrix_path": "Ti64/FaceRegionData",
+        "use_mask": true,
+        "mask_array_path": "Ti64/Cell Data/BrightOriginal",
+        "compute_by_index": true,
+        "feature_ids_path": "Ti64/Cell Data/FaceRegionIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "PixelCount",
+        "find_min": true,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": true,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": true,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "index": 3
+    },
+    {
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "filter": "WriteFeatureDataCSVFilter",
+      "parameters_version": 1,
+      "role": "Export a normal CSV header and all positive feature ID rows; skip background row zero.",
+      "key_parameters": {
+        "feature_data_file": "Data/Output/Ti64_Segmentation_Examples/Connected/Ti64_ConnectedRegions.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false,
+        "delimiter_index": 2,
+        "cell_feature_attribute_matrix_path": "Ti64/FaceRegionData"
+      },
+      "index": 4
+    },
+    {
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "filter": "WriteDREAM3DFilter",
+      "parameters_version": 2,
+      "role": "Save all predecessor geometries and arrays together with new labels and measurements.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Ti64_Segmentation_Examples/Connected/Ti64_ConnectedRegions.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "index": 5
+    }
+  ],
+  "last_verified": "2026-10-08",
+  "verification_status": "Windows in-memory preflight/execution and independent region-membership, grouped-statistics, CSV, and input-preservation checks passed. GUI, OOC, generated Python and full application installation remain unverified.",
+  "reference_results": {
+    "positive_regions": 1166,
+    "foreground_pixels": 35806,
+    "region_size_range_pixels": [
+      1,
+      873
+    ]
+  }
+}

@@ -235,6 +235,11 @@ if(EXISTS "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines")
       DESTINATION "${SIMPLNX_PIPELINE_INSTALL_DIR}/${PLUGIN_NAME}/Ti64_Image_Cleanup_Examples"
       COMPONENT Applications
     )
+    install(DIRECTORY
+      "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Ti64_Segmentation_Examples/"
+      DESTINATION "${SIMPLNX_PIPELINE_INSTALL_DIR}/${PLUGIN_NAME}/Ti64_Segmentation_Examples"
+      COMPONENT Applications
+    )
   endif()
 endif()
 
