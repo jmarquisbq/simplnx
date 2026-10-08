@@ -1,0 +1,258 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) T12 Compact Report.d3dpipeline",
+  "markdown_file": "(03) T12 Compact Report.md",
+  "title": "T12 Compact Report",
+  "summary": "Export six scalar feature fields to a CSV and a selective-import-ready Reporting group while retaining the full source checkpoint.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Steel manufacturing"
+  ],
+  "use_cases": [
+    "Share a compact per-feature report",
+    "Selectively reimport typed feature data from DREAM3D"
+  ],
+  "keywords": [
+    "T12",
+    "IF steel",
+    "EBSD",
+    "CSV",
+    "feature report",
+    "selective import"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d",
+      "role": "Complete derived checkpoint with original feature rows and GOSZScore."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+      "role": "Comma-delimited positive Feature_ID rows with six scalar fields and a normal header."
+    },
+    {
+      "path": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.dream3d",
+      "role": "Full T12 checkpoint plus six-field Reporting/Cell Feature Data copy."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "Actual size versus GOS scatter for positive IDs, reporting selection, and sample report rows.",
+    "target_traits": [
+      "1255 by 911 by 1 measured cells",
+      "0.5 micrometer XY spacing and unit Z spacing",
+      "IndexedPixels mask and preserved FeatureIds",
+      "Cubic phase symmetry from the CTF checkpoint",
+      "ReportableFeatures selects grains with at least four pixels"
+    ],
+    "known_differences": "Compact export and relative z scores are NX teaching choices, not paper tables.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-reporting-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Export a selected feature-column report",
+      "Keep original row IDs and typed feature data for reuse"
+    ],
+    "questions_to_ask": [
+      "Should rows with ReportableFeatures=false remain visible?",
+      "Are the expected header, field types, units, and ID index preserved?"
+    ],
+    "constraints": [
+      "CSV skips row zero but retains all positive feature rows, including false mask rows.",
+      "Reporting/Cell Feature Data has exactly six scalar arrays and preserves tuple dimensions.",
+      "The original T12/Cell Feature Data and full T12 data remain in the DREAM3D file."
+    ],
+    "related_pipelines": [
+      "(01) T12 Derived Reporting Fields.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "Paper motivates grain orientation heterogeneity; reporting, mapping, and compact export are additional illustrative NX choices.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Original paper-linked measured map with current NX filters. The paper noise-reduction method, exact file-to-deformation-state correspondence, complete multi-map analysis, and numerical identity are not established."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current filter UUIDs, parameters, symmetry-aware misorientation implementations, output units, and masked statistics semantics."
+    }
+  ],
+  "last_verified": "2026-10-08",
+  "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the complete saved checkpoint; preserve its original T12 labels and arrays.",
+      "input_paths": [
+        "Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d"
+      ],
+      "output_paths": [
+        "T12"
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "role": "Create a top-level group for the compact feature table.",
+      "input_paths": [],
+      "output_paths": [
+        "Reporting"
+      ],
+      "key_parameters": {
+        "data_object_path": "Reporting"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the entire feature Attribute Matrix and preserve tuple dimensions and row IDs.",
+      "input_paths": [
+        "T12/Cell Feature Data",
+        "Reporting"
+      ],
+      "output_paths": [
+        "Reporting/Cell Feature Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "T12/Cell Feature Data"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "Reporting",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Trim only orientation vectors and the Active flag from the copy; keep exactly six scalar columns.",
+      "input_paths": [
+        "Reporting/Cell Feature Data/Active",
+        "Reporting/Cell Feature Data/AvgEulerAngles",
+        "Reporting/Cell Feature Data/AvgQuats"
+      ],
+      "output_paths": [
+        "Reporting/Cell Feature Data"
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "Reporting/Cell Feature Data/Active",
+          "Reporting/Cell Feature Data/AvgEulerAngles",
+          "Reporting/Cell Feature Data/AvgQuats"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Write normal comma-separated headers and all positive feature-ID rows, including unselected grains.",
+      "input_paths": [
+        "Reporting/Cell Feature Data"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv"
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "Reporting/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the complete data structure with compression and without an XDMF sidecar.",
+      "input_paths": [
+        "T12",
+        "Reporting/Cell Feature Data"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "reference_figure": {
+    "file": "T12CompactReport.png",
+    "source": "Actual supplied-data pipeline output",
+    "description": "Actual size versus GOS scatter for positive IDs, reporting selection, and sample report rows."
+  },
+  "reference_results": {
+    "reportable_feature_count": 1443,
+    "equal_feature_gos_mean_degrees": 2.325058781039112,
+    "csv_rows": 3059,
+    "csv_columns": 7,
+    "structured_rows": 3060,
+    "structured_arrays": 6
+  }
+}

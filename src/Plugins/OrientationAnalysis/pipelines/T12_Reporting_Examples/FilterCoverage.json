@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "scope": "Selected filters in the T12 reporting examples, not all OrientationAnalysis or SimplnxCore filters.",
+  "filters": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) T12 Derived Reporting Fields.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete predecessor checkpoint with original row indexing and source arrays."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Derived Reporting Fields.d3dpipeline",
+      "step": 1,
+      "purpose": "Calculate a masked one-row summary; standardize reportable grain GOS only in step 01."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Derived Reporting Fields.d3dpipeline",
+      "step": 2,
+      "purpose": "Save the complete data structure for downstream examples and verification."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete predecessor checkpoint with original row indexing and source arrays."
+    },
+    {
+      "filter": "CopyFeatureArrayToElementArrayFilter",
+      "uuid": "4c8c976a-993d-438b-bd8e-99f71114b9a1",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 1,
+      "purpose": "Map selected feature values through unchanged FeatureIds to cell arrays."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 2,
+      "purpose": "Calculate a masked one-row summary; standardize reportable grain GOS only in step 01."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 3,
+      "purpose": "Save the complete data structure for downstream examples and verification."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete predecessor checkpoint with original row indexing and source arrays."
+    },
+    {
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 1,
+      "purpose": "Create a stable Reporting path for a compact feature Attribute Matrix."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 2,
+      "purpose": "Preserve the feature Attribute Matrix tuple shape and row indexing in Reporting."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 3,
+      "purpose": "Remove three unwanted arrays from the Reporting copy only."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 4,
+      "purpose": "Write all positive feature IDs with a normal comma-separated header and no neighbor lists."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) T12 Compact Report.d3dpipeline",
+      "step": 5,
+      "purpose": "Save the complete data structure for downstream examples and verification."
+    }
+  ]
+}

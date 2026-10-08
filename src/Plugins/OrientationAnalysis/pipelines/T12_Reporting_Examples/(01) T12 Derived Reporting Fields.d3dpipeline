@@ -1,0 +1,189 @@
+{
+  "isDisabled": false,
+  "name": "(01) T12 Derived Reporting Fields.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the complete saved checkpoint; preserve its original T12 labels and arrays.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_array_path": {
+          "value": "T12/Cell Feature Data/GrainOrientationSpread",
+          "version": 1
+        },
+        "destination_attribute_matrix_path": {
+          "value": "T12/ReportingReferenceSummary",
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "T12/Cell Feature Data/ReportableFeatures",
+          "version": 1
+        },
+        "compute_by_index": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_has_data_array_name": {
+          "value": "FeatureHasData",
+          "version": 1
+        },
+        "range_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "range": {
+          "value": [
+            0,
+            -1
+          ],
+          "version": 1
+        },
+        "feature_ids_indexing_name": {
+          "value": "Reduced Feature Ids Indices",
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "Length",
+          "version": 1
+        },
+        "find_min": {
+          "value": true,
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "Minimum",
+          "version": 1
+        },
+        "find_max": {
+          "value": true,
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "Maximum",
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "Mean",
+          "version": 1
+        },
+        "find_median": {
+          "value": true,
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "Median",
+          "version": 1
+        },
+        "find_mode": {
+          "value": false,
+          "version": 1
+        },
+        "mode_array_name": {
+          "value": "Mode",
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": true,
+          "version": 1
+        },
+        "std_deviation_array_name": {
+          "value": "StandardDeviation",
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "Summation",
+          "version": 1
+        },
+        "standardize_data": {
+          "value": true,
+          "version": 1
+        },
+        "standardized_array_name": {
+          "value": "GOSZScore",
+          "version": 1
+        },
+        "find_unique_values": {
+          "value": false,
+          "version": 1
+        },
+        "number_unique_values_name": {
+          "value": "NumUniqueValues",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "For reportable grains only, calculate count and population statistics in degrees; standardize the same eligible grain rows to a dimensionless GOSZScore. Inspect Length and StandardDeviation before interpreting z scores.",
+      "filter": {
+        "name": "nx::core::ComputeArrayStatisticsFilter",
+        "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d",
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the complete data structure with compression and without an XDMF sidecar.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
