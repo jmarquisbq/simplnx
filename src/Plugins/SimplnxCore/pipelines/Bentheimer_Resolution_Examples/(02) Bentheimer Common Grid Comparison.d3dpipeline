@@ -1,0 +1,329 @@
+{
+  "isDisabled": false,
+  "name": "(02) Bentheimer Common Grid Comparison.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the complete predecessor checkpoint; retain both native grids and all saved arrays.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculator_parameter": {
+          "value": {
+            "equation": "AuthorNormalizedIntensity / 20000",
+            "selected_group": "BentheimerVLR18um/CellData",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "calculated_array_path": {
+          "value": "BentheimerVLR18um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Express the author-normalized intensity on a shared Float32 scale using the fixed paper display maximum 20000. Preserve values above one; this is neither per-volume min-max normalization nor a probability.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculator_parameter": {
+          "value": {
+            "equation": "AuthorNormalizedIntensity / 20000",
+            "selected_group": "BentheimerLR6um/CellData",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "calculated_array_path": {
+          "value": "BentheimerLR6um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Express the author-normalized intensity on a shared Float32 scale using the fixed paper display maximum 20000. Preserve values above one; this is neither per-volume min-max normalization nor a probability.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "resampling_mode_index": {
+          "value": 2,
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            6.0,
+            6.0,
+            6.0
+          ],
+          "version": 1
+        },
+        "scaling": {
+          "value": [
+            300.0,
+            300.0,
+            300.0
+          ],
+          "version": 1
+        },
+        "exact_dimensions": {
+          "value": [
+            225,
+            225,
+            225
+          ],
+          "version": 1
+        },
+        "remove_original_geometry": {
+          "value": false,
+          "version": 1
+        },
+        "renumber_features": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "new_data_container_path": {
+          "value": "BentheimerVLRMapped6um",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "BentheimerVLR18um",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Replicate each 18 micrometer cell onto an exact 225 cubed, 6 micrometer grid. Retain the native geometry. This nearest-neighbor mapping adds no measured detail and does not reproduce cubic interpolation or EDSR.",
+      "filter": {
+        "name": "nx::core::ResampleImageGeomFilter",
+        "uuid": "9783ea2c-4cf7-46de-ab21-b40d91a48c5b"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "first_input_array_path": {
+          "value": "BentheimerVLRMapped6um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "second_input_array_path": {
+          "value": "BentheimerLR6um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "difference_map_array_path": {
+          "value": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute absolute Float32 differences between matching cells of the mapped 18 micrometer scan and the measured 6 micrometer scan. Equal grid dimensions, spacing and origins must be established before interpreting this as spatial discrepancy.",
+      "filter": {
+        "name": "nx::core::ComputeDifferencesMapFilter",
+        "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_array_path": {
+          "value": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference",
+          "version": 1
+        },
+        "destination_attribute_matrix_path": {
+          "value": "BentheimerComparisonStatistics",
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "compute_by_index": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "feature_has_data_array_name": {
+          "value": "HasData",
+          "version": 1
+        },
+        "range_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "range": {
+          "value": [
+            0,
+            -1
+          ],
+          "version": 1
+        },
+        "feature_ids_indexing_name": {
+          "value": "UnusedFeatureIndices",
+          "version": 1
+        },
+        "standardize_data": {
+          "value": false,
+          "version": 1
+        },
+        "standardized_array_name": {
+          "value": "UnusedStandardized",
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "CellCount",
+          "version": 1
+        },
+        "find_min": {
+          "value": true,
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "Minimum",
+          "version": 1
+        },
+        "find_max": {
+          "value": true,
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "Maximum",
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "Mean",
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "UnusedMedian",
+          "version": 1
+        },
+        "find_mode": {
+          "value": false,
+          "version": 1
+        },
+        "mode_array_name": {
+          "value": "UnusedMode",
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "std_deviation_array_name": {
+          "value": "UnusedStandardDeviation",
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "UnusedSum",
+          "version": 1
+        },
+        "find_unique_values": {
+          "value": false,
+          "version": 1
+        },
+        "number_unique_values_name": {
+          "value": "UnusedUniqueCount",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Compute count, minimum, maximum and mean over every common-grid cell. These are intensity summaries, not porosity, permeability, or accuracy scores.",
+      "filter": {
+        "name": "nx::core::ComputeArrayStatisticsFilter",
+        "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Comparison/CommonGridComparison.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

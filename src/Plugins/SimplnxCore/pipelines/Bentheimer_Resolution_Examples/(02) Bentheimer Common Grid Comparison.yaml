@@ -1,0 +1,461 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) Bentheimer Common Grid Comparison.d3dpipeline",
+  "markdown_file": "(02) Bentheimer Common Grid Comparison.md",
+  "title": "Bentheimer Common Grid Comparison",
+  "summary": "Compare the registered 18 and 6 micrometer scans on one grid using fixed intensity scaling and absolute differences.",
+  "primary_industries": [
+    "Digital rock analysis"
+  ],
+  "secondary_industries": [
+    "Geoscience",
+    "Porous materials characterization"
+  ],
+  "use_cases": [
+    "Where do these registered scans differ after mapping onto one grid?"
+  ],
+  "keywords": [
+    "Bentheimer",
+    "micro-CT",
+    "registered scans",
+    "physical coordinates",
+    "resolution",
+    "illustrative"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+      "role": "Required predecessor checkpoint; see README for execution order."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Comparison/CommonGridComparison.dream3d",
+      "role": "Source-preserving checkpoint with the named example results.",
+      "sha256": "52d97cff1b38a21aacb6ef3e4a8ce776845d8f860251bfc571b3077caaf86a6f"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+      "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw"
+    ],
+    "paper_doi": "10.1103/PhysRevApplied.17.054046",
+    "paper_url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+    "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+    "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+    "source_assets": [
+      {
+        "key": "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+        "bytes": 843750,
+        "dimensions_xyz": [
+          75,
+          75,
+          75
+        ],
+        "spacing_um": [
+          18,
+          18,
+          18
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      },
+      {
+        "key": "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "a158bbfb76a8f465627065e4e898cff089aed9e8a5da80439ec4b970833323ebfe7fb707df47c9d4c5d98f06a52bc911304d3b5beb04cc04d9dd7be42da71c15",
+        "bytes": 22781250,
+        "dimensions_xyz": [
+          225,
+          225,
+          225
+        ],
+        "spacing_um": [
+          6,
+          6,
+          6
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      }
+    ],
+    "reference_visual": "Primary paper Figures 1-3 and supplement Figures S1-S3 motivate registered multiresolution comparison. The new figures show this suite's outputs; no paper figure or numerical result is reproduced.",
+    "target_traits": [
+      "Measured-derived, mutually registered Core 1 / Subvolume 1 scans",
+      "Native 75 cubed at 18 micrometers and 225 cubed at 6 micrometers",
+      "Identical 1350 micrometer cubic field of view",
+      "Scalar author-normalized UInt16 little-endian voxels"
+    ],
+    "known_differences": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Bentheimer Native Volume Preparation.d3dpipeline",
+      "produces": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the complete predecessor checkpoint; retain both native grids and all saved arrays.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Express the author-normalized intensity on a shared Float32 scale using the fixed paper display maximum 20000. Preserve values above one; this is neither per-volume min-max normalization nor a probability.",
+      "paths": [
+        {
+          "parameter": "calculated_array_path",
+          "value": "BentheimerVLR18um/CellData/ScaledIntensity"
+        }
+      ],
+      "key_parameters": {
+        "calculator_parameter": {
+          "equation": "AuthorNormalizedIntensity / 20000",
+          "selected_group": "BentheimerVLR18um/CellData",
+          "units": 0
+        },
+        "scalar_type_index": 8,
+        "calculated_array_path": "BentheimerVLR18um/CellData/ScaledIntensity"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 2,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Express the author-normalized intensity on a shared Float32 scale using the fixed paper display maximum 20000. Preserve values above one; this is neither per-volume min-max normalization nor a probability.",
+      "paths": [
+        {
+          "parameter": "calculated_array_path",
+          "value": "BentheimerLR6um/CellData/ScaledIntensity"
+        }
+      ],
+      "key_parameters": {
+        "calculator_parameter": {
+          "equation": "AuthorNormalizedIntensity / 20000",
+          "selected_group": "BentheimerLR6um/CellData",
+          "units": 0
+        },
+        "scalar_type_index": 8,
+        "calculated_array_path": "BentheimerLR6um/CellData/ScaledIntensity"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "ResampleImageGeomFilter",
+      "uuid": "9783ea2c-4cf7-46de-ab21-b40d91a48c5b",
+      "role": "Replicate each 18 micrometer cell onto an exact 225 cubed, 6 micrometer grid. Retain the native geometry. This nearest-neighbor mapping adds no measured detail and does not reproduce cubic interpolation or EDSR.",
+      "paths": [
+        {
+          "parameter": "feature_ids_path",
+          "value": ""
+        },
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": ""
+        },
+        {
+          "parameter": "new_data_container_path",
+          "value": "BentheimerVLRMapped6um"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "BentheimerVLR18um"
+        }
+      ],
+      "key_parameters": {
+        "resampling_mode_index": 2,
+        "spacing": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "scaling": [
+          300.0,
+          300.0,
+          300.0
+        ],
+        "exact_dimensions": [
+          225,
+          225,
+          225
+        ],
+        "remove_original_geometry": false,
+        "renumber_features": false,
+        "feature_ids_path": "",
+        "cell_feature_attribute_matrix_path": "",
+        "new_data_container_path": "BentheimerVLRMapped6um",
+        "input_image_geometry_path": "BentheimerVLR18um"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Compute absolute Float32 differences between matching cells of the mapped 18 micrometer scan and the measured 6 micrometer scan. Equal grid dimensions, spacing and origins must be established before interpreting this as spatial discrepancy.",
+      "paths": [
+        {
+          "parameter": "first_input_array_path",
+          "value": "BentheimerVLRMapped6um/CellData/ScaledIntensity"
+        },
+        {
+          "parameter": "second_input_array_path",
+          "value": "BentheimerLR6um/CellData/ScaledIntensity"
+        },
+        {
+          "parameter": "difference_map_array_path",
+          "value": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference"
+        }
+      ],
+      "key_parameters": {
+        "first_input_array_path": "BentheimerVLRMapped6um/CellData/ScaledIntensity",
+        "second_input_array_path": "BentheimerLR6um/CellData/ScaledIntensity",
+        "difference_map_array_path": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Compute count, minimum, maximum and mean over every common-grid cell. These are intensity summaries, not porosity, permeability, or accuracy scores.",
+      "paths": [
+        {
+          "parameter": "selected_array_path",
+          "value": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference"
+        },
+        {
+          "parameter": "destination_attribute_matrix_path",
+          "value": "BentheimerComparisonStatistics"
+        },
+        {
+          "parameter": "mask_array_path",
+          "value": ""
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "selected_array_path": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference",
+        "destination_attribute_matrix_path": "BentheimerComparisonStatistics",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "HasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "UnusedFeatureIndices",
+        "standardize_data": false,
+        "standardized_array_name": "UnusedStandardized",
+        "find_length": true,
+        "length_array_name": "CellCount",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "UnusedMedian",
+        "find_mode": false,
+        "mode_array_name": "UnusedMode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "UnusedStandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "find_unique_values": false,
+        "number_unique_values_name": "UnusedUniqueCount"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Comparison/CommonGridComparison.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Bentheimer_Resolution_Examples/Comparison/CommonGridComparison.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "bentheimer-resolution-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Where do these registered scans differ after mapping onto one grid?"
+    ],
+    "questions": [
+      "Are the scans registered to the same field of view?",
+      "Are the requested results intensity comparisons or segmented material properties?"
+    ],
+    "constraints": [
+      "Keep native scans and fixed 20000 divisor; preserve values above one.",
+      "Verify geometry dimensions, origins and spacing before cellwise comparisons.",
+      "Read Differences Map as an absolute difference.",
+      "Compute physical coordinates after all origin and spacing changes.",
+      "Image ROI masks require complete cell bounds inside the rectangle.",
+      "Do not claim EDSR, ground-truth accuracy, porosity, permeability or scanner-axis orientation."
+    ],
+    "related_pipelines": [
+      "(01) Bentheimer Native Volume Preparation.d3dpipeline",
+      "(03) Bentheimer Interior Region Comparison.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "Deep Learning of Multiresolution X-Ray Micro-Computed-Tomography Images for Multiscale Modeling",
+      "authors": [
+        "Samuel J. Jackson",
+        "Yufu Niu",
+        "Sojwal Manoorkar",
+        "Peyman Mostaghimi",
+        "Ryan T. Armstrong"
+      ],
+      "year": 2022,
+      "journal": "Physical Review Applied",
+      "doi": "10.1103/PhysRevApplied.17.054046",
+      "url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: registered multiresolution sandstone CT, common intensity scale, and limits of image comparison before pore-space modelling. Methods reviewed in arXiv:2111.01270v2 (2022-01-18) and its supplement.",
+      "dataset": {
+        "availability": "The paper-linked Zenodo record supplies registered author-normalized 18 and 6 micrometer Core1/Subvol1 raw cubes. Both complete released cubes are used; no new crop is substituted.",
+        "url": "https://zenodo.org/records/5542624",
+        "doi": "10.5281/zenodo.5542624",
+        "license": "Creative Commons Attribution 4.0 International (CC BY 4.0). See SourceDataLicense.md for attribution and transformations.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices."
+      }
+    }
+  ],
+  "last_verified": "2026-10-09",
+  "dimensional_scope": "Full released Core1/Subvol1 cubes; X fastest; native 75^3 / 225^3 with 18 / 6 micrometer spacing.",
+  "cli_usage": {
+    "working_directory": "One chosen writable folder containing Data/Bentheimer_Resolution_Examples and Data/Output.",
+    "relative_path_base": "Current CLI working directory",
+    "instructions": "Follow README: acquire and verify both inputs, then run 01, 02, 03 in order.",
+    "gui_note": "Set absolute input/output file paths if relative paths do not resolve in the GUI."
+  },
+  "validation": {
+    "date": "2026-10-09",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples",
+      "passed": true,
+      "pipelines": 3,
+      "preflight_and_execute": true,
+      "elapsed_seconds": 2.01,
+      "input_acquisition": "Verified cached source files; HTTP download branch not exercised."
+    },
+    "pipeline_sha256": "1027943f67fcb63ec20eb193e251ea117565911b2145760eb7c02e716babae45",
+    "independent_checks": {
+      "scope": "Complete three-stage suite",
+      "checks": 366,
+      "passed": 366,
+      "source_arrays": "Exact source UInt16 values preserved across all checkpoints.",
+      "mapped_arrays": "Exact factor-three NumPy voxel replication.",
+      "scaled_and_difference_arrays": "Exact Float32 fixed-divisor scaling and absolute differences.",
+      "geometry": "Native/mapped dimensions, origins, spacing and micrometer unit metadata match the contract.",
+      "coordinates_and_roi": "Exact Float32 centers and UInt8 full-cell masks; generated arrays have flattened X-fastest cell tuples.",
+      "statistics_tolerance": "Within two Float32 ULPs of independent reductions; CellCount is UInt64.",
+      "roi_counts": {
+        "BentheimerVLR18um": 91125,
+        "BentheimerLR6um": 2460375
+      },
+      "roi_volume_um3": 531441000,
+      "values_above_one": {
+        "BentheimerVLR18um": 1,
+        "BentheimerLR6um": 718,
+        "BentheimerVLRMapped6um": 27
+      }
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "full installation",
+      "missing-cache HTTP download branch",
+      "exact paper-result reproduction",
+      "scanner/world-axis orientation",
+      "porosity or permeability validation"
+    ],
+    "runtime_statistics": {
+      "stage_2_whole_difference": {
+        "CellCount": 11390625,
+        "Maximum": 1.9402000904083252,
+        "Mean": 0.04781347140669823,
+        "Minimum": 0.0
+      }
+    }
+  },
+  "result_visual": {
+    "path": "Comparison.png",
+    "sha256": "ec7d4f2257330e6d8eefe39645026aefd26ebd26b304e1d7ca86ac566d8a29c2",
+    "source_output": "Data/Output/Bentheimer_Resolution_Examples/Comparison/CommonGridComparison.dream3d",
+    "source_sha256": "52d97cff1b38a21aacb6ef3e4a8ce776845d8f860251bfc571b3077caaf86a6f",
+    "method": "Matplotlib rendering of the saved NX checkpoint arrays; nearest-pixel display, physical axes, and explicit display limits. No paper image or synthetic replacement.",
+    "details": {
+      "slice_index_z": 112,
+      "slice_center_um": 675,
+      "intensity_display_range": [
+        0,
+        1
+      ],
+      "difference_display_range": [
+        0,
+        0.2
+      ],
+      "difference_full_volume_mean": 0.04781347140669823,
+      "difference_full_volume_maximum": 1.9402000904083252,
+      "difference_display_saturated_cells_on_slice": 72
+    },
+    "visual_review": "2026-10-09: physical axes, slice locations, data scales, colorbar limits, ROI outlines, attribution, labels and margins inspected; no overlap or clipped text."
+  }
+}

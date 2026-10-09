@@ -335,3 +335,14 @@ set(PREBUILT_PIPELINE_NAMES
   # "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/ReplaceElementAttributesWithNeighbor.d3dpipeline"
 )
 create_pipeline_tests(PLUGIN_NAME ${PLUGIN_NAME} PIPELINE_LIST ${PREBUILT_PIPELINE_NAMES})
+
+# Bentheimer_Resolution_Examples example chain
+add_test(NAME PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Bentheimer_Resolution_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Bentheimer_Resolution_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/BentheimerResolutionExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Bentheimer_Resolution_Examples;Network")

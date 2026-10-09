@@ -1,0 +1,398 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Bentheimer Native Volume Preparation.d3dpipeline",
+  "markdown_file": "(01) Bentheimer Native Volume Preparation.md",
+  "title": "Bentheimer Native Volume Preparation",
+  "summary": "Import two registered, author-normalized Bentheimer micro-CT cubes with their native dimensions and micrometer spacing.",
+  "primary_industries": [
+    "Digital rock analysis"
+  ],
+  "secondary_industries": [
+    "Geoscience",
+    "Porous materials characterization"
+  ],
+  "use_cases": [
+    "How do I preserve physical size when importing headerless CT data at two voxel sizes?"
+  ],
+  "keywords": [
+    "Bentheimer",
+    "micro-CT",
+    "registered scans",
+    "physical coordinates",
+    "resolution",
+    "illustrative"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+      "role": "Exact author-normalized public dataset bytes; see DataSources.json."
+    },
+    {
+      "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+      "role": "Exact author-normalized public dataset bytes; see DataSources.json."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+      "role": "Source-preserving checkpoint with the named example results.",
+      "sha256": "a948a1d8c2875c83247f86dd5044b7002752ee8e76f06ab0ad8e59c64b7249f7"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+      "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw"
+    ],
+    "paper_doi": "10.1103/PhysRevApplied.17.054046",
+    "paper_url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+    "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+    "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+    "source_assets": [
+      {
+        "key": "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+        "bytes": 843750,
+        "dimensions_xyz": [
+          75,
+          75,
+          75
+        ],
+        "spacing_um": [
+          18,
+          18,
+          18
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      },
+      {
+        "key": "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "a158bbfb76a8f465627065e4e898cff089aed9e8a5da80439ec4b970833323ebfe7fb707df47c9d4c5d98f06a52bc911304d3b5beb04cc04d9dd7be42da71c15",
+        "bytes": 22781250,
+        "dimensions_xyz": [
+          225,
+          225,
+          225
+        ],
+        "spacing_um": [
+          6,
+          6,
+          6
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      }
+    ],
+    "reference_visual": "Primary paper Figures 1-3 and supplement Figures S1-S3 motivate registered multiresolution comparison. The new figures show this suite's outputs; no paper figure or numerical result is reproduced.",
+    "target_traits": [
+      "Measured-derived, mutually registered Core 1 / Subvolume 1 scans",
+      "Native 75 cubed at 18 micrometers and 225 cubed at 6 micrometers",
+      "Identical 1350 micrometer cubic field of view",
+      "Scalar author-normalized UInt16 little-endian voxels"
+    ],
+    "known_differences": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "prerequisites": [],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "CreateImageGeometryFilter",
+      "uuid": "c4320659-1a84-461d-939e-c7c10229a504",
+      "role": "Create the native 75 cubed grid at 18 micrometer spacing. Both released cubes span 1350 micrometers per axis; use a common example-local corner origin.",
+      "paths": [
+        {
+          "parameter": "output_image_geometry_path",
+          "value": "BentheimerVLR18um"
+        }
+      ],
+      "key_parameters": {
+        "output_image_geometry_path": "BentheimerVLR18um",
+        "dimensions": [
+          75,
+          75,
+          75
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          18.0,
+          18.0,
+          18.0
+        ],
+        "cell_data_name": "CellData"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ReadRawBinaryFilter",
+      "uuid": "dd159366-5f12-42db-af6d-a33592ae8a89",
+      "role": "Import exact author-normalized UInt16 little-endian bytes as one scalar per cell. Inherit tuple dimensions from CellData; no byte header, normalization, cropping, or axis permutation is applied.",
+      "paths": [
+        {
+          "parameter": "input_file",
+          "value": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw"
+        },
+        {
+          "parameter": "created_attribute_array_path",
+          "value": "BentheimerVLR18um/CellData/AuthorNormalizedIntensity"
+        }
+      ],
+      "key_parameters": {
+        "input_file": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "scalar_type_index": 3,
+        "endian_index": 0,
+        "skip_header_bytes": 0,
+        "allow_partial_filling": false,
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            75,
+            75,
+            75
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "created_attribute_array_path": "BentheimerVLR18um/CellData/AuthorNormalizedIntensity"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 2,
+      "filter": "CreateImageGeometryFilter",
+      "uuid": "c4320659-1a84-461d-939e-c7c10229a504",
+      "role": "Create the native 225 cubed grid at 6 micrometer spacing. Both released cubes span 1350 micrometers per axis; use a common example-local corner origin.",
+      "paths": [
+        {
+          "parameter": "output_image_geometry_path",
+          "value": "BentheimerLR6um"
+        }
+      ],
+      "key_parameters": {
+        "output_image_geometry_path": "BentheimerLR6um",
+        "dimensions": [
+          225,
+          225,
+          225
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          6.0,
+          6.0,
+          6.0
+        ],
+        "cell_data_name": "CellData"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ReadRawBinaryFilter",
+      "uuid": "dd159366-5f12-42db-af6d-a33592ae8a89",
+      "role": "Import exact author-normalized UInt16 little-endian bytes as one scalar per cell. Inherit tuple dimensions from CellData; no byte header, normalization, cropping, or axis permutation is applied.",
+      "paths": [
+        {
+          "parameter": "input_file",
+          "value": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw"
+        },
+        {
+          "parameter": "created_attribute_array_path",
+          "value": "BentheimerLR6um/CellData/AuthorNormalizedIntensity"
+        }
+      ],
+      "key_parameters": {
+        "input_file": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "scalar_type_index": 3,
+        "endian_index": 0,
+        "skip_header_bytes": 0,
+        "allow_partial_filling": false,
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            225,
+            225,
+            225
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "created_attribute_array_path": "BentheimerLR6um/CellData/AuthorNormalizedIntensity"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 4,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "bentheimer-resolution-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "How do I preserve physical size when importing headerless CT data at two voxel sizes?"
+    ],
+    "questions": [
+      "Are the scans registered to the same field of view?",
+      "Are the requested results intensity comparisons or segmented material properties?"
+    ],
+    "constraints": [
+      "Keep native scans and fixed 20000 divisor; preserve values above one.",
+      "Verify geometry dimensions, origins and spacing before cellwise comparisons.",
+      "Read Differences Map as an absolute difference.",
+      "Compute physical coordinates after all origin and spacing changes.",
+      "Image ROI masks require complete cell bounds inside the rectangle.",
+      "Do not claim EDSR, ground-truth accuracy, porosity, permeability or scanner-axis orientation."
+    ],
+    "related_pipelines": [
+      "(02) Bentheimer Common Grid Comparison.d3dpipeline",
+      "(03) Bentheimer Interior Region Comparison.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "Deep Learning of Multiresolution X-Ray Micro-Computed-Tomography Images for Multiscale Modeling",
+      "authors": [
+        "Samuel J. Jackson",
+        "Yufu Niu",
+        "Sojwal Manoorkar",
+        "Peyman Mostaghimi",
+        "Ryan T. Armstrong"
+      ],
+      "year": 2022,
+      "journal": "Physical Review Applied",
+      "doi": "10.1103/PhysRevApplied.17.054046",
+      "url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: registered multiresolution sandstone CT, common intensity scale, and limits of image comparison before pore-space modelling. Methods reviewed in arXiv:2111.01270v2 (2022-01-18) and its supplement.",
+      "dataset": {
+        "availability": "The paper-linked Zenodo record supplies registered author-normalized 18 and 6 micrometer Core1/Subvol1 raw cubes. Both complete released cubes are used; no new crop is substituted.",
+        "url": "https://zenodo.org/records/5542624",
+        "doi": "10.5281/zenodo.5542624",
+        "license": "Creative Commons Attribution 4.0 International (CC BY 4.0). See SourceDataLicense.md for attribution and transformations.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices."
+      }
+    }
+  ],
+  "last_verified": "2026-10-09",
+  "dimensional_scope": "Full released Core1/Subvol1 cubes; X fastest; native 75^3 / 225^3 with 18 / 6 micrometer spacing.",
+  "cli_usage": {
+    "working_directory": "One chosen writable folder containing Data/Bentheimer_Resolution_Examples and Data/Output.",
+    "relative_path_base": "Current CLI working directory",
+    "instructions": "Follow README: acquire and verify both inputs, then run 01, 02, 03 in order.",
+    "gui_note": "Set absolute input/output file paths if relative paths do not resolve in the GUI."
+  },
+  "validation": {
+    "date": "2026-10-09",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples",
+      "passed": true,
+      "pipelines": 3,
+      "preflight_and_execute": true,
+      "elapsed_seconds": 2.01,
+      "input_acquisition": "Verified cached source files; HTTP download branch not exercised."
+    },
+    "pipeline_sha256": "b2af23d9d1e909cedbb11808206ed8128af18acd12d43842a28332a982aab588",
+    "independent_checks": {
+      "scope": "Complete three-stage suite",
+      "checks": 366,
+      "passed": 366,
+      "source_arrays": "Exact source UInt16 values preserved across all checkpoints.",
+      "mapped_arrays": "Exact factor-three NumPy voxel replication.",
+      "scaled_and_difference_arrays": "Exact Float32 fixed-divisor scaling and absolute differences.",
+      "geometry": "Native/mapped dimensions, origins, spacing and micrometer unit metadata match the contract.",
+      "coordinates_and_roi": "Exact Float32 centers and UInt8 full-cell masks; generated arrays have flattened X-fastest cell tuples.",
+      "statistics_tolerance": "Within two Float32 ULPs of independent reductions; CellCount is UInt64.",
+      "roi_counts": {
+        "BentheimerVLR18um": 91125,
+        "BentheimerLR6um": 2460375
+      },
+      "roi_volume_um3": 531441000,
+      "values_above_one": {
+        "BentheimerVLR18um": 1,
+        "BentheimerLR6um": 718,
+        "BentheimerVLRMapped6um": 27
+      }
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "full installation",
+      "missing-cache HTTP download branch",
+      "exact paper-result reproduction",
+      "scanner/world-axis orientation",
+      "porosity or permeability validation"
+    ]
+  },
+  "result_visual": {
+    "path": "Preparation.png",
+    "sha256": "ab697358390c10fc1352cfba9fed36f75e813ab19923ea8c61e60320e7274067",
+    "source_output": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+    "source_sha256": "a948a1d8c2875c83247f86dd5044b7002752ee8e76f06ab0ad8e59c64b7249f7",
+    "method": "Matplotlib rendering of the saved NX checkpoint arrays; nearest-pixel display, physical axes, and explicit display limits. No paper image or synthetic replacement.",
+    "details": {
+      "slice_indices_zyx": {
+        "VLR_z": 37,
+        "LR_z": 112
+      },
+      "slice_center_um": 675,
+      "intensity_display_range": [
+        0,
+        20000
+      ],
+      "full_geometry_bounds_um": [
+        0,
+        1350
+      ]
+    },
+    "visual_review": "2026-10-09: physical axes, slice locations, data scales, colorbar limits, ROI outlines, attribution, labels and margins inspected; no overlap or clipped text."
+  }
+}

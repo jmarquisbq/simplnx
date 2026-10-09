@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "dataset_title": "Multi-resolution X-Ray micro-CT images of Bentheimer Sandstones",
+  "dataset_doi": "10.5281/zenodo.5542624",
+  "source_url": "https://zenodo.org/records/5542624",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "Samuel J. Jackson, Yufu Niu, Sojwal Manoorkar, Peyman Mostaghimi and Ryan Armstrong (2021), Multi-resolution X-Ray micro-CT images of Bentheimer Sandstones, Zenodo.",
+  "subset": "Complete released Core 1, Subvolume 1 cubes at 18 and 6 micrometers; no local crop or data modification.",
+  "files": [
+    {
+      "filename": "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+      "url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+      "bytes": 843750,
+      "sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+      "md5": "6be38996684013a6a82ca181738bee48",
+      "data_type": "UInt16",
+      "byte_order": "little endian",
+      "header_bytes": 0,
+      "dimensions_xyz": [
+        75,
+        75,
+        75
+      ],
+      "spacing_micrometers": [
+        18,
+        18,
+        18
+      ],
+      "array_order": "X fastest, then Y, then Z",
+      "processing": "Reconstructed, registered and intensity-normalized by the dataset authors; original downloaded bytes retained."
+    },
+    {
+      "filename": "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+      "url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw/content",
+      "bytes": 22781250,
+      "sha512": "a158bbfb76a8f465627065e4e898cff089aed9e8a5da80439ec4b970833323ebfe7fb707df47c9d4c5d98f06a52bc911304d3b5beb04cc04d9dd7be42da71c15",
+      "md5": "d26cb64dbe448c1330bdc00e424c011b",
+      "data_type": "UInt16",
+      "byte_order": "little endian",
+      "header_bytes": 0,
+      "dimensions_xyz": [
+        225,
+        225,
+        225
+      ],
+      "spacing_micrometers": [
+        6,
+        6,
+        6
+      ],
+      "array_order": "X fastest, then Y, then Z",
+      "processing": "Reconstructed, registered and intensity-normalized by the dataset authors; original downloaded bytes retained."
+    }
+  ],
+  "source_data_included_in_repository": false,
+  "runtime_directory": "Data/Bentheimer_Resolution_Examples",
+  "checksums_verified": "2026-10-09"
+}

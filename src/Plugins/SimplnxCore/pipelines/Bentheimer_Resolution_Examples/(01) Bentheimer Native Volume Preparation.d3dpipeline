@@ -1,0 +1,236 @@
+{
+  "isDisabled": false,
+  "name": "(01) Bentheimer Native Volume Preparation.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "output_image_geometry_path": {
+          "value": "BentheimerVLR18um",
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            75,
+            75,
+            75
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            18.0,
+            18.0,
+            18.0
+          ],
+          "version": 1
+        },
+        "cell_data_name": {
+          "value": "CellData",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create the native 75 cubed grid at 18 micrometer spacing. Both released cubes span 1350 micrometers per axis; use a common example-local corner origin.",
+      "filter": {
+        "name": "nx::core::CreateImageGeometryFilter",
+        "uuid": "c4320659-1a84-461d-939e-c7c10229a504"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_file": {
+          "value": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 3,
+          "version": 1
+        },
+        "endian_index": {
+          "value": 0,
+          "version": 1
+        },
+        "skip_header_bytes": {
+          "value": 0,
+          "version": 1
+        },
+        "allow_partial_filling": {
+          "value": false,
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              75,
+              75,
+              75
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "created_attribute_array_path": {
+          "value": "BentheimerVLR18um/CellData/AuthorNormalizedIntensity",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Import exact author-normalized UInt16 little-endian bytes as one scalar per cell. Inherit tuple dimensions from CellData; no byte header, normalization, cropping, or axis permutation is applied.",
+      "filter": {
+        "name": "nx::core::ReadRawBinaryFilter",
+        "uuid": "dd159366-5f12-42db-af6d-a33592ae8a89"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_image_geometry_path": {
+          "value": "BentheimerLR6um",
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            225,
+            225,
+            225
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            6.0,
+            6.0,
+            6.0
+          ],
+          "version": 1
+        },
+        "cell_data_name": {
+          "value": "CellData",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create the native 225 cubed grid at 6 micrometer spacing. Both released cubes span 1350 micrometers per axis; use a common example-local corner origin.",
+      "filter": {
+        "name": "nx::core::CreateImageGeometryFilter",
+        "uuid": "c4320659-1a84-461d-939e-c7c10229a504"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_file": {
+          "value": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 3,
+          "version": 1
+        },
+        "endian_index": {
+          "value": 0,
+          "version": 1
+        },
+        "skip_header_bytes": {
+          "value": 0,
+          "version": 1
+        },
+        "allow_partial_filling": {
+          "value": false,
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              225,
+              225,
+              225
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "created_attribute_array_path": {
+          "value": "BentheimerLR6um/CellData/AuthorNormalizedIntensity",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Import exact author-normalized UInt16 little-endian bytes as one scalar per cell. Inherit tuple dimensions from CellData; no byte header, normalization, cropping, or axis permutation is applied.",
+      "filter": {
+        "name": "nx::core::ReadRawBinaryFilter",
+        "uuid": "dd159366-5f12-42db-af6d-a33592ae8a89"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Preparation/ImportedVolumes.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
