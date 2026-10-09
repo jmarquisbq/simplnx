@@ -1,0 +1,312 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microstructure characterization"
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson Figure 5 supplies measured reconstruction context; Table 2 motivates feature-level measurement. No paper bounds or IQ result is used as a numerical target.",
+    "target_traits": [
+      "117 measured serial sections",
+      "189 by 201 cells per section",
+      "0.25 micrometer isotropic spacing",
+      "Final positive FeatureIds and retained processed Image Quality"
+    ],
+    "known_differences": "Modern preparation and additional bounds/histogram/box-statistics stages are illustrative extensions. Original paper input identity and exact results are not established. IQ inherits predecessor cleanup.",
+    "archive_provenance_file": "README.md"
+  },
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: measured 3D EBSD reconstruction followed by feature-level statistics. Spatial bounds and processed-IQ comparisons are illustrative extensions.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses the established public Small_IN100 measured-derived reconstruction. Bounds and IQ neighborhood comparisons extend the paper; no exact identity or numerical match to its supplement is asserted."
+      }
+    }
+  ],
+  "last_verified": "2026-10-09",
+  "pipeline_file": "(02) Small IN100 Feature and Box Quality.d3dpipeline",
+  "markdown_file": "(02) Small IN100 Feature and Box Quality.md",
+  "title": "Small IN100 Feature and Box Quality",
+  "summary": "Compare membership-based processed-IQ distributions with statistics of all cells inside each feature bounding box.",
+  "use_cases": [
+    "Region-of-interest planning",
+    "Distinguish grain membership from box neighborhoods"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "feature bounds",
+    "processed image quality",
+    "histogram",
+    "spatial context"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d",
+      "role": "Required predecessor checkpoint; see README for archive and execution order."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Spatial_Examples/Quality/SmallIN100_FeatureAndBoxQuality.dream3d",
+      "role": "Source-preserving checkpoint with feature histograms and box quality statistics.",
+      "sha256": "753626f7a0bdcd58d8eca6a3de41b558d6bb59045eee231f74436e284413a374"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-spatial-python-generation-v1"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the documented predecessor checkpoint; relative paths resolve from one chosen writable working folder.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeArrayHistogramByFeatureFilter",
+      "uuid": "79b51978-bb85-4a6b-ad7a-8f771ad88506",
+      "role": "Count processed IQ per original FeatureId in 16 shared width-20 bins over [0,320). Background 0 is retained for inspection but excluded from grain reporting. Empty rows contain zero counts/ranges; no acceptance threshold is implied.",
+      "paths": [
+        {
+          "parameter": "selected_array_paths",
+          "value": [
+            "DataContainer/Cell Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_group_path",
+          "value": "DataContainer/FeatureIQHistograms"
+        },
+        {
+          "parameter": "output_data_group_path",
+          "value": ""
+        },
+        {
+          "parameter": "cell_feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "mask_array_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "number_of_bins": 16,
+        "user_defined_range": true,
+        "min_range": 0.0,
+        "max_range": 320.0,
+        "create_new_data_group": true,
+        "selected_array_paths": [
+          "DataContainer/Cell Data/Image Quality"
+        ],
+        "new_data_group_path": "DataContainer/FeatureIQHistograms",
+        "output_data_group_path": "",
+        "cell_feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "histogram_bin_count_array_name": "Counts",
+        "histogram_bin_range_array_name": "Ranges",
+        "histogram_most_populated_bin_array_name": "MostPopulatedBin",
+        "calculate_modal_bin_ranges": false,
+        "histogram_modal_bin_ranges_array_name": "UnusedModalRanges",
+        "use_mask": false,
+        "mask_array_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeBoundingBoxStatsFilter",
+      "uuid": "6b1e0fc9-0365-4a13-a353-91ec34941cea",
+      "role": "Summarize all processed-IQ cells in each valid physical bounding box, including other grains/background. Compute count, min, max, mean, and population standard deviation; BoxHasData gates interpretation. No feature-membership mask is applied.",
+      "paths": [
+        {
+          "parameter": "geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "unified_bounds_path",
+          "value": "DataContainer/Cell Feature Data/BoxQueryBounds"
+        },
+        {
+          "parameter": "input_array_path",
+          "value": "DataContainer/Cell Data/Image Quality"
+        },
+        {
+          "parameter": "output_am_path",
+          "value": "DataContainer/Cell Feature Data"
+        }
+      ],
+      "key_parameters": {
+        "geometry_path": "DataContainer",
+        "unified_bounds_path": "DataContainer/Cell Feature Data/BoxQueryBounds",
+        "input_array_path": "DataContainer/Cell Data/Image Quality",
+        "create_new_am": false,
+        "output_am_path": "DataContainer/Cell Feature Data",
+        "new_am_name": "UnusedBoxStatistics",
+        "bounds_has_data_name": "BoxHasData",
+        "calculate_length": true,
+        "length_name": "BoxCellCount",
+        "calculate_min": true,
+        "min_name": "BoxIQMinimum",
+        "calculate_max": true,
+        "max_name": "BoxIQMaximum",
+        "calculate_summation": false,
+        "summation_name": "BoxIQSum",
+        "calculate_mean": true,
+        "mean_name": "BoxIQMean",
+        "calculate_median": false,
+        "median_name": "BoxIQMedian",
+        "calculate_mode": false,
+        "mode_name": "BoxIQMode",
+        "calculate_num_unique_values": false,
+        "num_unique_values_name": "BoxIQUniqueCount",
+        "calculate_standard_deviation": true,
+        "std_dev_name": "BoxIQStandardDeviation"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save original source arrays, geometry, original FeatureIds, and the newly named results.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Spatial_Examples/Quality/SmallIN100_FeatureAndBoxQuality.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Spatial_Examples/Quality/SmallIN100_FeatureAndBoxQuality.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Locate a measured grain",
+      "Compare feature quality with its spatial neighborhood"
+    ],
+    "questions": [
+      "Does this request need feature membership or every cell in a bounding box?",
+      "Should background be excluded from the report?"
+    ],
+    "constraints": [
+      "Preserve final FeatureIds; ParentIds are a different namespace.",
+      "Exclude feature 0 and unoccupied rows from grain reports.",
+      "Use prepared BoxQueryBounds for box statistics; raw FeaturePhysicalBounds describe outer-cell-face extents and inclusive FeatureIndexBounds configure voxel crops.",
+      "Processed Image Quality includes inherited cleanup; it is not raw detector data or an accuracy measure.",
+      "The [0,320) IQ range is fixture-specific; check finite values and overflow when adapting.",
+      "BoxQueryBounds uses +0.125 micrometers on all six endpoints for this 0.25 isotropic grid, then zeros excluded rows. This is query-coordinate handling, not a change to physical feature bounds; adapt offsets per axis for anisotropic spacing."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Feature Bounds.d3dpipeline"
+    ]
+  },
+  "dimensional_scope": "Full 189 by 201 by 117 reconstructed image; 0.25 micrometer spacing. No crop or relabeling.",
+  "cli_usage": {
+    "working_directory": "One chosen writable folder containing predecessor Data/Output.",
+    "relative_path_base": "Current CLI working directory",
+    "instructions": "See README for exact order and output-directory creation.",
+    "gui_note": "Set absolute file paths if relative Data paths do not resolve."
+  },
+  "result_visual": {
+    "path": "FeatureAndBoxQuality.png",
+    "sha256": "9cffc46eb0a061a480dfaaebba42a0bee3ccceb570dba94fd2082ed45403cba0",
+    "source_output": "Data/Output/Small_IN100_Spatial_Examples/Quality/SmallIN100_FeatureAndBoxQuality.dream3d",
+    "source_sha256": "753626f7a0bdcd58d8eca6a3de41b558d6bb59045eee231f74436e284413a374",
+    "method": "Matplotlib rendering from saved arrays. Feature histograms and box mean are pipeline outputs; normalized box histogram is independently computed from the saved source IQ for display only.",
+    "selected_feature_id": 533,
+    "slice_z_index": 60,
+    "visual_review": "2026-10-09: axes, units, annotations, legends, margins, and population distinction inspected."
+  },
+  "validation": {
+    "date": "2026-10-09",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Spatial_Examples",
+      "passed": true,
+      "elapsed_seconds": 21.69,
+      "pipelines": 2
+    },
+    "pipeline_sha256": "a4d2af49a1e5f8a4c7534c5e0a89691db8a30a1459e40686ca6111e85aee9aa5",
+    "independent_checks": {
+      "source_datasets_preserved": 27,
+      "raw_bounds_rows_checked": 2335,
+      "occupied_positive_rows": 2317,
+      "empty_query_rows": 18,
+      "half_cell_query_offset": 0.125,
+      "histogram_rows": 2335,
+      "histogram_bins": 16,
+      "histogram_included_cells": 4444713,
+      "histogram_background_cells": 1057632,
+      "histogram_range": [
+        0,
+        320
+      ],
+      "histogram_bin_width": 20,
+      "histogram_out_of_range_cells": 0,
+      "box_cells_with_overlap": 10617413,
+      "largest_box_cells": 99000,
+      "boxes_containing_other_labels": 2313,
+      "maximum_mean_error_against_float64": 0.0017238281549225576,
+      "maximum_population_std_error_against_float64": 3.967064799326181e-06,
+      "excluded_row_policy": "Counts zero and BoxHasData false; other scalar defaults are not interpreted."
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "exact paper-result reproduction",
+      "calibrated material acceptance or orientation accuracy"
+    ]
+  }
+}

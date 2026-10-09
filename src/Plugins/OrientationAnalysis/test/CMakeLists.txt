@@ -490,3 +490,14 @@ add_test(NAME PIPELINE::OrientationAnalysis::T12_Import_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/T12ImportExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::T12_Import_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;T12_Import_Examples")
+
+# Small_IN100_Spatial_Examples example chain
+add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Spatial_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Spatial_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Small_IN100_Spatial_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100SpatialExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Spatial_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Small_IN100_Spatial_Examples")

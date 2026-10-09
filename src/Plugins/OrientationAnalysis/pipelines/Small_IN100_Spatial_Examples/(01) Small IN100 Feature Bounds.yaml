@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Microstructure characterization"
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson Figure 5 supplies measured reconstruction context; Table 2 motivates feature-level measurement. No paper bounds or IQ result is used as a numerical target.",
+    "target_traits": [
+      "117 measured serial sections",
+      "189 by 201 cells per section",
+      "0.25 micrometer isotropic spacing",
+      "Final positive FeatureIds and retained processed Image Quality"
+    ],
+    "known_differences": "Modern preparation and additional bounds/histogram/box-statistics stages are illustrative extensions. Original paper input identity and exact results are not established. IQ inherits predecessor cleanup.",
+    "archive_provenance_file": "README.md"
+  },
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context: measured 3D EBSD reconstruction followed by feature-level statistics. Spatial bounds and processed-IQ comparisons are illustrative extensions.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses the established public Small_IN100 measured-derived reconstruction. Bounds and IQ neighborhood comparisons extend the paper; no exact identity or numerical match to its supplement is asserted."
+      }
+    }
+  ],
+  "last_verified": "2026-10-09",
+  "pipeline_file": "(01) Small IN100 Feature Bounds.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Feature Bounds.md",
+  "title": "Small IN100 Feature Bounds",
+  "summary": "Locate original measured features using inclusive voxel-index bounds and physical outer-cell-face bounds; prepare valid occupied-feature boxes.",
+  "use_cases": [
+    "Region-of-interest planning",
+    "Distinguish grain membership from box neighborhoods"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "feature bounds",
+    "processed image quality",
+    "histogram",
+    "spatial context"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "role": "Required predecessor checkpoint; see README for archive and execution order."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d",
+      "role": "Source-preserving checkpoint with feature bounds and occupancy mask.",
+      "sha256": "f69e92ca2c94f95682b9593334fb07fbcd6bb293904613a23f2a25bb583d7af3"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-spatial-python-generation-v1"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "../Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the documented predecessor checkpoint; relative paths resolve from one chosen writable working folder.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeFeatureRectFilter",
+      "uuid": "bf947c45-8610-44c9-917a-405e88f73fe7",
+      "role": "Find inclusive minXYZ/maxXYZ cell indices per original positive FeatureId. Row 0 and absent labels retain UINT32_MAX minima and zero maxima.",
+      "paths": [
+        {
+          "parameter": "feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "feature_data_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        }
+      ],
+      "key_parameters": {
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "feature_data_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "feature_rect_array_name": "FeatureIndexBounds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeFeatureBoundsFilter",
+      "uuid": "b0616957-d051-4e51-bf27-efb742848fc9",
+      "role": "Create six-component physical outer-cell-face bounds in micrometers. Observed background 0 has bounds; absent labels have NaNs. Preserve these raw results.",
+      "paths": [
+        {
+          "parameter": "selected_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "feature_am_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "output_edge_geometry_path",
+          "value": "UnusedBoundsEdges"
+        }
+      ],
+      "key_parameters": {
+        "output_type_index": 1,
+        "selected_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "feature_am_path": "DataContainer/Cell Feature Data",
+        "min_array_name": "UnusedLowerBounds",
+        "max_array_name": "UnusedUpperBounds",
+        "unified_array_name": "FeaturePhysicalBounds",
+        "create_edge_geometry": false,
+        "output_edge_geometry_path": "UnusedBoundsEdges",
+        "edge_attribute_matrix_name": "Edge Data",
+        "created_feature_ids_array_name": "FeatureIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Select NumElements > 0. The measurements predecessor leaves row 0 at zero even though background cells exist; this mask excludes background and all unused positive labels.",
+      "paths": [],
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "DataContainer/Cell Feature Data/NumElements",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 10,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "OccupiedPositiveFeatures",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Shift all six physical endpoints by half the supplied 0.25 micrometer spacing to form cell-interior query coordinates. The statistics filter floors both endpoints and clips to the image, recovering the intended half-open voxel interval without float32 edge-rounding loss. These query coordinates are not feature extents; raw bounds remain unchanged.",
+      "paths": [
+        {
+          "parameter": "calculated_array_path",
+          "value": "DataContainer/Cell Feature Data/BoxQueryBounds"
+        }
+      ],
+      "key_parameters": {
+        "calculator_parameter": {
+          "equation": "FeaturePhysicalBounds + 0.125",
+          "selected_group": "DataContainer/Cell Feature Data",
+          "units": 0
+        },
+        "scalar_type_index": 8,
+        "calculated_array_path": "DataContainer/Cell Feature Data/BoxQueryBounds"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ConditionalSetValueFilter",
+      "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881",
+      "role": "Set all six components of excluded rows to zero. These finite zero-size boxes contain no cells and safely replace raw NaNs/background bounds for statistics.",
+      "paths": [
+        {
+          "parameter": "conditional_array_path",
+          "value": "DataContainer/Cell Feature Data/OccupiedPositiveFeatures"
+        },
+        {
+          "parameter": "selected_array_path",
+          "value": "DataContainer/Cell Feature Data/BoxQueryBounds"
+        }
+      ],
+      "key_parameters": {
+        "use_conditional": true,
+        "remove_value": "0",
+        "replace_value": "0",
+        "conditional_array_path": "DataContainer/Cell Feature Data/OccupiedPositiveFeatures",
+        "selected_array_path": "DataContainer/Cell Feature Data/BoxQueryBounds",
+        "invert_mask": true
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save original source arrays, geometry, original FeatureIds, and the newly named results.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Locate a measured grain",
+      "Compare feature quality with its spatial neighborhood"
+    ],
+    "questions": [
+      "Does this request need feature membership or every cell in a bounding box?",
+      "Should background be excluded from the report?"
+    ],
+    "constraints": [
+      "Preserve final FeatureIds; ParentIds are a different namespace.",
+      "Exclude feature 0 and unoccupied rows from grain reports.",
+      "Use prepared BoxQueryBounds for box statistics; raw FeaturePhysicalBounds describe outer-cell-face extents and inclusive FeatureIndexBounds configure voxel crops.",
+      "Processed Image Quality includes inherited cleanup; it is not raw detector data or an accuracy measure.",
+      "The [0,320) IQ range is fixture-specific; check finite values and overflow when adapting.",
+      "BoxQueryBounds uses +0.125 micrometers on all six endpoints for this 0.25 isotropic grid, then zeros excluded rows. This is query-coordinate handling, not a change to physical feature bounds; adapt offsets per axis for anisotropic spacing."
+    ],
+    "related_pipelines": [
+      "(02) Small IN100 Feature and Box Quality.d3dpipeline"
+    ]
+  },
+  "dimensional_scope": "Full 189 by 201 by 117 reconstructed image; 0.25 micrometer spacing. No crop or relabeling.",
+  "cli_usage": {
+    "working_directory": "One chosen writable folder containing predecessor Data/Output.",
+    "relative_path_base": "Current CLI working directory",
+    "instructions": "See README for exact order and output-directory creation.",
+    "gui_note": "Set absolute file paths if relative Data paths do not resolve."
+  },
+  "result_visual": {
+    "path": "FeatureBounds.png",
+    "sha256": "981df76b13c3cb0f360887930b662b1dab0f221ad4afbea46ee51c98d9576b66",
+    "source_output": "Data/Output/Small_IN100_Spatial_Examples/Bounds/SmallIN100_FeatureBounds.dream3d",
+    "source_sha256": "f69e92ca2c94f95682b9593334fb07fbcd6bb293904613a23f2a25bb583d7af3",
+    "method": "Matplotlib rendering of saved label and index/physical bound arrays; projected box is shown in two coordinate systems, not the statistics query offsets.",
+    "selected_feature_id": 533,
+    "slice_z_index": 60,
+    "visual_review": "2026-10-09: axes, units, annotations, legends, margins, and population distinction inspected."
+  },
+  "validation": {
+    "date": "2026-10-09",
+    "configuration": "Windows in-memory Release",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Spatial_Examples",
+      "passed": true,
+      "elapsed_seconds": 21.69,
+      "pipelines": 2
+    },
+    "pipeline_sha256": "8e08188971ef4e25d89ba421b0c8b671966494e045cbf83b912d749b0c2cc272",
+    "independent_checks": {
+      "source_datasets_preserved": 27,
+      "raw_bounds_rows_checked": 2335,
+      "occupied_positive_rows": 2317,
+      "empty_query_rows": 18,
+      "half_cell_query_offset": 0.125
+    },
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "exact paper-result reproduction",
+      "calibrated material acceptance or orientation accuracy"
+    ]
+  }
+}

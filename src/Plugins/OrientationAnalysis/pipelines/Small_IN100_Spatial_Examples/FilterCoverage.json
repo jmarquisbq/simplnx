@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "scope": "Selected spatial examples; filter occurrences are not scientific validation or complete plugin coverage.",
+  "filters": [
+    {
+      "filter": "ComputeFeatureRectFilter",
+      "uuid": "bf947c45-8610-44c9-917a-405e88f73fe7",
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "step": 1,
+      "purpose": "Find inclusive minXYZ/maxXYZ cell indices per original positive FeatureId. Row 0 and absent labels retain UINT32_MAX minima and zero maxima."
+    },
+    {
+      "filter": "ComputeFeatureBoundsFilter",
+      "uuid": "b0616957-d051-4e51-bf27-efb742848fc9",
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "step": 2,
+      "purpose": "Create six-component physical outer-cell-face bounds in micrometers. Observed background 0 has bounds; absent labels have NaNs. Preserve these raw results."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "step": 3,
+      "purpose": "Select NumElements > 0. The measurements predecessor leaves row 0 at zero even though background cells exist; this mask excludes background and all unused positive labels."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "step": 4,
+      "purpose": "Shift all six physical endpoints by half the supplied 0.25 micrometer spacing to form cell-interior query coordinates. The statistics filter floors both endpoints and clips to the image, recovering the intended half-open voxel interval without float32 edge-rounding loss. These query coordinates are not feature extents; raw bounds remain unchanged."
+    },
+    {
+      "filter": "ConditionalSetValueFilter",
+      "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881",
+      "pipeline": "(01) Small IN100 Feature Bounds.d3dpipeline",
+      "step": 5,
+      "purpose": "Set all six components of excluded rows to zero. These finite zero-size boxes contain no cells and safely replace raw NaNs/background bounds for statistics."
+    },
+    {
+      "filter": "ComputeArrayHistogramByFeatureFilter",
+      "uuid": "79b51978-bb85-4a6b-ad7a-8f771ad88506",
+      "pipeline": "(02) Small IN100 Feature and Box Quality.d3dpipeline",
+      "step": 1,
+      "purpose": "Count processed IQ per original FeatureId in 16 shared width-20 bins over [0,320). Background 0 is retained for inspection but excluded from grain reporting. Empty rows contain zero counts/ranges; no acceptance threshold is implied."
+    },
+    {
+      "filter": "ComputeBoundingBoxStatsFilter",
+      "uuid": "6b1e0fc9-0365-4a13-a353-91ec34941cea",
+      "pipeline": "(02) Small IN100 Feature and Box Quality.d3dpipeline",
+      "step": 2,
+      "purpose": "Summarize all processed-IQ cells in each valid physical bounding box, including other grains/background. Compute count, min, max, mean, and population standard deviation; BoxHasData gates interpretation. No feature-membership mask is applied."
+    }
+  ]
+}
