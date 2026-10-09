@@ -9,7 +9,7 @@ Executable pipeline: `(03) T12 Compact Report.d3dpipeline`
 - **Input:** `Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d`, from [(01) T12 Derived Reporting Fields](%2801%29%20T12%20Derived%20Reporting%20Fields.md).
 - **Results:** `Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv` and `T12_CompactReport.dream3d` in the same folder.
 - **Main choice:** Copy the feature Attribute Matrix into `Reporting/Cell Feature Data` and trim only the copy to six scalar arrays.
-- **Run order:** Run the metrics and derived-fields examples first. Feature-to-cell mapping is not required; see [run commands](README.md).
+- **Run order:** Run the combined T12 Orientation Case Study, then the derived reporting-fields example first. Feature-to-cell mapping is not required; see [run commands](README.md).
 
 ## Purpose and real-world setting
 
@@ -39,7 +39,7 @@ Diameter is in micrometers, pixel area in square micrometers, and GOS in degrees
 
 ![Grain size and GOS for every exported positive ID, with selected sample rows](T12CompactReport.png)
 
-The CSV has **3,059 rows and seven columns**: 1,443 reportable grains and 1,616 excluded positive IDs. For example, feature 9 has three pixels and remains present with flag 0. The DREAM3D reporting table has **3,060 rows and six arrays**, retaining background row 0; its original `T12` tree is also preserved.
+The CSV has **3,059 rows and seven columns**: 1,443 reportable grains and 1,616 excluded positive IDs. For example, feature 19 has three pixels and remains present with flag 0. The DREAM3D reporting table has **3,060 rows and six arrays**, retaining background row 0; its original `T12` tree is also preserved.
 
 ## Adaptation and pitfalls
 

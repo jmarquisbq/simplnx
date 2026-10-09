@@ -117,7 +117,7 @@
       "role": "Current filter UUIDs, parameters, symmetry-aware misorientation implementations, output units, and masked statistics semantics."
     }
   ],
-  "last_verified": "2026-10-08",
+  "last_verified": "2026-10-09",
   "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
   "steps": [
     {
@@ -217,11 +217,11 @@
   },
   "reference_results": {
     "reportable_feature_count": 1443,
-    "equal_feature_gos_mean_degrees": 2.325058781039112,
-    "population_standard_deviation_degrees": 1.3117552123881462,
+    "equal_feature_gos_mean_degrees": 2.325058801692142,
+    "population_standard_deviation_degrees": 1.311755222195463,
     "zscore_range": [
       -1.5805710554122925,
-      3.6794278621673584
+      3.679429292678833
     ],
     "excluded_feature_rows": 1617
   }

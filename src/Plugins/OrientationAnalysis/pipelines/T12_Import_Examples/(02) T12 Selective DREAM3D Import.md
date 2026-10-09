@@ -9,7 +9,7 @@ Executable pipeline: `(02) T12 Selective DREAM3D Import.d3dpipeline`
 - **Input:** `Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.dream3d`, from [(03) T12 Compact Report](../T12_Reporting_Examples/%2803%29%20T12%20Compact%20Report.md).
 - **Result:** `Data/Output/T12_Import_Examples/Structured/T12_StructuredImport.dream3d`, containing `Reporting/Cell Feature Data` and `StructuredSummary`.
 - **Main choice:** Select the `Reporting` group with `IncludeList`, preserving descendants while excluding the original `T12` tree.
-- **Run order:** Complete the orientation metrics, reporting derived fields, and compact report first. The CSV import is independent; see [run commands](README.md).
+- **Run order:** Run the combined orientation case study, then reporting derived fields and the compact report first. The CSV import is independent; see [run commands](README.md).
 
 ## Purpose and real-world setting
 

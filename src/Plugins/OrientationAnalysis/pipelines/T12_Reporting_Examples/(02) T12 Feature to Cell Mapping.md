@@ -9,7 +9,7 @@ Executable pipeline: `(02) T12 Feature to Cell Mapping.d3dpipeline`
 - **Input:** `Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d`, from [(01) T12 Derived Reporting Fields](%2801%29%20T12%20Derived%20Reporting%20Fields.md).
 - **Result:** Three `_Cell` arrays and `T12/CellWeightedGOSSummary`, saved in `Data/Output/T12_Reporting_Examples/Mapping/T12_FeatureMaps.dream3d`.
 - **Main choice:** Broadcast grain values through `FeatureIds`, then compare a pixel-weighted mean with the equal-grain mean.
-- **Run order:** Complete the orientation metrics and reporting-fields examples first. The compact report is independent of this step; see [run commands](README.md).
+- **Run order:** Run the combined T12 Orientation Case Study, then the derived reporting-fields example first. The compact report is independent of this step; see [run commands](README.md).
 
 ## Purpose and real-world setting
 

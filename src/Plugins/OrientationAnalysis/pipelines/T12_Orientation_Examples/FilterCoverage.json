@@ -1,97 +1,167 @@
 {
   "version": 1,
-  "scope": "Selected filters in the T12 orientation examples, not all OrientationAnalysis filters.",
+  "scope": "Every step of the T12 orientation case study, not all OrientationAnalysis filters. Step indices are zero-based.",
   "filters": [
     {
       "filter": "ReadCtfDataFilter",
       "uuid": "7751923c-afb9-4032-8372-8078325c69a4",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
       "step": 0,
-      "purpose": "Import the public 2D steel map without rotating its acquisition frame; convert Euler angles from degrees to radians."
+      "purpose": "Read the public CTF map and convert Euler angles to radians; the next step applies the default Oxford/HKL sample-frame correction."
+    },
+    {
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 1,
+      "purpose": "Apply the documented default Oxford/HKL CTF correction: rotate the sample reference frame 180 degrees about Y before masks, quaternions and segmentation. No additional Euler-frame rotation is prescribed for this CTF/BCC input; retain the transform-derived origin."
     },
     {
       "filter": "MultiThresholdObjectsFilter",
       "uuid": "4246245e-1011-4add-8436-0af6bed19228",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 1,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 2,
       "purpose": "Accept pixels only when Phases > 0 AND Error == 0. Keep rejected measurements in the saved arrays but exclude them from segmentation."
     },
     {
       "filter": "ConvertOrientationsFilter",
       "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 2,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 3,
       "purpose": "Convert radians-based Euler orientations to quaternions for symmetry-aware segmentation and feature averaging."
     },
     {
       "filter": "EBSDSegmentFeaturesFilter",
       "uuid": "1810c2c7-63e3-41db-b204-a5821e6271c0",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 3,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 4,
       "purpose": "Join face-connected valid pixels within a phase when pairwise misorientation is below 5 degrees. Keep the finite map nonperiodic and feature IDs unrandomized."
     },
     {
       "filter": "ComputeFeatureSizesFilter",
       "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 4,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 5,
       "purpose": "Measure every positive feature before reporting selection. With one Z cell and unit Z spacing, the size output is area and the diameter is an equivalent circle diameter."
     },
     {
       "filter": "ComputeAvgOrientationsFilter",
       "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 5,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 6,
       "purpose": "Compute one symmetry-aware Rodrigues average per positive feature as the fixed reference for later orientation-spread comparisons; do not average Euler components directly."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 7,
+      "purpose": "Select features with NumElements >= 4 for reporting, following the paper minimum population size. Retain smaller features and their pixel labels without reassignment."
     },
     {
       "filter": "ComputeIPFColorsFilter",
       "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 7,
-      "purpose": "Color accepted orientations relative to acquisition Z for visual context only; no loading-axis or strain inference is implied."
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 8,
+      "purpose": "Color accepted orientations relative to corrected sample Z for visual context; no loading-axis or strain inference is implied."
     },
     {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "pipeline": "(01) T12 Orientation Preparation.d3dpipeline",
-      "step": 8,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 9,
       "purpose": "Save measured arrays, validity mask, unchanged segmentation, feature sizes, reporting mask, and average orientations as the shared checkpoint."
-    },
-    {
-      "filter": "ReadDREAM3DFilter",
-      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
-      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
-      "step": 0,
-      "purpose": "Read the full saved T12 preparation checkpoint, including masks, grain labels, and average quaternions."
     },
     {
       "filter": "ComputeKernelAvgMisorientationsFilter",
       "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
-      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
-      "step": 1,
-      "purpose": "Compare only cells in the same grain and phase within a clipped 3 by 3, single-slice window; output degrees."
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 10,
+      "purpose": "Radius [1, 1, 0] is the smallest nonzero in-plane baseline: a clipped 3 by 3 window with 0.5 micrometer axial reach. Feature mode tests matching positive FeatureIds; preparation makes each grain phase-coherent. Center and diagonal cells contribute. Output KAM_R1_Grain in degrees."
     },
     {
       "filter": "ComputeFeatureReferenceMisorientationsFilter",
       "uuid": "24b54daf-3bf5-4331-93f6-03a49f719bf1",
-      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
-      "step": 2,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 11,
       "purpose": "Compare each cell quaternion with its grain AvgQuats; save cell reference angles and per-grain mean spread in degrees."
     },
     {
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
-      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
-      "step": 3,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 12,
       "purpose": "Summarize KAM over indexed pixels; each admitted pixel contributes once."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 13,
+      "purpose": "Summarize grain-reference misorientation over indexed pixels; each admitted pixel contributes once."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 14,
+      "purpose": "Summarize one spread per reportable grain with at least four pixels; each grain contributes once."
     },
     {
       "filter": "WriteFeatureDataCSVFilter",
       "uuid": "d734293f-3017-4699-b458-c05aca078b96",
-      "pipeline": "(02) T12 Local and Grain Reference Misorientation.d3dpipeline",
-      "step": 6,
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 15,
       "purpose": "Export positive Feature_ID rows with GrainOrientationSpread, ReportableFeatures, and unchanged feature measurements."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 16,
+      "purpose": "Save original T12 arrays plus cell maps, grain spread, and the three one-row masked summaries."
+    },
+    {
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 17,
+      "purpose": "Increase only the same-grain kernel radius to [2, 2, 0]: a clipped 5 by 5 window with 1.0 micrometer axial reach. Save KAM_R2_Grain in degrees; retain the existing KAM_R1_Grain baseline."
+    },
+    {
+      "filter": "ComputeKernelAvgMisorientationsFilter",
+      "uuid": "61cfc9c1-aa0e-452b-b9ef-d3b9e6268035",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 18,
+      "purpose": "Radius one, same-phase comparisons across positive feature IDs; save KAM_R1_Phase in degrees."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 19,
+      "purpose": "Summarize KAM_R1_Grain over IndexedPixels with one equally weighted observation per admitted pixel."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 20,
+      "purpose": "Summarize KAM_R2_Grain over IndexedPixels with one equally weighted observation per admitted pixel."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 21,
+      "purpose": "Summarize KAM_R1_Phase over IndexedPixels with one equally weighted observation per admitted pixel."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
+      "step": 22,
+      "purpose": "Save the complete case study: preparation arrays, local and grain-reference metrics, feature spread, all three KAM maps, and all six masked summaries."
     }
   ]
 }

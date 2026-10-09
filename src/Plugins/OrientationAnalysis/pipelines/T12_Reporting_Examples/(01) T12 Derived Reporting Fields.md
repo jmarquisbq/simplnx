@@ -6,10 +6,10 @@ Executable pipeline: `(01) T12 Derived Reporting Fields.d3dpipeline`
 
 ## At a glance
 
-- **Input:** `Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d`, from [(02) T12 Local and Grain Reference Misorientation](../T12_Orientation_Examples/%2802%29%20T12%20Local%20and%20Grain%20Reference%20Misorientation.md).
+- **Input:** `Data/Output/T12_Orientation_Examples/Metrics/T12_MisorientationMetrics.dream3d`, from [T12 Orientation Case Study](../T12_Orientation_Examples/%2801%29%20T12%20Orientation%20Case%20Study.md).
 - **Result:** `T12/Cell Feature Data/GOSZScore` and `T12/ReportingReferenceSummary`, saved in `Data/Output/T12_Reporting_Examples/Derived/T12_ReportingFields.dream3d`.
 - **Main choice:** Each reportable grain contributes once to the reference mean and population standard deviation.
-- **Run order:** Complete the T12 orientation preparation and misorientation examples first. Use the same writable working folder; the [suite README](README.md) gives commands.
+- **Run order:** Run the combined T12 Orientation Case Study first. Use the same writable working folder; the [suite README](README.md) gives commands.
 
 ## Purpose and real-world setting
 
@@ -32,7 +32,7 @@ Excluded rows receive initialized z-score zeros. They are placeholders, so alway
 
 ![Absolute GOS and standardized scores for the same selected grains](T12ReportingFields.png)
 
-The supplied run selects **1,443 grains**, with mean GOS **2.325059°**, median **2.224733°**, and population deviation **1.311755°**. Their z scores span **−1.580571 to 3.679428**, with mean near zero and population deviation near one. The 1,617 excluded rows, including background, are omitted from both histograms.
+The supplied run selects **1,443 grains**, with mean GOS **2.325059°**, median **2.224737°**, and population deviation **1.311755°**. Their z scores span **−1.580571 to 3.679429**, with mean near zero and population deviation near one. The 1,617 excluded rows, including background, are omitted from both histograms.
 
 ## Adaptation and pitfalls
 

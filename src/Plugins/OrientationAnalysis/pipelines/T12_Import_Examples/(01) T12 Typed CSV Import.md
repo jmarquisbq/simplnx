@@ -9,7 +9,7 @@ Executable pipeline: `(01) T12 Typed CSV Import.d3dpipeline`
 - **Input:** `Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv`, from [(03) T12 Compact Report](../T12_Reporting_Examples/%2803%29%20T12%20Compact%20Report.md).
 - **Result:** `Data/Output/T12_Import_Examples/CSV/T12_CSVImport.dream3d`, containing `ImportedCSV` and `CSVSummary`.
 - **Main choice:** Explicit column types and 3059 tuples; the reader does not infer the tuple dimensions.
-- **Run order:** Complete the orientation metrics, reporting derived fields, and compact report first. This import is independent of the selective DREAM3D import; see [run commands](README.md).
+- **Run order:** Run the combined orientation case study, then reporting derived fields and the compact report first. This import is independent of the selective DREAM3D import; see [run commands](README.md).
 
 ## Purpose and real-world setting
 

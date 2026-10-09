@@ -116,7 +116,7 @@
       "role": "Current ReadCSV, ReadDREAM3D, masked statistics, and writer behavior and serialized parameter contracts."
     }
   ],
-  "last_verified": "2026-10-08",
+  "last_verified": "2026-10-09",
   "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
   "steps": [
     {
@@ -253,7 +253,7 @@
   },
   "reference_results": {
     "reportable_feature_count": 1443,
-    "equal_feature_gos_mean_degrees": 2.325058781039112,
+    "equal_feature_gos_mean_degrees": 2.325058801692142,
     "rows": 3059,
     "arrays": 7,
     "background_included": false,

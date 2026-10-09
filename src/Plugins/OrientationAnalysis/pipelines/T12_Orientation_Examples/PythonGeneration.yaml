@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "t12-orientation-python-generation-v1",
-  "title": "T12 orientation example pipeline to Python generation",
+  "title": "T12 orientation case-study pipeline to Python generation",
   "source_authority": ".d3dpipeline",
   "converter_api": "simplnx_utilities.generate_python_pipeline",
   "required_modules": [
@@ -12,13 +12,13 @@
   ],
   "working_directory": "Chosen writable CLI working folder containing Data/T12-MAI-2010 and Data/Output",
   "output_lifetime": "temporary",
-  "verification_status": "NOT VERIFIED: generation, imports, syntax, structure, and execution have not been tested for these bundles.",
+  "verification_status": "NOT VERIFIED: generation, imports, syntax, structure, and execution have not been tested for this case study.",
   "failure_behavior": "Report a missing module, load error, generation error, or execution error. Do not silently substitute handwritten Python.",
   "regeneration_rule": "Regenerate temporary Python from the authoritative .d3dpipeline after any filter, argument, comment, or path change.",
   "path_rules": {
     "pipeline_reference_base": "pipeline_suite_root",
     "runtime_data_base": "chosen_cli_working_directory",
-    "input_paths": "Preserve Data/T12-MAI-2010 and Data/Output/T12_Orientation_Examples input paths relative to the chosen CLI working folder.",
+    "input_paths": "Preserve Data/T12-MAI-2010 source path relative to the chosen CLI working folder; no predecessor outputs are required.",
     "output_paths": "Preserve Data/Output/T12_Orientation_Examples output paths relative to the chosen CLI working folder."
   },
   "generation": {
@@ -29,7 +29,7 @@
       "Load the authoritative .d3dpipeline with simplnx.Pipeline.from_file(pipeline_path).",
       "Call simplnx_utilities.generate_python_pipeline(pipeline).",
       "Compile the returned program and write it to a temporary .py file.",
-      "Execute from the same chosen writable CLI working folder after predecessor outputs exist; discard the temporary file after validation."
+      "Execute the generated program once from the chosen writable CLI working folder containing the source CTF; discard the temporary file after validation."
     ],
     "reference_code": [
       "import simplnx as nx",
@@ -45,8 +45,9 @@
     "syntax": "Compile the generated text with Python compile().",
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check every relative input and output path against the source pipeline.",
-    "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
+    "execution": "Run the generated case study from the documented source CTF and inspect all three checkpoints plus feature CSV. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
-  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "pipeline_file": "(01) T12 Orientation Case Study.d3dpipeline"
 }
