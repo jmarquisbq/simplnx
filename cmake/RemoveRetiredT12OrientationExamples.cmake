@@ -1,0 +1,30 @@
+# copy_directory and install(DIRECTORY) retain files removed from the source.
+# Retire only the three examples replaced by the combined T12 case study.
+if(NOT DEFINED PIPELINE_DIR OR NOT IS_ABSOLUTE "${PIPELINE_DIR}")
+  message(FATAL_ERROR "PIPELINE_DIR must be an absolute pipeline destination")
+endif()
+set(category "${PIPELINE_DIR}/T12_Orientation_Examples")
+if(NOT EXISTS "${category}/(01) T12 Orientation Case Study.d3dpipeline")
+  return()
+endif()
+file(REAL_PATH "${PIPELINE_DIR}" pipeline_root)
+file(REAL_PATH "${category}" category_root)
+cmake_path(IS_PREFIX pipeline_root "${category_root}" NORMALIZE category_inside)
+if(NOT category_inside OR category_root STREQUAL pipeline_root)
+  message(FATAL_ERROR "T12 category must stay below the pipeline destination: ${category_root}")
+endif()
+foreach(stem
+    "(01) T12 Orientation Preparation"
+    "(02) T12 Local and Grain Reference Misorientation"
+    "(03) T12 KAM Neighborhood Comparison")
+  foreach(extension d3dpipeline md yaml)
+    set(retired_file "${category_root}/${stem}.${extension}")
+    if(IS_DIRECTORY "${retired_file}")
+      message(FATAL_ERROR "Expected a retired file, found a directory: ${retired_file}")
+    endif()
+    file(REMOVE "${retired_file}")
+    if(EXISTS "${retired_file}" OR IS_SYMLINK "${retired_file}")
+      message(FATAL_ERROR "Could not remove retired example: ${retired_file}")
+    endif()
+  endforeach()
+endforeach()

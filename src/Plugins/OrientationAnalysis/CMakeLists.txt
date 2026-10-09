@@ -318,6 +318,8 @@ if(EXISTS "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines")
   add_custom_target(Copy_${PLUGIN_NAME}_Pipeline_Folder ALL
                     COMMAND ${CMAKE_COMMAND} -E copy_directory "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines"
                     ${PIPELINE_DEST_DIR}
+                    COMMAND ${CMAKE_COMMAND} "-DPIPELINE_DIR=${PIPELINE_DEST_DIR}"
+                    -P "${simplnx_SOURCE_DIR}/cmake/RemoveRetiredT12OrientationExamples.cmake"
                     COMMENT "Copying Pipeline Folder into Binary Directory"
                     COMMAND_EXPAND_LISTS
                     VERBATIM
@@ -333,6 +335,16 @@ if(EXISTS "${${PLUGIN_NAME}_SOURCE_DIR}/pipelines")
       DESTINATION "${INSTALL_DESTINATION}"
       COMPONENT Applications
     )
+    set(retired_t12_install_code [[
+      set(t12_install_dir "@INSTALL_DESTINATION@")
+      if(NOT IS_ABSOLUTE "${t12_install_dir}")
+        set(t12_install_dir "${CMAKE_INSTALL_PREFIX}/${t12_install_dir}")
+      endif()
+      set(PIPELINE_DIR "$ENV{DESTDIR}${t12_install_dir}")
+      include("@simplnx_SOURCE_DIR@/cmake/RemoveRetiredT12OrientationExamples.cmake")
+    ]])
+    string(CONFIGURE "${retired_t12_install_code}" retired_t12_install_code @ONLY)
+    install(CODE "${retired_t12_install_code}" COMPONENT Applications)
   endif()
 endif()
 
