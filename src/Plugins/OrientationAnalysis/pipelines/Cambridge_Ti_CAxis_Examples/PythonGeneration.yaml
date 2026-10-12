@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "cambridge-ti-caxis-python-generation-v1",
+  "title": "Cambridge titanium c-axis examples to Python generation",
+  "source_authority": ".d3dpipeline",
+  "converter_api": "simplnx_utilities.generate_python_pipeline",
+  "required_modules": [
+    "simplnx",
+    "orientationanalysis",
+    "imageprocessing",
+    "simplnx_utilities"
+  ],
+  "working_directory": "Chosen writable CLI working folder containing Data/CambridgeTitanium and Data/Output",
+  "output_lifetime": "temporary",
+  "verification_status": "NOT VERIFIED: generated Python imports, syntax, structure, and execution.",
+  "failure_behavior": "Report missing modules, load, generation, syntax, or execution errors; do not silently substitute handwritten code.",
+  "regeneration_rule": "Regenerate temporary Python from each authoritative .d3dpipeline after a filter, argument, comment, or path change.",
+  "path_rules": {
+    "pipeline_reference_base": "pipeline_suite_root",
+    "runtime_data_base": "chosen_cli_working_directory",
+    "input_paths": "Preserve Data/CambridgeTitanium original CPR path and predecessor Data/Output paths. Keep CPR and CRC together.",
+    "output_paths": "Preserve Data/Output/Cambridge_Ti_CAxis_Examples paths."
+  },
+  "generation": {
+    "language": "Python",
+    "steps": [
+      "Use Python supplied with a matching DREAM3D-NX application and load required plugins; the converter can import imageprocessing even when these pipelines use no ImageProcessing filter.",
+      "Load each authoritative pipeline with simplnx.Pipeline.from_file(pipeline_path).",
+      "Call simplnx_utilities.generate_python_pipeline(pipeline), then compile the returned code.",
+      "Write code to a temporary file and run stages 01, 02, 03 in order from the chosen writable working folder."
+    ],
+    "reference_code": [
+      "import simplnx as nx",
+      "import orientationanalysis",
+      "import imageprocessing",
+      "import simplnx_utilities",
+      "pipeline = nx.Pipeline.from_file(pipeline_path)",
+      "code = simplnx_utilities.generate_python_pipeline(pipeline)",
+      "compile(code, str(pipeline_path), 'exec')"
+    ]
+  },
+  "validation": {
+    "syntax": "Compile generated text with Python compile().",
+    "structure": "Compare generated filter order with enabled JSON steps.",
+    "paths": "Compare all relative input and output paths with source JSON.",
+    "execution": "Execute each temporary generated stage and check all three checkpoints; not yet verified.",
+    "storage": "Validate OOC separately before claiming OOC support."
+  },
+  "gui_note": "GUI working folders vary; set absolute file paths when Data-relative paths do not resolve. GUI run is unverified.",
+  "pipeline_files": [
+    "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+    "(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline",
+    "(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline"
+  ]
+}

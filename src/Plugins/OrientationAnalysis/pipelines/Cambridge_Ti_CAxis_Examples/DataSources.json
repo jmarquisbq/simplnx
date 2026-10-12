@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "relative_directory": "Data/CambridgeTitanium",
+  "dataset_doi": "10.17863/CAM.8815",
+  "dataset_url": "https://doi.org/10.17863/CAM.8815",
+  "paper_doi": "10.1098/rspa.2017.0274",
+  "license": "CC BY 4.0",
+  "attribution": "Krakow et al. (2017), On three-dimensional misorientation spaces; Cambridge data repository DOI 10.17863/CAM.8815.",
+  "provenance": "Original published Oxford CPR/CRC pair from the author companion archive, not a generated stand-in. The paired source files are not bundled.",
+  "archive": {
+    "url": "https://api.repository.cam.ac.uk/server/api/core/bitstreams/24eaae5b-5f74-405e-82e5-449f89ee570c/content",
+    "sha512": "694a3a7719d42d3f9894bf6aacf21729705fdec68c5eae21ca35447a080a4a6f01ca66fb56099218fd5324fe045deae127186901938d75ad72a13b879e6b74ff",
+    "filename": "upload_scripts_apollo.zip",
+    "bytes": 44726968,
+    "md5": "d299aebd0dade26195fc0bb2789637d4"
+  },
+  "files": [
+    {
+      "filename": "case_study_2_titanium_data.cpr",
+      "archive_path": "upload_scripts_apollo/case_study_2_titanium_data.cpr",
+      "sha512": "933ccdf3d6ca4d4aa31b5deeb4d6f23f765b0fecb94c5283bd74e110605731d9e93a8c2fc4ad8e5b2e8bab0b7604d051b8743590b9cbe7c79d1c403b7a4dd018",
+      "bytes": 732
+    },
+    {
+      "filename": "case_study_2_titanium_data.crc",
+      "archive_path": "upload_scripts_apollo/case_study_2_titanium_data.crc",
+      "sha512": "c95a8bb6c7406910a83efddc31004671d96bf531b9d23d66b894caa4047355e70077567c7559bb3c36882dc3628f399996c08a3a94c3f40aceee13165ec9ffd9",
+      "bytes": 4056507
+    }
+  ]
+}

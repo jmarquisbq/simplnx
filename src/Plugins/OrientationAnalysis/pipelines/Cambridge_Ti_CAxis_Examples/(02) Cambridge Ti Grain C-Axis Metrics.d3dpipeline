@@ -1,0 +1,485 @@
+{
+  "isDisabled": false,
+  "name": "(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Cambridge_Ti_CAxis_Examples/Prepared/CambridgeTi_Prepared.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the complete predecessor checkpoint.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "misorientation_tolerance": {
+          "value": 7.0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "cell_quats_array_path": {
+          "value": "Titanium/Cell Data/Quats",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "cell_mask_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "feature_ids_array_name": {
+          "value": "GrainIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_name": {
+          "value": "Grain Data",
+          "version": 1
+        },
+        "active_array_name": {
+          "value": "Active",
+          "version": 1
+        },
+        "randomize_features": {
+          "value": false,
+          "version": 1
+        },
+        "is_periodic": {
+          "value": false,
+          "version": 1
+        },
+        "neighbor_scheme_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Find face-connected full-orientation grains at the author-script 7 degree tolerance; IDs are NX-specific.",
+      "filter": {
+        "name": "nx::core::EBSDSegmentFeaturesFilter",
+        "uuid": "1810c2c7-63e3-41db-b204-a5821e6271c0"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "save_element_sizes": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "Titanium/Grain Data",
+          "version": 1
+        },
+        "volumes_name": {
+          "value": "Areas",
+          "version": 1
+        },
+        "equivalent_diameters_name": {
+          "value": "EquivalentCircleDiameters",
+          "version": 1
+        },
+        "num_elements_name": {
+          "value": "NumCells",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Measure grain pixel counts and two-dimensional areas; unit z spacing is a software placeholder.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureSizesFilter",
+        "uuid": "c666ee17-ca58-4969-80d0-819986c72485"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "Titanium/Grain Data/Areas",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 1.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "ReportingGrains",
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Mark grains with measured area greater than 1 square micrometer for an optional paper-like display cohort; retain every grain.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "FeaturePhases",
+          "version": 1
+        },
+        "cell_features_attribute_matrix_path": {
+          "value": "Titanium/Grain Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Assign each positive grain its analysis phase; row zero remains background.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesFilter",
+        "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "avg_euler_angles_array_name": {
+          "value": "AvgEulerAngles",
+          "version": 1
+        },
+        "avg_quats_array_name": {
+          "value": "AvgQuats",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "Titanium/Grain Data",
+          "version": 1
+        },
+        "cell_feature_ids_array_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "cell_quats_array_path": {
+          "value": "Titanium/Cell Data/Quats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_rodrigues_average": {
+          "value": true,
+          "version": 1
+        },
+        "use_vmf_average": {
+          "value": false,
+          "version": 1
+        },
+        "use_watson_average": {
+          "value": false,
+          "version": 1
+        },
+        "vmf_euler_array_name": {
+          "value": "vMF Avg EulerAngles",
+          "version": 1
+        },
+        "vmf_kappa_array_name": {
+          "value": "vMF Kappas",
+          "version": 1
+        },
+        "vmf_quat_array_name": {
+          "value": "vMF Avg Quats",
+          "version": 1
+        },
+        "watson_euler_array_name": {
+          "value": "Watson Avg EulerAngles",
+          "version": 1
+        },
+        "watson_kappa_array_name": {
+          "value": "Watson Kappas",
+          "version": 1
+        },
+        "watson_quat_array_name": {
+          "value": "Watson Avg Quats",
+          "version": 1
+        }
+      },
+      "comments": "Compute symmetry-aware grain AvgQuats for neighbor c-axis comparisons.",
+      "filter": {
+        "name": "nx::core::ComputeAvgOrientationsFilter",
+        "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "store_boundary_cells": {
+          "value": false,
+          "version": 1
+        },
+        "store_surface_features": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "cell_feature_array_path": {
+          "value": "Titanium/Grain Data",
+          "version": 1
+        },
+        "boundary_cells_name": {
+          "value": "BoundaryCells",
+          "version": 1
+        },
+        "number_of_neighbors_name": {
+          "value": "NumNeighbors",
+          "version": 1
+        },
+        "neighbor_list_name": {
+          "value": "NeighborList",
+          "version": 1
+        },
+        "shared_surface_area_list_name": {
+          "value": "SharedBoundaryLength",
+          "version": 1
+        },
+        "surface_features_name": {
+          "value": "SurfaceFeatures",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Build the face-contiguous grain graph; single-layer shared areas represent boundary lengths under unit z spacing.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureNeighborsFilter",
+        "uuid": "7177e88c-c3ab-4169-abe9-1fdaff20e598"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "quats_array_path": {
+          "value": "Titanium/Cell Data/Quats",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "Titanium/Grain Data",
+          "version": 1
+        },
+        "avg_c_axes_array_name": {
+          "value": "AvgCAxes",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute antipodally aligned mean cell c axes for each grain.",
+      "filter": {
+        "name": "nx::core::ComputeAvgCAxesFilter",
+        "uuid": "453cdb58-7bbb-4576-ad5e-f75a1c54d348"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "quats_array_path": {
+          "value": "Titanium/Cell Data/Quats",
+          "version": 1
+        },
+        "avg_c_axes_array_path": {
+          "value": "Titanium/Grain Data/AvgCAxes",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "feature_avg_c_axis_misorientations_array_name": {
+          "value": "MeanCAxisDeviation",
+          "version": 1
+        },
+        "feature_stdev_c_axis_misorientations_array_name": {
+          "value": "StdDevCAxisDeviation",
+          "version": 1
+        },
+        "feature_reference_c_axis_misorientations_array_name": {
+          "value": "CAxisDeviationFromGrain",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Measure each indexed cell c-axis deviation from its grain AvgCAxes in degrees.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureReferenceCAxisMisorientationsFilter",
+        "uuid": "16c487d2-8f99-4fb5-a4df-d3f70a8e6b25"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "find_avg_misals": {
+          "value": true,
+          "version": 1
+        },
+        "neighbor_list_array_path": {
+          "value": "Titanium/Grain Data/NeighborList",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "Titanium/Grain Data/AvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "Titanium/Grain Data/FeaturePhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "c_axis_misalignment_list_array_name": {
+          "value": "NeighborCAxisMisalignments",
+          "version": 1
+        },
+        "avg_c_axis_misalignments_array_name": {
+          "value": "MeanNeighborCAxisMisalignment",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Measure neighbor c-axis angles from AvgQuats; this reference differs from AvgCAxes.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureNeighborCAxisMisalignmentsFilter",
+        "uuid": "636ee030-9f07-4f16-a4f3-592eff8ef1ee"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/Cambridge_Ti_CAxis_Examples/GrainMetrics/CambridgeTi_GrainMetrics.dream3d",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Save the complete checkpoint for the next example and independent checks.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

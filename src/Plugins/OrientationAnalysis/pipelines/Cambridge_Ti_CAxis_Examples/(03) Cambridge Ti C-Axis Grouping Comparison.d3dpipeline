@@ -1,0 +1,403 @@
+{
+  "isDisabled": false,
+  "name": "(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Cambridge_Ti_CAxis_Examples/GrainMetrics/CambridgeTi_GrainMetrics.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the complete predecessor checkpoint.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "misorientation_tolerance": {
+          "value": 7.0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "quats_array_path": {
+          "value": "Titanium/Cell Data/Quats",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "Titanium/Cell Data/AnalysisPhases",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "feature_ids_array_name": {
+          "value": "CAxisRegionIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_name": {
+          "value": "CAxis Region Data",
+          "version": 1
+        },
+        "active_array_name": {
+          "value": "Active",
+          "version": 1
+        },
+        "randomize_feature_ids": {
+          "value": false,
+          "version": 1
+        },
+        "neighbor_scheme_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Segment face-connected cell c axes at the same 7 degree threshold for visual comparison with grains.",
+      "filter": {
+        "name": "nx::core::CAxisSegmentFeaturesFilter",
+        "uuid": "9fe07e17-aef1-4bf1-834c-d3a73dafc27d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_running_average": {
+          "value": false,
+          "version": 1
+        },
+        "c_axis_tolerance": {
+          "value": 7.0,
+          "version": 1
+        },
+        "use_non_contiguous_neighbors": {
+          "value": false,
+          "version": 1
+        },
+        "contiguous_neighbor_list_array_path": {
+          "value": "Titanium/Grain Data/NeighborList",
+          "version": 1
+        },
+        "non_contiguous_neighbor_list_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "randomize_parent_ids": {
+          "value": false,
+          "version": 1
+        },
+        "use_seed": {
+          "value": true,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "CambridgeTi_GroupingSeed",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "Titanium/Cell Data/GrainIds",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "Titanium/Grain Data/FeaturePhases",
+          "version": 1
+        },
+        "volumes_array_path": {
+          "value": "Titanium/Grain Data/Areas",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "Titanium/Grain Data/AvgQuats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "Titanium/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "new_cell_feature_attribute_matrix_path": {
+          "value": "Titanium/Grouped Grain Data",
+          "version": 1
+        },
+        "cell_parent_ids_array_name": {
+          "value": "GroupedGrainIds",
+          "version": 1
+        },
+        "feature_parent_ids_array_name": {
+          "value": "GroupedGrainIds",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Group adjacent grains by pairwise c-axis alignment; fixed seed and unrandomized IDs make reruns comparable.",
+      "filter": {
+        "name": "nx::core::GroupMicroTextureRegionsFilter",
+        "uuid": "3f695987-81b1-47c3-8cff-b49cfa219be0"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_conditional": {
+          "value": true,
+          "version": 1
+        },
+        "conditional_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "invert_mask": {
+          "value": true,
+          "version": 1
+        },
+        "remove_value": {
+          "value": "0",
+          "version": 1
+        },
+        "replace_value": {
+          "value": "0",
+          "version": 1
+        },
+        "selected_array_path": {
+          "value": "Titanium/Cell Data/GroupedGrainIds",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reset excluded cell parent labels to zero after native grouping.",
+      "filter": {
+        "name": "nx::core::ConditionalSetValueFilter",
+        "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "Titanium/Grain Data/FeaturePhases",
+                "comparison": 2,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "BackgroundGrain",
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Identify background grain row zero for parent-label cleanup.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_conditional": {
+          "value": true,
+          "version": 1
+        },
+        "conditional_array_path": {
+          "value": "Titanium/Grain Data/BackgroundGrain",
+          "version": 1
+        },
+        "invert_mask": {
+          "value": false,
+          "version": 1
+        },
+        "remove_value": {
+          "value": "0",
+          "version": 1
+        },
+        "replace_value": {
+          "value": "0",
+          "version": 1
+        },
+        "selected_array_path": {
+          "value": "Titanium/Grain Data/GroupedGrainIds",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reset background feature parent label to zero; leave the unused parent row in place.",
+      "filter": {
+        "name": "nx::core::ConditionalSetValueFilter",
+        "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "save_element_sizes": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "Titanium",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Titanium/Cell Data/GroupedGrainIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "Titanium/Grouped Grain Data",
+          "version": 1
+        },
+        "volumes_name": {
+          "value": "Areas",
+          "version": 1
+        },
+        "equivalent_diameters_name": {
+          "value": "EquivalentCircleDiameters",
+          "version": 1
+        },
+        "num_elements_name": {
+          "value": "NumCells",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Measure populated grouped-parent areas from corrected cell IDs; skip empty parent rows in interpretation.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureSizesFilter",
+        "uuid": "c666ee17-ca58-4969-80d0-819986c72485"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "volumes_path": {
+          "value": "Titanium/Grain Data/Areas",
+          "version": 1
+        },
+        "contiguous_neighbor_list_path": {
+          "value": "Titanium/Grain Data/NeighborList",
+          "version": 1
+        },
+        "use_non_contiguous_neighbors": {
+          "value": false,
+          "version": 1
+        },
+        "non_contiguous_neighbor_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "parent_ids_path": {
+          "value": "Titanium/Grain Data/GroupedGrainIds",
+          "version": 1
+        },
+        "parent_volumes_path": {
+          "value": "Titanium/Grouped Grain Data/Areas",
+          "version": 1
+        },
+        "find_checked_features": {
+          "value": false,
+          "version": 1
+        },
+        "checked_features_name": {
+          "value": "CheckedFeatures",
+          "version": 1
+        },
+        "grouping_densities_name": {
+          "value": "NeighborhoodAreaFraction",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Measure parent area divided by the unique member-plus-neighbor area; a dimensionless 2D neighborhood fraction.",
+      "filter": {
+        "name": "nx::core::ComputeGroupingDensityFilter",
+        "uuid": "ff46afcf-de32-4f37-98bc-8f0fd4b3c122"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/Cambridge_Ti_CAxis_Examples/Grouping/CambridgeTi_GroupingComparison.dream3d",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Save the complete checkpoint for the next example and independent checks.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
