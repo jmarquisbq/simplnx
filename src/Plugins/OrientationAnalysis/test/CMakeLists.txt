@@ -534,3 +534,14 @@ add_test(NAME PIPELINE::OrientationAnalysis::Cambridge_Ti_CAxis_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/CambridgeTiCAxisExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::Cambridge_Ti_CAxis_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Cambridge_Ti_CAxis_Examples")
+
+# Small_IN100_Boundary_Examples example chain
+add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Boundary_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Boundary_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Small_IN100_Boundary_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100BoundaryExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Boundary_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Small_IN100_Boundary_Examples")

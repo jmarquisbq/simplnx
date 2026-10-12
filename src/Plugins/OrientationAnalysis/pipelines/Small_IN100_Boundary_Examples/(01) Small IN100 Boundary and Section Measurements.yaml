@@ -1,0 +1,584 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Boundary and Section Measurements.md",
+  "title": "Small IN100 Boundary and Section Measurements",
+  "summary": "Compare boundary-cell fractions, voxel surface-to-volume ratios, sphericity, and largest XY/XZ/YZ slice areas on the same reconstructed 3D EBSD labels.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "3D microscopy"
+  ],
+  "use_cases": [
+    "Compare boundary and section descriptors for occupied grains",
+    "Screen interior grains for follow-up morphology review"
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "boundary cells",
+    "surface area to volume",
+    "sphericity",
+    "largest cross section"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "role": "Full measured-derived 3D feature-measurement checkpoint after Archive, Preparation, and Measurements."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Boundary_Examples/Measurements/SmallIN100_BoundarySections.dream3d",
+      "role": "Full source-preserving DREAM3D checkpoint with new cell and feature arrays.",
+      "sha256": "e99cba2de4a9d3fa918332fd209a6ab5d48d09721583f776beccd6d8e23f8058"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson (2014) for measured 3D EBSD reconstruction and feature statistics; no paper figure is a numerical target here.",
+    "target_traits": [
+      "117 measured ANG sections",
+      "Full 189 × 201 × 117 reconstructed image",
+      "0.25 µm isotropic grid",
+      "Original final FeatureIds retained"
+    ],
+    "known_differences": "The boundary and section comparison is illustrative and does not reproduce a named paper result or establish source identity with publisher supplements.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "../Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline",
+      "produces": "Data/Output/Reconstruction/Small_IN100.h5ebsd"
+    },
+    {
+      "pipeline": "../Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
+    },
+    {
+      "pipeline": "../Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the saved feature measurements once; this branch does not read another comparison output.",
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 1,
+      "filter": "ComputeSurfaceFeaturesFilter",
+      "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948",
+      "role": "Mark image-box contact and face-adjacent background-0 contact. Preserve FeatureIds.",
+      "key_parameters": {
+        "mark_feature_0_neighbors": true,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "surface_features_array_name": "SurfaceFeatures"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "mark_feature_0_neighbors": {
+          "value": true,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "surface_features_array_name": {
+          "value": "SurfaceFeatures",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 2,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Select occupied positive-ID rows that touch neither the frame nor in-bounds background 0; these support whole-grain interpretation.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "DataContainer/Cell Feature Data/NumElements",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "DataContainer/Cell Feature Data/SurfaceFeatures",
+              "comparison": 2,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 10,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "InteriorFeatures",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "DataContainer/Cell Feature Data/NumElements",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              },
+              {
+                "array_path": "DataContainer/Cell Feature Data/SurfaceFeatures",
+                "comparison": 2,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "InteriorFeatures",
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 3,
+      "filter": "ComputeBoundaryCellsFilter",
+      "uuid": "a1dd1c29-9152-4648-836c-3b6967e32600",
+      "role": "Count unlike-label in-bounds face neighbors per cell, including label-0 contacts and excluding out-of-image faces.",
+      "key_parameters": {
+        "ignore_feature_zero": false,
+        "include_volume_boundary": false,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "boundary_cells_array_name": "BoundaryNeighborCounts"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "ignore_feature_zero": {
+          "value": false,
+          "version": 1
+        },
+        "include_volume_boundary": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "boundary_cells_array_name": {
+          "value": "BoundaryNeighborCounts",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 4,
+      "filter": "ComputeBoundaryElementFractionsFilter",
+      "uuid": "f268dab6-9a31-498e-8502-338cd7a549b4",
+      "role": "For each positive feature, count cells with at least one unlike in-bounds neighbor and divide by cell count.",
+      "key_parameters": {
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "boundary_cells_array_path": "DataContainer/Cell Data/BoundaryNeighborCounts",
+        "feature_data_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "boundary_cell_fractions_array_name": "BoundaryCellFractions"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "boundary_cells_array_path": {
+          "value": "DataContainer/Cell Data/BoundaryNeighborCounts",
+          "version": 1
+        },
+        "feature_data_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "boundary_cell_fractions_array_name": {
+          "value": "BoundaryCellFractions",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 5,
+      "filter": "ComputeSurfaceAreaToVolumeFilter",
+      "uuid": "94e83e4f-797d-4594-b130-3819b7676f01",
+      "role": "Estimate voxel-face surface area divided by NumElements-based volume and sphericity on the isotropic 0.25 micrometer grid.",
+      "key_parameters": {
+        "calculate_sphericity": true,
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_image_geometry_path": "DataContainer",
+        "num_cells_array_path": "DataContainer/Cell Feature Data/NumElements",
+        "sphericity_array_name": "Sphericity",
+        "surface_area_volume_ratio_array_name": "SurfaceAreaToVolume"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "calculate_sphericity": {
+          "value": true,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "num_cells_array_path": {
+          "value": "DataContainer/Cell Feature Data/NumElements",
+          "version": 1
+        },
+        "parameters_version": 1,
+        "sphericity_array_name": {
+          "value": "Sphericity",
+          "version": 1
+        },
+        "surface_area_volume_ratio_array_name": {
+          "value": "SurfaceAreaToVolume",
+          "version": 1
+        }
+      }
+    },
+    {
+      "index": 6,
+      "filter": "ComputeLargestCrossSectionsFilter",
+      "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
+      "role": "Find each feature’s largest grid-aligned XY slice area in square micrometers.",
+      "key_parameters": {
+        "plane_index": 0,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "largest_cross_sections_array_name": "LargestSectionXY"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "plane_index": {
+          "value": 0,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionXY",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 7,
+      "filter": "ComputeLargestCrossSectionsFilter",
+      "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
+      "role": "Find each feature’s largest grid-aligned XZ slice area in square micrometers.",
+      "key_parameters": {
+        "plane_index": 1,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "largest_cross_sections_array_name": "LargestSectionXZ"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "plane_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionXZ",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 8,
+      "filter": "ComputeLargestCrossSectionsFilter",
+      "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
+      "role": "Find each feature’s largest grid-aligned YZ slice area in square micrometers.",
+      "key_parameters": {
+        "plane_index": 2,
+        "input_image_geometry_path": "DataContainer",
+        "feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "largest_cross_sections_array_name": "LargestSectionYZ"
+      },
+      "parameters_version": 1,
+      "arguments": {
+        "plane_index": {
+          "value": 2,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionYZ",
+          "version": 1
+        },
+        "parameters_version": 1
+      }
+    },
+    {
+      "index": 9,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the full source checkpoint plus boundary and section arrays without relabeling.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Boundary_Examples/Measurements/SmallIN100_BoundarySections.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2,
+      "arguments": {
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Boundary_Examples/Measurements/SmallIN100_BoundarySections.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      }
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-boundary-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare boundary and section metrics of reconstructed grains",
+      "Identify interior features for morphology review"
+    ],
+    "questions": [
+      "Are background and image-edge contacts relevant?",
+      "Is a grid-aligned largest section sufficient?",
+      "Is the image spacing isotropic?"
+    ],
+    "constraints": [
+      "Use occupied positive FeatureIds; InteriorFeatures excludes frame and label-0 contacts.",
+      "BoundaryCellFractions is a fraction of cells with at least one unlike neighbor, not a fraction of face area.",
+      "SurfaceAreaToVolume counts in-bounds label-0 contacts but excludes out-of-image faces in the current algorithm.",
+      "LargestSectionXY/XZ/YZ are maxima over grid-aligned slices, not arbitrary oblique sections.",
+      "Known limitation: ComputeSurfaceAreaToVolume uses incorrect X/Y-normal face areas when X and Y spacing differ (https://github.com/BlueQuartzSoftware/simplnx/issues/1780). This 0.25 µm isotropic input is unaffected.",
+      "The .d3dpipeline is executable authority; exact argument objects are in steps[].arguments."
+    ],
+    "related_pipelines": [
+      "../Small_IN100_Examples/(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "../Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Measured 3D EBSD reconstruction and feature-statistics context; this comparison is an illustrative extension.",
+      "dataset": {
+        "availability": "Public Small_IN100 archive of 117 ANG sections. Exact identity with publisher supplements has not been established.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "Article CC BY 2.0; separate archive redistribution terms have not been established. No raw or processed volume is bundled.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses measured-derived reconstructed labels and adds current core-filter descriptors; no numerical paper result is reproduced."
+      }
+    }
+  ],
+  "last_verified": "2026-10-12",
+  "dimensional_scope": "Full 189 × 201 × 117 image, 0.25 µm isotropic spacing; no crop or relabeling.",
+  "cli_usage": {
+    "working_directory": "One writable folder containing the predecessor Data/Output tree.",
+    "relative_path_base": "Current CLI working directory",
+    "instructions": "See README for exact run order and output directory.",
+    "gui_note": "Set absolute file input and output paths if the GUI working folder differs."
+  },
+  "validation": {
+    "date": "2026-10-12",
+    "configuration": "Windows in-memory Release native CTest passed 1/1 in 19.67 s; independent saved-output audit passed 17/17.",
+    "pipeline_chain": {
+      "passed": true,
+      "tests": 1,
+      "elapsed_seconds": 19.67
+    },
+    "independent_checks": {
+      "passed": 17,
+      "total": 17,
+      "cell_boundary_counts_checked": 4444713,
+      "largest_section_planes_checked": 3,
+      "preserved_source_datasets": 27,
+      "occupied_positive_features": 2317,
+      "interior_features": 1349,
+      "unused_feature_rows": 17,
+      "sphericity_max_relative_error": 5.29543e-05,
+      "sphericity_analytical_approximation_bound": 5.3411e-05
+    },
+    "known_limitation": "Anisotropic X/Y-normal face-area defect filed as https://github.com/BlueQuartzSoftware/simplnx/issues/1780; the isotropic example is unaffected.",
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI",
+      "exact paper reproduction"
+    ],
+    "pipeline_sha256": "c25f07bcc67556285bf2e957d67e68ac94bbfebd3f69d436e44ea2085192e91e",
+    "native_output_sha256": "e99cba2de4a9d3fa918332fd209a6ab5d48d09721583f776beccd6d8e23f8058",
+    "observed_interior_features": 1349
+  },
+  "result_visual": {
+    "path": "BoundarySections.png",
+    "sha256": "27053cfec8efd47d2e37a57c288c913bf865b7d702b0be882e1f35c016257adb",
+    "source_output": "Data/Output/Small_IN100_Boundary_Examples/Measurements/SmallIN100_BoundarySections.dream3d",
+    "source_sha256": "e99cba2de4a9d3fa918332fd209a6ab5d48d09721583f776beccd6d8e23f8058",
+    "method": "Matplotlib scatter plots of native saved feature arrays for occupied interior grains; no algorithmic pipeline replacement.",
+    "visual_review": "2026-10-12: axes, units, cohort size, margins, and color legends inspected."
+  }
+}

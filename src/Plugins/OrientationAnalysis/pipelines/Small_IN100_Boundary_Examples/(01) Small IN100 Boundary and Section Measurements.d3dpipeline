@@ -1,0 +1,335 @@
+{
+  "isDisabled": false,
+  "name": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the saved feature measurements once; this branch does not read another comparison output.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "mark_feature_0_neighbors": {
+          "value": true,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "surface_features_array_name": {
+          "value": "SurfaceFeatures",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Mark image-box contact and face-adjacent background-0 contact. Preserve FeatureIds.",
+      "filter": {
+        "name": "nx::core::ComputeSurfaceFeaturesFilter",
+        "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "DataContainer/Cell Feature Data/NumElements",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              },
+              {
+                "array_path": "DataContainer/Cell Feature Data/SurfaceFeatures",
+                "comparison": 2,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "InteriorFeatures",
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Select occupied positive-ID rows that touch neither the frame nor in-bounds background 0; these support whole-grain interpretation.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "ignore_feature_zero": {
+          "value": false,
+          "version": 1
+        },
+        "include_volume_boundary": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "boundary_cells_array_name": {
+          "value": "BoundaryNeighborCounts",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Count unlike-label in-bounds face neighbors per cell, including label-0 contacts and excluding out-of-image faces.",
+      "filter": {
+        "name": "nx::core::ComputeBoundaryCellsFilter",
+        "uuid": "a1dd1c29-9152-4648-836c-3b6967e32600"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "boundary_cells_array_path": {
+          "value": "DataContainer/Cell Data/BoundaryNeighborCounts",
+          "version": 1
+        },
+        "feature_data_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "boundary_cell_fractions_array_name": {
+          "value": "BoundaryCellFractions",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "For each positive feature, count cells with at least one unlike in-bounds neighbor and divide by cell count.",
+      "filter": {
+        "name": "nx::core::ComputeBoundaryElementFractionsFilter",
+        "uuid": "f268dab6-9a31-498e-8502-338cd7a549b4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculate_sphericity": {
+          "value": true,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "num_cells_array_path": {
+          "value": "DataContainer/Cell Feature Data/NumElements",
+          "version": 1
+        },
+        "parameters_version": 1,
+        "sphericity_array_name": {
+          "value": "Sphericity",
+          "version": 1
+        },
+        "surface_area_volume_ratio_array_name": {
+          "value": "SurfaceAreaToVolume",
+          "version": 1
+        }
+      },
+      "comments": "Estimate voxel-face surface area divided by NumElements-based volume and sphericity on the isotropic 0.25 micrometer grid.",
+      "filter": {
+        "name": "nx::core::ComputeSurfaceAreaToVolumeFilter",
+        "uuid": "94e83e4f-797d-4594-b130-3819b7676f01"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "plane_index": {
+          "value": 0,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionXY",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Find each feature\u2019s largest grid-aligned XY slice area in square micrometers.",
+      "filter": {
+        "name": "nx::core::ComputeLargestCrossSectionsFilter",
+        "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "plane_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionXZ",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Find each feature\u2019s largest grid-aligned XZ slice area in square micrometers.",
+      "filter": {
+        "name": "nx::core::ComputeLargestCrossSectionsFilter",
+        "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "plane_index": {
+          "value": 2,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "largest_cross_sections_array_name": {
+          "value": "LargestSectionYZ",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Find each feature\u2019s largest grid-aligned YZ slice area in square micrometers.",
+      "filter": {
+        "name": "nx::core::ComputeLargestCrossSectionsFilter",
+        "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Boundary_Examples/Measurements/SmallIN100_BoundarySections.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the full source checkpoint plus boundary and section arrays without relabeling.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
