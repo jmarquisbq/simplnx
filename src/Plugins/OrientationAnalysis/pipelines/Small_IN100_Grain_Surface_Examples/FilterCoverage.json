@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "scope": "Two illustrative measured-derived Small IN100 grain-surface pipelines; occurrences are not independent filter verification.",
+  "filters": [
+    {
+      "filter": "ExtractComponentAsArrayFilter",
+      "uuid": "fcc1c1cc-c37a-40fc-97fa-ce40201d34e3",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 1,
+      "purpose": "Expose each original FaceLabels component without changing source ownership."
+    },
+    {
+      "filter": "ExtractComponentAsArrayFilter",
+      "uuid": "fcc1c1cc-c37a-40fc-97fa-ce40201d34e3",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 2,
+      "purpose": "Expose each original FaceLabels component without changing source ownership."
+    },
+    {
+      "filter": "RemoveFlaggedTrianglesFilter",
+      "uuid": "38155c61-2709-4731-be95-43745bb3f8d8",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 4,
+      "purpose": "Retain all grain-2205 faces selected through either original label component and compact vertices."
+    },
+    {
+      "filter": "LabelTriangleGeometryFilter",
+      "uuid": "7a7a2c6f-3b03-444d-8b8c-5976b0e5c82e",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 9,
+      "purpose": "Label the connected extracted shell in a separate local region namespace."
+    },
+    {
+      "filter": "VerifyTriangleWindingFilter",
+      "uuid": "7a63783e-2449-414c-ae73-58058ae8da7e",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 10,
+      "purpose": "Repair the observed inconsistent winding of the single extracted shell."
+    },
+    {
+      "filter": "ComputeTriangleGeomVolumesFilter",
+      "uuid": "a979bd9b-834e-4497-84b0-ab7a8add341a",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 6,
+      "purpose": "Integrate enclosed volume with a local [-1,1] label pair after closure checks."
+    },
+    {
+      "filter": "ComputeTriangleGeomCentroidsFilter",
+      "uuid": "074c0523-ab7a-4097-b0c3-c4dcbfb9a05e",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 7,
+      "purpose": "Calculate the unique-surface-vertex mean with its actual implementation meaning."
+    }
+  ]
+}

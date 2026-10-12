@@ -1,0 +1,372 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+  "markdown_file": "(02) Small IN100 Grain Surface Measurements.md",
+  "title": "Small IN100 Grain Surface Measurements",
+  "summary": "Measure the enclosed volume and mean unique surface-vertex position of a closed Small IN100 grain shell while mapping local region 1 to original FeatureId 2205.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Computational geometry"
+  ],
+  "use_cases": [
+    "Measure the enclosed volume and mean unique surface-vertex position of a closed Small IN100 grain shell while mapping local region 1 to original FeatureId 2205."
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "grain volume",
+    "surface vertex mean",
+    "local region labels",
+    "identity map"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
+      "role": "Required independently checked complete-grain shell from stage 01."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.dream3d",
+      "role": "Full shell and local-to-original identity map with enclosed volume and unique-vertex mean."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.csv",
+      "role": "Scalar feature CSV with count/header and one occupied data row: local Feature_ID 1 maps to original 2205. The DREAM3D matrix retains rows 0 and 1."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson (2014) for reconstructed 3D EBSD geometry context; no paper figure is a numerical target for grain 2205.",
+    "target_traits": [
+      "117 measured ANG sections in the source archive",
+      "24 by 24 by 24 interior measured-derived crop",
+      "original FeatureId 2205 occupies all 170 source voxels inside the crop",
+      "unsmoothed shared-interface surface, 0.25 micrometer source spacing"
+    ],
+    "known_differences": "This chosen grain, ROI, modern SurfaceNets reconstruction, extraction, and measurement are illustrative. Exact identity with the publisher supplement or a numerical paper result is not established.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-grain-surface-python-generation-v1"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the verified complete-grain checkpoint; this stage does not rerun extraction.",
+      "paths": [
+        {
+          "parameter": "import_data_object",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "role": "Allocate a two-component int32 face array for local exterior and grain labels.",
+      "paths": [
+        {
+          "parameter": "output_array_path",
+          "value": "Grain2205/Face Data/LocalSurfaceLabels"
+        }
+      ],
+      "key_parameters": {
+        "component_count": 2,
+        "data_format": "",
+        "initialization_value_str": "0",
+        "numeric_type_index": 4,
+        "output_array_path": "Grain2205/Face Data/LocalSurfaceLabels",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            2.0,
+            10.0,
+            10.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "InitializeDataFilter",
+      "uuid": "01c82d15-ba52-4ffa-a7a5-487ee5a613f5",
+      "role": "Fill all tuples with the stated local labels.",
+      "paths": [
+        {
+          "parameter": "array_path",
+          "value": "Grain2205/Face Data/LocalSurfaceLabels"
+        }
+      ],
+      "key_parameters": {
+        "array_path": "Grain2205/Face Data/LocalSurfaceLabels",
+        "init_type_index": 0,
+        "init_value": "-1;1",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "init_start_range": "0",
+        "init_end_range": "10",
+        "standardize_seed": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "role": "Create two local measurement rows: unused exterior 0 and occupied grain region 1.",
+      "paths": [
+        {
+          "parameter": "data_object_path",
+          "value": "Grain2205/Grain Measurements"
+        }
+      ],
+      "key_parameters": {
+        "data_object_path": "Grain2205/Grain Measurements",
+        "tuple_dimensions": [
+          [
+            2.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "role": "Allocate original reconstructed FeatureId lookup for the local rows.",
+      "paths": [
+        {
+          "parameter": "output_array_path",
+          "value": "Grain2205/Grain Measurements/OriginalFeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "component_count": 1,
+        "data_format": "",
+        "initialization_value_str": "0",
+        "numeric_type_index": 4,
+        "output_array_path": "Grain2205/Grain Measurements/OriginalFeatureIds",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            2.0,
+            10.0,
+            10.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "InitializeDataFilter",
+      "uuid": "01c82d15-ba52-4ffa-a7a5-487ee5a613f5",
+      "role": "Map local row 1 to original reconstructed FeatureId 2205; row 0 is unused.",
+      "paths": [
+        {
+          "parameter": "array_path",
+          "value": "Grain2205/Grain Measurements/OriginalFeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "array_path": "Grain2205/Grain Measurements/OriginalFeatureIds",
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "2205",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "init_start_range": "0",
+        "init_end_range": "10",
+        "standardize_seed": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ComputeTriangleGeomVolumesFilter",
+      "uuid": "a979bd9b-834e-4497-84b0-ab7a8add341a",
+      "role": "Integrate the repaired, closed shell using local [-1,1] face labels; row 1 is the enclosed cubic-micrometer volume.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "Grain2205"
+        },
+        {
+          "parameter": "face_labels_array_path",
+          "value": "Grain2205/Face Data/LocalSurfaceLabels"
+        },
+        {
+          "parameter": "feature_attribute_matrix_path",
+          "value": "Grain2205/Grain Measurements"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "Grain2205",
+        "face_labels_array_path": "Grain2205/Face Data/LocalSurfaceLabels",
+        "feature_attribute_matrix_path": "Grain2205/Grain Measurements",
+        "volumes_array_name": "ClosedSurfaceVolumes"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ComputeTriangleGeomCentroidsFilter",
+      "uuid": "074c0523-ab7a-4097-b0c3-c4dcbfb9a05e",
+      "role": "Average unique surface vertices for local grain 1; this is a vertex mean rather than a volume centroid.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "Grain2205"
+        },
+        {
+          "parameter": "face_labels_array_path",
+          "value": "Grain2205/Face Data/LocalSurfaceLabels"
+        },
+        {
+          "parameter": "feature_attribute_matrix_path",
+          "value": "Grain2205/Grain Measurements"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "Grain2205",
+        "face_labels_array_path": "Grain2205/Face Data/LocalSurfaceLabels",
+        "feature_attribute_matrix_path": "Grain2205/Grain Measurements",
+        "centroids_array_name": "SurfaceVertexMeans",
+        "is_periodic": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export local row IDs, original FeatureId mapping, enclosed volume, and surface vertex mean for inspection.",
+      "paths": [
+        {
+          "parameter": "feature_data_file",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.csv"
+        },
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "Grain2205/Grain Measurements"
+        }
+      ],
+      "key_parameters": {
+        "feature_data_file": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": true,
+        "delimiter_index": 2,
+        "cell_feature_attribute_matrix_path": "Grain2205/Grain Measurements"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the calibrated shell with original identity, local labels, and audited measurements.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow context for reconstructed three-dimensional EBSD grains and their geometric analysis; the selected grain and modern filters are illustrative.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Selected interior grain 2205 from a current measured-derived Small IN100 reconstruction; no exact published numerical output is reproduced."
+      }
+    }
+  ],
+  "last_verified": "2026-10-12",
+  "verification_status": "Windows in-memory Release: registered two-pipeline CTest chain passed 1/1 in 19.91 s; independent saved-output audit passed 76/76 checks. Enclosed native volume 2.6562402248 cubic micrometers differs from independent 2.65625 by 9.7752e-6 cubic micrometers. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "mcp": {
+    "user_intents": [
+      "Measure the enclosed volume and mean unique surface-vertex position of a closed Small IN100 grain shell while mapping local region 1 to original FeatureId 2205."
+    ],
+    "questions_to_ask": [
+      "Is the source shell independently closed and outward oriented?",
+      "Does the user need a volume centroid or unique-surface-vertex mean?",
+      "How should local region IDs map to original reconstructed labels?"
+    ],
+    "constraints": [
+      "Read the stage 01 checkpoint; do not reinterpret original neighbor FaceLabels as local closed regions.",
+      "LocalSurfaceLabels is [-1,1] for the single outward shell.",
+      "OriginalFeatureIds maps local row 1 to source FeatureId 2205; row 0 is unused.",
+      "SurfaceVertexMeans averages distinct surface vertices, not enclosed volume.",
+      "Positive output volume alone does not certify closure or outward winding."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Complete Grain Surface.d3dpipeline"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100GrainMeasurements.png",
+    "role": "Preview rendered from saved native output; numerical checks are recorded separately."
+  }
+}

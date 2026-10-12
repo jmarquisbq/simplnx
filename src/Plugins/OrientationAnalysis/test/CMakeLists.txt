@@ -512,3 +512,14 @@ add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Slip_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100SlipExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Slip_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Small_IN100_Slip_Examples")
+
+# Small_IN100_Grain_Surface_Examples example chain
+add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Grain_Surface_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Small_IN100_Grain_Surface_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100GrainSurfaceExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Small_IN100_Grain_Surface_Examples")

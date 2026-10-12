@@ -1,0 +1,38 @@
+# Small IN100 complete grain surface examples
+
+These two executable examples isolate one complete measured-derived grain from a multi-label surface mesh, then measure its closed shell. The `.d3dpipeline` files define the steps and parameters; the matching Markdown explains their use, and the JSON-compatible YAML supports search and generation. The target is original reconstructed `FeatureId` **2205** in the documented Small IN100 interior crop. This small grain has 170 source voxels and remains clear of every crop wall.
+
+## Run order and files
+
+Run these examples from the same writable working directory, in order:
+
+1. `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` imports the 117 measured ANG sections from [Small_IN100.tar.gz](https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz). The [Small IN100 examples README](../Small_IN100_Examples/README.md#quick-start-117-section-3d-example) explains archive extraction.
+2. `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` establishes original `FeatureIds` without whole-volume measurement rows in the mesh path.
+3. `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` crops to the 24-cubed interior region and writes `Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d`.
+4. [(01) Small IN100 Complete Grain Surface](%2801%29%20Small%20IN100%20Complete%20Grain%20Surface.md) selects every face with `2205` in **either** original `FaceLabels` component, compacts the mesh, and repairs winding. It writes `Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d`.
+5. [(02) Small IN100 Grain Surface Measurements](%2802%29%20Small%20IN100%20Grain%20Surface%20Measurements.md) reads stage 01, assigns local shell labels, and writes `Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.{dream3d,csv}`.
+
+The `Data/...` paths resolve from the CLI process working directory. Create the output folders before running. For example, from a chosen writable folder with the predecessor `Data/Output` tree:
+
+```powershell
+$work = 'C:\path\to\writable\SmallIN100Work'
+$runner = 'C:\path\to\nxrunner.exe'
+$examples = 'C:\path\to\pipelines' # Parent of the named Small_IN100 folders.
+Set-Location $work
+New-Item -ItemType Directory -Force 'Data/Output/Small_IN100_Grain_Surface_Examples/Extraction' | Out-Null
+New-Item -ItemType Directory -Force 'Data/Output/Small_IN100_Grain_Surface_Examples/Measurements' | Out-Null
+$first = Join-Path $examples 'Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline'
+$second = Join-Path $examples 'Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline'
+& $runner --execute $first
+if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $first (exit $LASTEXITCODE)" }
+& $runner --execute $second
+if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $second (exit $LASTEXITCODE)" }
+```
+
+For the GUI, use **File > Open** and set absolute file paths if its working directory differs. No measured volume, intermediate checkpoint, or archive is distributed in this folder. The source archive SHA-512 is `79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b`.
+
+The source is a reconstructed Small IN100 EBSD volume in the setting described by [Groeber and Jackson (2014)](https://doi.org/10.1186/2193-9772-3-5). These modern extraction and repair steps illustrate a complete-grain workflow; they do not reproduce a published numerical result. The article is CC BY 2.0. Separate archive redistribution terms have not been established. `PythonGeneration.yaml` describes generated Python from the native pipelines; generated execution and out-of-core execution require separate verification.
+
+Reference-input expectations are 508 selected faces and 256 used vertices, one closed connected shell, 15.875 square micrometers of surface area, and 2.65625 cubic micrometers enclosed volume. These are audit values for this source and implementation, not acceptance tolerances for other reconstructions. The original `FaceLabels` record neighboring grain identity; `LocalSurfaceLabels` describe the single extracted shell. The measurement called `SurfaceVertexMeans` averages unique mesh vertices and is not a volume centroid.
+
+The registered two-pipeline Windows in-memory Release CTest chain passed 1/1 in 19.91 seconds. An independent saved-output audit passed 76/76 HDF5 checks of selection, topology, winding, preserved ownership, local mapping, and measurements. The CSV count, header, and single occupied row were inspected separately. The native volume is 2.6562402248 µm³, 0.0000097752 µm³ below the independent 2.65625 µm³ result. The preview images were rendered from these saved outputs and inspected. These checks do not establish OOC, generated Python, GUI, installed application, exact paper reproduction, or general downstream simulation suitability.
