@@ -1,0 +1,562 @@
+{
+  "isDisabled": false,
+  "name": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read final-label contact graph and measured cell orientations from the documented neighbor checkpoint.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_features_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "DataContainer/Cell Data/Phases",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "Phases",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Recompute phase IDs for final FeatureIds; earlier feature rows refer to labels before cleanup.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesFilter",
+        "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "avg_euler_angles_array_name": {
+          "value": "AvgEulerAngles",
+          "version": 1
+        },
+        "avg_quats_array_name": {
+          "value": "AvgQuats",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "cell_feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "DataContainer/Cell Data/Phases",
+          "version": 1
+        },
+        "cell_quats_array_path": {
+          "value": "DataContainer/Cell Data/Quats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_rodrigues_average": {
+          "value": true,
+          "version": 1
+        },
+        "use_vmf_average": {
+          "value": false,
+          "version": 1
+        },
+        "use_watson_average": {
+          "value": false,
+          "version": 1
+        },
+        "vmf_euler_array_name": {
+          "value": "vMF Avg EulerAngles",
+          "version": 1
+        },
+        "vmf_kappa_array_name": {
+          "value": "vMF Kappas",
+          "version": 1
+        },
+        "vmf_quat_array_name": {
+          "value": "vMF Avg Quats",
+          "version": 1
+        },
+        "watson_euler_array_name": {
+          "value": "Watson Avg EulerAngles",
+          "version": 1
+        },
+        "watson_kappa_array_name": {
+          "value": "Watson Kappas",
+          "version": 1
+        },
+        "watson_quat_array_name": {
+          "value": "Watson Avg Quats",
+          "version": 1
+        }
+      },
+      "comments": "Compute Rodrigues average quaternions for the same final FeatureIds from measured cell Quats.",
+      "filter": {
+        "name": "nx::core::ComputeAvgOrientationsFilter",
+        "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compute_avg_misors": {
+          "value": true,
+          "version": 1
+        },
+        "neighbor_list_array_path": {
+          "value": "DataContainer/Cell Feature Data/NeighborList",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/AvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/Phases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "misorientation_list_array_name": {
+          "value": "NeighborMisorientationDegrees",
+          "version": 1
+        },
+        "avg_misorientations_array_name": {
+          "value": "AvgNeighborMisorientationDegrees",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute cubic-symmetry neighbor misorientation in degrees, aligned positionally with NeighborList; include unweighted feature mean.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureNeighborMisorientationsFilter",
+        "uuid": "0b68fe25-b5ef-4805-ae32-20acb8d4e823"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "loading_direction": {
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "store_angle_components": {
+          "value": false,
+          "version": 1
+        },
+        "override_system": {
+          "value": false,
+          "version": 1
+        },
+        "slip_plane": {
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "slip_direction": {
+          "value": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/Phases",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/AvgQuats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "schmids_array_name": {
+          "value": "SchmidFactor_Z",
+          "version": 1
+        },
+        "slip_systems_array_name": {
+          "value": "SlipSystem_Z",
+          "version": 1
+        },
+        "poles_array_name": {
+          "value": "LoadingPole_Z",
+          "version": 1
+        },
+        "phis_array_name": {
+          "value": "UnusedPhi_Z",
+          "version": 1
+        },
+        "lambdas_array_name": {
+          "value": "UnusedLambda_Z",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Compute maximum cubic slip-system Schmid factor for hypothetical sample Z loading. No measured load is claimed.",
+      "filter": {
+        "name": "nx::core::ComputeSchmidsFilter",
+        "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "loading_direction": {
+          "value": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "store_angle_components": {
+          "value": false,
+          "version": 1
+        },
+        "override_system": {
+          "value": false,
+          "version": 1
+        },
+        "slip_plane": {
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "slip_direction": {
+          "value": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/Phases",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/AvgQuats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "schmids_array_name": {
+          "value": "SchmidFactor_X",
+          "version": 1
+        },
+        "slip_systems_array_name": {
+          "value": "SlipSystem_X",
+          "version": 1
+        },
+        "poles_array_name": {
+          "value": "LoadingPole_X",
+          "version": 1
+        },
+        "phis_array_name": {
+          "value": "UnusedPhi_X",
+          "version": 1
+        },
+        "lambdas_array_name": {
+          "value": "UnusedLambda_X",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Compute maximum cubic slip-system Schmid factor for hypothetical sample X loading. No measured load is claimed.",
+      "filter": {
+        "name": "nx::core::ComputeSchmidsFilter",
+        "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "neighbor_list_array_path": {
+          "value": "DataContainer/Cell Feature Data/NeighborList",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/AvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/Phases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "f1_list_array_name": {
+          "value": "F1_Z",
+          "version": 1
+        },
+        "f1spt_list_array_name": {
+          "value": "F1spt_Z",
+          "version": 1
+        },
+        "f7_list_array_name": {
+          "value": "F7_Z",
+          "version": 1
+        },
+        "m_prime_list_array_name": {
+          "value": "mPrime_Z",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute directed neighbor slip-geometry metrics using the filter's fixed sample-Z loading direction. Keep the lists aligned with NeighborList.",
+      "filter": {
+        "name": "nx::core::ComputeSlipTransmissionMetricsFilter",
+        "uuid": "7569d075-d05a-4e07-8660-5cca3e78ee49"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "find_minimum": {
+          "value": false,
+          "version": 1
+        },
+        "find_maximum": {
+          "value": true,
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "find_standard_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "input_neighbor_list_path": {
+          "value": "DataContainer/Cell Feature Data/NeighborMisorientationDegrees",
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "NeighborMisorientationDegreesListLength",
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "UnusedNeighborMisorientationDegreesMinimum",
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "MaxNeighborMisorientationDegrees",
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "MeanNeighborMisorientationDegrees",
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "UnusedNeighborMisorientationDegreesMedian",
+          "version": 1
+        },
+        "standard_deviation_array_name": {
+          "value": "UnusedNeighborMisorientationDegreesStdDev",
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "UnusedNeighborMisorientationDegreesSum",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reduce each feature's NeighborMisorientationDegrees neighbor values to list length, unweighted mean, and maximum; empty lists retain zero placeholders.",
+      "filter": {
+        "name": "nx::core::ComputeNeighborListStatisticsFilter",
+        "uuid": "270a824e-414b-455e-bb7e-b38a0848990d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "find_minimum": {
+          "value": false,
+          "version": 1
+        },
+        "find_maximum": {
+          "value": true,
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "find_standard_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "input_neighbor_list_path": {
+          "value": "DataContainer/Cell Feature Data/mPrime_Z",
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "mPrime_ZListLength",
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "UnusedmPrime_ZMinimum",
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "MaxmPrime_Z",
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "MeanmPrime_Z",
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "UnusedmPrime_ZMedian",
+          "version": 1
+        },
+        "standard_deviation_array_name": {
+          "value": "UnusedmPrime_ZStdDev",
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "UnusedmPrime_ZSum",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reduce each feature's mPrime_Z neighbor values to list length, unweighted mean, and maximum; empty lists retain zero placeholders.",
+      "filter": {
+        "name": "nx::core::ComputeNeighborListStatisticsFilter",
+        "uuid": "270a824e-414b-455e-bb7e-b38a0848990d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "feature_data_file": {
+          "value": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.csv",
+          "version": 1
+        },
+        "parameters_version": 1,
+        "write_neighborlist_data": {
+          "value": true,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Export a scalar Feature_ID table (rows 1+) followed by separate variable-width neighbor-list blocks (rows 0+). Parse blocks independently.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.dream3d",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        }
+      },
+      "comments": "Save measured geometry, final labels, orientations, reciprocal contacts, directed metrics, and scalar summaries.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

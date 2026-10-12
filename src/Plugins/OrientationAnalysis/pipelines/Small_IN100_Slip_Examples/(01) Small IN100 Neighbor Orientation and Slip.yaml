@@ -1,0 +1,626 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization",
+    "Metallurgy"
+  ],
+  "secondary_industries": [
+    "Aerospace materials research"
+  ],
+  "keywords": [
+    "Small IN100",
+    "3D EBSD",
+    "neighbor misorientation",
+    "Schmid factor",
+    "slip transmission",
+    "mPrime"
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Published measured Small IN100 3D EBSD reconstruction and orientation-statistics context. This extension is illustrative.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses the public measured 117-section archive, final labels, and current NX algorithms. The paper includes neighbor misorientation and Schmid analysis, but this branch's loading choices and slip-transmission results are illustrative additions, not numerical reproductions or measured mechanical response."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current algorithm semantics: symmetry-aware neighbor misorientation, max-Schmid system selection, fixed-Z directed slip metrics."
+    },
+    {
+      "title": "Compatibility of deformation in two-phase Ti-Al alloys: Dependence on microstructure and orientation relationships",
+      "authors": [
+        "J. Luster",
+        "M. A. Morris"
+      ],
+      "year": 1995,
+      "journal": "Metallurgical and Materials Transactions A",
+      "doi": "10.1007/BF02670762",
+      "url": "https://doi.org/10.1007/BF02670762",
+      "scope": "filter_algorithm",
+      "role": "Historical slip-system compatibility context; source-implemented mPrime variant controls this example. Paper studied Ti-Al, not Small IN100."
+    },
+    {
+      "title": "On Predicting Nucleation of Microcracks Due to Slip-Twin Interactions at Grain Boundaries in Duplex Near gamma-TiAl",
+      "authors": [
+        "D. Kumar",
+        "T. R. Bieler",
+        "P. Eisenlohr",
+        "D. E. Mason",
+        "M. A. Crimp",
+        "F. Roters",
+        "D. Raabe"
+      ],
+      "year": 2008,
+      "journal": "Journal of Engineering Materials and Technology",
+      "doi": "10.1115/1.2841620",
+      "url": "https://doi.org/10.1115/1.2841620",
+      "scope": "filter_algorithm",
+      "role": "Historical Ti-Al fracture-parameter study. Its F1spt uses boundary-plane traces derived from boundary normals; the current filter uses plane-normal alignment, so this example does not reproduce that metric or its broader elastic-response analysis."
+    }
+  ],
+  "last_verified": "2026-10-12",
+  "verification_status": "Windows in-core Release chain passed 1/1 in 20.38 seconds. Independent FCC-system checker passed all 28,006 directed contacts, 2,317 occupied features, Schmid Z/X arrays (maximum error 1.49e-8), CSV scalar section, and seven neighbor sections. Generated Python, OOC, GUI, mechanical interpretation, and installed application remain unverified.",
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "orientationanalysis-smallin100-slip-python-generation-v1"
+  },
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Occupied-feature distributions of neighbor misorientation, Schmid factors, and slip geometry.",
+    "target_traits": [
+      "117 measured EBSD sections",
+      "189 by 201 image cells per section",
+      "0.25 spacing on each axis",
+      "traceable final feature IDs"
+    ],
+    "known_differences": "Raw archive identity with publisher processed data is unproven. This branch uses reconstructed final labels, hypothetical sample-X/Z loading, and fixed-Z slip metrics. The implemented F1spt uses slip-plane normal alignment and no boundary normal, whereas Kumar et al. (2008) use slip-plane traces at the boundary. No mechanical loading or fatigue outcome was measured.",
+    "archive_provenance_file": "README.md"
+  },
+  "summary": "Connect final-label neighbor contacts to measured orientation, neighbor misorientation, hypothetical load-axis Schmid factors, and fixed-Z slip-geometry metrics.",
+  "use_cases": [
+    "Inspect orientation contrast across touching measured features",
+    "Compare hypothetical sample-X and sample-Z Schmid factors",
+    "Screen directed neighbor slip-geometry metrics for follow-up"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+      "role": "Full final-label contact graph from the neighbor relationships predecessor."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.csv",
+      "role": "Scalar Feature_ID table for rows 1+, then separate variable-width neighbor-list blocks including row 0; includes unused positive rows."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.dream3d",
+      "role": "Complete measured volume, final labels, feature orientations, contacts, directed metric lists, and scalar reductions."
+    }
+  ],
+  "mcp": {
+    "user_intents": [
+      "Assess orientation contrast between contacting Small IN100 features",
+      "Compare loading-direction sensitivity of Schmid factors",
+      "Inspect slip-system alignment across feature contacts"
+    ],
+    "questions_to_ask": [
+      "Are final feature labels and the neighbor list from the same segmentation?",
+      "Is the material a single cubic phase with phase index 1?",
+      "Which sample loading direction, if any, matches the experiment?"
+    ],
+    "constraints": [
+      "Run the 117-section Archive, Feature Preparation, Feature Measurements, and Neighbor Relationships predecessors first.",
+      "The Schmid X/Z directions are hypothetical; the slip filter always uses Z.",
+      "mPrime uses each grain's max-Schmid system under fixed Z, not a maximum over every slip-system pair.",
+      "F1, F1spt, and F7 may be directional; keep Feature_ID and neighbor-list position together.",
+      "Exclude background and unused positive rows from scientific plots using NumElements>0.",
+      "Use results as geometric orientation descriptors, not stress, strain, strength, or fatigue predictions.",
+      "F1spt_Z uses plane-normal alignment and lacks boundary normals; it is not Kumar et al. 2008 boundary-trace F1spt. Reproducing the paper formula needs boundary normals and Ti-Al slip/twin systems; its broader fracture analysis also needs elastic response and experimental validation."
+    ],
+    "related_pipelines": [
+      "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "(04) Small IN100 Crystallographic Statistics.d3dpipeline"
+    ]
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "role": "Import all 117 public serial EBSD sections."
+    },
+    {
+      "pipeline": "(01) Small IN100 Feature Preparation.d3dpipeline",
+      "role": "Create cleaned final FeatureIds."
+    },
+    {
+      "pipeline": "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "role": "Measure final positive-ID features."
+    },
+    {
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "role": "Compute final-label face-sharing contacts and reciprocal lists."
+    }
+  ],
+  "parameter_adaptations": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "parameter": "import_data_object.file_path",
+      "reference_value": "Data/Output/Small_IN100_Examples/Measurements/SmallIN100_FeatureMeasurements.dream3d",
+      "example_value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+      "reason": "Read the documented final-label contact graph checkpoint, which also retains measured cell quaternions and phases."
+    },
+    {
+      "filter": "ComputeFeatureNeighborMisorientationsFilter",
+      "parameter": "compute_avg_misors",
+      "reference_value": false,
+      "example_value": true,
+      "reason": "Store the filter mean beside the separate NeighborListStatistics mean as a check on per-feature reduction."
+    },
+    {
+      "filter": "ComputeSchmidsFilter",
+      "parameter": "loading_direction",
+      "reference_value": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "example_value": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "reason": "Use hypothetical sample-Z loading to align the feature-level Schmid comparison with the slip filter fixed-Z direction."
+    },
+    {
+      "filter": "ComputeSchmidsFilter",
+      "parameter": "loading_direction",
+      "reference_value": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "example_value": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "reason": "Add an independently named hypothetical sample-X Schmid comparison; slip-transmission metrics remain fixed-Z."
+    }
+  ],
+  "measurement_labels": {
+    "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
+    "feature_matrix": "DataContainer/Cell Feature Data",
+    "not_used": "DataContainer/Cell Data/ParentIds"
+  },
+  "pipeline_file": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Neighbor Orientation and Slip.md",
+  "title": "Small IN100 neighbor orientation and slip",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read final-label contact graph and measured cell orientations from the documented neighbor checkpoint.",
+      "paths": [
+        {
+          "parameter": "import_data_object.file_path",
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "role": "Recompute phase IDs for final FeatureIds; earlier feature rows refer to labels before cleanup.",
+      "paths": [
+        {
+          "parameter": "cell_features_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "cell_phases_array_path",
+          "value": "DataContainer/Cell Data/Phases"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "cell_features_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "cell_phases_array_path": "DataContainer/Cell Data/Phases",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "feature_phases_array_name": "Phases"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeAvgOrientationsFilter",
+      "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e",
+      "role": "Compute Rodrigues average quaternions for the same final FeatureIds from measured cell Quats.",
+      "paths": [
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "cell_feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "cell_phases_array_path",
+          "value": "DataContainer/Cell Data/Phases"
+        },
+        {
+          "parameter": "cell_quats_array_path",
+          "value": "DataContainer/Cell Data/Quats"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "avg_euler_angles_array_name": "AvgEulerAngles",
+        "avg_quats_array_name": "AvgQuats",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "cell_feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_phases_array_path": "DataContainer/Cell Data/Phases",
+        "cell_quats_array_path": "DataContainer/Cell Data/Quats",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "use_rodrigues_average": true,
+        "use_vmf_average": false,
+        "use_watson_average": false,
+        "vmf_euler_array_name": "vMF Avg EulerAngles",
+        "vmf_kappa_array_name": "vMF Kappas",
+        "vmf_quat_array_name": "vMF Avg Quats",
+        "watson_euler_array_name": "Watson Avg EulerAngles",
+        "watson_kappa_array_name": "Watson Kappas",
+        "watson_quat_array_name": "Watson Avg Quats"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "ComputeFeatureNeighborMisorientationsFilter",
+      "uuid": "0b68fe25-b5ef-4805-ae32-20acb8d4e823",
+      "role": "Compute cubic-symmetry neighbor misorientation in degrees, aligned positionally with NeighborList; include unweighted feature mean.",
+      "paths": [
+        {
+          "parameter": "neighbor_list_array_path",
+          "value": "DataContainer/Cell Feature Data/NeighborList"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/AvgQuats"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/Phases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "compute_avg_misors": true,
+        "neighbor_list_array_path": "DataContainer/Cell Feature Data/NeighborList",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/AvgQuats",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/Phases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "misorientation_list_array_name": "NeighborMisorientationDegrees",
+        "avg_misorientations_array_name": "AvgNeighborMisorientationDegrees"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ComputeSchmidsFilter",
+      "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4",
+      "role": "Compute maximum cubic slip-system Schmid factor for hypothetical sample Z loading. No measured load is claimed.",
+      "paths": [
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/Phases"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/AvgQuats"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "loading_direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "store_angle_components": false,
+        "override_system": false,
+        "slip_plane": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "slip_direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/Phases",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/AvgQuats",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "schmids_array_name": "SchmidFactor_Z",
+        "slip_systems_array_name": "SlipSystem_Z",
+        "poles_array_name": "LoadingPole_Z",
+        "phis_array_name": "UnusedPhi_Z",
+        "lambdas_array_name": "UnusedLambda_Z"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ComputeSchmidsFilter",
+      "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4",
+      "role": "Compute maximum cubic slip-system Schmid factor for hypothetical sample X loading. No measured load is claimed.",
+      "paths": [
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/Phases"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/AvgQuats"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "loading_direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "store_angle_components": false,
+        "override_system": false,
+        "slip_plane": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "slip_direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/Phases",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/AvgQuats",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "schmids_array_name": "SchmidFactor_X",
+        "slip_systems_array_name": "SlipSystem_X",
+        "poles_array_name": "LoadingPole_X",
+        "phis_array_name": "UnusedPhi_X",
+        "lambdas_array_name": "UnusedLambda_X"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "ComputeSlipTransmissionMetricsFilter",
+      "uuid": "7569d075-d05a-4e07-8660-5cca3e78ee49",
+      "role": "Compute directed neighbor slip-geometry metrics under fixed sample Z. F1spt_Z uses plane-normal alignment without boundary normals, so it differs from Kumar et al. 2008 boundary-trace F1spt.",
+      "paths": [
+        {
+          "parameter": "neighbor_list_array_path",
+          "value": "DataContainer/Cell Feature Data/NeighborList"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/AvgQuats"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/Phases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "neighbor_list_array_path": "DataContainer/Cell Feature Data/NeighborList",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/AvgQuats",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/Phases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "f1_list_array_name": "F1_Z",
+        "f1spt_list_array_name": "F1spt_Z",
+        "f7_list_array_name": "F7_Z",
+        "m_prime_list_array_name": "mPrime_Z"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ComputeNeighborListStatisticsFilter",
+      "uuid": "270a824e-414b-455e-bb7e-b38a0848990d",
+      "role": "Reduce each feature's NeighborMisorientationDegrees neighbor values to list length, unweighted mean, and maximum; empty lists retain zero placeholders.",
+      "paths": [
+        {
+          "parameter": "input_neighbor_list_path",
+          "value": "DataContainer/Cell Feature Data/NeighborMisorientationDegrees"
+        }
+      ],
+      "key_parameters": {
+        "find_length": true,
+        "find_minimum": false,
+        "find_maximum": true,
+        "find_mean": true,
+        "find_median": false,
+        "find_standard_deviation": false,
+        "find_summation": false,
+        "input_neighbor_list_path": "DataContainer/Cell Feature Data/NeighborMisorientationDegrees",
+        "length_array_name": "NeighborMisorientationDegreesListLength",
+        "minimum_array_name": "UnusedNeighborMisorientationDegreesMinimum",
+        "maximum_array_name": "MaxNeighborMisorientationDegrees",
+        "mean_array_name": "MeanNeighborMisorientationDegrees",
+        "median_array_name": "UnusedNeighborMisorientationDegreesMedian",
+        "standard_deviation_array_name": "UnusedNeighborMisorientationDegreesStdDev",
+        "summation_array_name": "UnusedNeighborMisorientationDegreesSum"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "ComputeNeighborListStatisticsFilter",
+      "uuid": "270a824e-414b-455e-bb7e-b38a0848990d",
+      "role": "Reduce each feature's mPrime_Z neighbor values to list length, unweighted mean, and maximum; empty lists retain zero placeholders.",
+      "paths": [
+        {
+          "parameter": "input_neighbor_list_path",
+          "value": "DataContainer/Cell Feature Data/mPrime_Z"
+        }
+      ],
+      "key_parameters": {
+        "find_length": true,
+        "find_minimum": false,
+        "find_maximum": true,
+        "find_mean": true,
+        "find_median": false,
+        "find_standard_deviation": false,
+        "find_summation": false,
+        "input_neighbor_list_path": "DataContainer/Cell Feature Data/mPrime_Z",
+        "length_array_name": "mPrime_ZListLength",
+        "minimum_array_name": "UnusedmPrime_ZMinimum",
+        "maximum_array_name": "MaxmPrime_Z",
+        "mean_array_name": "MeanmPrime_Z",
+        "median_array_name": "UnusedmPrime_ZMedian",
+        "standard_deviation_array_name": "UnusedmPrime_ZStdDev",
+        "summation_array_name": "UnusedmPrime_ZSum"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export a scalar Feature_ID table (rows 1+) followed by separate variable-width neighbor-list blocks (rows 0+). Parse blocks independently.",
+      "paths": [
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "feature_data_file",
+          "value": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.csv"
+        }
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.csv",
+        "write_neighborlist_data": true,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save measured geometry, final labels, orientations, reciprocal contacts, directed metrics, and scalar summaries.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Slip_Examples/Analysis/SmallIN100_NeighborSlip.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "validation": {
+    "date": "2026-10-12",
+    "configuration": "Windows in-core Release; isolated controlled nxrunner via registered CTest chain",
+    "preflight_execution": "1/1 chain passed in 20.38 seconds",
+    "independent_checks": "All 28,006 directed contact entries and 2,317 occupied features passed an independent FCC-system oracle. Schmid Z/X max absolute error <=1.49e-8; observed maxima 0.4999797642/0.4999382794. CSV scalar section plus seven neighbor sections verified.",
+    "occupied_feature_count": 2317,
+    "unique_contact_pairs": 14003,
+    "directed_contact_entries": 28006,
+    "median_neighbor_misorientation_degrees": 44.09579849243164,
+    "median_mprime_z": 0.21534720063209534,
+    "median_schmid_z": 0.4624239206314087,
+    "median_schmid_x": 0.46160703897476196,
+    "median_absolute_schmid_axis_change": 0.03412914276123047,
+    "unverified": [
+      "OOC",
+      "generated Python execution",
+      "native GUI behavior",
+      "full application installation",
+      "mechanical outcome prediction"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100NeighborSlip.png",
+    "role": "Data-derived occupied-feature Schmid Z/X distributions and unique-contact misorientation versus fixed-Z mPrime preview from checked output; not native GUI or mechanical validation."
+  },
+  "dimensional_scope": "3D volume reconstructed from 117 serial EBSD sections; the metrics use feature-average orientation, not local boundary orientation.",
+  "cli_usage": {
+    "instructions": "See README.md for exact predecessor order and runner command.",
+    "working_directory": "A chosen writable folder containing the predecessor Data/Output files.",
+    "relative_path_base": "The CLI resolves Data/... relative to its working directory.",
+    "gui_note": "Open the pipeline with File > Open; set absolute input and output paths if the GUI working folder differs. Native GUI execution is unverified."
+  }
+}

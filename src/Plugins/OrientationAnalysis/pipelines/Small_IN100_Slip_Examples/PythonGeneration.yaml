@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "orientationanalysis-smallin100-slip-python-generation-v1",
+  "title": "Small IN100 slip pipeline to Python generation",
+  "source_authority": ".d3dpipeline",
+  "converter_api": "simplnx_utilities.generate_python_pipeline",
+  "required_modules": [
+    "simplnx",
+    "orientationanalysis",
+    "imageprocessing",
+    "simplnx_utilities"
+  ],
+  "working_directory": "Chosen writable CLI working folder with documented predecessor Data/Output paths",
+  "output_lifetime": "temporary",
+  "verification_status": "Unverified: generation, syntax, structure, and execution are separate checks.",
+  "failure_behavior": "Report a missing module, load error, generation error, or execution error. Do not silently substitute handwritten Python.",
+  "regeneration_rule": "Regenerate from the authoritative .d3dpipeline after any filter, argument, comment, or path change.",
+  "path_rules": {
+    "pipeline_reference_base": "pipeline_suite_root",
+    "runtime_data_base": "chosen_cli_working_directory",
+    "input_paths": "Preserve the exact NeighborRelationships checkpoint path.",
+    "output_paths": "Preserve the exact Small_IN100_Slip_Examples/Analysis paths."
+  },
+  "generation": {
+    "language": "Python",
+    "steps": [
+      "Use the Python environment supplied with the matching DREAM3D-NX application.",
+      "Import simplnx, orientationanalysis, imageprocessing, and simplnx_utilities before loading the pipeline; the current converter imports imageprocessing even though this example has no ImageProcessing filters.",
+      "Load the .d3dpipeline using simplnx.Pipeline.from_file(pipeline_path).",
+      "Call simplnx_utilities.generate_python_pipeline(pipeline).",
+      "Compile and write the result to a temporary .py file.",
+      "Run it from the documented writable working folder after predecessor outputs exist."
+    ],
+    "reference_code": [
+      "import simplnx as nx",
+      "import orientationanalysis",
+      "import imageprocessing",
+      "import simplnx_utilities",
+      "pipeline = nx.Pipeline.from_file(pipeline_path)",
+      "code = simplnx_utilities.generate_python_pipeline(pipeline)",
+      "compile(code, str(pipeline_path), 'exec')"
+    ]
+  },
+  "validation": {
+    "syntax": "Compile generated text with Python compile().",
+    "structure": "Match generated filter calls and order to enabled pipeline steps.",
+    "paths": "Check all relative input and output paths against source pipeline.",
+    "execution": "Execute with documented predecessors. NOT VERIFIED.",
+    "storage": "Validate OOC separately."
+  },
+  "gui_note": "GUI working folders vary; use absolute file parameters when relative paths do not resolve."
+}

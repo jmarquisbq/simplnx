@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "scope": "Selected illustrative Small IN100 orientation and slip workflow; occurrence does not establish physical validation.",
+  "filters": [
+    {
+      "filter": "ComputeFeatureNeighborMisorientationsFilter",
+      "uuid": "0b68fe25-b5ef-4805-ae32-20acb8d4e823",
+      "pipeline": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+      "step": 3,
+      "purpose": "Compute cubic-symmetry neighbor misorientation in degrees, aligned positionally with NeighborList; include unweighted feature mean."
+    },
+    {
+      "filter": "ComputeSchmidsFilter",
+      "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4",
+      "pipeline": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+      "step": 4,
+      "purpose": "Compute maximum cubic slip-system Schmid factor for hypothetical sample Z loading. No measured load is claimed."
+    },
+    {
+      "filter": "ComputeSchmidsFilter",
+      "uuid": "b4681855-0a3d-4237-97f2-5aec509115c4",
+      "pipeline": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+      "step": 5,
+      "purpose": "Compute maximum cubic slip-system Schmid factor for hypothetical sample X loading. No measured load is claimed."
+    },
+    {
+      "filter": "ComputeSlipTransmissionMetricsFilter",
+      "uuid": "7569d075-d05a-4e07-8660-5cca3e78ee49",
+      "pipeline": "(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline",
+      "step": 6,
+      "purpose": "Compute directed neighbor slip-geometry metrics using the filter's fixed sample-Z loading direction. Keep the lists aligned with NeighborList."
+    }
+  ]
+}
