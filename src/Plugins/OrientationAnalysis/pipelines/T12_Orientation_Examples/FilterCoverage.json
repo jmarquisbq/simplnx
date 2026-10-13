@@ -234,11 +234,137 @@
       "purpose": "Export original radians as degrees, keeping only indexed pixels and splitting by phase. T12 produces T12_IndexedAngles_Phase_1.txt in source tuple order, with weight 1 and sigma 1. This writes an angle file, not an ODF."
     },
     {
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 10,
+      "purpose": "Assign each positive grain its phase from its cells. The filter skips feature 0, which is excluded from the orientation-space branch. Positive grains must each contain phase 1 only; investigate any mixed-phase warning."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 11,
+      "purpose": "Record the source feature-row identity 0 through 3059 as int32 before removing background from working arrays; source geometry and feature labels remain unchanged."
+    },
+    {
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 12,
+      "purpose": "Split AvgQuats identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 13,
+      "purpose": "Split AvgEulerAngles identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 14,
+      "purpose": "Split FeaturePhases identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 15,
+      "purpose": "Split NumElements identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 16,
+      "purpose": "Split SourceFeatureId identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "filter": "ComputeFZQuaternionsFilter",
+      "uuid": "8b651407-08a9-4c25-967a-d86444eca87f",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 17,
+      "purpose": "Choose the cubic-symmetry-equivalent representative nearest identity for each positive grain. This changes representation under crystal symmetry, not the specimen frame or physical grain orientation. The compact input contains no background or empty feature rows."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 18,
+      "purpose": "Form dimensionless Rodrigues x = quaternion component 0 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 19,
+      "purpose": "Form dimensionless Rodrigues y = quaternion component 1 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 20,
+      "purpose": "Form dimensionless Rodrigues z = quaternion component 2 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity."
+    },
+    {
+      "filter": "CombineAttributeArraysFilter",
+      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 21,
+      "purpose": "Combine x, y, z in explicit order without normalization. These are dimensionless orientation coordinates, not specimen positions or a unit direction."
+    },
+    {
+      "filter": "RodriguesConvertorFilter",
+      "uuid": "3704a3c6-dd09-4b91-9eda-2fbb4cb9bf99",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 22,
+      "purpose": "Convert the finite nonzero three-component Rodrigues vector to unit axis plus magnitude: [rx/|r|, ry/|r|, rz/|r|, |r|]. This is the four-component Rodrigues convention expected by Convert Orientations, not axis plus angle. Zero vectors need separate treatment before adapting this filter."
+    },
+    {
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 23,
+      "purpose": "Convert four-component Rodrigues (choice 4) back to Bunge Euler radians (choice 0). Component equality with original Euler angles is not expected after symmetry reduction; compare crystal misorientation instead."
+    },
+    {
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 24,
+      "purpose": "Compare original and recovered Euler arrays row by row under cubic symmetry. The fourth component is angle in degrees and should be near zero; its axis is not meaningful near zero."
+    },
+    {
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 25,
+      "purpose": "Compare each original grain orientation to identity, axis-angle [0,0,1,0 degrees], under cubic symmetry. The fourth component is the reference angle in degrees, not grain orientation spread or strain."
+    },
+    {
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 26,
+      "purpose": "Repeat the identity-reference comparison after the FZ/Rodrigues conversion. Its fourth-component angle should match the original-reference result despite different Euler components."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 27,
+      "purpose": "Export all 3059 compact grain rows, including row zero, with source feature IDs and voxel counts. Misorientation columns are axis x/y/z then angle degrees; the Rodrigues columns are dimensionless. This table weights grains equally, unlike the pixel angle file."
+    },
+    {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
-      "step": 10,
-      "purpose": "Save every original preparation object plus the six derived arrays with explicit units or component order in their names."
+      "step": 28,
+      "purpose": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs."
     }
   ]
 }

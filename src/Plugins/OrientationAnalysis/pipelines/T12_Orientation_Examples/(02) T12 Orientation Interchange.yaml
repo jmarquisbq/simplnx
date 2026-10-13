@@ -3,7 +3,7 @@
   "pipeline_file": "(02) T12 Orientation Interchange.d3dpipeline",
   "markdown_file": "(02) T12 Orientation Interchange.md",
   "title": "T12 Orientation Interchange",
-  "summary": "Preserve a measured EBSD checkpoint while preparing degree Euler angles, scalar-first quaternions, explicit round trips, a conjugate branch, and a masked phase-split StatsGenerator angle file.",
+  "summary": "Preserve measured EBSD orientations while changing angle units and quaternion order, inspecting conjugation, exporting indexed pixel records, and checking cubic fundamental-zone/Rodrigues grain representations with source identity retained.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -15,7 +15,9 @@
     "Exchange Euler angles between radians and degrees without losing the source",
     "Exchange quaternion component order with an explicitly matched consumer convention",
     "Inspect conjugation separately from representation changes",
-    "Export indexed 2D EBSD orientations as phase-specific angle records"
+    "Export indexed 2D EBSD orientations as phase-specific angle records",
+    "Prepare a compact positive-grain orientation table without losing source feature identity",
+    "Check symmetry-equivalent orientation representations with crystal misorientation rather than component equality"
   ],
   "keywords": [
     "T12",
@@ -31,7 +33,15 @@
     "round trip",
     "StatsGenerator",
     "ODF angle file",
-    "validity mask"
+    "validity mask",
+    "fundamental zone",
+    "cubic symmetry",
+    "Rodrigues vector",
+    "axis and magnitude",
+    "feature identity",
+    "tuple split",
+    "crystal misorientation",
+    "orientation space"
   ],
   "inputs": [
     {
@@ -42,11 +52,15 @@
   "outputs": [
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
-      "role": "Unchanged preparation data plus six derived float32 arrays."
+      "role": "Unchanged preparation objects, six cell representation arrays, feature phases/source IDs, and compact positive-grain symmetry/Rodrigues comparisons."
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
       "role": "Space-delimited phase-1 indexed-pixel Euler angles in degrees, Weight 1, Sigma 1; source raster order."
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv",
+      "role": "All 3059 positive-grain rows, including compact row zero, with source feature IDs, phases, pixel counts, dimensionless Rodrigues vector and three axis-angle comparisons; angle is component 3 in degrees."
     }
   ],
   "input_data_strategy": {
@@ -58,15 +72,19 @@
     "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
     "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
     "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
-    "reference_visual": "One fixed corrected-grid ROI: native first Euler component in radians and degrees with matched physical scales, and native quaternion x before and after conjugation.",
+    "reference_visual": "One fixed corrected-grid ROI: native first Euler component in radians and degrees with matched physical scales, and native quaternion x before and after conjugation. A second native-output figure shows three dimensionless Rodrigues projections with one point per grain, colored by saved crystal misorientation to identity.",
     "target_traits": [
       "1255 by 911 measured pixels; corrected geometry and every original preparation object retained",
       "Float32 Bunge Euler angles in radians and scalar-last XYZW quaternions",
       "IndexedPixels validity mask from Phases > 0 AND Error == 0",
       "Derived unit and order round trips plus a separate conjugation branch",
-      "One phase-1 angle record per indexed pixel, equal weight, in source tuple order"
+      "One phase-1 angle record per indexed pixel, equal weight, in source tuple order",
+      "3060 source feature rows: background 0 plus 3059 occupied phase-1 grains; no positive empty rows",
+      "Identically split quaternion, Euler, phase, count and source-ID arrays retain all positive grains in order",
+      "Cubic-high phase symmetry; dimensionless finite nonzero Rodrigues vectors after fundamental-zone reduction",
+      "Near-zero original-versus-recovered crystal misorientation and preserved reference angles to identity"
     ],
-    "known_differences": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced.",
+    "known_differences": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced. The grain representation branch includes all occupied grains, including fewer-than-four-pixel grains excluded from the predecessor reporting mask; it does not reproduce the article grain-selection analysis.",
     "archive_provenance_file": "README.md"
   },
   "python_generation": {
@@ -79,13 +97,17 @@
       "Convert Euler units while preserving original measurements",
       "Prepare scalar-first quaternions for another program",
       "Compare a quaternion with its conjugate and round trips",
-      "Export indexed phase-specific Euler angle records"
+      "Export indexed phase-specific Euler angle records",
+      "Compare cubic-symmetry-equivalent grain representations",
+      "Export a compact grain orientation table linked to original feature IDs"
     ],
     "questions_to_ask": [
       "Does the receiving program expect radians or degrees and Bunge Z-X-Z Euler angles?",
       "Does it expect XYZW or WXYZ, and which active/passive and reference-frame conventions apply?",
       "Should sampling weight pixels, grains, or a separately justified population?",
-      "Are phase labels and the IndexedPixels admission rule appropriate for the new input?"
+      "Are phase labels and the IndexedPixels admission rule appropriate for the new input?",
+      "Are all selected grains occupied and phase-homogeneous, and are crystal-structure indices correct?",
+      "Which Rodrigues layout does the consumer expect, and how will identity and 180-degree cases be handled?"
     ],
     "constraints": [
       "Run (01) T12 Orientation Case Study first from the same working folder; (02) reads its Preparation checkpoint.",
@@ -99,7 +121,17 @@
       "Equal weight per indexed 2D pixel is area-weighted sampling, not equal-grain or measured 3D-volume weighting. Sigma 1 is a fixed export setting, not measured uncertainty.",
       "This workflow writes angle records only. It computes no ODF and performs no StatsGenerator run or synthetic microstructure generation.",
       "The angle file lacks complete phase and crystal-symmetry metadata; configure and validate the downstream StatsGenerator phase separately.",
-      "The .d3dpipeline is executable authority. GUI, OOC, generated Python, and downstream import require separate validation."
+      "The .d3dpipeline is executable authority. GUI, OOC, generated Python, and downstream import require separate validation.",
+      "The grain branch uses rows 1 through 3059 of this specific 3060-row preparation checkpoint. Apply identical split_dimension=0 counts [[1],[3059]] to all five arrays; never reuse those counts blindly after segmentation changes.",
+      "Suffix _1 contains background, suffix _2 contains all occupied positive grains. Compact row zero is source feature 1; SourceFeatureId_2 preserves the mapping. WriteASCIIData includes compact row zero.",
+      "All positive grains must be phase 1 and cubic-high in this dataset. ComputeFeaturePhases skips feature 0; any mixed-phase warning for a positive grain needs investigation. ComputeMisorientations has no implemented mask parameter.",
+      "This representation exercise retains smaller-than-four-pixel grains. It does not change ReportableFeatures or claim the article reporting population.",
+      "Crystal fundamental-zone reduction chooses a symmetry-equivalent orientation, unlike conjugation. It does not correct a specimen frame.",
+      "FZQuats_XYZW remains scalar-last. RodriguesVector is dimensionless [qx/qw,qy/qw,qz/qw], while RodriguesAxisMagnitude is [unit axis x,y,z,|r|]. Never normalize the combined three-vector or interpret magnitude as angle.",
+      "RodriguesConvertor divides by vector norm, so zero vectors need separate handling; qv/w is singular at a 180-degree rotation. Require finite nonzero input without changing measurements to hide singularities.",
+      "ComputeMisorientations reads Euler radians and phase symmetry. Its four output components are axis x,y,z and angle in degrees. Axis is not meaningful at near-zero angle.",
+      "Both reference comparisons use identity axis-angle [0,0,1,0 degrees]. The saved angle is not grain spread, strain, loading direction, or Euclidean distance in Rodrigues space.",
+      "The grain CSV has equal grain rows, whereas the separate indexed-pixel angle file samples area; do not infer equal statistical weighting between the two."
     ],
     "related_pipelines": [
       "(01) T12 Orientation Case Study.d3dpipeline"
@@ -127,7 +159,7 @@
         "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
         "included": false,
         "reproduction_status": "illustrative",
-        "reproduction_notes": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced."
+        "reproduction_notes": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced. The grain representation branch includes all occupied grains, including fewer-than-four-pixel grains excluded from the predecessor reporting mask; it does not reproduce the article grain-selection analysis."
       }
     },
     {
@@ -140,11 +172,11 @@
       "doi": "",
       "url": "https://github.com/BlueQuartzSoftware/simplnx",
       "scope": "filter_algorithm",
-      "role": "Current angle conversion, component reordering, scalar-last conjugation, phase-split masked export, file header, and tuple-order semantics."
+      "role": "Current angle conversion, component reordering, scalar-last conjugation, phase-split masked export, file header, and tuple-order semantics. Fundamental-zone, tuple-split, Rodrigues layout and phase-aware axis-angle semantics are taken from these implementations; the branch does not claim an article method."
     }
   ],
   "last_verified": "2026-10-13",
-  "verification_status": "Windows in-memory Release predecessor-to-interchange preflight/execution passed on 2026-10-13. Independent checks passed for all 1,143,305 tuples and all 1,038,142 exported records: 23 predecessor datasets and geometry preserved; Euler units and round trip; exact component order, conjugation and both quaternion return paths; original quaternion norms and conjugate product; export headers, count, units, tuple order, weight and sigma. Two negative controls detected wrong order and missing angle conversion. This verifies representation arithmetic and file content, not materials interpretation. GUI, OOC, generated Python, downstream StatsGenerator import/run, ODF computation, and cross-platform behavior remain unverified.",
+  "verification_status": "Windows in-memory Release predecessor-to-extended-interchange preflight/execution passed on 2026-10-13. Forty-three independent extension checks passed for all 3059 positive grains: all 23 preparation and all 29 previous interchange datasets preserved; original pixel angle export byte-identical; phase homogeneity and occupancy; all five splits/source identities; independent 24-element cubic group orbit and FZ bounds; Rodrigues arithmetic and recovered Euler orientation; pairwise and identity-reference angles; every grain CSV row and component. The original 28 all-cell/export checks remain supported by exact preservation. This verifies representation arithmetic and file content, not materials interpretation. GUI, OOC, generated Python, downstream StatsGenerator import/run, ODF computation, and cross-platform behavior remain unverified.",
   "dimensional_scope": "Measured 2D EBSD map. Geometry spacing [0.5,0.5,1] and origin [-627.5,0,-1] are inherited unchanged. Angle-file rows weight admitted pixels equally; no 3D ODF or grain-equal weighting is implied.",
   "input_contract": {
     "geometry": "T12",
@@ -188,7 +220,25 @@
         "components": 1,
         "convention": "Indexed population is phase 1"
       }
-    ]
+    ],
+    "feature_branch": {
+      "attribute_matrix": "T12/Cell Feature Data",
+      "tuple_count": 3060,
+      "background_row": 0,
+      "positive_occupied_rows": 3059,
+      "phase": 1,
+      "crystal_structure": "Cubic high (index 1)",
+      "working_group": "T12/Orientation Space Working",
+      "split_counts": [
+        [
+          1
+        ],
+        [
+          3059
+        ]
+      ],
+      "compaction": "The second block preserves source feature rows 1..3059; its row zero is valid."
+    }
   },
   "steps": [
     {
@@ -389,9 +439,530 @@
     },
     {
       "index": 10,
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "role": "Assign each positive grain its phase from its cells. The filter skips feature 0, which is excluded from the orientation-space branch. Positive grains must each contain phase 1 only; investigate any mixed-phase warning.",
+      "input_paths": [
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/FeatureIds"
+      ],
+      "output_paths": [
+        "T12/Cell Feature Data/FeaturePhases"
+      ],
+      "key_parameters": {
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "feature_phases_array_name": "FeaturePhases",
+        "cell_features_attribute_matrix_path": "T12/Cell Feature Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Record the source feature-row identity 0 through 3059 as int32 before removing background from working arrays; source geometry and feature labels remain unchanged.",
+      "input_paths": [
+        "T12/Cell Feature Data"
+      ],
+      "output_paths": [
+        "T12/Cell Feature Data/SourceFeatureId"
+      ],
+      "key_parameters": {
+        "output_array_path": "T12/Cell Feature Data/SourceFeatureId",
+        "numeric_type_index": 4,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "role": "Split AvgQuats identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background.",
+      "input_paths": [
+        "T12/Cell Feature Data/AvgQuats"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/AvgQuats_1",
+        "T12/Orientation Space Working/AvgQuats_2"
+      ],
+      "key_parameters": {
+        "data_array_path": "T12/Cell Feature Data/AvgQuats",
+        "delete_original_array": false,
+        "split_dimension": 0,
+        "split_dimension_counts": [
+          [
+            1
+          ],
+          [
+            3059
+          ]
+        ],
+        "output_container_index": 0,
+        "new_data_group_path": "T12/Orientation Space Working",
+        "existing_data_group_path": "",
+        "new_attribute_matrix_path": "",
+        "existing_attribute_matrix_path": "",
+        "attr_matrix_tuple_shape": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "role": "Split AvgEulerAngles identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background.",
+      "input_paths": [
+        "T12/Cell Feature Data/AvgEulerAngles"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/AvgEulerAngles_1",
+        "T12/Orientation Space Working/AvgEulerAngles_2"
+      ],
+      "key_parameters": {
+        "data_array_path": "T12/Cell Feature Data/AvgEulerAngles",
+        "delete_original_array": false,
+        "split_dimension": 0,
+        "split_dimension_counts": [
+          [
+            1
+          ],
+          [
+            3059
+          ]
+        ],
+        "output_container_index": 1,
+        "new_data_group_path": "",
+        "existing_data_group_path": "T12/Orientation Space Working",
+        "new_attribute_matrix_path": "",
+        "existing_attribute_matrix_path": "",
+        "attr_matrix_tuple_shape": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "role": "Split FeaturePhases identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background.",
+      "input_paths": [
+        "T12/Cell Feature Data/FeaturePhases"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/FeaturePhases_1",
+        "T12/Orientation Space Working/FeaturePhases_2"
+      ],
+      "key_parameters": {
+        "data_array_path": "T12/Cell Feature Data/FeaturePhases",
+        "delete_original_array": false,
+        "split_dimension": 0,
+        "split_dimension_counts": [
+          [
+            1
+          ],
+          [
+            3059
+          ]
+        ],
+        "output_container_index": 1,
+        "new_data_group_path": "",
+        "existing_data_group_path": "T12/Orientation Space Working",
+        "new_attribute_matrix_path": "",
+        "existing_attribute_matrix_path": "",
+        "attr_matrix_tuple_shape": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "role": "Split NumElements identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background.",
+      "input_paths": [
+        "T12/Cell Feature Data/NumElements"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/NumElements_1",
+        "T12/Orientation Space Working/NumElements_2"
+      ],
+      "key_parameters": {
+        "data_array_path": "T12/Cell Feature Data/NumElements",
+        "delete_original_array": false,
+        "split_dimension": 0,
+        "split_dimension_counts": [
+          [
+            1
+          ],
+          [
+            3059
+          ]
+        ],
+        "output_container_index": 1,
+        "new_data_group_path": "",
+        "existing_data_group_path": "T12/Orientation Space Working",
+        "new_attribute_matrix_path": "",
+        "existing_attribute_matrix_path": "",
+        "attr_matrix_tuple_shape": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "SplitDataArrayByTupleFilter",
+      "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99",
+      "role": "Split SourceFeatureId identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background.",
+      "input_paths": [
+        "T12/Cell Feature Data/SourceFeatureId"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/SourceFeatureId_1",
+        "T12/Orientation Space Working/SourceFeatureId_2"
+      ],
+      "key_parameters": {
+        "data_array_path": "T12/Cell Feature Data/SourceFeatureId",
+        "delete_original_array": false,
+        "split_dimension": 0,
+        "split_dimension_counts": [
+          [
+            1
+          ],
+          [
+            3059
+          ]
+        ],
+        "output_container_index": 1,
+        "new_data_group_path": "",
+        "existing_data_group_path": "T12/Orientation Space Working",
+        "new_attribute_matrix_path": "",
+        "existing_attribute_matrix_path": "",
+        "attr_matrix_tuple_shape": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "ComputeFZQuaternionsFilter",
+      "uuid": "8b651407-08a9-4c25-967a-d86444eca87f",
+      "role": "Choose the cubic-symmetry-equivalent representative nearest identity for each positive grain. This changes representation under crystal symmetry, not the specimen frame or physical grain orientation. The compact input contains no background or empty feature rows.",
+      "input_paths": [
+        "T12/Orientation Space Working/AvgQuats_2",
+        "T12/Orientation Space Working/FeaturePhases_2",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/FZQuats_XYZW"
+      ],
+      "key_parameters": {
+        "input_quats_array_path": "T12/Orientation Space Working/AvgQuats_2",
+        "cell_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "use_mask": false,
+        "mask_array_path": "",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "output_fz_quats_array_name": "FZQuats_XYZW"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Form dimensionless Rodrigues x = quaternion component 0 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "input_paths": [
+        "T12/Orientation Space Working/FZQuats_XYZW"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RodriguesX"
+      ],
+      "key_parameters": {
+        "calculated_array_path": "T12/Orientation Space Working/RodriguesX",
+        "calculator_parameter": {
+          "equation": "FZQuats_XYZW[0]/FZQuats_XYZW[3]",
+          "selected_group": "T12/Orientation Space Working",
+          "units": 0
+        },
+        "scalar_type_index": 8
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 19,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Form dimensionless Rodrigues y = quaternion component 1 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "input_paths": [
+        "T12/Orientation Space Working/FZQuats_XYZW"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RodriguesY"
+      ],
+      "key_parameters": {
+        "calculated_array_path": "T12/Orientation Space Working/RodriguesY",
+        "calculator_parameter": {
+          "equation": "FZQuats_XYZW[1]/FZQuats_XYZW[3]",
+          "selected_group": "T12/Orientation Space Working",
+          "units": 0
+        },
+        "scalar_type_index": 8
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 20,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Form dimensionless Rodrigues z = quaternion component 2 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "input_paths": [
+        "T12/Orientation Space Working/FZQuats_XYZW"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RodriguesZ"
+      ],
+      "key_parameters": {
+        "calculated_array_path": "T12/Orientation Space Working/RodriguesZ",
+        "calculator_parameter": {
+          "equation": "FZQuats_XYZW[2]/FZQuats_XYZW[3]",
+          "selected_group": "T12/Orientation Space Working",
+          "units": 0
+        },
+        "scalar_type_index": 8
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 21,
+      "filter": "CombineAttributeArraysFilter",
+      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
+      "role": "Combine x, y, z in explicit order without normalization. These are dimensionless orientation coordinates, not specimen positions or a unit direction.",
+      "input_paths": [
+        "T12/Orientation Space Working/RodriguesX",
+        "T12/Orientation Space Working/RodriguesY",
+        "T12/Orientation Space Working/RodriguesZ"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RodriguesVector"
+      ],
+      "key_parameters": {
+        "input_data_array_paths": [
+          "T12/Orientation Space Working/RodriguesX",
+          "T12/Orientation Space Working/RodriguesY",
+          "T12/Orientation Space Working/RodriguesZ"
+        ],
+        "move_values": false,
+        "normalize_data": false,
+        "output_data_array_name": "RodriguesVector"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "RodriguesConvertorFilter",
+      "uuid": "3704a3c6-dd09-4b91-9eda-2fbb4cb9bf99",
+      "role": "Convert the finite nonzero three-component Rodrigues vector to unit axis plus magnitude: [rx/|r|, ry/|r|, rz/|r|, |r|]. This is the four-component Rodrigues convention expected by Convert Orientations, not axis plus angle. Zero vectors need separate treatment before adapting this filter.",
+      "input_paths": [
+        "T12/Orientation Space Working/RodriguesVector"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RodriguesAxisMagnitude"
+      ],
+      "key_parameters": {
+        "input_data_array_path": "T12/Orientation Space Working/RodriguesVector",
+        "output_data_array_name": "RodriguesAxisMagnitude",
+        "delete_original_data": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "role": "Convert four-component Rodrigues (choice 4) back to Bunge Euler radians (choice 0). Component equality with original Euler angles is not expected after symmetry reduction; compare crystal misorientation instead.",
+      "input_paths": [
+        "T12/Orientation Space Working/RodriguesAxisMagnitude"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RecoveredEulerAngles_Radians"
+      ],
+      "key_parameters": {
+        "input_orientation_array_path": "T12/Orientation Space Working/RodriguesAxisMagnitude",
+        "input_representation_index": 4,
+        "output_orientation_array_name": "RecoveredEulerAngles_Radians",
+        "output_representation_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "role": "Compare original and recovered Euler arrays row by row under cubic symmetry. The fourth component is angle in degrees and should be near zero; its axis is not meaningful near zero.",
+      "input_paths": [
+        "T12/Orientation Space Working/AvgEulerAngles_2",
+        "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+        "T12/Orientation Space Working/FeaturePhases_2",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RepresentationDifference_AxisAngleDeg"
+      ],
+      "key_parameters": {
+        "computation_type_index": 0,
+        "input_orientation_1_array_path": "T12/Orientation Space Working/AvgEulerAngles_2",
+        "input_orientation_2_array_path": "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+        "input_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "reference_orientation": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "output_orientation_array_name": "RepresentationDifference_AxisAngleDeg"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 25,
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "role": "Compare each original grain orientation to identity, axis-angle [0,0,1,0 degrees], under cubic symmetry. The fourth component is the reference angle in degrees, not grain orientation spread or strain.",
+      "input_paths": [
+        "T12/Orientation Space Working/AvgEulerAngles_2",
+        "T12/Orientation Space Working/FeaturePhases_2",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg"
+      ],
+      "key_parameters": {
+        "computation_type_index": 1,
+        "input_orientation_1_array_path": "T12/Orientation Space Working/AvgEulerAngles_2",
+        "input_orientation_2_array_path": "",
+        "input_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "reference_orientation": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "output_orientation_array_name": "OriginalToIdentity_AxisAngleDeg"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "ComputeMisorientationsFilter",
+      "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced",
+      "role": "Repeat the identity-reference comparison after the FZ/Rodrigues conversion. Its fourth-component angle should match the original-reference result despite different Euler components.",
+      "input_paths": [
+        "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+        "T12/Orientation Space Working/FeaturePhases_2",
+        "T12/Cell Ensemble Data/CrystalStructures"
+      ],
+      "output_paths": [
+        "T12/Orientation Space Working/RecoveredToIdentity_AxisAngleDeg"
+      ],
+      "key_parameters": {
+        "computation_type_index": 1,
+        "input_orientation_1_array_path": "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+        "input_orientation_2_array_path": "",
+        "input_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "reference_orientation": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "output_orientation_array_name": "RecoveredToIdentity_AxisAngleDeg"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Export all 3059 compact grain rows, including row zero, with source feature IDs and voxel counts. Misorientation columns are axis x/y/z then angle degrees; the Rodrigues columns are dimensionless. This table weights grains equally, unlike the pixel angle file.",
+      "input_paths": [
+        "T12/Orientation Space Working/SourceFeatureId_2",
+        "T12/Orientation Space Working/FeaturePhases_2",
+        "T12/Orientation Space Working/NumElements_2",
+        "T12/Orientation Space Working/RodriguesVector",
+        "T12/Orientation Space Working/RepresentationDifference_AxisAngleDeg",
+        "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg",
+        "T12/Orientation Space Working/RecoveredToIdentity_AxisAngleDeg"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv"
+      ],
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "T12/Orientation Space Working/SourceFeatureId_2",
+          "T12/Orientation Space Working/FeaturePhases_2",
+          "T12/Orientation Space Working/NumElements_2",
+          "T12/Orientation Space Working/RodriguesVector",
+          "T12/Orientation Space Working/RepresentationDifference_AxisAngleDeg",
+          "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg",
+          "T12/Orientation Space Working/RecoveredToIdentity_AxisAngleDeg"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 28,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "role": "Save every original preparation object plus the six derived arrays with explicit units or component order in their names.",
+      "role": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs.",
       "input_paths": [
         "T12"
       ],
@@ -454,23 +1025,58 @@
     "negative_controls": [
       "misread WXYZ fails order check",
       "unconverted radians fail degree check"
-    ]
+    ],
+    "cell_checks_scope": "Original 28 checks cover all 1143305 cells and 1038142 exported records; the extended native run preserved all 29 previous-interchange datasets and the exact pixel export bytes.",
+    "symmetry_extension": {
+      "independent_checks_passed": 43,
+      "grain_rows": 3059,
+      "original_interchange_datasets_preserved": 29,
+      "original_pixel_export_byte_identical": true,
+      "metrics": {
+        "fz_max_norm_error": 3.412660820600877e-08,
+        "fz_symmetry_orbit_max_component_distance": 3.4126608182387296e-08,
+        "changed_representatives": 107,
+        "rod_norm_min": 0.049789314546552124,
+        "rod_norm_max": 0.6036363951295838,
+        "fz_w_min": 0.8561164140701294,
+        "roundtrip_native_angle_max_deg": 7.726651529083028e-05,
+        "roundtrip_oracle_angle_max_deg": 7.726651498590936e-05,
+        "paired_angle_max_error_deg": 2.489930638516387e-12,
+        "original_reference_angle_max_error_deg": 1.9068420229473304e-06,
+        "recovered_reference_angle_max_error_deg": 1.907338258888558e-06,
+        "reference_angle_range_deg": [
+          5.700734615325928,
+          62.23341751098633
+        ],
+        "csv_max_absolute_error": 4.997558598063279e-07
+      },
+      "oracle": "Independent 24 proper cubic rotations, left Hamilton symmetry orbit, cubic Rodrigues FZ bounds, Bunge quaternion arithmetic and symmetry-minimized angles.",
+      "csv_rows": 3059,
+      "csv_columns": 18,
+      "csv_numeric_contract": "Integer IDs/phases/counts exact; floating columns checked against native arrays within eight significant digits.",
+      "domain": "All retained FZ quaternions have positive w >= 0.8561164; Rodrigues norms are 0.0497893 through 0.6036364. No zero Rodrigues vector or near-180-degree division is used."
+    }
   },
   "reference_artifacts": [
     {
       "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
-      "role": "Native preparation checkpoint consumed by the final verified run",
-      "sha256": "4b53af72c9bd7f7380eaa51178ed4d0267a579bf03174fff831224a999cf1e13"
+      "role": "Native preparation checkpoint consumed by the verified extended run",
+      "sha256": "41303483c8274c685e1010decd45895c41caf3f4e374493c0cafb120200c4b9f"
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
-      "role": "Final native interchange output used for every numerical check and the figure",
-      "sha256": "670da6406bdc76db5885fde140ea3b6eba76680fa903a889f444d097f57b4785"
+      "role": "Extended native interchange output used for the symmetry checks and second figure; original cell figure retains its own earlier native-source hash below.",
+      "sha256": "49555ac4356c90473911a19962b92966ec00c8a6993f3e2953dfbb801c3b760f"
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
       "role": "Final native phase-1 angle list checked row by row",
       "sha256": "23484e8b65c2d803cdec4a7ba8422df992899a2fe4a7eac6d015c655686dd071"
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv",
+      "role": "Native 3059-row, 18-column grain interchange table checked component by component",
+      "sha256": "7208bc05f94f9fcd08ed8bbfa96ac5961c391bd89858731c919af71c6920675e"
     }
   ],
   "figure": {
@@ -511,5 +1117,23 @@
     ],
     "excluded_pixels": "Gray, distinct from valid zero",
     "coordinates": "Derived from unchanged corrected geometry origin and spacing; acquisition X/Y arrays are not plotted."
+  },
+  "orientation_space_figure": {
+    "file": "T12OrientationSymmetry.png",
+    "sha256": "55d245f88f36d4221014bf907b4f11131fddb04595443cf67c08a81c8e0ad324",
+    "native_source_sha256": "49555ac4356c90473911a19962b92966ec00c8a6993f3e2953dfbb801c3b760f",
+    "method": "Plot native saved RodriguesVector components and OriginalToIdentity_AxisAngleDeg component 3 directly. No orientation, symmetry, Rodrigues or misorientation result is computed by the plotting script. Metric annotation is supplied by the independent checker.",
+    "arrays": [
+      "T12/Orientation Space Working/RodriguesVector",
+      "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg",
+      "T12/Orientation Space Working/SourceFeatureId_2"
+    ],
+    "population": "Every one of 3059 occupied positive grains, one point each; source IDs 1..3059; includes grains below the predecessor reporting-size threshold.",
+    "coordinate_units": "Dimensionless Rodrigues qv/w; not specimen XYZ.",
+    "color": "viridis, 0..63 degrees, native cubic misorientation angle to identity [0,0,1,0 degrees].",
+    "axes_limits": [
+      -0.43,
+      0.43
+    ]
   }
 }

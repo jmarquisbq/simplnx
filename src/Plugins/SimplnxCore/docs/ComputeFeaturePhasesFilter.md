@@ -27,6 +27,9 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Slip_Examples/(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline` (OrientationAnalysis)
 
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

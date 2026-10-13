@@ -34,6 +34,10 @@ Then, for every Euler Angle in the input array, the misorientation with the refe
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 

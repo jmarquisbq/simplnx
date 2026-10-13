@@ -45,7 +45,7 @@
     "syntax": "Compile the generated text with Python compile().",
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check every relative input and output path against the source pipeline.",
-    "execution": "Run the generated (01) case study from the source CTF and inspect its three checkpoints and feature CSV. Then run generated (02) interchange and inspect its DREAM3D output and T12_IndexedAngles_Phase_1.txt, including units, count, and row order. NOT VERIFIED.",
+    "execution": "Run the generated (01) case study from the source CTF and inspect its three checkpoints and feature CSV. Then run generated (02) interchange and inspect its DREAM3D output and T12_IndexedAngles_Phase_1.txt, including units, count, and row order. Also inspect the compact grain table, identical five-array splits and source IDs, crystal-symmetry equivalence, nonzero finite Rodrigues domain, and both identity-reference comparisons. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",

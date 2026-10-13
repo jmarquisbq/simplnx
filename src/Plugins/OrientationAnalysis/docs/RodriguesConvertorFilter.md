@@ -21,7 +21,10 @@ For in-memory arrays, the filter retains its parallel tuple traversal. If either
 
 ## Example Pipelines
 
-List the names of the example pipelines where this filter is used.
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 

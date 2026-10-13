@@ -5,7 +5,7 @@ These two examples answer distinct questions using one measured steel EBSD map. 
 | Order | Task |
 |---|---|
 | [(01) T12 Orientation Case Study](%2801%29%20T12%20Orientation%20Case%20Study.md) | Prepare the map, compare local and grain-reference orientation variation, and test KAM neighborhood choices in one combined pipeline. |
-| [(02) T12 Orientation Interchange](%2802%29%20T12%20Orientation%20Interchange.md) | Read the preparation checkpoint; preserve source measurements while changing Euler units and quaternion order, inspecting conjugation, and exporting indexed angle records. |
+| [(02) T12 Orientation Interchange](%2802%29%20T12%20Orientation%20Interchange.md) | Read the preparation checkpoint; preserve source measurements while changing Euler units and quaternion order, inspecting conjugation, exporting indexed angle records, and checking compact grain representations under cubic symmetry. |
 
 ## Get the data and run
 
@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Case study failed; inspect the runner output.'
 if ($LASTEXITCODE -ne 0) { throw 'Interchange failed; inspect the runner output.' }
 ```
 
-Relative paths resolve from the CLI working folder. In the GUI, open the pipeline and set absolute file paths if the launch location does not resolve `Data/...`. Example (01) writes preparation, metrics, and complete neighborhood checkpoints under `Data/Output/T12_Orientation_Examples/`, retaining the paths used by the separate reporting and import examples. Example (02) reads `Preparation/T12_Orientations.dream3d` and writes `Interchange/T12_OrientationInterchange.dream3d` plus `Interchange/T12_IndexedAngles_Phase_1.txt`. The configured text base name gains the phase suffix. Rerun (01) before its dependents after a processing change.
+Relative paths resolve from the CLI working folder. In the GUI, open the pipeline and set absolute file paths if the launch location does not resolve `Data/...`. Example (01) writes preparation, metrics, and complete neighborhood checkpoints under `Data/Output/T12_Orientation_Examples/`, retaining the paths used by the separate reporting and import examples. Example (02) reads `Preparation/T12_Orientations.dream3d` and writes `Interchange/T12_OrientationInterchange.dream3d` plus `Interchange/T12_IndexedAngles_Phase_1.txt` and `Interchange/T12_GrainOrientationInterchange.csv`. The grain CSV retains source feature IDs; orientation-space coordinates are dimensionless. The configured text base name gains the phase suffix. Rerun (01) before its dependents after a processing change.
 
 ## Scientific basis and scope
 

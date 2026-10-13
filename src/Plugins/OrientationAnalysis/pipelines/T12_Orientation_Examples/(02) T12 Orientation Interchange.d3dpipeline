@@ -267,6 +267,810 @@
     },
     {
       "args": {
+        "cell_phases_array_path": {
+          "value": "T12/Cell Data/Phases",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "T12/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "FeaturePhases",
+          "version": 1
+        },
+        "cell_features_attribute_matrix_path": {
+          "value": "T12/Cell Feature Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Assign each positive grain its phase from its cells. The filter skips feature 0, which is excluded from the orientation-space branch. Positive grains must each contain phase 1 only; investigate any mixed-phase warning.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesFilter",
+        "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_array_path": {
+          "value": "T12/Cell Feature Data/SourceFeatureId",
+          "version": 1
+        },
+        "numeric_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "init_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "init_value": {
+          "value": "0",
+          "version": 1
+        },
+        "starting_fill_value": {
+          "value": "0",
+          "version": 1
+        },
+        "step_operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "step_value": {
+          "value": "1",
+          "version": 1
+        },
+        "use_seed": {
+          "value": false,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "InitializeDataFilter SeedValue",
+          "version": 1
+        },
+        "standardize_seed": {
+          "value": false,
+          "version": 1
+        },
+        "init_start_range": {
+          "value": "0",
+          "version": 1
+        },
+        "init_end_range": {
+          "value": "1",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Record the source feature-row identity 0 through 3059 as int32 before removing background from working arrays; source geometry and feature labels remain unchanged.",
+      "filter": {
+        "name": "nx::core::CreateDataArrayAdvancedFilter",
+        "uuid": "f23464df-abcc-40cf-bf99-f71463df633c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "data_array_path": {
+          "value": "T12/Cell Feature Data/AvgQuats",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "split_dimension": {
+          "value": 0,
+          "version": 1
+        },
+        "split_dimension_counts": {
+          "value": [
+            [
+              1
+            ],
+            [
+              3059
+            ]
+          ],
+          "version": 1
+        },
+        "output_container_index": {
+          "value": 0,
+          "version": 1
+        },
+        "new_data_group_path": {
+          "value": "T12/Orientation Space Working",
+          "version": 1
+        },
+        "existing_data_group_path": {
+          "value": "",
+          "version": 1
+        },
+        "new_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "attr_matrix_tuple_shape": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::SplitDataArrayByTupleFilter",
+        "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99"
+      },
+      "isDisabled": false,
+      "comments": "Split AvgQuats identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "args": {
+        "data_array_path": {
+          "value": "T12/Cell Feature Data/AvgEulerAngles",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "split_dimension": {
+          "value": 0,
+          "version": 1
+        },
+        "split_dimension_counts": {
+          "value": [
+            [
+              1
+            ],
+            [
+              3059
+            ]
+          ],
+          "version": 1
+        },
+        "output_container_index": {
+          "value": 1,
+          "version": 1
+        },
+        "new_data_group_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_data_group_path": {
+          "value": "T12/Orientation Space Working",
+          "version": 1
+        },
+        "new_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "attr_matrix_tuple_shape": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::SplitDataArrayByTupleFilter",
+        "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99"
+      },
+      "isDisabled": false,
+      "comments": "Split AvgEulerAngles identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "args": {
+        "data_array_path": {
+          "value": "T12/Cell Feature Data/FeaturePhases",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "split_dimension": {
+          "value": 0,
+          "version": 1
+        },
+        "split_dimension_counts": {
+          "value": [
+            [
+              1
+            ],
+            [
+              3059
+            ]
+          ],
+          "version": 1
+        },
+        "output_container_index": {
+          "value": 1,
+          "version": 1
+        },
+        "new_data_group_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_data_group_path": {
+          "value": "T12/Orientation Space Working",
+          "version": 1
+        },
+        "new_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "attr_matrix_tuple_shape": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::SplitDataArrayByTupleFilter",
+        "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99"
+      },
+      "isDisabled": false,
+      "comments": "Split FeaturePhases identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "args": {
+        "data_array_path": {
+          "value": "T12/Cell Feature Data/NumElements",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "split_dimension": {
+          "value": 0,
+          "version": 1
+        },
+        "split_dimension_counts": {
+          "value": [
+            [
+              1
+            ],
+            [
+              3059
+            ]
+          ],
+          "version": 1
+        },
+        "output_container_index": {
+          "value": 1,
+          "version": 1
+        },
+        "new_data_group_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_data_group_path": {
+          "value": "T12/Orientation Space Working",
+          "version": 1
+        },
+        "new_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "attr_matrix_tuple_shape": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::SplitDataArrayByTupleFilter",
+        "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99"
+      },
+      "isDisabled": false,
+      "comments": "Split NumElements identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "args": {
+        "data_array_path": {
+          "value": "T12/Cell Feature Data/SourceFeatureId",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "split_dimension": {
+          "value": 0,
+          "version": 1
+        },
+        "split_dimension_counts": {
+          "value": [
+            [
+              1
+            ],
+            [
+              3059
+            ]
+          ],
+          "version": 1
+        },
+        "output_container_index": {
+          "value": 1,
+          "version": 1
+        },
+        "new_data_group_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_data_group_path": {
+          "value": "T12/Orientation Space Working",
+          "version": 1
+        },
+        "new_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "existing_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "attr_matrix_tuple_shape": {
+          "value": [
+            [
+              1
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::SplitDataArrayByTupleFilter",
+        "uuid": "4fae7454-620b-4e68-9d54-33fa8bff2e99"
+      },
+      "isDisabled": false,
+      "comments": "Split SourceFeatureId identically into background _1 and 3059 occupied positive-grain rows _2. Keep the original. The fixed counts [1,3059] describe this checkpoint only; _2 row zero is source feature 1, not background."
+    },
+    {
+      "args": {
+        "input_quats_array_path": {
+          "value": "T12/Orientation Space Working/AvgQuats_2",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "output_fz_quats_array_name": {
+          "value": "FZQuats_XYZW",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::ComputeFZQuaternionsFilter",
+        "uuid": "8b651407-08a9-4c25-967a-d86444eca87f"
+      },
+      "isDisabled": false,
+      "comments": "Choose the cubic-symmetry-equivalent representative nearest identity for each positive grain. This changes representation under crystal symmetry, not the specimen frame or physical grain orientation. The compact input contains no background or empty feature rows."
+    },
+    {
+      "args": {
+        "calculated_array_path": {
+          "value": "T12/Orientation Space Working/RodriguesX",
+          "version": 1
+        },
+        "calculator_parameter": {
+          "value": {
+            "equation": "FZQuats_XYZW[0]/FZQuats_XYZW[3]",
+            "selected_group": "T12/Orientation Space Working",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Form dimensionless Rodrigues x = quaternion component 0 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculated_array_path": {
+          "value": "T12/Orientation Space Working/RodriguesY",
+          "version": 1
+        },
+        "calculator_parameter": {
+          "value": {
+            "equation": "FZQuats_XYZW[1]/FZQuats_XYZW[3]",
+            "selected_group": "T12/Orientation Space Working",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Form dimensionless Rodrigues y = quaternion component 1 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculated_array_path": {
+          "value": "T12/Orientation Space Working/RodriguesZ",
+          "version": 1
+        },
+        "calculator_parameter": {
+          "value": {
+            "equation": "FZQuats_XYZW[2]/FZQuats_XYZW[3]",
+            "selected_group": "T12/Orientation Space Working",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Form dimensionless Rodrigues z = quaternion component 2 / scalar component 3 using the saved FZ quaternion. This division requires nonzero w; cubic reduction keeps this dataset away from the 180-degree singularity.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_data_array_paths": {
+          "value": [
+            "T12/Orientation Space Working/RodriguesX",
+            "T12/Orientation Space Working/RodriguesY",
+            "T12/Orientation Space Working/RodriguesZ"
+          ],
+          "version": 1
+        },
+        "move_values": {
+          "value": false,
+          "version": 1
+        },
+        "normalize_data": {
+          "value": false,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "RodriguesVector",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Combine x, y, z in explicit order without normalization. These are dimensionless orientation coordinates, not specimen positions or a unit direction.",
+      "filter": {
+        "name": "nx::core::CombineAttributeArraysFilter",
+        "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_data_array_path": {
+          "value": "T12/Orientation Space Working/RodriguesVector",
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "RodriguesAxisMagnitude",
+          "version": 1
+        },
+        "delete_original_data": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::RodriguesConvertorFilter",
+        "uuid": "3704a3c6-dd09-4b91-9eda-2fbb4cb9bf99"
+      },
+      "isDisabled": false,
+      "comments": "Convert the finite nonzero three-component Rodrigues vector to unit axis plus magnitude: [rx/|r|, ry/|r|, rz/|r|, |r|]. This is the four-component Rodrigues convention expected by Convert Orientations, not axis plus angle. Zero vectors need separate treatment before adapting this filter."
+    },
+    {
+      "args": {
+        "input_orientation_array_path": {
+          "value": "T12/Orientation Space Working/RodriguesAxisMagnitude",
+          "version": 1
+        },
+        "input_representation_index": {
+          "value": 4,
+          "version": 1
+        },
+        "output_orientation_array_name": {
+          "value": "RecoveredEulerAngles_Radians",
+          "version": 1
+        },
+        "output_representation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Convert four-component Rodrigues (choice 4) back to Bunge Euler radians (choice 0). Component equality with original Euler angles is not expected after symmetry reduction; compare crystal misorientation instead.",
+      "filter": {
+        "name": "nx::core::ConvertOrientationsFilter",
+        "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "computation_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "input_orientation_1_array_path": {
+          "value": "T12/Orientation Space Working/AvgEulerAngles_2",
+          "version": 1
+        },
+        "input_orientation_2_array_path": {
+          "value": "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+          "version": 1
+        },
+        "input_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "reference_orientation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "output_orientation_array_name": {
+          "value": "RepresentationDifference_AxisAngleDeg",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::ComputeMisorientationsFilter",
+        "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced"
+      },
+      "isDisabled": false,
+      "comments": "Compare original and recovered Euler arrays row by row under cubic symmetry. The fourth component is angle in degrees and should be near zero; its axis is not meaningful near zero."
+    },
+    {
+      "args": {
+        "computation_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_orientation_1_array_path": {
+          "value": "T12/Orientation Space Working/AvgEulerAngles_2",
+          "version": 1
+        },
+        "input_orientation_2_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "input_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "reference_orientation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "output_orientation_array_name": {
+          "value": "OriginalToIdentity_AxisAngleDeg",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::ComputeMisorientationsFilter",
+        "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced"
+      },
+      "isDisabled": false,
+      "comments": "Compare each original grain orientation to identity, axis-angle [0,0,1,0 degrees], under cubic symmetry. The fourth component is the reference angle in degrees, not grain orientation spread or strain."
+    },
+    {
+      "args": {
+        "computation_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_orientation_1_array_path": {
+          "value": "T12/Orientation Space Working/RecoveredEulerAngles_Radians",
+          "version": 1
+        },
+        "input_orientation_2_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "input_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "reference_orientation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "output_orientation_array_name": {
+          "value": "RecoveredToIdentity_AxisAngleDeg",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "filter": {
+        "name": "nx::core::ComputeMisorientationsFilter",
+        "uuid": "fff2aa5c-cc79-4dd4-9ee6-4f3c028a5ced"
+      },
+      "isDisabled": false,
+      "comments": "Repeat the identity-reference comparison after the FZ/Rodrigues conversion. Its fourth-component angle should match the original-reference result despite different Euler components."
+    },
+    {
+      "args": {
+        "output_style_index": {
+          "value": 1,
+          "version": 1
+        },
+        "output_path": {
+          "value": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv",
+          "version": 1
+        },
+        "output_dir": {
+          "value": "",
+          "version": 1
+        },
+        "file_extension": {
+          "value": ".csv",
+          "version": 1
+        },
+        "max_val_per_line": {
+          "value": 1,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "header_option_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "T12/Orientation Space Working/SourceFeatureId_2",
+            "T12/Orientation Space Working/FeaturePhases_2",
+            "T12/Orientation Space Working/NumElements_2",
+            "T12/Orientation Space Working/RodriguesVector",
+            "T12/Orientation Space Working/RepresentationDifference_AxisAngleDeg",
+            "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg",
+            "T12/Orientation Space Working/RecoveredToIdentity_AxisAngleDeg"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export all 3059 compact grain rows, including row zero, with source feature IDs and voxel counts. Misorientation columns are axis x/y/z then angle degrees; the Rodrigues columns are dimensionless. This table weights grains equally, unlike the pixel angle file.",
+      "filter": {
+        "name": "nx::core::WriteASCIIDataFilter",
+        "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "compression_level": {
           "value": 5,
           "version": 1
@@ -285,7 +1089,7 @@
         },
         "parameters_version": 2
       },
-      "comments": "Save every original preparation object plus the six derived arrays with explicit units or component order in their names.",
+      "comments": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs.",
       "filter": {
         "name": "nx::core::WriteDREAM3DFilter",
         "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
