@@ -1,4 +1,4 @@
-# Smoke-test the public Small IN100 archive and seven pilot example pipelines.
+# Smoke-test the public Small IN100 archive and eight pilot example pipelines.
 # This checks execution and output presence, not scientific correctness.
 
 foreach(required_var NXRUNNER RAW_DATA_DIR ARCHIVE_PIPELINE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
@@ -15,7 +15,8 @@ foreach(required_path "${NXRUNNER}"
                       "${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dpipeline"
                       "${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline"
                       "${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline"
-                      "${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")
+                      "${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline"
+                      "${EXAMPLE_DIR}/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline")
   if(NOT EXISTS "${required_path}")
     message(FATAL_ERROR "Required executable or pipeline is missing: ${required_path}")
   endif()
@@ -30,6 +31,7 @@ validate_companion("${EXAMPLE_DIR}/(04) Small IN100 Minimum Size Comparison.d3dp
 validate_companion("${EXAMPLE_DIR}/(05) Small IN100 Combined Selection.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")
+validate_companion("${EXAMPLE_DIR}/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline")
 
 # Check every raw section before staging or running a pipeline.
 foreach(slice RANGE 1 117)
@@ -55,6 +57,7 @@ file(REMOVE
   "${work_root}/combined-selection-preflight.log" "${work_root}/combined-selection-execute.log"
   "${work_root}/neighbor-relationships-preflight.log" "${work_root}/neighbor-relationships-execute.log")
 file(REMOVE "${work_root}/voxel-mesh-preflight.log" "${work_root}/voxel-mesh-execute.log")
+file(REMOVE "${work_root}/grain-size-groups-preflight.log" "${work_root}/grain-size-groups-execute.log")
 
 set(raw_stage "${work_root}/Data/Small_IN100")
 file(MAKE_DIRECTORY "${raw_stage}")
@@ -90,7 +93,11 @@ set(known_outputs
     "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_nodes.inp"
     "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elems.inp"
     "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_elset.inp"
-    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_sects.inp")
+    "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24_sects.inp"
+    "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.csv"
+    "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMeansSizeCenters.csv"
+    "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMedoidsSizeRepresentatives.csv"
+    "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d")
 foreach(relative_path IN LISTS known_outputs)
   set(output_path "${work_root}/${relative_path}")
   get_filename_component(output_parent "${output_path}" DIRECTORY)
@@ -239,5 +246,35 @@ require_output("Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dr
 foreach(mesh_suffix "" "_nodes" "_elems" "_elset" "_sects")
   require_output("Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24${mesh_suffix}.inp")
 endforeach()
+
+run_pipeline("grain-size-groups" "${EXAMPLE_DIR}/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline")
+require_output("Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d")
+
+function(require_grain_size_csv filename)
+  set(relative_path "Data/Output/Small_IN100_Examples/GrainSizeGroups/${filename}")
+  require_output("${relative_path}")
+  set(csv_path "${work_root}/${relative_path}")
+  file(STRINGS "${csv_path}" first_two_lines LIMIT_COUNT 2)
+  list(LENGTH first_two_lines line_count)
+  if(line_count LESS 2)
+    message(FATAL_ERROR "Grain-size CSV has no data rows: ${csv_path}")
+  endif()
+  list(GET first_two_lines 0 header)
+  string(REPLACE "," ";" columns "${header}")
+  list(GET columns 0 first_column)
+  if(NOT first_column STREQUAL "Feature_ID")
+    message(FATAL_ERROR "Grain-size CSV lacks Feature_ID: ${csv_path}")
+  endif()
+  foreach(required_column IN LISTS ARGN)
+    list(FIND columns "${required_column}" column_index)
+    if(column_index LESS 0)
+      message(FATAL_ERROR "Grain-size CSV lacks ${required_column}: ${csv_path}")
+    endif()
+  endforeach()
+endfunction()
+
+require_grain_size_csv("SmallIN100_GrainSizeGroups.csv" NumElements EquivalentDiameters ValidFeatures InteriorFeatures KMeansSizeGroupIds KMedoidsSizeGroupIds)
+require_grain_size_csv("SmallIN100_KMeansSizeCenters.csv" MeanEquivalentDiameter)
+require_grain_size_csv("SmallIN100_KMedoidsSizeRepresentatives.csv" RepresentativeEquivalentDiameter)
 
 message(STATUS "Small IN100 example smoke test passed; logs and outputs: ${work_root}")

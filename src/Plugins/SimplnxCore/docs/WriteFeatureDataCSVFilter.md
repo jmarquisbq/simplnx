@@ -78,6 +78,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 + `T12_Reporting_Examples/(03) T12 Compact Report.d3dpipeline` (OrientationAnalysis)
 
++ `Small_IN100_Examples/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

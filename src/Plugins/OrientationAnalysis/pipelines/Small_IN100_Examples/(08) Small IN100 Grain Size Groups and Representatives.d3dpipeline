@@ -1,0 +1,258 @@
+{
+  "isDisabled": false,
+  "name": "(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the surface-selection checkpoint. Preserve source geometry, FeatureIds, measurements, and masks.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_seed": {
+          "value": true,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "init_clusters": {
+          "value": 3,
+          "version": 1
+        },
+        "distance_metric_index": {
+          "value": 0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "DataContainer/Cell Feature Data/InteriorFeatures",
+          "version": 1
+        },
+        "selected_array_path": {
+          "value": "DataContainer/Cell Feature Data/EquivalentDiameters",
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "SizeKMeansSeed",
+          "version": 1
+        },
+        "feature_ids_array_name": {
+          "value": "KMeansSizeGroupIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "DataContainer/SizeKMeansGroups",
+          "version": 1
+        },
+        "means_array_name": {
+          "value": "MeanEquivalentDiameter",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Partition selected scalar diameters in micrometers into three illustrative groups using arithmetic means. Group IDs 1..3 are unordered; excluded rows have ID 0. Ignore reserved center row 0.",
+      "filter": {
+        "name": "nx::core::ComputeKMeansFilter",
+        "uuid": "b8682b04-ccc0-49a2-9ced-32d5f5c512f3"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_seed": {
+          "value": true,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "init_clusters": {
+          "value": 3,
+          "version": 1
+        },
+        "distance_metric_index": {
+          "value": 0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "DataContainer/Cell Feature Data/InteriorFeatures",
+          "version": 1
+        },
+        "selected_array_path": {
+          "value": "DataContainer/Cell Feature Data/EquivalentDiameters",
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "SizeKMedoidsSeed",
+          "version": 1
+        },
+        "feature_ids_array_name": {
+          "value": "KMedoidsSizeGroupIds",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "DataContainer/SizeKMedoidsGroups",
+          "version": 1
+        },
+        "medoids_array_name": {
+          "value": "RepresentativeEquivalentDiameter",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compare three groups from the same selected diameters using observed representative sizes and scalar Euclidean distance. Representatives are diameter values, not unique grain IDs; ignore reserved row 0.",
+      "filter": {
+        "name": "nx::core::ComputeKMedoidsFilter",
+        "uuid": "7643cb64-bcb9-4867-b85a-bf158cd0f54a"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "feature_data_file": {
+          "value": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.csv",
+          "version": 1
+        },
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export all positive original feature rows with both masks and group IDs; retain excluded and unused rows for traceability.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/SizeKMeansGroups",
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "feature_data_file": {
+          "value": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMeansSizeCenters.csv",
+          "version": 1
+        },
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export only group rows 1..3 with their arithmetic mean diameters in micrometers; Feature_ID identifies the K-means group.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/SizeKMedoidsGroups",
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "feature_data_file": {
+          "value": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMedoidsSizeRepresentatives.csv",
+          "version": 1
+        },
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export only group rows 1..3 with observed representative diameters in micrometers; Feature_ID identifies the K-medoids group.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d",
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save all source data plus both group assignments, center tables, and stored seeds. Exclude row 0 from group interpretation.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

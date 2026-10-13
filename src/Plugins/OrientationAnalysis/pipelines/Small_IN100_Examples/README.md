@@ -17,11 +17,12 @@ if (@($sections | Where-Object { -not (Test-Path $_ -PathType Leaf) }).Count -gt
 }
 if (@($sections | Where-Object { -not (Test-Path $_ -PathType Leaf) }).Count -gt 0) { throw 'One or more of the 117 ANG sections are missing.' }
 Set-Location $work
-foreach ($name in @('Preparation', 'Measurements', 'SurfaceSelection', 'MinimumSize', 'CombinedSelection', 'NeighborRelationships', 'VoxelMesh')) {
+foreach ($name in @('Preparation', 'Measurements', 'SurfaceSelection', 'MinimumSize', 'CombinedSelection', 'NeighborRelationships', 'VoxelMesh', 'GrainSizeGroups')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $work "Data\Output\Small_IN100_Examples\$name") | Out-Null
 }
 # Run every example: branches 03–06 each read the measurement checkpoint independently; 07 reads preparation.
 # Running 03 then 04 does not combine their rules; 05 supplies the explicit intersection.
+# The grain-size comparison 08 reads the surface-selection output from 03.
 
 foreach ($relative in @(
     'Small_IN100_Processing\(01) Small IN100 Archive.d3dpipeline',
@@ -31,7 +32,8 @@ foreach ($relative in @(
     'Small_IN100_Examples\(04) Small IN100 Minimum Size Comparison.d3dpipeline',
     'Small_IN100_Examples\(05) Small IN100 Combined Selection.d3dpipeline',
     'Small_IN100_Examples\(06) Small IN100 Neighbor Relationships.d3dpipeline',
-    'Small_IN100_Examples\(07) Small IN100 Bounded Voxel Mesh.d3dpipeline'
+    'Small_IN100_Examples\(07) Small IN100 Bounded Voxel Mesh.d3dpipeline',
+    'Small_IN100_Examples\(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline'
 )) {
     $pipeline = Join-Path $examples $relative
     & $runner --execute $pipeline
@@ -52,6 +54,10 @@ In the reference measurement checkpoint, background `NumElements[0]=0` and all 2
 ## Bounded voxel mesh branch
 
 The [(07) bounded voxel mesh](%2807%29%20Small%20IN100%20Bounded%20Voxel%20Mesh.md) reads the preparation checkpoint directly; it does not need the feature-measurement checkpoint. It preserves original labels beside compact local labels, crops a measured 24 x 24 x 24 voxel region, and writes a DREAM3D crop and five Abaqus mesh files under VoxelMesh/. Create that directory before preflight. The mesh files are model-input scaffolding: material definitions, loads, and boundary conditions are not supplied, and no Abaqus or LengMorph execution is verified. The older measured-grain summaries must not be interpreted as measurements of the cropped grain fragments.
+
+## Grain-size grouping branch
+
+The [(08) grain-size groups and representatives](%2808%29%20Small%20IN100%20Grain%20Size%20Groups%20and%20Representatives.md) comparison reads the surface-selection checkpoint from 03. Its minimal dependency chain is archive → 01 → 02 → 03 → 08. It compares three K-means arithmetic centers with three K-medoids observed representative diameters for the same 1,349 selected grains. Original feature rows and cell labels stay intact. Three CSVs and a DREAM3D checkpoint are written under `GrainSizeGroups/`. The group count is illustrative; group IDs are unordered, and excluded rows have ID 0. Ignore center-table row 0. See the companion for the different objectives, representative-size ambiguity, and a native-output preview.
 
 ## Reference results and execution scope
 

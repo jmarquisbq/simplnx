@@ -59,6 +59,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Bentheimer_Resolution_Examples/(02) Bentheimer Common Grid Comparison.d3dpipeline` (SimplnxCore)
 + `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
 
++ `Small_IN100_Examples/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

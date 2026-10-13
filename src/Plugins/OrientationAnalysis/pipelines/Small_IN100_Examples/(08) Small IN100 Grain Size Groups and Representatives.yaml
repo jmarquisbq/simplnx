@@ -1,0 +1,533 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Additive manufacturing",
+    "Metallurgy"
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Scientific context for reconstruction and feature-level analysis of Small IN100; the three-group comparison is an illustrative extension.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Public Small IN100-derived scalar diameters illustrate two clustering methods. Three groups and the cohort selection are example choices, not paper findings or an exact reproduction."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Exact current clustering, mask, seed, group-row, and export behavior."
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "orientationanalysis-smallin100-python-generation-v1"
+  },
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson 3D microstructure and feature-statistics context; this bundle adds a native-output comparison of scalar size groups, not a reproduction of a paper figure.",
+    "target_traits": [
+      "117 measured EBSD sections",
+      "189 by 201 image cells per section",
+      "0.25 spacing on each axis",
+      "traceable final feature IDs"
+    ],
+    "known_differences": "Archive identity with the publisher's NiPoly data is unproven. The current NX preparation is not an exact historical reconstruction, and the pilot disables periodic segmentation.",
+    "archive_provenance_file": "README.md",
+    "surface_selection_checkpoint_sha256": "59279f14e09078923b6a61d02e942b495eff4f7cdeef7896d5f75e5140c2e194"
+  },
+  "pipeline_file": "(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline",
+  "markdown_file": "(08) Small IN100 Grain Size Groups and Representatives.md",
+  "title": "Small IN100 Grain Size Groups and Representatives",
+  "summary": "Compare three arithmetic-mean size groups with three observed representative-size groups for the same selected grains without detected contact with the image box or background; preserve original feature IDs.",
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "equivalent diameter",
+    "K-means",
+    "K-medoids",
+    "inspection groups",
+    "representative size"
+  ],
+  "use_cases": [
+    "Create exploratory size strata for feature-table inspection",
+    "Compare mean centers and observed representative diameters",
+    "Trace both assignments to original feature IDs"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d",
+      "role": "Output of example 03 with occupied-feature and surface-contact selection masks and equivalent diameters in micrometers."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.csv",
+      "role": "All 2334 positive original feature rows, both masks and both group IDs; excluded rows retain group ID zero."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMeansSizeCenters.csv",
+      "role": "Three group rows with mean diameters in micrometers; Feature_ID is a group ID."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMedoidsSizeRepresentatives.csv",
+      "role": "Three group rows with observed representative diameters in micrometers; Feature_ID is a group ID, not an original grain ID."
+    },
+    {
+      "path": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d",
+      "role": "All source objects plus both group assignments, both four-row center matrices and two stored seeds."
+    }
+  ],
+  "prerequisites": [
+    {
+      "pipeline": "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d"
+    }
+  ],
+  "dependency_chain": [
+    "Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline",
+    "(01) Small IN100 Feature Preparation.d3dpipeline",
+    "(02) Small IN100 Feature Measurements.d3dpipeline",
+    "(03) Small IN100 Surface Selection Comparison.d3dpipeline",
+    "(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline"
+  ],
+  "measurement_labels": {
+    "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
+    "feature_matrix": "DataContainer/Cell Feature Data",
+    "size_array": "DataContainer/Cell Feature Data/EquivalentDiameters",
+    "selected_mask": "DataContainer/Cell Feature Data/InteriorFeatures",
+    "not_used": "DataContainer/Cell Data/ParentIds"
+  },
+  "parameter_rationale": {
+    "init_clusters": "Three illustrative inspection strata, not phases or evidence of three physical modes.",
+    "distance_metric_index": "Zero is Euclidean; for this single scalar it equals absolute diameter difference. Mean updates correspond to the squared-error objective; medoid updates minimize absolute error within each assigned group.",
+    "units": "A single diameter component in micrometers needs no relative component scaling.",
+    "mask": "InteriorFeatures = NumElements > 0 AND SurfaceFeatures == 0. The selected cohort is not guaranteed complete or unbiased.",
+    "seed_value": "Both use fixed seed 5489. Repeatability is checked within one environment; cross-platform random sampling can change partitions.",
+    "row_zero": "Group ID zero denotes excluded tuples. Ignore row zero in both center matrices; the K-means row includes excluded values and the K-medoids row is zero."
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare scalar grain-size grouping methods",
+      "Find observed representative sizes for inspection groups",
+      "Keep group assignments traceable to reconstructed grain IDs"
+    ],
+    "questions_to_ask": [
+      "Is the surface-selection cohort suitable for the analysis?",
+      "Are three exploratory size groups appropriate?",
+      "Are all selected diameters finite and expressed in the same physical units?"
+    ],
+    "constraints": [
+      "Run archive, 01, 02, and 03 before 08; regenerate predecessors after spacing, label, or cohort changes.",
+      "Preserve original FeatureIds, feature rows, geometry, measurements, and masks.",
+      "Use only one scalar EquivalentDiameters component; a multidimensional extension requires separate implementation and scaling review.",
+      "Exclude group row zero from all interpretation and plotting.",
+      "Native group IDs are unordered; rank by centers only in derived displays.",
+      "A representative diameter is an observed value and may belong to many original grains.",
+      "Do not interpret three groups as material phases, spatial segmentation, physical modes, or a globally optimal partition.",
+      "Squared-error and absolute-error totals have different units and must not be compared as one score.",
+      "Repeatability in one build does not imply identical partitions across platforms.",
+      "OOC, generated Python execution, and native GUI behavior need separate verification."
+    ],
+    "related_pipelines": [
+      "(02) Small IN100 Feature Measurements.d3dpipeline",
+      "(03) Small IN100 Surface Selection Comparison.d3dpipeline"
+    ]
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the surface-selection checkpoint. Preserve source geometry, FeatureIds, measurements, and masks.",
+      "input_paths": [
+        "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d"
+      ],
+      "output_paths": [
+        "DataContainer"
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Examples/SurfaceSelection/SmallIN100_SurfaceSelection.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameter_versions": {
+        "import_data_object": 2
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ComputeKMeansFilter",
+      "uuid": "b8682b04-ccc0-49a2-9ced-32d5f5c512f3",
+      "role": "Partition selected scalar diameters in micrometers into three illustrative groups using arithmetic means. Group IDs 1..3 are unordered; excluded rows have ID 0. Ignore reserved center row 0.",
+      "input_paths": [
+        "DataContainer/Cell Feature Data/EquivalentDiameters",
+        "DataContainer/Cell Feature Data/InteriorFeatures"
+      ],
+      "output_paths": [
+        "DataContainer/Cell Feature Data/KMeansSizeGroupIds",
+        "DataContainer/SizeKMeansGroups/MeanEquivalentDiameter",
+        "SizeKMeansSeed"
+      ],
+      "key_parameters": {
+        "use_seed": true,
+        "seed_value": 5489,
+        "init_clusters": 3,
+        "distance_metric_index": 0,
+        "use_mask": true,
+        "mask_array_path": "DataContainer/Cell Feature Data/InteriorFeatures",
+        "selected_array_path": "DataContainer/Cell Feature Data/EquivalentDiameters",
+        "seed_array_name": "SizeKMeansSeed",
+        "feature_ids_array_name": "KMeansSizeGroupIds",
+        "feature_attribute_matrix_path": "DataContainer/SizeKMeansGroups",
+        "means_array_name": "MeanEquivalentDiameter"
+      },
+      "parameter_versions": {
+        "use_seed": 1,
+        "seed_value": 1,
+        "init_clusters": 1,
+        "distance_metric_index": 1,
+        "use_mask": 1,
+        "mask_array_path": 1,
+        "selected_array_path": 1,
+        "seed_array_name": 1,
+        "feature_ids_array_name": 1,
+        "feature_attribute_matrix_path": 1,
+        "means_array_name": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeKMedoidsFilter",
+      "uuid": "7643cb64-bcb9-4867-b85a-bf158cd0f54a",
+      "role": "Compare three groups from the same selected diameters using observed representative sizes and scalar Euclidean distance. Representatives are diameter values, not unique grain IDs; ignore reserved row 0.",
+      "input_paths": [
+        "DataContainer/Cell Feature Data/EquivalentDiameters",
+        "DataContainer/Cell Feature Data/InteriorFeatures"
+      ],
+      "output_paths": [
+        "DataContainer/Cell Feature Data/KMedoidsSizeGroupIds",
+        "DataContainer/SizeKMedoidsGroups/RepresentativeEquivalentDiameter",
+        "SizeKMedoidsSeed"
+      ],
+      "key_parameters": {
+        "use_seed": true,
+        "seed_value": 5489,
+        "init_clusters": 3,
+        "distance_metric_index": 0,
+        "use_mask": true,
+        "mask_array_path": "DataContainer/Cell Feature Data/InteriorFeatures",
+        "selected_array_path": "DataContainer/Cell Feature Data/EquivalentDiameters",
+        "seed_array_name": "SizeKMedoidsSeed",
+        "feature_ids_array_name": "KMedoidsSizeGroupIds",
+        "feature_attribute_matrix_path": "DataContainer/SizeKMedoidsGroups",
+        "medoids_array_name": "RepresentativeEquivalentDiameter"
+      },
+      "parameter_versions": {
+        "use_seed": 1,
+        "seed_value": 1,
+        "init_clusters": 1,
+        "distance_metric_index": 1,
+        "use_mask": 1,
+        "mask_array_path": 1,
+        "selected_array_path": 1,
+        "seed_array_name": 1,
+        "feature_ids_array_name": 1,
+        "feature_attribute_matrix_path": 1,
+        "medoids_array_name": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export all positive original feature rows with both masks and group IDs; retain excluded and unused rows for traceability.",
+      "input_paths": [
+        "DataContainer/Cell Feature Data"
+      ],
+      "output_paths": [
+        "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.csv"
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameter_versions": {
+        "cell_feature_attribute_matrix_path": 1,
+        "delimiter_index": 1,
+        "feature_data_file": 1,
+        "write_neighborlist_data": 1,
+        "write_num_features_line": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export only group rows 1..3 with their arithmetic mean diameters in micrometers; Feature_ID identifies the K-means group.",
+      "input_paths": [
+        "DataContainer/SizeKMeansGroups"
+      ],
+      "output_paths": [
+        "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMeansSizeCenters.csv"
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/SizeKMeansGroups",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMeansSizeCenters.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameter_versions": {
+        "cell_feature_attribute_matrix_path": 1,
+        "delimiter_index": 1,
+        "feature_data_file": 1,
+        "write_neighborlist_data": 1,
+        "write_num_features_line": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export only group rows 1..3 with observed representative diameters in micrometers; Feature_ID identifies the K-medoids group.",
+      "input_paths": [
+        "DataContainer/SizeKMedoidsGroups"
+      ],
+      "output_paths": [
+        "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMedoidsSizeRepresentatives.csv"
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/SizeKMedoidsGroups",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_KMedoidsSizeRepresentatives.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameter_versions": {
+        "cell_feature_attribute_matrix_path": 1,
+        "delimiter_index": 1,
+        "feature_data_file": 1,
+        "write_neighborlist_data": 1,
+        "write_num_features_line": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save all source data plus both group assignments, center tables, and stored seeds. Exclude row 0 from group interpretation.",
+      "input_paths": [
+        "DataContainer",
+        "SizeKMeansSeed",
+        "SizeKMedoidsSeed"
+      ],
+      "output_paths": [
+        "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Examples/GrainSizeGroups/SmallIN100_GrainSizeGroups.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameter_versions": {
+        "compression_level": 1,
+        "export_file_path": 1,
+        "use_compression": 1,
+        "write_xdmf_file": 1
+      },
+      "parameters_version": 2
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-core Release: native preflight and execution passed within the registered eight-example chain. Independent checks passed 34/34, including preservation of all 48 predecessor datasets, masks, assignments, stationary mean updates, member medoid minima, CSV precision, and a same-environment fixed-seed repeat. OOC, generated Python, native GUI, cross-platform partitions, and global optimality remain unverified.",
+  "validation": {
+    "date": "2026-10-13",
+    "configuration": "Windows in-core Release",
+    "status": "passed_with_scope_limits",
+    "native_execution": "Registered PIPELINE::OrientationAnalysis::Small_IN100_Examples passed 1/1 with preflight and execution of archive and all eight examples.",
+    "independent_checks_passed": 34,
+    "independent_checks": [
+      "Recompute image-box and face-adjacent background contact independently from original cell labels.",
+      "Preserve all 48 predecessor datasets and image dimensions, spacing, origin, and units.",
+      "Selected group IDs are 1 through 3; excluded IDs are zero; all groups are populated.",
+      "Every selected feature is assigned to its nearest final center.",
+      "Each K-means center matches an independent mean within float32 error bounds and is stationary under another float32 update.",
+      "Each K-medoids representative is an observed member diameter and minimizes within-group absolute distance, checked with sorted prefix sums.",
+      "All CSV integer fields are exact and float fields agree within their eight-significant-digit printed precision.",
+      "A same-environment fixed-seed rerun preserves all checked output datasets."
+    ],
+    "preserved_input_dataset_count": 48,
+    "pipeline_sha256": "ebe4bc35210dff24bbc103f15b1504f2367c23c32a33db003513a6b130dab475",
+    "output_sha256": {
+      "SmallIN100_GrainSizeGroups.csv": "84ca55a4f5c7168bdc637143f461fe19b6be2fa4daddb44a1b579ed949b21d6a",
+      "SmallIN100_GrainSizeGroups.dream3d": "709180b87fc686e5d28ff7a3ed02b7ed08f0b69807bc67ef05f61acc7e88272e",
+      "SmallIN100_KMeansSizeCenters.csv": "ac9cb3466aef10ee0dd4df87cfc9a2a093af1d99b3743d8a75d9916410b12067",
+      "SmallIN100_KMedoidsSizeRepresentatives.csv": "5370e75d19ba343b93db901cd6772b118f4ecbc90c13778354cbe0ba6aa1979c"
+    },
+    "unverified": [
+      "OOC",
+      "generated Python",
+      "native GUI",
+      "cross-platform partitions",
+      "global optimality"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100GrainSizeGroups.png",
+    "role": "Histograms and agreement counts derived from the saved native output; displayed groups are ordered by increasing center.",
+    "source_output_sha256": "709180b87fc686e5d28ff7a3ed02b7ed08f0b69807bc67ef05f61acc7e88272e",
+    "sha256": "3b42c193ba5c07b2c120251508f7421cf50a807f114394ff6b83541f9fb2728a",
+    "histogram_bins_um": {
+      "minimum": 0.0,
+      "maximum": 10.0,
+      "width": 0.25
+    },
+    "native_group_ids_preserved": true
+  },
+  "cli_usage": {
+    "instructions": "See README.md#quick-start-117-section-3d-example; the minimal dependency order is archive -> 01 -> 02 -> 03 -> 08.",
+    "working_directory": "A chosen writable folder containing the predecessor checkpoint under Data/Output/Small_IN100_Examples/SurfaceSelection/.",
+    "relative_path_base": "The CLI resolves relative Data/... paths from its working directory.",
+    "gui_note": "Use File > Open in dependency order; set absolute input/output paths if relative paths do not resolve. Native GUI execution is unverified."
+  },
+  "reference_results": {
+    "selected_features": 1349,
+    "occupied_positive_features": 2317,
+    "unused_positive_rows": 17,
+    "reserved_row": 0,
+    "feature_csv_rows": 2334,
+    "groups_ordered_by_center": {
+      "KMeans": [
+        {
+          "native_group_id": 1,
+          "count": 650,
+          "center_um": 1.5618945360183716,
+          "min_um": 0.4473501145839691,
+          "max_um": 2.3978450298309326
+        },
+        {
+          "native_group_id": 3,
+          "count": 545,
+          "center_um": 3.2438526153564453,
+          "min_um": 2.40474534034729,
+          "max_um": 4.411508083343506
+        },
+        {
+          "native_group_id": 2,
+          "count": 154,
+          "center_um": 5.589391708374023,
+          "min_um": 4.432365417480469,
+          "max_um": 9.030715942382812
+        }
+      ],
+      "KMedoids": [
+        {
+          "native_group_id": 3,
+          "count": 519,
+          "center_um": 1.374401330947876,
+          "min_um": 0.4473501145839691,
+          "max_um": 2.041214942932129,
+          "matching_member_feature_ids": [
+            1256,
+            2002,
+            2190
+          ]
+        },
+        {
+          "native_group_id": 2,
+          "count": 490,
+          "center_um": 2.7100818157196045,
+          "min_um": 2.0435996055603027,
+          "max_um": 3.4953205585479736,
+          "matching_member_feature_ids": [
+            1572
+          ]
+        },
+        {
+          "native_group_id": 1,
+          "count": 340,
+          "center_um": 4.287966728210449,
+          "min_um": 3.5066821575164795,
+          "max_um": 9.030715942382812,
+          "matching_member_feature_ids": [
+            898
+          ]
+        }
+      ]
+    },
+    "ranked_agreement": {
+      "rows": "K-means increasing center",
+      "columns": "K-medoids increasing center",
+      "counts": [
+        [
+          519,
+          131,
+          0
+        ],
+        [
+          0,
+          359,
+          186
+        ],
+        [
+          0,
+          0,
+          154
+        ]
+      ],
+      "same_rank": 1032,
+      "different_rank": 317
+    },
+    "csv_numeric_columns_including_feature_id": {
+      "SmallIN100_GrainSizeGroups.csv": 22,
+      "SmallIN100_KMeansSizeCenters.csv": 2,
+      "SmallIN100_KMedoidsSizeRepresentatives.csv": 2
+    },
+    "rounding_note": "CSV floating-point values use eight significant digits; retain DREAM3D arrays for full stored precision."
+  }
+}

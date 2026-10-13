@@ -104,6 +104,10 @@ The in-core Direct algorithm is faster for in-memory data due to the lower overh
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Examples/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**
