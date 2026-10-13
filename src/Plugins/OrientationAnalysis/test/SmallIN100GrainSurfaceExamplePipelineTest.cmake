@@ -3,6 +3,7 @@ set(OUTPUT_CATEGORY "Small_IN100_Grain_Surface_Examples")
 set(pipeline_stems
   "(01) Small IN100 Complete Grain Surface"
   "(02) Small IN100 Grain Surface Measurements"
+  "(03) Small IN100 Grain Point Cloud Registration"
 )
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")

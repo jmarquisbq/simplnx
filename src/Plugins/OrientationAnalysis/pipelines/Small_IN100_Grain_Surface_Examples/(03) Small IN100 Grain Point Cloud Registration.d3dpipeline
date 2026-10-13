@@ -1,0 +1,1544 @@
+{
+  "isDisabled": false,
+  "name": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "import_data_object": {
+          "value": {
+            "data_paths": [],
+            "file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
+            "path_import_policy": 0
+          },
+          "version": 2
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read stage 01: retain the cropped source image and grain surface as context. Stage 02 is not required.",
+      "filter": {
+        "name": "nx::core::ReadDREAM3DFilter",
+        "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "numeric_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "output_array_path": {
+          "value": "DataContainer/Cell Data/SourceROICellIndex",
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "init_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "init_value": {
+          "value": "0",
+          "version": 1
+        },
+        "starting_fill_value": {
+          "value": "0",
+          "version": 1
+        },
+        "step_operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "step_value": {
+          "value": "1",
+          "version": 1
+        },
+        "use_seed": {
+          "value": false,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "InitializeDataFilter SeedValue",
+          "version": 1
+        },
+        "init_start_range": {
+          "value": "0",
+          "version": 1
+        },
+        "init_end_range": {
+          "value": "1",
+          "version": 1
+        },
+        "standardize_seed": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Index all 24-cubed cropped image cells from 0 to 13823 in flat storage order; this is an ROI-local tuple index, not a global acquisition ID.",
+      "filter": {
+        "name": "nx::core::CreateDataArrayAdvancedFilter",
+        "uuid": "f23464df-abcc-40cf-bf99-f71463df633c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "DataContainer/Cell Data/FeatureIds",
+                "comparison": 2,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 2205.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "KeepGrain2205",
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep the 170 source cells whose original reconstructed FeatureId equals 2205; true means extract.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "DataContainer/Cell Data/KeepGrain2205",
+          "version": 1
+        },
+        "input_grid_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "included_data_array_paths": {
+          "value": [
+            "DataContainer/Cell Data/SourceROICellIndex",
+            "DataContainer/Cell Data/FeatureIds",
+            "DataContainer/Cell Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "ReferenceCloud_Raw",
+          "version": 1
+        },
+        "output_vertex_attr_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "output_shared_vertex_list_name": {
+          "value": "Shared Vertex List",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Extract measured-derived voxel centers and COPY three scalar arrays. These 170 points are distinct from the 256 grain surface vertices.",
+      "filter": {
+        "name": "nx::core::ExtractVertexGeometryFilter",
+        "uuid": "621a71ca-124b-4471-ad1a-02f05ffba099"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "ReferenceCloud_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy ReferenceCloud_Raw coordinates into independent ReferenceCloud with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "ReferenceCloud_Raw/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud_Raw/Vertex Data/FeatureIds",
+            "ReferenceCloud_Raw/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "ReferenceCloud/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into ReferenceCloud; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "ReferenceCloud_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Delete only temporary ReferenceCloud_Raw after coordinates and scalar arrays have been copied into ReferenceCloud.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_vertex_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "TileA_Raw",
+          "version": 1
+        },
+        "min_pos": {
+          "value": [
+            24.5,
+            25.5,
+            14.5
+          ],
+          "version": 1
+        },
+        "max_pos": {
+          "value": [
+            25.25,
+            27.75,
+            16.5
+          ],
+          "version": 1
+        },
+        "target_array_paths": {
+          "value": [
+            "ReferenceCloud/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud/Vertex Data/FeatureIds",
+            "ReferenceCloud/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create TileA as a complementary spatial tile with 89 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition.",
+      "filter": {
+        "name": "nx::core::CropVertexGeometryFilter",
+        "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "TileA",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "TileA_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy TileA_Raw coordinates into independent TileA with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "TileA_Raw/Vertex Data/SourceROICellIndex",
+            "TileA_Raw/Vertex Data/FeatureIds",
+            "TileA_Raw/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "TileA/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into TileA; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "TileA_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Delete only temporary TileA_Raw after coordinates and scalar arrays have been copied into TileA.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_vertex_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "TileB_Raw",
+          "version": 1
+        },
+        "min_pos": {
+          "value": [
+            25.25,
+            25.5,
+            14.5
+          ],
+          "version": 1
+        },
+        "max_pos": {
+          "value": [
+            26.0,
+            27.75,
+            16.5
+          ],
+          "version": 1
+        },
+        "target_array_paths": {
+          "value": [
+            "ReferenceCloud/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud/Vertex Data/FeatureIds",
+            "ReferenceCloud/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create TileB as a complementary spatial tile with 81 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition.",
+      "filter": {
+        "name": "nx::core::CropVertexGeometryFilter",
+        "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "TileB",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "TileB_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy TileB_Raw coordinates into independent TileB with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "TileB_Raw/Vertex Data/SourceROICellIndex",
+            "TileB_Raw/Vertex Data/FeatureIds",
+            "TileB_Raw/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "TileB/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into TileB; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "TileB_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Delete only temporary TileB_Raw after coordinates and scalar arrays have been copied into TileB.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_geometry_paths": {
+          "value": [
+            "TileA",
+            "TileB"
+          ],
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "CombinedTiles_Raw",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reassemble the complementary spatial tiles and matching scalar metadata: 89 plus 81 equals 170 unique source-cell centers. No deduplication is performed.",
+      "filter": {
+        "name": "nx::core::CombineNodeBasedGeometriesFilter",
+        "uuid": "15669036-b417-4450-a937-d5bb2f59124c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "CombinedTiles",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "CombinedTiles_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy CombinedTiles_Raw coordinates into independent CombinedTiles with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "CombinedTiles_Raw/Vertex Data/SourceROICellIndex",
+            "CombinedTiles_Raw/Vertex Data/FeatureIds",
+            "CombinedTiles_Raw/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "CombinedTiles/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into CombinedTiles; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "CombinedTiles_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Delete only temporary CombinedTiles_Raw after coordinates and scalar arrays have been copied into CombinedTiles.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "MovingChallenge",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "CombinedTiles/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy CombinedTiles coordinates into independent MovingChallenge with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "CombinedTiles/Vertex Data/SourceROICellIndex",
+            "CombinedTiles/Vertex Data/FeatureIds",
+            "CombinedTiles/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "MovingChallenge/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into MovingChallenge; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "MovingChallenge",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              0.9993908270190958,
+              -0.034899496702501,
+              0.0,
+              1.0
+            ],
+            [
+              0.034899496702501,
+              0.9993908270190958,
+              0.0,
+              -0.75
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.5
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "KnownTransform",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Apply the known synthetic challenge to real voxel-center coordinates: rotate 2 degrees about global Z, then translate [1,-0.75,0.5] micrometers. Preserve the challenge separately.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "MovingCoarse",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "MovingChallenge/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy MovingChallenge coordinates into independent MovingCoarse with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "MovingChallenge/Vertex Data/SourceROICellIndex",
+            "MovingChallenge/Vertex Data/FeatureIds",
+            "MovingChallenge/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "MovingCoarse/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into MovingCoarse; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_moving_geometry_path": {
+          "value": "MovingCoarse",
+          "version": 1
+        },
+        "input_target_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "alignment_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP.",
+      "filter": {
+        "name": "nx::core::AlignGeometriesFilter",
+        "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "MovingRegistered",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "MovingCoarse/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy MovingCoarse coordinates into independent MovingRegistered with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "MovingCoarse/Vertex Data/SourceROICellIndex",
+            "MovingCoarse/Vertex Data/FeatureIds",
+            "MovingCoarse/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "MovingRegistered/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Deep-copy all retained scalar metadata into MovingRegistered; keep source-cell identity and inherited image quality unchanged.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_moving_vertex_geometry_path": {
+          "value": "MovingRegistered",
+          "version": 1
+        },
+        "input_target_vertex_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "num_iterations": {
+          "value": 10,
+          "version": 1
+        },
+        "apply_transformation": {
+          "value": true,
+          "version": 1
+        },
+        "transform_array_path": {
+          "value": "ICPResidualTransform",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation.",
+      "filter": {
+        "name": "nx::core::IterativeClosestPointFilter",
+        "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

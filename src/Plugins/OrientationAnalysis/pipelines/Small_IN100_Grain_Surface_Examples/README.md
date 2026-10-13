@@ -1,16 +1,17 @@
 # Small IN100 complete grain surface examples
 
-These two executable examples isolate one complete measured-derived grain from a multi-label surface mesh, then measure its closed shell. The `.d3dpipeline` files define the steps and parameters; the matching Markdown explains their use, and the JSON-compatible YAML supports search and generation. The target is original reconstructed `FeatureId` **2205** in the documented Small IN100 interior crop. This small grain has 170 source voxels and remains clear of every crop wall.
+These three executable examples isolate one complete measured-derived grain, measure its closed shell, and demonstrate point-cloud assembly and registration using its voxel centers. The `.d3dpipeline` files define the steps and parameters; the matching Markdown explains their use, and the JSON-compatible YAML supports search and generation. The target is original reconstructed `FeatureId` **2205** in the documented Small IN100 interior crop. This small grain has 170 source voxels and remains clear of every crop wall.
 
 ## Run order and files
 
-Run these examples from the same writable working directory, in order:
+Run the prerequisites and stage 01 from the same writable working directory. Stages 02 and 03 then branch independently from stage 01:
 
 1. `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` imports the 117 measured ANG sections from [Small_IN100.tar.gz](https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz). The [Small IN100 examples README](../Small_IN100_Examples/README.md#quick-start-117-section-3d-example) explains archive extraction.
 2. `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` establishes original `FeatureIds` without whole-volume measurement rows in the mesh path.
 3. `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` crops to the 24-cubed interior region and writes `Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d`.
 4. [(01) Small IN100 Complete Grain Surface](%2801%29%20Small%20IN100%20Complete%20Grain%20Surface.md) selects every face with `2205` in **either** original `FaceLabels` component, compacts the mesh, and repairs winding. It writes `Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d`.
 5. [(02) Small IN100 Grain Surface Measurements](%2802%29%20Small%20IN100%20Grain%20Surface%20Measurements.md) reads stage 01, assigns local shell labels, and writes `Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.{dream3d,csv}`.
+6. [(03) Small IN100 Grain Point Cloud Registration](%2803%29%20Small%20IN100%20Grain%20Point%20Cloud%20Registration.md) reads stage 01's source image, partitions 170 grain voxel centers into complementary tiles, reassembles them, and registers a known displaced copy. It writes `Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d`; stage 02 is not required.
 
 The `Data/...` paths resolve from the CLI process working directory. Create the output folders before running. For example, from a chosen writable folder with the predecessor `Data/Output` tree:
 
@@ -21,12 +22,16 @@ $examples = 'C:\path\to\pipelines' # Parent of the named Small_IN100 folders.
 Set-Location $work
 New-Item -ItemType Directory -Force 'Data/Output/Small_IN100_Grain_Surface_Examples/Extraction' | Out-Null
 New-Item -ItemType Directory -Force 'Data/Output/Small_IN100_Grain_Surface_Examples/Measurements' | Out-Null
+New-Item -ItemType Directory -Force 'Data/Output/Small_IN100_Grain_Surface_Examples/Registration' | Out-Null
 $first = Join-Path $examples 'Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline'
 $second = Join-Path $examples 'Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline'
+$third = Join-Path $examples 'Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline'
 & $runner --execute $first
 if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $first (exit $LASTEXITCODE)" }
 & $runner --execute $second
 if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $second (exit $LASTEXITCODE)" }
+& $runner --execute $third
+if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $third (exit $LASTEXITCODE)" }
 ```
 
 For the GUI, use **File > Open** and set absolute file paths if its working directory differs. No measured volume, intermediate checkpoint, or archive is distributed in this folder. The source archive SHA-512 is `79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b`.
@@ -35,4 +40,8 @@ The source is a reconstructed Small IN100 EBSD volume in the setting described b
 
 Reference-input expectations are 508 selected faces and 256 used vertices, one closed connected shell, 15.875 square micrometers of surface area, and 2.65625 cubic micrometers enclosed volume. These are audit values for this source and implementation, not acceptance tolerances for other reconstructions. The original `FaceLabels` record neighboring grain identity; `LocalSurfaceLabels` describe the single extracted shell. The measurement called `SurfaceVertexMeans` averages unique mesh vertices and is not a volume centroid.
 
-The registered two-pipeline Windows in-memory Release CTest chain passed 1/1 in 19.91 seconds. An independent saved-output audit passed 76/76 HDF5 checks of selection, topology, winding, preserved ownership, local mapping, and measurements. The CSV count, header, and single occupied row were inspected separately. The native volume is 2.6562402248 µm³, 0.0000097752 µm³ below the independent 2.65625 µm³ result. The preview images were rendered from these saved outputs and inspected. These checks do not establish OOC, generated Python, GUI, installed application, exact paper reproduction, or general downstream simulation suitability.
+The original stages 01–02 Windows in-memory Release CTest chain passed 1/1 in 19.91 seconds. An independent saved-output audit passed 76/76 HDF5 checks of selection, topology, winding, preserved ownership, local mapping, and measurements. The CSV count, header, and single occupied row were inspected separately. The native volume is 2.6562402248 µm³, 0.0000097752 µm³ below the independent 2.65625 µm³ result. The surface preview images were rendered from these saved outputs and inspected. These checks do not establish OOC, generated Python, GUI, installed application, exact paper reproduction, or general downstream simulation suitability.
+
+Stage 03 uses complementary tiles with 89 and 81 points. The tiles and the transformed moving cloud derive from the same reconstruction, so they do not measure agreement between independent acquisitions. `SourceROICellIndex` tracks each point back to a flat tuple in the cropped image; inherited `Image Quality` is scalar metadata, not an ICP weight. Explicit calibrated geometry copies preserve Micrometer units through each checkpoint to work around the [unit-propagation defect](https://github.com/BlueQuartzSoftware/simplnx/issues/1784). Overlapping-tile duplicate removal remains excluded because [duplicate detection misses identical points on tied grid planes](https://github.com/BlueQuartzSoftware/simplnx/issues/1783).
+
+The expanded three-pipeline Windows in-memory Release CTest passed 1/1 in 23.30 seconds. Stage 03's independent saved-output audit passed 67/67 checks, including original-data preservation, tile reconstruction, scalar mapping, units, and transform recovery. Its final paired point RMS error is 0.00000648 µm. The registration preview uses that saved native output; this result applies to the controlled challenge above.

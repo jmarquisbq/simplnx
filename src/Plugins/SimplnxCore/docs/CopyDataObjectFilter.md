@@ -40,6 +40,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Small_IN100_Geometry_Examples/(03) Small IN100 Surface Transform and Export.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline` (OrientationAnalysis)
 + `T12_Reporting_Examples/(03) T12 Compact Report.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

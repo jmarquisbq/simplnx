@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Two illustrative measured-derived Small IN100 grain-surface pipelines; occurrences are not independent filter verification.",
+  "scope": "Three illustrative measured-derived Small IN100 grain-surface and point-cloud pipelines; occurrences are not independent filter verification. Stage 03 uses complementary tiles and does not claim duplicate-removal coverage.",
   "filters": [
     {
       "filter": "ExtractComponentAsArrayFilter",
@@ -50,6 +50,48 @@
       "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
       "step": 7,
       "purpose": "Calculate the unique-surface-vertex mean with its actual implementation meaning."
+    },
+    {
+      "filter": "ExtractVertexGeometryFilter",
+      "uuid": "621a71ca-124b-4471-ad1a-02f05ffba099",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 3,
+      "purpose": "Extract measured-derived voxel centers and COPY three scalar arrays. These 170 points are distinct from the 256 grain surface vertices."
+    },
+    {
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 7,
+      "purpose": "Create TileA as a complementary spatial tile with 89 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
+    },
+    {
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 11,
+      "purpose": "Create TileB as a complementary spatial tile with 81 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
+    },
+    {
+      "filter": "CombineNodeBasedGeometriesFilter",
+      "uuid": "15669036-b417-4450-a937-d5bb2f59124c",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 15,
+      "purpose": "Reassemble the complementary spatial tiles and matching scalar metadata: 89 plus 81 equals 170 unique source-cell centers. No deduplication is performed."
+    },
+    {
+      "filter": "AlignGeometriesFilter",
+      "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 24,
+      "purpose": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP."
+    },
+    {
+      "filter": "IterativeClosestPointFilter",
+      "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 27,
+      "purpose": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation."
     }
   ]
 }

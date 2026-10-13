@@ -1,0 +1,1194 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+  "markdown_file": "(03) Small IN100 Grain Point Cloud Registration.md",
+  "title": "Small IN100 Grain Point Cloud Registration",
+  "summary": "Reassemble two complementary tiles of measured-derived grain voxel centers and recover a known rigid displacement while preserving source-cell identity.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Computational geometry"
+  ],
+  "use_cases": [
+    "Reassemble complementary spatial tiles with their scalar metadata.",
+    "Demonstrate coarse translation and local rigid point-cloud registration on a known derived challenge."
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "voxel centers",
+    "point cloud",
+    "spatial partition",
+    "tile assembly",
+    "ICP",
+    "rigid registration",
+    "source-cell mapping"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
+      "role": "Stage 01 checkpoint containing the cropped source image and complete grain surface; stage 02 is not required."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+      "role": "Source image and grain mesh, reference cloud, complementary tiles, reassembled cloud, three moving checkpoints, KnownTransform, and ICPResidualTransform."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson (2014), Figure 5, supplies the 3D EBSD context; the point clouds and known displacement are an illustrative extension, not a paper figure target.",
+    "target_traits": [
+      "117 measured ANG sections in the source archive",
+      "24 by 24 by 24 measured-derived interior image crop at 0.25 micrometer spacing",
+      "170 voxel centers with original reconstructed FeatureId 2205",
+      "Complementary 89-point and 81-point tiles with a 170-point union and no overlap",
+      "Known 2 degree global-Z rotation followed by [1,-0.75,0.5] micrometer translation"
+    ],
+    "known_differences": "The selected ROI and grain use the current reconstruction. Both tiles and the transformed moving cloud are deliberately derived copies of the same measured-derived coordinates, not independent acquisitions. No exact paper result or instrument-registration accuracy is reproduced.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-grain-surface-python-generation-v1"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read stage 01: retain the cropped source image and grain surface as context. Stage 02 is not required.",
+      "paths": [
+        {
+          "parameter": "import_data_object",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Index all 24-cubed cropped image cells from 0 to 13823 in flat storage order; this is an ROI-local tuple index, not a global acquisition ID.",
+      "paths": [
+        {
+          "parameter": "output_array_path",
+          "value": "DataContainer/Cell Data/SourceROICellIndex"
+        }
+      ],
+      "key_parameters": {
+        "numeric_type_index": 4,
+        "set_tuple_dimensions": false,
+        "component_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "output_array_path": "DataContainer/Cell Data/SourceROICellIndex",
+        "data_format": "",
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "init_start_range": "0",
+        "init_end_range": "1",
+        "standardize_seed": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Keep the 170 source cells whose original reconstructed FeatureId equals 2205; true means extract.",
+      "paths": [],
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "DataContainer/Cell Data/FeatureIds",
+              "comparison": 2,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 2205.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 10,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "KeepGrain2205",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ExtractVertexGeometryFilter",
+      "uuid": "621a71ca-124b-4471-ad1a-02f05ffba099",
+      "role": "Extract measured-derived voxel centers and COPY three scalar arrays. These 170 points are distinct from the 256 grain surface vertices.",
+      "paths": [
+        {
+          "parameter": "mask_array_path",
+          "value": "DataContainer/Cell Data/KeepGrain2205"
+        },
+        {
+          "parameter": "input_grid_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "included_data_array_paths",
+          "value": [
+            "DataContainer/Cell Data/SourceROICellIndex",
+            "DataContainer/Cell Data/FeatureIds",
+            "DataContainer/Cell Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "output_vertex_geometry_path",
+          "value": "ReferenceCloud_Raw"
+        }
+      ],
+      "key_parameters": {
+        "array_handling_index": 0,
+        "use_mask": true,
+        "mask_array_path": "DataContainer/Cell Data/KeepGrain2205",
+        "input_grid_geometry_path": "DataContainer",
+        "included_data_array_paths": [
+          "DataContainer/Cell Data/SourceROICellIndex",
+          "DataContainer/Cell Data/FeatureIds",
+          "DataContainer/Cell Data/Image Quality"
+        ],
+        "output_vertex_geometry_path": "ReferenceCloud_Raw",
+        "output_vertex_attr_matrix_name": "Vertex Data",
+        "output_shared_vertex_list_name": "Shared Vertex List"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy ReferenceCloud_Raw coordinates into independent ReferenceCloud with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "ReferenceCloud"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "ReferenceCloud_Raw/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "ReferenceCloud",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "ReferenceCloud_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into ReferenceCloud; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "ReferenceCloud_Raw/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud_Raw/Vertex Data/FeatureIds",
+            "ReferenceCloud_Raw/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "ReferenceCloud/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "ReferenceCloud_Raw/Vertex Data/SourceROICellIndex",
+          "ReferenceCloud_Raw/Vertex Data/FeatureIds",
+          "ReferenceCloud_Raw/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "ReferenceCloud/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Delete only temporary ReferenceCloud_Raw after coordinates and scalar arrays have been copied into ReferenceCloud.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "ReferenceCloud_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "ReferenceCloud_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "role": "Create TileA as a complementary spatial tile with 89 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "ReferenceCloud"
+        },
+        {
+          "parameter": "output_vertex_geometry_path",
+          "value": "TileA_Raw"
+        },
+        {
+          "parameter": "target_array_paths",
+          "value": [
+            "ReferenceCloud/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud/Vertex Data/FeatureIds",
+            "ReferenceCloud/Vertex Data/Image Quality"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "ReferenceCloud",
+        "output_vertex_geometry_path": "TileA_Raw",
+        "min_pos": [
+          24.5,
+          25.5,
+          14.5
+        ],
+        "max_pos": [
+          25.25,
+          27.75,
+          16.5
+        ],
+        "target_array_paths": [
+          "ReferenceCloud/Vertex Data/SourceROICellIndex",
+          "ReferenceCloud/Vertex Data/FeatureIds",
+          "ReferenceCloud/Vertex Data/Image Quality"
+        ],
+        "vertex_attribute_matrix_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy TileA_Raw coordinates into independent TileA with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "TileA"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "TileA_Raw/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "TileA",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "TileA_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into TileA; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "TileA_Raw/Vertex Data/SourceROICellIndex",
+            "TileA_Raw/Vertex Data/FeatureIds",
+            "TileA_Raw/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "TileA/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "TileA_Raw/Vertex Data/SourceROICellIndex",
+          "TileA_Raw/Vertex Data/FeatureIds",
+          "TileA_Raw/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "TileA/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Delete only temporary TileA_Raw after coordinates and scalar arrays have been copied into TileA.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "TileA_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "TileA_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "role": "Create TileB as a complementary spatial tile with 81 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "ReferenceCloud"
+        },
+        {
+          "parameter": "output_vertex_geometry_path",
+          "value": "TileB_Raw"
+        },
+        {
+          "parameter": "target_array_paths",
+          "value": [
+            "ReferenceCloud/Vertex Data/SourceROICellIndex",
+            "ReferenceCloud/Vertex Data/FeatureIds",
+            "ReferenceCloud/Vertex Data/Image Quality"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "ReferenceCloud",
+        "output_vertex_geometry_path": "TileB_Raw",
+        "min_pos": [
+          25.25,
+          25.5,
+          14.5
+        ],
+        "max_pos": [
+          26.0,
+          27.75,
+          16.5
+        ],
+        "target_array_paths": [
+          "ReferenceCloud/Vertex Data/SourceROICellIndex",
+          "ReferenceCloud/Vertex Data/FeatureIds",
+          "ReferenceCloud/Vertex Data/Image Quality"
+        ],
+        "vertex_attribute_matrix_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy TileB_Raw coordinates into independent TileB with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "TileB"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "TileB_Raw/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "TileB",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "TileB_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into TileB; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "TileB_Raw/Vertex Data/SourceROICellIndex",
+            "TileB_Raw/Vertex Data/FeatureIds",
+            "TileB_Raw/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "TileB/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "TileB_Raw/Vertex Data/SourceROICellIndex",
+          "TileB_Raw/Vertex Data/FeatureIds",
+          "TileB_Raw/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "TileB/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Delete only temporary TileB_Raw after coordinates and scalar arrays have been copied into TileB.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "TileB_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "TileB_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "CombineNodeBasedGeometriesFilter",
+      "uuid": "15669036-b417-4450-a937-d5bb2f59124c",
+      "role": "Reassemble the complementary spatial tiles and matching scalar metadata: 89 plus 81 equals 170 unique source-cell centers. No deduplication is performed.",
+      "paths": [
+        {
+          "parameter": "input_geometry_paths",
+          "value": [
+            "TileA",
+            "TileB"
+          ]
+        },
+        {
+          "parameter": "output_geometry_path",
+          "value": "CombinedTiles_Raw"
+        }
+      ],
+      "key_parameters": {
+        "input_geometry_paths": [
+          "TileA",
+          "TileB"
+        ],
+        "output_geometry_path": "CombinedTiles_Raw"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy CombinedTiles_Raw coordinates into independent CombinedTiles with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "CombinedTiles"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "CombinedTiles_Raw/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "CombinedTiles",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "CombinedTiles_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into CombinedTiles; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "CombinedTiles_Raw/Vertex Data/SourceROICellIndex",
+            "CombinedTiles_Raw/Vertex Data/FeatureIds",
+            "CombinedTiles_Raw/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "CombinedTiles/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "CombinedTiles_Raw/Vertex Data/SourceROICellIndex",
+          "CombinedTiles_Raw/Vertex Data/FeatureIds",
+          "CombinedTiles_Raw/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "CombinedTiles/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Delete only temporary CombinedTiles_Raw after coordinates and scalar arrays have been copied into CombinedTiles.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "CombinedTiles_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "CombinedTiles_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy CombinedTiles coordinates into independent MovingChallenge with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "MovingChallenge"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "CombinedTiles/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "MovingChallenge",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "CombinedTiles/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into MovingChallenge; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "CombinedTiles/Vertex Data/SourceROICellIndex",
+            "CombinedTiles/Vertex Data/FeatureIds",
+            "CombinedTiles/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "MovingChallenge/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "CombinedTiles/Vertex Data/SourceROICellIndex",
+          "CombinedTiles/Vertex Data/FeatureIds",
+          "CombinedTiles/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "MovingChallenge/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 21,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Apply the known synthetic challenge to real voxel-center coordinates: rotate 2 degrees about global Z, then translate [1,-0.75,0.5] micrometers. Preserve the challenge separately.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "MovingChallenge"
+        },
+        {
+          "parameter": "output_transform_matrix_path",
+          "value": "KnownTransform"
+        }
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "MovingChallenge",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            0.9993908270190958,
+            -0.034899496702501,
+            0.0,
+            1.0
+          ],
+          [
+            0.034899496702501,
+            0.9993908270190958,
+            0.0,
+            -0.75
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.5
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "KnownTransform"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 22,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy MovingChallenge coordinates into independent MovingCoarse with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "MovingCoarse"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "MovingChallenge/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "MovingCoarse",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "MovingChallenge/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into MovingCoarse; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "MovingChallenge/Vertex Data/SourceROICellIndex",
+            "MovingChallenge/Vertex Data/FeatureIds",
+            "MovingChallenge/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "MovingCoarse/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "MovingChallenge/Vertex Data/SourceROICellIndex",
+          "MovingChallenge/Vertex Data/FeatureIds",
+          "MovingChallenge/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "MovingCoarse/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "AlignGeometriesFilter",
+      "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d",
+      "role": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP.",
+      "paths": [
+        {
+          "parameter": "input_moving_geometry_path",
+          "value": "MovingCoarse"
+        },
+        {
+          "parameter": "input_target_geometry_path",
+          "value": "ReferenceCloud"
+        }
+      ],
+      "key_parameters": {
+        "input_moving_geometry_path": "MovingCoarse",
+        "input_target_geometry_path": "ReferenceCloud",
+        "alignment_type_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 25,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy MovingCoarse coordinates into independent MovingRegistered with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "MovingRegistered"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "MovingCoarse/Shared Vertex List"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "MovingRegistered",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "MovingCoarse/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Deep-copy all retained scalar metadata into MovingRegistered; keep source-cell identity and inherited image quality unchanged.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "MovingCoarse/Vertex Data/SourceROICellIndex",
+            "MovingCoarse/Vertex Data/FeatureIds",
+            "MovingCoarse/Vertex Data/Image Quality"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "MovingRegistered/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "MovingCoarse/Vertex Data/SourceROICellIndex",
+          "MovingCoarse/Vertex Data/FeatureIds",
+          "MovingCoarse/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "MovingRegistered/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "IterativeClosestPointFilter",
+      "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98",
+      "role": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation.",
+      "paths": [
+        {
+          "parameter": "input_moving_vertex_geometry_path",
+          "value": "MovingRegistered"
+        },
+        {
+          "parameter": "input_target_vertex_geometry_path",
+          "value": "ReferenceCloud"
+        },
+        {
+          "parameter": "transform_array_path",
+          "value": "ICPResidualTransform"
+        }
+      ],
+      "key_parameters": {
+        "input_moving_vertex_geometry_path": "MovingRegistered",
+        "input_target_vertex_geometry_path": "ReferenceCloud",
+        "num_iterations": 10,
+        "apply_transformation": true,
+        "transform_array_path": "ICPResidualTransform"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 28,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Workflow setting for measured 3D EBSD grain reconstruction and geometric representation; registration is an illustrative extension.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Measured-derived grain 2205 supplies point coordinates and scalar metadata. Complementary tile partitioning and a known rigid displacement are deliberate manipulations of that one reconstruction, not independent scans or a published numerical result."
+      }
+    },
+    {
+      "title": "A method for registration of 3-D shapes",
+      "authors": [
+        "Paul J. Besl",
+        "Neil D. McKay"
+      ],
+      "year": 1992,
+      "journal": "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "doi": "10.1109/34.121791",
+      "url": "https://doi.org/10.1109/34.121791",
+      "scope": "filter_algorithm",
+      "role": "Closest-point rigid registration and local convergence; this example uses the current simplnx implementation rather than reproducing the paper experiments."
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release: registered three-pipeline CTest chain passed 1/1 in 23.30 s; independent native saved-output audit passed 67/67 checks, including all 28 original datasets preserved and all seven clouds in Micrometer units. Paired RMS displacement: challenge 0.5165395801, coarse 0.0297782960, registered 6.4759869e-6 micrometers. Maximum registered point error 9.5843083e-6 micrometers; transform composition maximum identity error 5.34044e-5; residual rotation determinant 0.999999774. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "mcp": {
+    "user_intents": [
+      "Reassemble two complementary tiles of measured-derived grain voxel centers and recover a known rigid displacement while preserving source-cell identity."
+    ],
+    "questions_to_ask": [
+      "Are the clouds independent acquisitions or deliberate copies of one reconstruction?",
+      "What coordinate units, overlap, and initial alignment apply?",
+      "Which independent identity or landmarks can check registration?"
+    ],
+    "constraints": [
+      "Read stage 01 directly; stage 02 measurements are optional.",
+      "ReferenceCloud contains 170 image-cell centers, not 256 surface-mesh vertices.",
+      "SourceROICellIndex is a flat index in the cropped 24-cubed image, not a global acquisition ID.",
+      "Tiles and MovingChallenge derive from the same reference; do not describe them as independent measured scans.",
+      "Image Quality is inherited reconstruction metadata; it is not a calibrated score or an ICP weight.",
+      "Preserve Micrometer units and independent vertex arrays for all retained clouds. The unit-propagation workaround addresses https://github.com/BlueQuartzSoftware/simplnx/issues/1784.",
+      "The tiles are complementary partitions: 89 plus 81 equals 170 unique points. No duplicate identification or removal is performed or claimed.",
+      "Overlapping-tile deduplication is excluded because the current duplicate filter can miss identical coordinates on tied grid planes. Tracked at https://github.com/BlueQuartzSoftware/simplnx/issues/1783.",
+      "Origin alignment matches coordinate-wise minima; ICP is local and needs a sufficiently close starting pose.",
+      "ICPResidualTransform excludes the earlier coarse translation; compose residual, coarse translation, and known transform for recovery checks."
+    ],
+    "related_pipelines": [
+      "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "(02) Small IN100 Grain Surface Measurements.d3dpipeline"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100PointCloudRegistration.png",
+    "role": "Reference, displaced challenge, coarse pose, and registered pose rendered from native saved coordinates on equal micrometer axes."
+  }
+}

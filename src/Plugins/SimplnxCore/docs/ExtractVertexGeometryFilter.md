@@ -28,7 +28,11 @@ The *Array Handling* parameter controls how the selected cell arrays are transfe
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 PrebuiltPipelines/Examples/Extract Vertex Geometry.json
+
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

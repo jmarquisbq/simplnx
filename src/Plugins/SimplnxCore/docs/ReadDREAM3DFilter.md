@@ -60,6 +60,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
 
 + `Small_IN100_Examples/(08) Small IN100 Grain Size Groups and Representatives.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

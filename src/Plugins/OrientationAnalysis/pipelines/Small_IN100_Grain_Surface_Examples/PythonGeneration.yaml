@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "smallin100-grain-surface-python-generation-v1",
-  "title": "Small IN100 grain-surface pipeline to Python generation",
+  "title": "Small IN100 grain-surface and point-cloud pipeline to Python generation",
   "source_authority": ".d3dpipeline",
   "converter_api": "simplnx_utilities.generate_python_pipeline",
   "required_modules": [
@@ -19,7 +19,7 @@
     "pipeline_reference_base": "pipeline_suite_root",
     "runtime_data_base": "chosen_cli_working_directory",
     "input_paths": "Preserve the exact Geometry mesh and stage 01 grain-shell checkpoint paths.",
-    "output_paths": "Preserve the exact Small_IN100_Grain_Surface_Examples/Extraction and Measurements paths."
+    "output_paths": "Preserve the exact Small_IN100_Grain_Surface_Examples/Extraction, Measurements, and Registration paths."
   },
   "generation": {
     "language": "Python",
@@ -29,7 +29,7 @@
       "Load the .d3dpipeline using simplnx.Pipeline.from_file(pipeline_path).",
       "Call simplnx_utilities.generate_python_pipeline(pipeline).",
       "Compile and write the result to a temporary .py file.",
-      "Run each generated pipeline in order from the documented writable working folder after its predecessor output exists."
+      "Run stage 01 after the Geometry predecessor. Stages 02 and 03 independently read stage 01; stage 03 does not require stage 02. Use the documented writable working folder."
     ],
     "reference_code": [
       "import simplnx as nx",
