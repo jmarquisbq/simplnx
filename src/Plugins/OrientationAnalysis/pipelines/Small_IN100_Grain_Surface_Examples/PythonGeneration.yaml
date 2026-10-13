@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "smallin100-grain-surface-python-generation-v1",
-  "title": "Small IN100 grain-surface and point-cloud pipeline to Python generation",
+  "title": "Small IN100 grain-surface, point-cloud, and interchange pipeline to Python generation",
   "source_authority": ".d3dpipeline",
   "converter_api": "simplnx_utilities.generate_python_pipeline",
   "required_modules": [
@@ -10,7 +10,7 @@
     "imageprocessing",
     "simplnx_utilities"
   ],
-  "working_directory": "Chosen writable CLI working folder with the documented Geometry predecessor and stage 01 output",
+  "working_directory": "Chosen writable CLI working folder with the documented Geometry predecessor and each stage-specific prerequisite output",
   "output_lifetime": "temporary",
   "verification_status": "Unverified: Python generation, syntax, structure, and execution are separate checks.",
   "failure_behavior": "Report a missing module, load error, generation error, or execution error. Do not silently substitute handwritten Python.",
@@ -18,8 +18,8 @@
   "path_rules": {
     "pipeline_reference_base": "pipeline_suite_root",
     "runtime_data_base": "chosen_cli_working_directory",
-    "input_paths": "Preserve the exact Geometry mesh and stage 01 grain-shell checkpoint paths.",
-    "output_paths": "Preserve the exact Small_IN100_Grain_Surface_Examples/Extraction, Measurements, and Registration paths."
+    "input_paths": "Preserve the exact Geometry mesh, stage 01 grain-shell, and stage 03 registration checkpoint paths.",
+    "output_paths": "Preserve the exact Small_IN100_Grain_Surface_Examples/Extraction, Measurements, Registration, and Interchange paths."
   },
   "generation": {
     "language": "Python",
@@ -29,7 +29,7 @@
       "Load the .d3dpipeline using simplnx.Pipeline.from_file(pipeline_path).",
       "Call simplnx_utilities.generate_python_pipeline(pipeline).",
       "Compile and write the result to a temporary .py file.",
-      "Run stage 01 after the Geometry predecessor. Stages 02 and 03 independently read stage 01; stage 03 does not require stage 02. Use the documented writable working folder."
+      "Run stage 01 after the Geometry predecessor. Stages 02 and 03 independently read stage 01; stage 04 requires the saved stage 03 HDF5 file even for preflight. Use the documented writable working folder."
     ],
     "reference_code": [
       "import simplnx as nx",

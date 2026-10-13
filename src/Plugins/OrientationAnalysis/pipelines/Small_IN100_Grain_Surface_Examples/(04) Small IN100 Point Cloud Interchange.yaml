@@ -1,0 +1,674 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+  "markdown_file": "(04) Small IN100 Point Cloud Interchange.md",
+  "pipeline_sha256": "38b86d08c65657653f74d2bfe4740b1649787f5c454df32a5172f584e907bb67",
+  "title": "Small IN100 Point Cloud Interchange",
+  "summary": "Import selected HDF5 point arrays, append complementary tile rows, split and recombine XYZ columns, reconstruct calibrated vertex geometry, and export a six-column CSV.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Scientific data interchange"
+  ],
+  "use_cases": [
+    "Convert a documented numeric HDF5 point-table contract into vertex geometry.",
+    "Preserve identity and physical coordinates while assembling rows and naming columns for CSV interchange."
+  ],
+  "keywords": [
+    "Small IN100",
+    "EBSD",
+    "HDF5",
+    "point cloud",
+    "tuple dimensions",
+    "component dimensions",
+    "concatenation",
+    "CSV",
+    "coordinate units",
+    "source-cell identity"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+      "role": "Stage 03 saved TileA and TileB numeric datasets; this file must already exist at preflight.",
+      "verified_sha256": "c6224377e5d9c073ef628b4e19cdc2c0d3b852dba733bd1ecae9703640db330a",
+      "checksum_scope": "Observed 2026-10-13 verification run; the upstream file includes stored seed metadata and may differ across complete chain runs."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointTable.csv",
+      "role": "All 170 points with six ordered columns: SourceROICellIndex, FeatureIds, X_um, Y_um, Z_um, Image Quality.",
+      "verified_sha256": "d644574fc87e184a2ea5c4a7209ad6cbdbb95655785437689ae011ca1dfaf64e"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointCloudInterchange.dream3d",
+      "role": "ReassembledCloud with Micrometer units and six scalar arrays, plus numeric import and assembly checkpoints.",
+      "verified_sha256": "a7bd9b225edae7155eb73eada36f82e76fa8846fb0d296b37301537488cd5ffc"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Groeber and Jackson (2014), Figure 5, provides the 3D EBSD reconstruction setting. Numeric point-table interchange is an illustrative extension with no paper figure target.",
+    "target_traits": [
+      "117 measured ANG sections in the source archive",
+      "24 by 24 by 24 measured-derived interior image crop at 0.25 micrometer spacing",
+      "170 voxel centers with original reconstructed FeatureId 2205",
+      "Complementary 89-point and 81-point tiles with a 170-point union and no overlap",
+      "Four numeric arrays per tile, explicit XYZ component order, int32 identities, and reconstructed Micrometer geometry"
+    ],
+    "known_differences": "The two tiles are complementary subsets of the same measured-derived grain from stage 03, not independent acquisitions. The source is deliberately an NX-generated HDF5 file so imported numeric arrays can be checked against known geometry and metadata. No new measured data or exact paper reproduction is claimed.",
+    "archive_provenance_file": "README.md"
+  },
+  "prerequisites": [
+    {
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "produces": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d"
+    }
+  ],
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-grain-surface-python-generation-v1"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "role": "Create ImportedTileA so equal dataset leaf names from the two source tiles cannot collide.",
+      "paths": [
+        {
+          "parameter": "data_object_path",
+          "value": "ImportedTileA"
+        }
+      ],
+      "key_parameters": {
+        "data_object_path": "ImportedTileA"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "role": "Create ImportedTileB so equal dataset leaf names from the two source tiles cannot collide.",
+      "paths": [
+        {
+          "parameter": "data_object_path",
+          "value": "ImportedTileB"
+        }
+      ],
+      "key_parameters": {
+        "data_object_path": "ImportedTileB"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "role": "Read four numeric datasets from TileA: 89 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported.",
+      "paths": [
+        {
+          "parameter": "import_hdf5_object",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_hdf5_object": {
+          "input_file": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+          "parent_group": "ImportedTileA",
+          "data_paths": [
+            {
+              "dataset_path": "/DataStructure/TileA/Shared Vertex List",
+              "component_dimensions": "3",
+              "tuple_dimensions": "89"
+            },
+            {
+              "dataset_path": "/DataStructure/TileA/Vertex Data/SourceROICellIndex",
+              "component_dimensions": "1",
+              "tuple_dimensions": "89"
+            },
+            {
+              "dataset_path": "/DataStructure/TileA/Vertex Data/FeatureIds",
+              "component_dimensions": "1",
+              "tuple_dimensions": "89"
+            },
+            {
+              "dataset_path": "/DataStructure/TileA/Vertex Data/Image Quality",
+              "component_dimensions": "1",
+              "tuple_dimensions": "89"
+            }
+          ]
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "role": "Read four numeric datasets from TileB: 81 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported.",
+      "paths": [
+        {
+          "parameter": "import_hdf5_object",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "import_hdf5_object": {
+          "input_file": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+          "parent_group": "ImportedTileB",
+          "data_paths": [
+            {
+              "dataset_path": "/DataStructure/TileB/Shared Vertex List",
+              "component_dimensions": "3",
+              "tuple_dimensions": "81"
+            },
+            {
+              "dataset_path": "/DataStructure/TileB/Vertex Data/SourceROICellIndex",
+              "component_dimensions": "1",
+              "tuple_dimensions": "81"
+            },
+            {
+              "dataset_path": "/DataStructure/TileB/Vertex Data/FeatureIds",
+              "component_dimensions": "1",
+              "tuple_dimensions": "81"
+            },
+            {
+              "dataset_path": "/DataStructure/TileB/Vertex Data/Image Quality",
+              "component_dimensions": "1",
+              "tuple_dimensions": "81"
+            }
+          ]
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "role": "Create a staging group for the assembled numeric point table before constructing its geometry.",
+      "paths": [
+        {
+          "parameter": "data_object_path",
+          "value": "AssembledTable"
+        }
+      ],
+      "key_parameters": {
+        "data_object_path": "AssembledTable"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "role": "Append TileA then TileB rows for Coordinates_um: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape.",
+      "paths": [
+        {
+          "parameter": "input_arrays",
+          "value": [
+            "ImportedTileA/Shared Vertex List",
+            "ImportedTileB/Shared Vertex List"
+          ]
+        },
+        {
+          "parameter": "output_array_path",
+          "value": "AssembledTable/Coordinates_um"
+        }
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "ImportedTileA/Shared Vertex List",
+          "ImportedTileB/Shared Vertex List"
+        ],
+        "output_array_path": "AssembledTable/Coordinates_um"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "role": "Append TileA then TileB rows for SourceROICellIndex: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape.",
+      "paths": [
+        {
+          "parameter": "input_arrays",
+          "value": [
+            "ImportedTileA/SourceROICellIndex",
+            "ImportedTileB/SourceROICellIndex"
+          ]
+        },
+        {
+          "parameter": "output_array_path",
+          "value": "AssembledTable/SourceROICellIndex"
+        }
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "ImportedTileA/SourceROICellIndex",
+          "ImportedTileB/SourceROICellIndex"
+        ],
+        "output_array_path": "AssembledTable/SourceROICellIndex"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "role": "Append TileA then TileB rows for FeatureIds: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape.",
+      "paths": [
+        {
+          "parameter": "input_arrays",
+          "value": [
+            "ImportedTileA/FeatureIds",
+            "ImportedTileB/FeatureIds"
+          ]
+        },
+        {
+          "parameter": "output_array_path",
+          "value": "AssembledTable/FeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "ImportedTileA/FeatureIds",
+          "ImportedTileB/FeatureIds"
+        ],
+        "output_array_path": "AssembledTable/FeatureIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "role": "Append TileA then TileB rows for Image Quality: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape.",
+      "paths": [
+        {
+          "parameter": "input_arrays",
+          "value": [
+            "ImportedTileA/Image Quality",
+            "ImportedTileB/Image Quality"
+          ]
+        },
+        {
+          "parameter": "output_array_path",
+          "value": "AssembledTable/Image Quality"
+        }
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "ImportedTileA/Image Quality",
+          "ImportedTileB/Image Quality"
+        ],
+        "output_array_path": "AssembledTable/Image Quality"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "SplitDataArrayByComponentFilter",
+      "uuid": "55da791f-4d1c-4413-8673-742f27d2b22b",
+      "role": "Split all three XYZ coordinate components into scalar columns while retaining Coordinates_um as an inspection checkpoint.",
+      "paths": [
+        {
+          "parameter": "multicomponent_array_path",
+          "value": "AssembledTable/Coordinates_um"
+        }
+      ],
+      "key_parameters": {
+        "multicomponent_array_path": "AssembledTable/Coordinates_um",
+        "postfix": "_",
+        "delete_original_array": false,
+        "select_components_to_extract": false,
+        "components_to_extract": [
+          [
+            0.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "RenameDataObjectFilter",
+      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
+      "role": "Name coordinate component 0 X_um according to the verified source XYZ axis contract.",
+      "paths": [
+        {
+          "parameter": "source_data_object_path",
+          "value": "AssembledTable/Coordinates_um_0"
+        }
+      ],
+      "key_parameters": {
+        "source_data_object_path": "AssembledTable/Coordinates_um_0",
+        "new_name": "X_um",
+        "allow_overwrite": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "RenameDataObjectFilter",
+      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
+      "role": "Name coordinate component 1 Y_um according to the verified source XYZ axis contract.",
+      "paths": [
+        {
+          "parameter": "source_data_object_path",
+          "value": "AssembledTable/Coordinates_um_1"
+        }
+      ],
+      "key_parameters": {
+        "source_data_object_path": "AssembledTable/Coordinates_um_1",
+        "new_name": "Y_um",
+        "allow_overwrite": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "RenameDataObjectFilter",
+      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
+      "role": "Name coordinate component 2 Z_um according to the verified source XYZ axis contract.",
+      "paths": [
+        {
+          "parameter": "source_data_object_path",
+          "value": "AssembledTable/Coordinates_um_2"
+        }
+      ],
+      "key_parameters": {
+        "source_data_object_path": "AssembledTable/Coordinates_um_2",
+        "new_name": "Z_um",
+        "allow_overwrite": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "CombineAttributeArraysFilter",
+      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
+      "role": "Combine X_um, Y_um, Z_um columns in that exact order into 170 three-component vertices. Keep physical coordinates unchanged: normalization and source removal are disabled.",
+      "paths": [
+        {
+          "parameter": "input_data_array_paths",
+          "value": [
+            "AssembledTable/X_um",
+            "AssembledTable/Y_um",
+            "AssembledTable/Z_um"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "input_data_array_paths": [
+          "AssembledTable/X_um",
+          "AssembledTable/Y_um",
+          "AssembledTable/Z_um"
+        ],
+        "output_data_array_name": "Vertices_um",
+        "normalize_data": false,
+        "move_values": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy the reconstructed XYZ coordinates into ReassembledCloud with explicit Micrometer units (index 6), checked against the source tile geometry. Numeric HDF5 datasets alone do not declare a physical length unit.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "ReassembledCloud"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "AssembledTable/Vertices_um"
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "ReassembledCloud",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "AssembledTable/Vertices_um",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "MoveDataFilter",
+      "uuid": "651e5894-ab7c-4176-b7f0-ea466c521753",
+      "role": "Move six scalar columns into ReassembledCloud/Vertex Data so each row describes the corresponding vertex. Leave imported tiles and both assembled coordinate arrays as inspection checkpoints.",
+      "paths": [
+        {
+          "parameter": "source_data_paths",
+          "value": [
+            "AssembledTable/SourceROICellIndex",
+            "AssembledTable/FeatureIds",
+            "AssembledTable/X_um",
+            "AssembledTable/Y_um",
+            "AssembledTable/Z_um",
+            "AssembledTable/Image Quality"
+          ]
+        },
+        {
+          "parameter": "destination_parent_path",
+          "value": "ReassembledCloud/Vertex Data"
+        }
+      ],
+      "key_parameters": {
+        "source_data_paths": [
+          "AssembledTable/SourceROICellIndex",
+          "AssembledTable/FeatureIds",
+          "AssembledTable/X_um",
+          "AssembledTable/Y_um",
+          "AssembledTable/Z_um",
+          "AssembledTable/Image Quality"
+        ],
+        "destination_parent_path": "ReassembledCloud/Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Export all 170 point rows, including tuple zero, as six comma-separated columns in the listed order. Include headers only; SourceROICellIndex carries source identity without an extra export index.",
+      "paths": [
+        {
+          "parameter": "output_path",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointTable.csv"
+        },
+        {
+          "parameter": "input_data_array_paths",
+          "value": [
+            "ReassembledCloud/Vertex Data/SourceROICellIndex",
+            "ReassembledCloud/Vertex Data/FeatureIds",
+            "ReassembledCloud/Vertex Data/X_um",
+            "ReassembledCloud/Vertex Data/Y_um",
+            "ReassembledCloud/Vertex Data/Z_um",
+            "ReassembledCloud/Vertex Data/Image Quality"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointTable.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "ReassembledCloud/Vertex Data/SourceROICellIndex",
+          "ReassembledCloud/Vertex Data/FeatureIds",
+          "ReassembledCloud/Vertex Data/X_um",
+          "ReassembledCloud/Vertex Data/Y_um",
+          "ReassembledCloud/Vertex Data/Z_um",
+          "ReassembledCloud/Vertex Data/Image Quality"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the calibrated reconstructed cloud and small numeric import/assembly checkpoints for checking row identity, axis order, and coordinate preservation.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointCloudInterchange.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointCloudInterchange.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "3D EBSD reconstruction and geometric-representation setting; the selected grain and HDF5 point-table interchange are illustrative extensions.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Use selected numeric arrays from two complementary tiles of measured-derived grain 2205. Reconstruct the known coordinate/identity contract without reproducing a published numerical result or comparing independent acquisitions."
+      }
+    },
+    {
+      "title": "HDF5 Datasets",
+      "authors": [
+        "The HDF Group"
+      ],
+      "year": 2026,
+      "url": "https://support.hdfgroup.org/documentation/hdf5/latest/_h5_d__u_g.html",
+      "scope": "filter_algorithm",
+      "role": "Authoritative HDF5 dataset, datatype, dataspace, and attribute model; consulted 2026-10-13. This example explicitly reconstructs the application-level axis and unit contract."
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release: registered four-pipeline CTest chain passed 1/1 in 22.76 s. Independent saved-output audit passed 51/51 checks: eight imported datasets preserve every value/type/shape; A-then-B rows, XYZ split/combine, moved scalar placements, and Micrometer geometry are correct. Final coordinates and scalar values equal CombinedTiles and recover ReferenceCloud by SourceROICellIndex. CSV retains all 170 points, including row zero, in six declared columns; integer IDs are exact and floats agree at eight significant digits. The preview was rendered from these native products and visually inspected. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "mcp": {
+    "user_intents": [
+      "Assemble complementary point-table rows from HDF5 and export named coordinate columns without losing identity."
+    ],
+    "questions_to_ask": [
+      "What dataset paths, numeric types, tuple/component shapes, axis order, and coordinate units does the source declare?",
+      "Do all scalar arrays share the same row identity and tile order?",
+      "Is the goal a full NX structure import or selected numeric HDF5 interchange?"
+    ],
+    "constraints": [
+      "Run stage 03 before preflighting stage 04; its HDF5 file must exist.",
+      "Use ReadDREAM3D for a full NX structure import; this example deliberately extracts selected numeric datasets.",
+      "TileA has 89 tuples and TileB has 81; append A then B consistently for all four arrays. No sorting or deduplication is performed.",
+      "Coordinates are float32 with three XYZ components; SourceROICellIndex and FeatureIds remain int32 scalars, and Image Quality remains float32 scalar metadata.",
+      "Tuple dimensions and component dimensions describe the source layout; changing them is not a transpose.",
+      "SourceROICellIndex is an X-fastest flat index into the cropped 24-cubed ROI, not a global acquisition ID.",
+      "Both tiles derive from the same measured grain 2205; Image Quality is inherited metadata, not calibrated confidence.",
+      "Disable normalization; create geometry with explicitly checked Micrometer units (index 6), not units inferred from numeric coordinates.",
+      "Export every point tuple, including row zero, with headers only and the six declared columns."
+    ],
+    "related_pipelines": [
+      "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "(01) Small IN100 Complete Grain Surface.d3dpipeline"
+    ]
+  },
+  "result_visual": {
+    "path": "SmallIN100PointCloudInterchange.png",
+    "role": "Source tiles and reconstructed cloud on equal micrometer axes, with a small table read from the native CSV.",
+    "sha256": "3376ee538dc5aeebaf378fbd1175cc7aac87e37cffa0dc64d6a7798f849a5abb",
+    "source_output_sha256": "a7bd9b225edae7155eb73eada36f82e76fa8846fb0d296b37301537488cd5ffc",
+    "source_csv_sha256": "d644574fc87e184a2ea5c4a7209ad6cbdbb95655785437689ae011ca1dfaf64e"
+  }
+}

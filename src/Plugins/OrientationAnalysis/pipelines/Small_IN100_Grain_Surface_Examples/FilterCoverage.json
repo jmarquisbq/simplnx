@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Three illustrative measured-derived Small IN100 grain-surface and point-cloud pipelines; occurrences are not independent filter verification. Stage 03 uses complementary tiles and does not claim duplicate-removal coverage.",
+  "scope": "Four illustrative measured-derived Small IN100 grain-surface, point-cloud, and numeric interchange pipelines; occurrences are not independent filter verification. Stages 03 and 04 use complementary tiles and do not claim duplicate-removal coverage.",
   "filters": [
     {
       "filter": "ExtractComponentAsArrayFilter",
@@ -92,6 +92,76 @@
       "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
       "step": 27,
       "purpose": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation."
+    },
+    {
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 2,
+      "purpose": "Read four numeric datasets from TileA: 89 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+    },
+    {
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 3,
+      "purpose": "Read four numeric datasets from TileB: 81 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 5,
+      "purpose": "Append TileA then TileB rows for Coordinates_um: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 6,
+      "purpose": "Append TileA then TileB rows for SourceROICellIndex: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 7,
+      "purpose": "Append TileA then TileB rows for FeatureIds: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 8,
+      "purpose": "Append TileA then TileB rows for Image Quality: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "SplitDataArrayByComponentFilter",
+      "uuid": "55da791f-4d1c-4413-8673-742f27d2b22b",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 9,
+      "purpose": "Split all three XYZ coordinate components into scalar columns while retaining Coordinates_um as an inspection checkpoint."
+    },
+    {
+      "filter": "CombineAttributeArraysFilter",
+      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 13,
+      "purpose": "Combine X_um, Y_um, Z_um columns in that exact order into 170 three-component vertices. Keep physical coordinates unchanged: normalization and source removal are disabled."
+    },
+    {
+      "filter": "MoveDataFilter",
+      "uuid": "651e5894-ab7c-4176-b7f0-ea466c521753",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 15,
+      "purpose": "Move six scalar columns into ReassembledCloud/Vertex Data so each row describes the corresponding vertex. Leave imported tiles and both assembled coordinate arrays as inspection checkpoints."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 16,
+      "purpose": "Export all point tuples, including valid row zero, in an explicit six-column CSV with headers."
     }
   ]
 }

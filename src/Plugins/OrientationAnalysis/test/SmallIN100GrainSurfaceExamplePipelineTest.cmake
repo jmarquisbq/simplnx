@@ -4,6 +4,7 @@ set(pipeline_stems
   "(01) Small IN100 Complete Grain Surface"
   "(02) Small IN100 Grain Surface Measurements"
   "(03) Small IN100 Grain Point Cloud Registration"
+  "(04) Small IN100 Point Cloud Interchange"
 )
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")

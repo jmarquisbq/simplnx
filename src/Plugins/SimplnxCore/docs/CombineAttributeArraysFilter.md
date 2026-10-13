@@ -42,6 +42,10 @@ A typical use case is building a multi-component coordinate or quaternion array 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(04) Small IN100 Point Cloud Interchange.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

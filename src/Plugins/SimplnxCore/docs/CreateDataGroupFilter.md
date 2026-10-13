@@ -25,6 +25,7 @@ Use a DataGroup when you need to organize heterogeneous data, such as a logical 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `T12_Reporting_Examples/(03) T12 Compact Report.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Grain_Surface_Examples/(04) Small IN100 Point Cloud Interchange.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 
