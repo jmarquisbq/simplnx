@@ -8,7 +8,7 @@ Reconstruction (Segmentation)
 
 This **Filter** groups neighboring **Cells** (voxels) that have similar scalar values into **Features** (connected regions). The output is a *FeatureIds* array that assigns every cell in the input **Image Geometry** to a numbered feature, so that downstream analyses can operate on features instead of individual cells.
 
-Use this filter whenever your segmentation criterion is a single scalar value per cell -- for example, image quality, confidence index, a phase label, or a computed property. For orientation-based segmentation of EBSD data, see [Segment Features (Misorientation)](../OrientationAnalysis/EBSDSegmentFeaturesFilter.md) or [Segment Features (C-Axis Misalignment)](../OrientationAnalysis/CAxisSegmentFeaturesFilter.md).
+Use this filter when the segmentation criterion is a single integer value per cell, such as a class label or an integer grayscale intensity. The current filter parameters accept integer input arrays and an integer tolerance; floating-point quality arrays require a documented conversion or a different segmentation method. For orientation-based segmentation of EBSD data, see [Segment Features (Misorientation)](../OrientationAnalysis/EBSDSegmentFeaturesFilter.md) or [Segment Features (C-Axis Misalignment)](../OrientationAnalysis/CAxisSegmentFeaturesFilter.md).
 
 ### What is Feature Segmentation?
 
@@ -18,38 +18,19 @@ Segmentation groups cells that "belong together" into discrete regions. Each reg
 
 ### How This Filter Works
 
-This filter uses a standard *burn algorithm* to grow each feature outward from a seed cell:
+The filter labels connected components of eligible cells. Two adjacent cells connect when their scalar values differ by **at most** the *Scalar Tolerance*. Connectivity propagates through a chain of qualifying neighboring pairs; values at opposite ends of one feature can therefore differ by more than the tolerance. The comparison is not a limit on the full feature's range or its difference from one seed.
 
-1. Randomly pick an unassigned **Cell** and give it a new *Feature Id*.
-2. Compare the cell's scalar value to each of its neighboring cells (see **Neighbor Scheme** below).
-3. Any neighbor whose scalar value differs from the seed by less than the user-specified *Scalar Tolerance* is added to the current feature and gets the same *Feature Id*.
-4. Repeat step 2-3 from each newly added cell, growing the feature outward until no more neighbors qualify.
-5. Increment the feature counter and pick a new unassigned seed cell. Continue until every eligible cell has been assigned.
+With tolerance *0*, neighboring integer values must be equal. Without a mask, zero-valued input cells are also eligible and receive positive feature IDs. A scalar value of zero is not automatically background. Enable a mask when a class should be excluded before segmentation.
 
 ### Tolerance and Units
 
-The *Scalar Tolerance* is in **the same units as the input scalar array**. There are no universal "good" values; the right tolerance depends entirely on what array you are segmenting:
+The *Scalar Tolerance* is a nonnegative **integer in the input scalar's units**. For a 0/1 class image, use *0* to keep different classes separate. A tolerance of *1* would allow the two classes to connect. For an 8-bit grayscale image, a tolerance of *5* permits adjacent intensities that differ by at most five intensity levels; it does not define a calibrated material distinction.
 
-- For an integer phase map, a tolerance of 0 (or less than 1) groups only cells with exactly the same phase.
-- For a floating-point image-quality array with values 0-1, tolerances around 0.05-0.1 are typical.
-- For a raw grayscale image with values 0-255, tolerances of 5-20 are typical.
-
-Start conservative (smaller tolerance -> more, smaller features), inspect the result, and loosen the tolerance if features are being over-split.
+A smaller tolerance usually produces more components. Inspect the segmentation against the intended task before increasing it. Changing integer scaling or quantization also changes the meaning of a numeric tolerance.
 
 ## Algorithm
 
-The filter has two execution paths selected automatically at runtime:
-
-- **In-core (DFS flood fill)**: The classic depth-first search algorithm described above. Each voxel is visited via element-by-element access through a typed comparator.
-- **Out-of-core (Connected-Component Labeling)**: A slice-by-slice CCL algorithm that processes data Z-slice at a time. This path is activated automatically when the data resides in an out-of-core (OOC) DataStore.
-
-Both paths produce identical segmentation results. After segmentation, the Feature Attribute Matrix is resized, the Active array is initialized, and Feature IDs are optionally randomized.
-
-### Performance
-
-When operating on out-of-core data, the CCL path uses a rolling 2-slot buffer system. Before processing each Z-slice, the algorithm bulk-reads the scalar input and mask arrays for that slice into contiguous in-memory buffers. All voxel comparisons then read from these buffers rather than the underlying disk-backed DataStore, eliminating chunk load/evict cycles. Two buffer slots are maintained simultaneously (current and previous slice) because the CCL algorithm must compare voxels across adjacent slices.
-
-All scalar types are converted to `float64` in the buffer for uniform comparison, so a single comparison code path handles all input data types.
+The implementation uses slice-buffered connected-component labeling. It compares neighboring scalar values after conversion to `float64`, then resizes the feature table and marks positive feature rows active. Feature row zero remains reserved. Optional ID randomization changes the labels used for display; it does not define new pixel memberships. Very large 64-bit integer values can lose exact distinctions when converted to `float64`; the small 0/1 integers in this example are represented exactly.
 
 ### Neighbor Scheme
 
@@ -86,7 +67,7 @@ If the input data represents a **periodic** structure (i.e., features are allowe
 
 ### Required Input Sources
 
-- **Input Scalar Array** -- any single-component cell-level scalar array suitable for thresholding. Common sources include image readers such as [Read Image Stack](../ImageProcessing/ReadImageStackFilter.md), phase or quality arrays from EBSD readers such as [Read H5EBSD](../OrientationAnalysis/ReadH5EbsdFilter.md), or any computed per-cell scalar from an earlier filter in the pipeline.
+- **Input Scalar Array** -- a single-component cell-level integer array. Common sources include image readers such as [Read Image Stack](../ImageProcessing/ReadImageStackFilter.md), phase or quality arrays from EBSD readers such as [Read H5EBSD](../OrientationAnalysis/ReadH5EbsdFilter.md), or any computed per-cell scalar from an earlier filter in the pipeline.
 - **Mask Array** (optional) -- a boolean array marking valid cells, typically produced by [Multi-Threshold Objects](MultiThresholdObjectsFilter.md).
 
 % Auto generated parameter table will be inserted here
@@ -94,6 +75,10 @@ If the input data represents a **periodic** structure (i.e., features are allowe
 ## Example Pipelines
 
 + (09) Image Segmentation
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
 
 ## License & Copyright
 

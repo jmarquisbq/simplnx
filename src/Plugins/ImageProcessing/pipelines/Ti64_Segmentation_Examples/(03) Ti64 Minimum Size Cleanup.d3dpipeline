@@ -617,6 +617,685 @@
     },
     {
       "args": {
+        "input_image_geometry_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "input_array_path": {
+          "value": "Ti64/Cell Data/BrightOriginal",
+          "version": 1
+        },
+        "scalar_tolerance": {
+          "value": 0,
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_path": {
+          "value": "Ti64/Cell Data/BrightOriginal",
+          "version": 1
+        },
+        "feature_ids_name": {
+          "value": "TwoClassRegionIds",
+          "version": 1
+        },
+        "cell_feature_group_name": {
+          "value": "TwoClassActivity",
+          "version": 1
+        },
+        "active_array_name": {
+          "value": "Active",
+          "version": 1
+        },
+        "randomize_features": {
+          "value": false,
+          "version": 1
+        },
+        "is_periodic": {
+          "value": false,
+          "version": 1
+        },
+        "neighbor_scheme_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Label connected components of both 0 and 1 brightness classes with exact integer equality and face adjacency; zero-valued input pixels are eligible because no mask is used.",
+      "filter": {
+        "name": "nx::core::ScalarSegmentFeaturesFilter",
+        "uuid": "e067cd97-9bbf-4c92-89a6-3cb4fdb76c93"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_array_path": {
+          "value": "Ti64/Cell Data/UnitIntensity",
+          "version": 1
+        },
+        "destination_attribute_matrix_path": {
+          "value": "Ti64/TwoClassRegionData",
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "Ti64/Cell Data/BrightOriginal",
+          "version": 1
+        },
+        "compute_by_index": {
+          "value": true,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Ti64/Cell Data/TwoClassRegionIds",
+          "version": 1
+        },
+        "feature_has_data_array_name": {
+          "value": "FeatureHasData",
+          "version": 1
+        },
+        "range_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "range": {
+          "value": [
+            0,
+            -1
+          ],
+          "version": 1
+        },
+        "feature_ids_indexing_name": {
+          "value": "FeatureIdsIndexing",
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "PixelCount",
+          "version": 1
+        },
+        "find_min": {
+          "value": false,
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "MinimumIntensity",
+          "version": 1
+        },
+        "find_max": {
+          "value": false,
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "MaximumIntensity",
+          "version": 1
+        },
+        "find_mean": {
+          "value": false,
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "MeanIntensity",
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "Median",
+          "version": 1
+        },
+        "find_mode": {
+          "value": false,
+          "version": 1
+        },
+        "mode_array_name": {
+          "value": "Mode",
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "std_deviation_array_name": {
+          "value": "StandardDeviation",
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "Summation",
+          "version": 1
+        },
+        "standardize_data": {
+          "value": false,
+          "version": 1
+        },
+        "standardized_array_name": {
+          "value": "Standardized",
+          "version": 1
+        },
+        "find_unique_values": {
+          "value": false,
+          "version": 1
+        },
+        "number_unique_values_name": {
+          "value": "NumUniqueValues",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Count pixels for every two-class component. Preserve this complete feature table as the unmodified class-selection reference; measured foreground intensity summaries remain in the original FaceRegionData.",
+      "filter": {
+        "name": "nx::core::ComputeArrayStatisticsFilter",
+        "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_ids_array_path": {
+          "value": "Ti64/Cell Data/TwoClassRegionIds",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "Ti64/Cell Data/BrightOriginal",
+          "version": 1
+        },
+        "cell_data_attribute_matrix_path": {
+          "value": "Ti64/TwoClassRegionData",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "BrightnessClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Assign feature-level brightness classes from the mask, using the feature-sized destination despite its Cell Data parameter label. Exact two-class components guarantee a uniform mask value within each feature.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesBinaryFilter",
+        "uuid": "16010080-a913-443a-b5b3-bd43391fe3c0"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_array_path": {
+          "value": "Ti64/TwoClassRegionData/OriginalComponentId",
+          "version": 1
+        },
+        "numeric_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "init_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "init_value": {
+          "value": "0",
+          "version": 1
+        },
+        "starting_fill_value": {
+          "value": "0",
+          "version": 1
+        },
+        "step_operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "step_value": {
+          "value": "1",
+          "version": 1
+        },
+        "use_seed": {
+          "value": false,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "InitializeDataFilter SeedValue",
+          "version": 1
+        },
+        "standardize_seed": {
+          "value": false,
+          "version": 1
+        },
+        "init_start_range": {
+          "value": "0",
+          "version": 1
+        },
+        "init_end_range": {
+          "value": "1",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Record original two-class component IDs, including reserved row zero, so later compacted feature rows remain traceable to their measured pixel sets.",
+      "filter": {
+        "name": "nx::core::CreateDataArrayAdvancedFilter",
+        "uuid": "f23464df-abcc-40cf-bf99-f71463df633c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "Ti64/Cell Data/TwoClassRegionIds",
+            "Ti64/TwoClassRegionData"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": false,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "_Bright",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the two-class IDs and their paired feature table before removing the unselected brightness class; preserve the full measured partition.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "Ti64/TwoClassRegionData_Bright/BrightnessClass",
+                "comparison": 1,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 1.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "RemoveDarkClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Flag class-zero components for removal, not as bad measurements. Feature row zero is reserved and ignored by the removal operation.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "operation_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "fill_removed_features": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Ti64/Cell Data/TwoClassRegionIds_Bright",
+          "version": 1
+        },
+        "flagged_features_array_path": {
+          "value": "Ti64/TwoClassRegionData_Bright/RemoveDarkClass",
+          "version": 1
+        },
+        "output_image_geometry_prefix": {
+          "value": "UnusedExtractedRegion",
+          "version": 1
+        },
+        "ignored_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Drop dark-class component pixels to background zero without copying neighbor attributes; compact the bright-only feature table and carry OriginalComponentId with each surviving row.",
+      "filter": {
+        "name": "nx::core::RemoveFlaggedFeaturesFilter",
+        "uuid": "6e8cc6ec-8b9b-402e-9deb-85bd1cdba743"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "Ti64/Cell Data/FaceRegionIds",
+            "Ti64/FaceRegionData"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": false,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "_Area80",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the prepared foreground-only IDs and feature table for the independent area-budget comparison. This measured population is equivalent to the new bright-only partition and has a known feature-table shape during preflight.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_array_path": {
+          "value": "Ti64/FaceRegionData_Area80/SourceFaceRegionId",
+          "version": 1
+        },
+        "numeric_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "init_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "init_value": {
+          "value": "0",
+          "version": 1
+        },
+        "starting_fill_value": {
+          "value": "0",
+          "version": 1
+        },
+        "step_operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "step_value": {
+          "value": "1",
+          "version": 1
+        },
+        "use_seed": {
+          "value": false,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "InitializeDataFilter SeedValue",
+          "version": 1
+        },
+        "standardize_seed": {
+          "value": false,
+          "version": 1
+        },
+        "init_start_range": {
+          "value": "0",
+          "version": 1
+        },
+        "init_end_range": {
+          "value": "1",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Record original foreground-only face-region IDs before rank compaction. SourceFaceRegionId indexes FaceRegionData and is a different namespace from the two-class OriginalComponentId.",
+      "filter": {
+        "name": "nx::core::CreateDataArrayAdvancedFilter",
+        "uuid": "f23464df-abcc-40cf-bf99-f71463df633c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "rank_from_index": {
+          "value": 0,
+          "version": 1
+        },
+        "selection_criterion_index": {
+          "value": 2,
+          "version": 1
+        },
+        "num_features": {
+          "value": 10,
+          "version": 1
+        },
+        "percent": {
+          "value": 80.0,
+          "version": 1
+        },
+        "fill_removed_features": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Ti64/Cell Data/FaceRegionIds_Area80",
+          "version": 1
+        },
+        "ranking_array_path": {
+          "value": "Ti64/FaceRegionData_Area80/PixelCount",
+          "version": 1
+        },
+        "ignored_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep whole bright components in descending pixel-count order until their cumulative area reaches at least 80 percent of all bright pixels. Include the crossing component; drop the remainder to zero without filling.",
+      "filter": {
+        "name": "nx::core::KeepRemoveRankedFeaturesFilter",
+        "uuid": "07eb5919-bfd3-4ab7-abdb-5af756a66bce"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "Ti64/Cell Data/FaceRegionIds_Area80",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 10,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "Area80Mask",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Expose the ranked selection as a 0/1 mask for direct comparison with BrightOriginal and the independent 25-pixel LargeRegionMask.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_data_file": {
+          "value": "Data/Output/Ti64_Segmentation_Examples/Cleanup/Ti64_Area80Regions.csv",
+          "version": 1
+        },
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "Ti64/FaceRegionData_Area80",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export positive ranked-region rows with pixel counts, measured intensity statistics, selection class, and SourceFaceRegionId; exclude reserved row zero.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "feature_data_file": {
           "value": "Data/Output/Ti64_Segmentation_Examples/Cleanup/Ti64_MinimumSizeCleanup.csv",
           "version": 1

@@ -87,6 +87,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
 
++ `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
 
 ## License & Copyright
 

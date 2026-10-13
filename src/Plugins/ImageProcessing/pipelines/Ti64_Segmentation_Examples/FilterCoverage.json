@@ -206,17 +206,101 @@
       "purpose": "Describe the retained brightness-patch shapes with normalized Omega1, Omega2 and saved central moments; original singleton regions are intentionally not measured."
     },
     {
+      "filter": "ScalarSegmentFeaturesFilter",
+      "uuid": "e067cd97-9bbf-4c92-89a6-3cb4fdb76c93",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 17,
+      "purpose": "Label connected components of both 0 and 1 brightness classes with exact integer equality and face adjacency; zero-valued input pixels are eligible because no mask is used."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 18,
+      "purpose": "Count pixels for every two-class component. Preserve this complete feature table as the unmodified class-selection reference; measured foreground intensity summaries remain in the original FaceRegionData."
+    },
+    {
+      "filter": "ComputeFeaturePhasesBinaryFilter",
+      "uuid": "16010080-a913-443a-b5b3-bd43391fe3c0",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 19,
+      "purpose": "Assign feature-level brightness classes from the mask, using the feature-sized destination despite its Cell Data parameter label. Exact two-class components guarantee a uniform mask value within each feature."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 20,
+      "purpose": "Record original two-class component IDs, including reserved row zero, so later compacted feature rows remain traceable to their measured pixel sets."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 21,
+      "purpose": "Copy the two-class IDs and their paired feature table before removing the unselected brightness class; preserve the full measured partition."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 22,
+      "purpose": "Flag class-zero components for removal, not as bad measurements. Feature row zero is reserved and ignored by the removal operation."
+    },
+    {
+      "filter": "RemoveFlaggedFeaturesFilter",
+      "uuid": "6e8cc6ec-8b9b-402e-9deb-85bd1cdba743",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 23,
+      "purpose": "Drop dark-class component pixels to background zero without copying neighbor attributes; compact the bright-only feature table and carry OriginalComponentId with each surviving row."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 24,
+      "purpose": "Copy the prepared foreground-only IDs and feature table for the independent area-budget comparison. This measured population is equivalent to the new bright-only partition and has a known feature-table shape during preflight."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 25,
+      "purpose": "Record original foreground-only face-region IDs before rank compaction. SourceFaceRegionId indexes FaceRegionData and is a different namespace from the two-class OriginalComponentId."
+    },
+    {
+      "filter": "KeepRemoveRankedFeaturesFilter",
+      "uuid": "07eb5919-bfd3-4ab7-abdb-5af756a66bce",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 26,
+      "purpose": "Keep whole bright components in descending pixel-count order until their cumulative area reaches at least 80 percent of all bright pixels. Include the crossing component; drop the remainder to zero without filling."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 27,
+      "purpose": "Expose the ranked selection as a 0/1 mask for direct comparison with BrightOriginal and the independent 25-pixel LargeRegionMask."
+    },
+    {
       "filter": "WriteFeatureDataCSVFilter",
       "uuid": "d734293f-3017-4699-b458-c05aca078b96",
       "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
-      "step": 17,
+      "step": 28,
+      "purpose": "Export positive ranked-region rows with pixel counts, measured intensity statistics, selection class, and SourceFaceRegionId; exclude reserved row zero."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 29,
       "purpose": "Export a normal CSV header and all positive feature ID rows; skip background row zero."
     },
     {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
-      "step": 18,
+      "step": 30,
       "purpose": "Save all predecessor geometries and arrays together with new labels and measurements."
     }
   ]

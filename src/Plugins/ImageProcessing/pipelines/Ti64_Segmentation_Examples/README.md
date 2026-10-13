@@ -1,6 +1,6 @@
 # Ti64 segmentation examples
 
-Explore connected bright regions in the measured Ti-6Al-4V image prepared by [Ti64 Image Cleanup Examples](../Ti64_Image_Cleanup_Examples/README.md). These pipelines compare image connectivity and a minimum pixel-count rule, then measure region counts, selected area, and retained shapes. They describe brightness patches, not grains, phases, or a reproduced scientific classifier.
+Explore connected bright regions in the measured Ti-6Al-4V image prepared by [Ti64 Image Cleanup Examples](../Ti64_Image_Cleanup_Examples/README.md). These pipelines compare image connectivity, a minimum pixel-count rule, and a cumulative selected-area budget, then measure region counts, selected area, and retained shapes. They describe brightness patches, not grains, phases, or a reproduced scientific classifier.
 
 ## Data and run instructions
 
@@ -32,7 +32,7 @@ Stages 02 and 03 both read stage 01's checkpoint. They do not read each other's 
 
 [(02) Connectivity Comparison](%2802%29%20Ti64%20Connectivity%20Comparison.md) starts from stage 01 and adds eight-neighbor labels and matching statistics under `Connectivity/`. Both label images use the same foreground. Region IDs are local to each branch.
 
-[(03) Minimum Size Cleanup](%2803%29%20Ti64%20Minimum%20Size%20Cleanup.md) starts from stage 01, flags original face regions with at least 25 pixels, then creates a separate relabeled image dropping smaller regions to background. It compares original/retained region counts and 2D selected-area fractions, then computes retained-region moment invariants. The existing checkpoint and cleaned-region CSV under `Cleanup/` include the new measurements. The threshold is an example choice in uncalibrated pixel units; the shape results describe only survivors.
+[(03) Minimum Size Cleanup](%2803%29%20Ti64%20Minimum%20Size%20Cleanup.md) starts from stage 01, flags original face regions with at least 25 pixels, then creates a separate relabeled image dropping smaller regions to background. It compares original/retained region counts and 2D selected-area fractions, then computes retained-region moment invariants. The existing checkpoint and cleaned-region CSV under `Cleanup/` include the new measurements. The threshold is an example choice in uncalibrated pixel units; the shape results describe only survivors. A separate branch labels both brightness classes, explicitly removes dark components from a copy, and compares that bright-only partition with the prepared face regions. A copy of the prepared table supplies the ranking that retains at least 80% of bright area. Paired labels and feature tables preserve their respective source IDs; `Ti64_Area80Regions.csv` reports the ranked selection.
 
 The source image and earlier geometries and arrays remain present in every checkpoint. All three examples use the 596 × 596 crop in pixel coordinates and normalized brightness. No new physical measurement or material phase classification is implied.
 
@@ -42,4 +42,4 @@ The grayscale raster derives from `Images1/image_500.png` in [Arun Baskaran's pu
 
 The `.d3dpipeline` files are executable authority. Matching Markdown and JSON-compatible YAML explain their choices; `FilterCoverage.json` indexes the selected filters. `PythonGeneration.yaml` specifies temporary Python generation.
 
-All three examples passed the Windows Release in-memory CTest chain on 2026-10-13. The extended cleanup stage also passed 27 independent checks covering region membership, size cleanup, original/retained counts and area fractions, all retained-region moments and bounds, all 24 CSV columns, and preservation of 79 input datasets. GUI use, OOC, generated Python, and full application installation have not been verified. Scientific suitability for a new material or image remains a separate review.
+The companion sidecar records verification scope. Scientific suitability for a new material or image remains a separate review.

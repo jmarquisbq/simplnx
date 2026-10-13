@@ -79,7 +79,9 @@ remain small resident data.
 
 ## Example Pipelines
 
-None.
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
 
 ## Differences from DREAM3D 6.5.171
 
