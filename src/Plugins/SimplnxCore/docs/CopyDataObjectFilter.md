@@ -30,6 +30,8 @@ When *Copy to New Parent* is toggled on, a new parameter appears. This parameter
 
 ## Example Pipelines
 
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)

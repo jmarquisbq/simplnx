@@ -1,0 +1,515 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) T12 Orientation Interchange.d3dpipeline",
+  "markdown_file": "(02) T12 Orientation Interchange.md",
+  "title": "T12 Orientation Interchange",
+  "summary": "Preserve a measured EBSD checkpoint while preparing degree Euler angles, scalar-first quaternions, explicit round trips, a conjugate branch, and a masked phase-split StatsGenerator angle file.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy",
+    "Steel manufacturing"
+  ],
+  "use_cases": [
+    "Exchange Euler angles between radians and degrees without losing the source",
+    "Exchange quaternion component order with an explicitly matched consumer convention",
+    "Inspect conjugation separately from representation changes",
+    "Export indexed 2D EBSD orientations as phase-specific angle records"
+  ],
+  "keywords": [
+    "T12",
+    "EBSD",
+    "orientation interchange",
+    "Euler angles",
+    "radians",
+    "degrees",
+    "quaternion",
+    "XYZW",
+    "WXYZ",
+    "conjugate",
+    "round trip",
+    "StatsGenerator",
+    "ODF angle file",
+    "validity mask"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+      "role": "Complete corrected-frame preparation checkpoint written by (01) T12 Orientation Case Study."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
+      "role": "Unchanged preparation data plus six derived float32 arrays."
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
+      "role": "Space-delimited phase-1 indexed-pixel Euler angles in degrees, Weight 1, Sigma 1; source raster order."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "One fixed corrected-grid ROI: native first Euler component in radians and degrees with matched physical scales, and native quaternion x before and after conjugation.",
+    "target_traits": [
+      "1255 by 911 measured pixels; corrected geometry and every original preparation object retained",
+      "Float32 Bunge Euler angles in radians and scalar-last XYZW quaternions",
+      "IndexedPixels validity mask from Phases > 0 AND Error == 0",
+      "Derived unit and order round trips plus a separate conjugation branch",
+      "One phase-1 angle record per indexed pixel, equal weight, in source tuple order"
+    ],
+    "known_differences": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-orientation-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Convert Euler units while preserving original measurements",
+      "Prepare scalar-first quaternions for another program",
+      "Compare a quaternion with its conjugate and round trips",
+      "Export indexed phase-specific Euler angle records"
+    ],
+    "questions_to_ask": [
+      "Does the receiving program expect radians or degrees and Bunge Z-X-Z Euler angles?",
+      "Does it expect XYZW or WXYZ, and which active/passive and reference-frame conventions apply?",
+      "Should sampling weight pixels, grains, or a separately justified population?",
+      "Are phase labels and the IndexedPixels admission rule appropriate for the new input?"
+    ],
+    "constraints": [
+      "Run (01) T12 Orientation Case Study first from the same working folder; (02) reads its Preparation checkpoint.",
+      "Preserve the existing corrected sample frame, original arrays, geometry, phases, validity mask, and feature labels.",
+      "All three conversion filters process all cells without a mask; finite values at excluded pixels do not become valid measurements.",
+      "Angle conversion is in place; copy first. The round trip includes float32 rounding.",
+      "Component reorder alone preserves meaning only when the consumer changes its declared order with the data; it does not normalize, rotate, or apply crystal symmetry.",
+      "Conjugation requires XYZW input here. It produces [-x,-y,-z,w], the inverse only for unit quaternions; do not feed Quats_WXYZ to this filter or call this a frame correction.",
+      "The exporter reads original Euler radians and converts them to degrees. Do not give it the degree copy with convert_to_degrees=true; false labels the output radians.",
+      "The export base name gains _Phase_1 for this dataset. Use spaces (delimiter_index=2).",
+      "Equal weight per indexed 2D pixel is area-weighted sampling, not equal-grain or measured 3D-volume weighting. Sigma 1 is a fixed export setting, not measured uncertainty.",
+      "This workflow writes angle records only. It computes no ODF and performs no StatsGenerator run or synthetic microstructure generation.",
+      "The angle file lacks complete phase and crystal-symmetry metadata; configure and validate the downstream StatsGenerator phase separately.",
+      "The .d3dpipeline is executable authority. GUI, OOC, generated Python, and downstream import require separate validation."
+    ],
+    "related_pipelines": [
+      "(01) T12 Orientation Case Study.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "Scientific context and provenance of the measured steel map used by the predecessor case study; the interchange operations are a teaching extension, not a method claimed by this article.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative interoperability extension using the paper-linked map and existing preparation checkpoint. The article does not prescribe this export or these round trips. No paper numerical result, ODF, StatsGenerator run, or synthetic microstructure is reproduced."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current angle conversion, component reordering, scalar-last conjugation, phase-split masked export, file header, and tuple-order semantics."
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release predecessor-to-interchange preflight/execution passed on 2026-10-13. Independent checks passed for all 1,143,305 tuples and all 1,038,142 exported records: 23 predecessor datasets and geometry preserved; Euler units and round trip; exact component order, conjugation and both quaternion return paths; original quaternion norms and conjugate product; export headers, count, units, tuple order, weight and sigma. Two negative controls detected wrong order and missing angle conversion. This verifies representation arithmetic and file content, not materials interpretation. GUI, OOC, generated Python, downstream StatsGenerator import/run, ODF computation, and cross-platform behavior remain unverified.",
+  "dimensional_scope": "Measured 2D EBSD map. Geometry spacing [0.5,0.5,1] and origin [-627.5,0,-1] are inherited unchanged. Angle-file rows weight admitted pixels equally; no 3D ODF or grain-equal weighting is implied.",
+  "input_contract": {
+    "geometry": "T12",
+    "dimensions": [
+      1255,
+      911,
+      1
+    ],
+    "spacing": [
+      0.5,
+      0.5,
+      1.0
+    ],
+    "origin": [
+      -627.5,
+      0.0,
+      -1.0
+    ],
+    "arrays": [
+      {
+        "path": "T12/Cell Data/EulerAngles",
+        "dtype": "float32",
+        "components": 3,
+        "convention": "Bunge Z-X-Z, radians"
+      },
+      {
+        "path": "T12/Cell Data/Quats",
+        "dtype": "float32",
+        "components": 4,
+        "convention": "XYZW, scalar last"
+      },
+      {
+        "path": "T12/Cell Data/IndexedPixels",
+        "dtype": "uint8",
+        "components": 1,
+        "convention": "Nonzero selects Phases > 0 AND Error == 0"
+      },
+      {
+        "path": "T12/Cell Data/Phases",
+        "dtype": "int32",
+        "components": 1,
+        "convention": "Indexed population is phase 1"
+      }
+    ]
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the complete preparation checkpoint from (01) T12 Orientation Case Study; preserve its corrected geometry, measured arrays, mask, phases, and features.",
+      "input_paths": [
+        "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d"
+      ],
+      "output_paths": [
+        "T12"
+      ],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy only EulerAngles before the in-place unit conversion; retain the original radians array.",
+      "input_paths": [
+        "T12/Cell Data/EulerAngles"
+      ],
+      "output_paths": [
+        "T12/Cell Data/EulerAngles_Degrees"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "T12/Cell Data/EulerAngles"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_Degrees"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ChangeAngleRepresentationFilter",
+      "uuid": "565e06e2-6fd0-4232-89c4-ee672926d565",
+      "role": "Convert the copy from radians to degrees in place. All cells are processed; IndexedPixels still determines measurement validity.",
+      "input_paths": [
+        "T12/Cell Data/EulerAngles_Degrees"
+      ],
+      "output_paths": [
+        "T12/Cell Data/EulerAngles_Degrees"
+      ],
+      "key_parameters": {
+        "angles_array_path": "T12/Cell Data/EulerAngles_Degrees",
+        "conversion_type_index": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the degree array to retain both units while checking a return to radians.",
+      "input_paths": [
+        "T12/Cell Data/EulerAngles_Degrees"
+      ],
+      "output_paths": [
+        "T12/Cell Data/EulerAngles_Degrees_RadiansRoundTrip"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "T12/Cell Data/EulerAngles_Degrees"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_RadiansRoundTrip"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ChangeAngleRepresentationFilter",
+      "uuid": "565e06e2-6fd0-4232-89c4-ee672926d565",
+      "role": "Convert the second copy from degrees back to radians; expect float32 rounding, not a new orientation or frame.",
+      "input_paths": [
+        "T12/Cell Data/EulerAngles_Degrees_RadiansRoundTrip"
+      ],
+      "output_paths": [
+        "T12/Cell Data/EulerAngles_Degrees_RadiansRoundTrip"
+      ],
+      "key_parameters": {
+        "angles_array_path": "T12/Cell Data/EulerAngles_Degrees_RadiansRoundTrip",
+        "conversion_type_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ConvertQuaternionFilter",
+      "uuid": "d6b51fb2-279d-41cd-ad1a-c7a5a3f4b1cc",
+      "role": "Reorder scalar-last XYZW quaternions to scalar-first WXYZ for a consumer that explicitly expects that order; retain the original.",
+      "input_paths": [
+        "T12/Cell Data/Quats"
+      ],
+      "output_paths": [
+        "T12/Cell Data/Quats_WXYZ"
+      ],
+      "key_parameters": {
+        "input_data_array_path": "T12/Cell Data/Quats",
+        "output_data_array_name": "Quats_WXYZ",
+        "conversion_index": 0,
+        "delete_original_data": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ConvertQuaternionFilter",
+      "uuid": "d6b51fb2-279d-41cd-ad1a-c7a5a3f4b1cc",
+      "role": "Reorder WXYZ back to XYZW; the result should match the original components exactly. No normalization, rotation, or symmetry operation occurs.",
+      "input_paths": [
+        "T12/Cell Data/Quats_WXYZ"
+      ],
+      "output_paths": [
+        "T12/Cell Data/Quats_XYZW_RoundTrip"
+      ],
+      "key_parameters": {
+        "input_data_array_path": "T12/Cell Data/Quats_WXYZ",
+        "output_data_array_name": "Quats_XYZW_RoundTrip",
+        "conversion_index": 1,
+        "delete_original_data": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ComputeQuaternionConjugateFilter",
+      "uuid": "e1653c62-3894-4b95-8449-605400038110",
+      "role": "Conjugate the original scalar-last quaternion to [-x,-y,-z,w]. This represents the inverse only for a unit quaternion; it is not a frame correction.",
+      "input_paths": [
+        "T12/Cell Data/Quats"
+      ],
+      "output_paths": [
+        "T12/Cell Data/Quats_Conjugate_XYZW"
+      ],
+      "key_parameters": {
+        "input_quats_data_path": "T12/Cell Data/Quats",
+        "output_data_array_name": "Quats_Conjugate_XYZW",
+        "delete_original_data": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "ComputeQuaternionConjugateFilter",
+      "uuid": "e1653c62-3894-4b95-8449-605400038110",
+      "role": "Conjugate the scalar-last result again; expect exact original components while retaining the inverse branch for inspection.",
+      "input_paths": [
+        "T12/Cell Data/Quats_Conjugate_XYZW"
+      ],
+      "output_paths": [
+        "T12/Cell Data/Quats_DoubleConjugate_XYZW"
+      ],
+      "key_parameters": {
+        "input_quats_data_path": "T12/Cell Data/Quats_Conjugate_XYZW",
+        "output_data_array_name": "Quats_DoubleConjugate_XYZW",
+        "delete_original_data": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "WriteStatsGenOdfAngleFileFilter",
+      "uuid": "aa6d399b-715e-44f1-9902-f1bd18faf1c5",
+      "role": "Export original radians as degrees, keeping only indexed pixels and splitting by phase. T12 produces T12_IndexedAngles_Phase_1.txt in source tuple order, with weight 1 and sigma 1. This writes an angle file, not an ODF.",
+      "input_paths": [
+        "T12/Cell Data/EulerAngles",
+        "T12/Cell Data/Phases",
+        "T12/Cell Data/IndexedPixels"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt"
+      ],
+      "key_parameters": {
+        "cell_euler_angles_array_path": "T12/Cell Data/EulerAngles",
+        "cell_phases_array_path": "T12/Cell Data/Phases",
+        "use_mask": true,
+        "mask_array_path": "T12/Cell Data/IndexedPixels",
+        "convert_to_degrees": true,
+        "delimiter_index": 2,
+        "weight": 1.0,
+        "sigma": 1,
+        "output_file": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles.txt"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save every original preparation object plus the six derived arrays with explicit units or component order in their names.",
+      "input_paths": [
+        "T12"
+      ],
+      "output_paths": [
+        "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d"
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "reference_results": {
+    "geometry": {
+      "dimensions": [
+        1255,
+        911,
+        1
+      ],
+      "spacing": [
+        0.5,
+        0.5,
+        1.0
+      ],
+      "origin": [
+        -627.5,
+        0.0,
+        -1.0
+      ]
+    },
+    "all_tuples_checked": 1143305,
+    "indexed_phase_one_export_rows": 1038142,
+    "preserved_predecessor_datasets": 23,
+    "independent_checks_passed": 28,
+    "degree_conversion_max_abs_error_deg": 1.9433053580542037e-05,
+    "euler_round_trip_max_abs_error_rad": 4.76837158203125e-07,
+    "quaternion_order_permutation_exact": true,
+    "quaternion_order_round_trip_bitwise_exact": true,
+    "quaternion_conjugate_exact": true,
+    "quaternion_double_conjugation_bitwise_exact": true,
+    "quaternion_max_norm_error": 1.0108087633575735e-07,
+    "quaternion_conjugate_product_vector_max": 0.0,
+    "quaternion_conjugate_product_scalar_max_error_vs_original_norm_squared": 0.0,
+    "export_max_abs_error_vs_float64_degrees": 1.9437584853676526e-05,
+    "export_max_abs_error_vs_native_degrees": 4.993209845594038e-09,
+    "export_fields": [
+      "Euler0",
+      "Euler1",
+      "Euler2",
+      "Weight",
+      "Sigma"
+    ],
+    "export_units": "degrees",
+    "export_delimiter": "space",
+    "weight": 1.0,
+    "sigma": 1,
+    "negative_controls": [
+      "misread WXYZ fails order check",
+      "unconverted radians fail degree check"
+    ]
+  },
+  "reference_artifacts": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+      "role": "Native preparation checkpoint consumed by the final verified run",
+      "sha256": "4b53af72c9bd7f7380eaa51178ed4d0267a579bf03174fff831224a999cf1e13"
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
+      "role": "Final native interchange output used for every numerical check and the figure",
+      "sha256": "670da6406bdc76db5885fde140ea3b6eba76680fa903a889f444d097f57b4785"
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
+      "role": "Final native phase-1 angle list checked row by row",
+      "sha256": "23484e8b65c2d803cdec4a7ba8422df992899a2fe4a7eac6d015c655686dd071"
+    }
+  ],
+  "figure": {
+    "file": "T12OrientationInterchange.png",
+    "sha256": "3a5a4fdf1def38bee5e30aaa64993109b6ab7ced95d17804396678a0d6ee6acc",
+    "native_source_sha256": "670da6406bdc76db5885fde140ea3b6eba76680fa903a889f444d097f57b4785",
+    "method": "Display native saved arrays directly; no conversion or conjugation output is computed by the plotting script. Metric annotations come from the independent all-tuple oracle.",
+    "roi_corrected_grid_indices": {
+      "x": [
+        400,
+        800
+      ],
+      "y": [
+        250,
+        650
+      ],
+      "z": 0,
+      "upper_bounds": "exclusive"
+    },
+    "arrays": [
+      "T12/Cell Data/EulerAngles",
+      "T12/Cell Data/EulerAngles_Degrees",
+      "T12/Cell Data/Quats",
+      "T12/Cell Data/Quats_Conjugate_XYZW"
+    ],
+    "components": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "mask": "T12/Cell Data/IndexedPixels",
+    "display_ranges": [
+      "0 to 2*pi radians",
+      "0 to 360 degrees",
+      "-1 to 1 dimensionless",
+      "-1 to 1 dimensionless"
+    ],
+    "excluded_pixels": "Gray, distinct from valid zero",
+    "coordinates": "Derived from unchanged corrected geometry origin and spacing; acquisition X/Y arrays are not plotted."
+  }
+}

@@ -46,6 +46,8 @@ None — this filter writes whatever currently exists in the **DataStructure** t
 
 ## Example Pipelines
 
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)

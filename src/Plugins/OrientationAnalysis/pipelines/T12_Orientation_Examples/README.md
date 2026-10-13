@@ -1,6 +1,11 @@
-# T12 orientation case study
+# T12 orientation examples
 
-Run one pipeline to prepare a measured steel EBSD map, compare local and grain-reference orientation variation, and test KAM neighborhood choices. The [combined guide](%2801%29%20T12%20Orientation%20Case%20Study.md) explains the choices, outputs, paper differences, and extension pitfalls. Read its **Before adapting** notice before changing inputs.
+These two examples answer distinct questions using one measured steel EBSD map. Read each guide's **Before adapting** notice before changing inputs.
+
+| Order | Task |
+|---|---|
+| [(01) T12 Orientation Case Study](%2801%29%20T12%20Orientation%20Case%20Study.md) | Prepare the map, compare local and grain-reference orientation variation, and test KAM neighborhood choices in one combined pipeline. |
+| [(02) T12 Orientation Interchange](%2802%29%20T12%20Orientation%20Interchange.md) | Read the preparation checkpoint; preserve source measurements while changing Euler units and quaternion order, inspecting conjugation, and exporting indexed angle records. |
 
 ## Get the data and run
 
@@ -16,13 +21,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Data extraction failed.' }
 Set-Location $work
 & $runner --execute (Join-Path $examples '(01) T12 Orientation Case Study.d3dpipeline')
 if ($LASTEXITCODE -ne 0) { throw 'Case study failed; inspect the runner output.' }
+& $runner --execute (Join-Path $examples '(02) T12 Orientation Interchange.d3dpipeline')
+if ($LASTEXITCODE -ne 0) { throw 'Interchange failed; inspect the runner output.' }
 ```
 
-Relative paths resolve from the CLI working folder. In the GUI, open the pipeline and set absolute file paths if the launch location does not resolve `Data/...`. The single run writes preparation, metrics, and complete neighborhood checkpoints under `Data/Output/T12_Orientation_Examples/`, retaining the paths used by the separate reporting and import examples. Rerun the case study to regenerate their inputs after a processing change.
+Relative paths resolve from the CLI working folder. In the GUI, open the pipeline and set absolute file paths if the launch location does not resolve `Data/...`. Example (01) writes preparation, metrics, and complete neighborhood checkpoints under `Data/Output/T12_Orientation_Examples/`, retaining the paths used by the separate reporting and import examples. Example (02) reads `Preparation/T12_Orientations.dream3d` and writes `Interchange/T12_OrientationInterchange.dream3d` plus `Interchange/T12_IndexedAngles_Phase_1.txt`. The configured text base name gains the phase suffix. Rerun (01) before its dependents after a processing change.
 
 ## Scientific basis and scope
 
-[Allain-Bonasso et al. (2012)](https://doi.org/10.1016/j.msea.2012.03.068) motivates this **illustrative** single-map workflow. It applies the default Oxford/HKL CTF sample-frame correction, preserves measured orientations, and explicitly compares NX neighborhood definitions. It does not reproduce the paper's noise reduction, four-neighbor KAM, grain tracking, or deformation results. The archive's release notice attributes public distribution permission to Francis Wagner and names no standard license. Raw data and the article are not included here.
+[Allain-Bonasso et al. (2012)](https://doi.org/10.1016/j.msea.2012.03.068) motivates the **illustrative** single-map case study. It applies the default Oxford/HKL CTF sample-frame correction, preserves measured orientations, and explicitly compares NX neighborhood definitions. It does not reproduce the paper's noise reduction, four-neighbor KAM, grain tracking, or deformation results. Interchange is a separate teaching extension that preserves this checkpoint; it computes no ODF and claims no article result. The archive's release notice attributes public distribution permission to Francis Wagner and names no standard license. Raw data and the article are not included here.
 
 The `.d3dpipeline` is executable authority; its Markdown and JSON-compatible YAML are human and structured companions. `FilterCoverage.json` lists every pipeline step. `PythonGeneration.yaml` describes temporary Python generation, which remains unverified. The older `EBSD_File_Processing/aptr12_Analysis.d3dpipeline` is preserved for comparison.
 

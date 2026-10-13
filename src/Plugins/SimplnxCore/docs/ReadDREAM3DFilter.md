@@ -28,6 +28,8 @@ None — this filter reads directly from a `.dream3d` file on disk.
 
 ## Example Pipelines
 
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `Ti64_Image_Cleanup_Examples/(02) Ti64 Smoothing Comparison.d3dpipeline` (ImageProcessing)

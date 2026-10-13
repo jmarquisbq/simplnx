@@ -72,6 +72,10 @@ The *Delimiter* parameter provides the following choices:
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 + Export Small IN100 ODF Data (StatsGenerator)
 
 ## License & Copyright

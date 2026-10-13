@@ -1,4 +1,4 @@
-# Run the consolidated orientation case study from the public CTF input.
+# Run the case study and its distinct interchange extension from the public CTF input.
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/RunExamplePipelineChain.cmake")
 foreach(required_var NXRUNNER RAW_DATA_FILE EXAMPLE_DIR WORK_DIR TEST_BINARY_ROOT)
   if(NOT DEFINED ${required_var} OR "${${required_var}}" STREQUAL "")
@@ -11,8 +11,13 @@ foreach(required_path "${NXRUNNER}" "${RAW_DATA_FILE}")
   endif()
 endforeach()
 set(OUTPUT_CATEGORY "T12_Orientation_Examples")
-set(pipeline_stems "(01) T12 Orientation Case Study")
-validate_companion("${EXAMPLE_DIR}/${pipeline_stems}.d3dpipeline")
+set(pipeline_stems
+  "(01) T12 Orientation Case Study"
+  "(02) T12 Orientation Interchange"
+)
+foreach(stem IN LISTS pipeline_stems)
+  validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")
+endforeach()
 prepare_example_workspace()
 file(REAL_PATH "${WORK_DIR}" work_root)
 set(raw_stage "${work_root}/Data/T12-MAI-2010")

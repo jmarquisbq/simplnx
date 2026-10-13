@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Every step of the T12 orientation case study, not all OrientationAnalysis filters. Step indices are zero-based.",
+  "scope": "Every step of the two distinct T12 orientation examples: scientific case study and orientation interchange. Step indices are zero-based; this is not all OrientationAnalysis filters.",
   "filters": [
     {
       "filter": "ReadCtfDataFilter",
@@ -162,6 +162,83 @@
       "pipeline": "(01) T12 Orientation Case Study.d3dpipeline",
       "step": 22,
       "purpose": "Save the complete case study: preparation arrays, local and grain-reference metrics, feature spread, all three KAM maps, and all six masked summaries."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete preparation checkpoint from (01) T12 Orientation Case Study; preserve its corrected geometry, measured arrays, mask, phases, and features."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 1,
+      "purpose": "Copy only EulerAngles before the in-place unit conversion; retain the original radians array."
+    },
+    {
+      "filter": "ChangeAngleRepresentationFilter",
+      "uuid": "565e06e2-6fd0-4232-89c4-ee672926d565",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 2,
+      "purpose": "Convert the copy from radians to degrees in place. All cells are processed; IndexedPixels still determines measurement validity."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 3,
+      "purpose": "Copy the degree array to retain both units while checking a return to radians."
+    },
+    {
+      "filter": "ChangeAngleRepresentationFilter",
+      "uuid": "565e06e2-6fd0-4232-89c4-ee672926d565",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 4,
+      "purpose": "Convert the second copy from degrees back to radians; expect float32 rounding, not a new orientation or frame."
+    },
+    {
+      "filter": "ConvertQuaternionFilter",
+      "uuid": "d6b51fb2-279d-41cd-ad1a-c7a5a3f4b1cc",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 5,
+      "purpose": "Reorder scalar-last XYZW quaternions to scalar-first WXYZ for a consumer that explicitly expects that order; retain the original."
+    },
+    {
+      "filter": "ConvertQuaternionFilter",
+      "uuid": "d6b51fb2-279d-41cd-ad1a-c7a5a3f4b1cc",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 6,
+      "purpose": "Reorder WXYZ back to XYZW; the result should match the original components exactly. No normalization, rotation, or symmetry operation occurs."
+    },
+    {
+      "filter": "ComputeQuaternionConjugateFilter",
+      "uuid": "e1653c62-3894-4b95-8449-605400038110",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 7,
+      "purpose": "Conjugate the original scalar-last quaternion to [-x,-y,-z,w]. This represents the inverse only for a unit quaternion; it is not a frame correction."
+    },
+    {
+      "filter": "ComputeQuaternionConjugateFilter",
+      "uuid": "e1653c62-3894-4b95-8449-605400038110",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 8,
+      "purpose": "Conjugate the scalar-last result again; expect exact original components while retaining the inverse branch for inspection."
+    },
+    {
+      "filter": "WriteStatsGenOdfAngleFileFilter",
+      "uuid": "aa6d399b-715e-44f1-9902-f1bd18faf1c5",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 9,
+      "purpose": "Export original radians as degrees, keeping only indexed pixels and splitting by phase. T12 produces T12_IndexedAngles_Phase_1.txt in source tuple order, with weight 1 and sigma 1. This writes an angle file, not an ODF."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 10,
+      "purpose": "Save every original preparation object plus the six derived arrays with explicit units or component order in their names."
     }
   ]
 }
