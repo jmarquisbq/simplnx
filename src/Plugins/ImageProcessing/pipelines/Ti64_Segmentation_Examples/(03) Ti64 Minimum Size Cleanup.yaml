@@ -3,7 +3,7 @@
   "pipeline_file": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
   "markdown_file": "(03) Ti64 Minimum Size Cleanup.md",
   "title": "Ti64 Minimum Size Cleanup",
-  "summary": "Connected-component labeling keeps every selected patch, including a single bright pixel. For a visualization or exploratory size distribution, one may want to separate larger patches from small specks. This stage demonstrates two related operations at a threshold of 25 pixels: a report-only flag on original region rows, and a new image in which smaller regions become background. The threshold is pedagogic and is not a physical detection limit or a validated noise cutoff.",
+  "summary": "Compare a report-only 25-pixel region cutoff with dropping small connected brightness patches to background. Measure original and retained region counts and 2D selected-area fractions, then describe retained shapes with circle-normalized moment invariants. Preserve original labels, masks, intensity measurements and output filenames.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -12,14 +12,23 @@
     "Microscopy"
   ],
   "use_cases": [
-    "Compare connected bright regions from a measured image without assigning phase or grain identity"
+    "Compare the effect of size selection on region count and selected area in a measured 2D image",
+    "Describe retained connected brightness patches using pixel-integrated moment invariants",
+    "Choose a report-only region flag or a separately relabeled image without assigning grain or material-phase identity"
   ],
   "keywords": [
     "Ti-6Al-4V",
     "microstructure",
     "connected components",
     "pixel labels",
-    "uncalibrated pixels"
+    "uncalibrated pixels",
+    "minimum size selection",
+    "region counts",
+    "selected area fraction",
+    "moment invariants",
+    "Omega1",
+    "Omega2",
+    "shape descriptors"
   ],
   "inputs": [
     {
@@ -30,11 +39,11 @@
   "outputs": [
     {
       "path": "Data/Output/Ti64_Segmentation_Examples/Cleanup/Ti64_MinimumSizeCleanup.csv",
-      "role": "Saved segmented image and report"
+      "role": "All positive cleaned feature rows: existing intensity statistics plus selection class, bounds, Omega1, Omega2 and nine central moments"
     },
     {
       "path": "Data/Output/Ti64_Segmentation_Examples/Cleanup/Ti64_MinimumSizeCleanup.dream3d",
-      "role": "Saved segmented image and report"
+      "role": "Complete preserved input checkpoint plus cleanup arrays, original/retained selection-class summaries and retained-region shape descriptors"
     }
   ],
   "input_data_strategy": {
@@ -66,8 +75,25 @@
       "(02) Ti64 Connectivity Comparison.d3dpipeline"
     ],
     "constraints": [
-      "Run documented predecessors first.",
-      "Use uncalibrated pixel units and no material identity claim."
+      "Run cleanup stages 01, 02 and 03, then segmentation stage 01. Segmentation stage 02 is independent.",
+      "Use uncalibrated pixel units; connected brightness patches have no grain or material-phase identity.",
+      "Pair FaceRegionIds with FaceRegionData and LargeRegionIds with LargeRegionData; numeric IDs are not interchangeable.",
+      "Selection classes are int32 0/1 with exactly two summary rows and must be constant within each feature.",
+      "CreateFeatureArrayFromElementArray copies a within-feature constant; use ComputeArrayStatistics for varying intensity.",
+      "Counts exclude feature row zero. Fractions include all 355216 pixels, with row zero representing the unselected complement.",
+      "Selected-area fractions on this one-slice image are not estimates of material volume fractions.",
+      "Compute moments only for the retained dense positive IDs in a single XY slice; original singleton regions are unsafe.",
+      "Exclude background row zero and check finite moment values before interpreting retained shapes.",
+      "Count and area snapshots show a selection effect, not before/after shape evolution."
+    ],
+    "user_intents": [
+      "Compare how a minimum pixel count changes region number and selected area",
+      "Measure retained 2D brightness-patch shapes"
+    ],
+    "questions": [
+      "Should small regions be flagged in a report or removed from a new label image?",
+      "How much selected area is lost compared with the number of regions?",
+      "Which retained patches have contrasting Omega1 and Omega2 values?"
     ]
   },
   "figure_file": "Ti64MinimumSizeCleanup.png",
@@ -95,6 +121,20 @@
         "license": "MIT license in source repository; see SourceDataLicense.txt.",
         "reproduction_notes": "Uses a paper-linked image and independently chosen brightness connectivity and size parameters."
       }
+    },
+    {
+      "scope": "filter_algorithm",
+      "title": "On the use of 2-D moment invariants for the automated classification of particle shapes",
+      "authors": [
+        "J. P. MacSleyne",
+        "J. P. Simmons",
+        "M. De Graef"
+      ],
+      "year": 2008,
+      "journal": "Acta Materialia",
+      "doi": "10.1016/j.actamat.2007.09.039",
+      "url": "https://doi.org/10.1016/j.actamat.2007.09.039",
+      "role": "Mathematical basis for 2D moment shape descriptors; this example does not reproduce the paper microstructures or classification results."
     }
   ],
   "steps": [
@@ -244,6 +284,229 @@
       "index": 5
     },
     {
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "filter": "CreateAttributeMatrixFilter",
+      "parameters_version": 1,
+      "role": "Create two selection-class rows: zero is the unselected complement and one is selected bright pixels; these are not material phases.",
+      "key_parameters": {
+        "data_object_path": "Ti64/SelectionClassData",
+        "tuple_dimensions": [
+          [
+            2
+          ]
+        ]
+      },
+      "index": 6,
+      "input_paths": [],
+      "output_paths": [
+        "Ti64/SelectionClassData"
+      ]
+    },
+    {
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "filter": "ConvertDataFilter",
+      "parameters_version": 1,
+      "role": "Copy the original binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask.",
+      "key_parameters": {
+        "scalar_type_index": 4,
+        "array_to_convert_path": "Ti64/Cell Data/BrightOriginal",
+        "delete_original_array": false,
+        "converted_array_name": "OriginalSelectionClass"
+      },
+      "index": 7,
+      "input_paths": [
+        "Ti64/Cell Data/BrightOriginal"
+      ],
+      "output_paths": [
+        "Ti64/Cell Data/OriginalSelectionClass"
+      ]
+    },
+    {
+      "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7",
+      "filter": "CreateFeatureArrayFromElementArrayFilter",
+      "parameters_version": 1,
+      "role": "Copy the uniform selection class within each original region to its own feature table; this is not intensity aggregation.",
+      "key_parameters": {
+        "selected_cell_array_path": "Ti64/Cell Data/OriginalSelectionClass",
+        "feature_ids_path": "Ti64/Cell Data/FaceRegionIds",
+        "cell_feature_attribute_matrix_path": "Ti64/FaceRegionData",
+        "created_array_name": "SelectionClass"
+      },
+      "index": 8,
+      "input_paths": [
+        "Ti64/Cell Data/OriginalSelectionClass",
+        "Ti64/Cell Data/FaceRegionIds",
+        "Ti64/FaceRegionData"
+      ],
+      "output_paths": [
+        "Ti64/FaceRegionData/SelectionClass"
+      ]
+    },
+    {
+      "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8",
+      "filter": "ComputeNumFeaturesFilter",
+      "parameters_version": 1,
+      "role": "Count positive original region IDs by selection class; feature row zero is excluded.",
+      "key_parameters": {
+        "feature_phases_array_path": "Ti64/FaceRegionData/SelectionClass",
+        "ensemble_attribute_matrix_path": "Ti64/SelectionClassData",
+        "num_features_array_name": "OriginalRegionCount"
+      },
+      "index": 9,
+      "input_paths": [
+        "Ti64/FaceRegionData/SelectionClass",
+        "Ti64/SelectionClassData"
+      ],
+      "output_paths": [
+        "Ti64/SelectionClassData/OriginalRegionCount"
+      ]
+    },
+    {
+      "uuid": "340b3433-193a-4287-a7d2-794e1bce061b",
+      "filter": "ComputeVolumeFractionsFilter",
+      "parameters_version": 1,
+      "role": "Count original selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction.",
+      "key_parameters": {
+        "cell_phases_array_path": "Ti64/Cell Data/OriginalSelectionClass",
+        "cell_ensemble_attribute_matrix_path": "Ti64/SelectionClassData",
+        "vol_fractions_array_name": "OriginalAreaFraction"
+      },
+      "index": 10,
+      "input_paths": [
+        "Ti64/Cell Data/OriginalSelectionClass",
+        "Ti64/SelectionClassData"
+      ],
+      "output_paths": [
+        "Ti64/SelectionClassData/OriginalAreaFraction"
+      ]
+    },
+    {
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "filter": "ConvertDataFilter",
+      "parameters_version": 1,
+      "role": "Copy the retained binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask.",
+      "key_parameters": {
+        "scalar_type_index": 4,
+        "array_to_convert_path": "Ti64/Cell Data/LargeRegionMask",
+        "delete_original_array": false,
+        "converted_array_name": "RetainedSelectionClass"
+      },
+      "index": 11,
+      "input_paths": [
+        "Ti64/Cell Data/LargeRegionMask"
+      ],
+      "output_paths": [
+        "Ti64/Cell Data/RetainedSelectionClass"
+      ]
+    },
+    {
+      "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7",
+      "filter": "CreateFeatureArrayFromElementArrayFilter",
+      "parameters_version": 1,
+      "role": "Copy the uniform selection class within each retained region to its own feature table; this is not intensity aggregation.",
+      "key_parameters": {
+        "selected_cell_array_path": "Ti64/Cell Data/RetainedSelectionClass",
+        "feature_ids_path": "Ti64/Cell Data/LargeRegionIds",
+        "cell_feature_attribute_matrix_path": "Ti64/LargeRegionData",
+        "created_array_name": "SelectionClass"
+      },
+      "index": 12,
+      "input_paths": [
+        "Ti64/Cell Data/RetainedSelectionClass",
+        "Ti64/Cell Data/LargeRegionIds",
+        "Ti64/LargeRegionData"
+      ],
+      "output_paths": [
+        "Ti64/LargeRegionData/SelectionClass"
+      ]
+    },
+    {
+      "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8",
+      "filter": "ComputeNumFeaturesFilter",
+      "parameters_version": 1,
+      "role": "Count positive retained region IDs by selection class; feature row zero is excluded.",
+      "key_parameters": {
+        "feature_phases_array_path": "Ti64/LargeRegionData/SelectionClass",
+        "ensemble_attribute_matrix_path": "Ti64/SelectionClassData",
+        "num_features_array_name": "RetainedRegionCount"
+      },
+      "index": 13,
+      "input_paths": [
+        "Ti64/LargeRegionData/SelectionClass",
+        "Ti64/SelectionClassData"
+      ],
+      "output_paths": [
+        "Ti64/SelectionClassData/RetainedRegionCount"
+      ]
+    },
+    {
+      "uuid": "340b3433-193a-4287-a7d2-794e1bce061b",
+      "filter": "ComputeVolumeFractionsFilter",
+      "parameters_version": 1,
+      "role": "Count retained selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction.",
+      "key_parameters": {
+        "cell_phases_array_path": "Ti64/Cell Data/RetainedSelectionClass",
+        "cell_ensemble_attribute_matrix_path": "Ti64/SelectionClassData",
+        "vol_fractions_array_name": "RetainedAreaFraction"
+      },
+      "index": 14,
+      "input_paths": [
+        "Ti64/Cell Data/RetainedSelectionClass",
+        "Ti64/SelectionClassData"
+      ],
+      "output_paths": [
+        "Ti64/SelectionClassData/RetainedAreaFraction"
+      ]
+    },
+    {
+      "uuid": "bf947c45-8610-44c9-917a-405e88f73fe7",
+      "filter": "ComputeFeatureRectFilter",
+      "parameters_version": 1,
+      "role": "Bound each retained region in inclusive pixel indices for the 2D moment calculation.",
+      "key_parameters": {
+        "feature_ids_array_path": "Ti64/Cell Data/LargeRegionIds",
+        "feature_data_attribute_matrix_path": "Ti64/LargeRegionData",
+        "feature_rect_array_name": "FeatureRect"
+      },
+      "index": 15,
+      "input_paths": [
+        "Ti64/Cell Data/LargeRegionIds",
+        "Ti64/LargeRegionData"
+      ],
+      "output_paths": [
+        "Ti64/LargeRegionData/FeatureRect"
+      ]
+    },
+    {
+      "uuid": "650aa454-130c-406e-a9df-80b99f89e03c",
+      "filter": "ComputeMomentInvariants2DFilter",
+      "parameters_version": 1,
+      "role": "Describe the retained brightness-patch shapes with normalized Omega1, Omega2 and saved central moments; original singleton regions are intentionally not measured.",
+      "key_parameters": {
+        "input_image_geometry_path": "Ti64",
+        "feature_attribute_matrix_path": "Ti64/LargeRegionData",
+        "feature_ids_array_path": "Ti64/Cell Data/LargeRegionIds",
+        "feature_rect_array_path": "Ti64/LargeRegionData/FeatureRect",
+        "normalize_moment_invariants": true,
+        "omega1_array_name": "Omega1",
+        "omega2_array_name": "Omega2",
+        "save_central_moments": true,
+        "central_moments_array_name": "CentralMoments"
+      },
+      "index": 16,
+      "input_paths": [
+        "Ti64",
+        "Ti64/Cell Data/LargeRegionIds",
+        "Ti64/LargeRegionData/FeatureRect",
+        "Ti64/LargeRegionData"
+      ],
+      "output_paths": [
+        "Ti64/LargeRegionData/Omega1",
+        "Ti64/LargeRegionData/Omega2",
+        "Ti64/LargeRegionData/CentralMoments"
+      ]
+    },
+    {
       "uuid": "d734293f-3017-4699-b458-c05aca078b96",
       "filter": "WriteFeatureDataCSVFilter",
       "parameters_version": 1,
@@ -255,7 +518,7 @@
         "delimiter_index": 2,
         "cell_feature_attribute_matrix_path": "Ti64/LargeRegionData"
       },
-      "index": 6
+      "index": 17
     },
     {
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
@@ -268,11 +531,11 @@
         "use_compression": true,
         "compression_level": 5
       },
-      "index": 7
+      "index": 18
     }
   ],
-  "last_verified": "2026-10-08",
-  "verification_status": "Windows in-memory preflight/execution and independent region-membership, grouped-statistics, CSV, and input-preservation checks passed. GUI, OOC, generated Python and full application installation remain unverified.",
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows Release in-memory CTest chain passed 1/1. Independent output audit passed 27/27 checks, including all 79 preserved input datasets, region membership and relabeling, two-class counts and fractions, all 266 retained bounds and pixel-integrated central moments, normalized invariants, and all 24 CSV columns. GUI, OOC, generated Python and full application installation remain unverified.",
   "reference_results": {
     "minimum_pixels": 25,
     "retained_regions": 266,
@@ -280,6 +543,55 @@
     "removed_regions": 900,
     "removed_pixels": 4462,
     "largest_original_id": 47,
-    "largest_cleaned_id": 1
-  }
+    "largest_cleaned_id": 1,
+    "original_regions": 1166,
+    "original_pixels": 35806,
+    "crop_pixels": 355216,
+    "original_region_count_by_class": [
+      0,
+      1166
+    ],
+    "retained_region_count_by_class": [
+      0,
+      266
+    ],
+    "original_area_fraction_by_class": [
+      0.899199366569519,
+      0.10080064088106155
+    ],
+    "retained_area_fraction_by_class": [
+      0.9117607474327087,
+      0.08823926746845245
+    ],
+    "retained_omega1_range": [
+      0.04418056830763817,
+      0.9238792657852173
+    ],
+    "retained_omega2_range": [
+      0.01463644951581955,
+      0.923261821269989
+    ],
+    "figure_retained_patches": [
+      {
+        "cleaned_id": 190,
+        "pixels": 42,
+        "omega1": 0.9238792657852173,
+        "omega2": 0.8711979389190674
+      },
+      {
+        "cleaned_id": 121,
+        "pixels": 80,
+        "omega1": 0.21111983060836792,
+        "omega2": 0.8199115991592407
+      },
+      {
+        "cleaned_id": 1,
+        "pixels": 873,
+        "omega1": 0.08716746419668198,
+        "omega2": 0.01463644951581955
+      }
+    ],
+    "native_output_sha256": "ddd4fda1bbee31d12747533255a125d233445f2ef0b9466586036c9b764fa097"
+  },
+  "figure_description": "Native original/retained label maps keep original colors for comparison, while count and selected-area bars show selection effects. The scatter and three retained patches show measured shape contrasts using cleaned IDs and separate local pixel scales."
 }

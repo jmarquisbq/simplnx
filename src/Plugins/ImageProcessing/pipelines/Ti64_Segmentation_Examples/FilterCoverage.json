@@ -129,17 +129,94 @@
       "purpose": "Group normalized input intensity by integer region label and count only selected foreground pixels."
     },
     {
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 6,
+      "purpose": "Create two selection-class rows: zero is the unselected complement and one is selected bright pixels; these are not material phases."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 7,
+      "purpose": "Copy the original binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask."
+    },
+    {
+      "filter": "CreateFeatureArrayFromElementArrayFilter",
+      "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 8,
+      "purpose": "Copy the uniform selection class within each original region to its own feature table; this is not intensity aggregation."
+    },
+    {
+      "filter": "ComputeNumFeaturesFilter",
+      "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 9,
+      "purpose": "Count positive original region IDs by selection class; feature row zero is excluded."
+    },
+    {
+      "filter": "ComputeVolumeFractionsFilter",
+      "uuid": "340b3433-193a-4287-a7d2-794e1bce061b",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 10,
+      "purpose": "Count original selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 11,
+      "purpose": "Copy the retained binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask."
+    },
+    {
+      "filter": "CreateFeatureArrayFromElementArrayFilter",
+      "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 12,
+      "purpose": "Copy the uniform selection class within each retained region to its own feature table; this is not intensity aggregation."
+    },
+    {
+      "filter": "ComputeNumFeaturesFilter",
+      "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 13,
+      "purpose": "Count positive retained region IDs by selection class; feature row zero is excluded."
+    },
+    {
+      "filter": "ComputeVolumeFractionsFilter",
+      "uuid": "340b3433-193a-4287-a7d2-794e1bce061b",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 14,
+      "purpose": "Count retained selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction."
+    },
+    {
+      "filter": "ComputeFeatureRectFilter",
+      "uuid": "bf947c45-8610-44c9-917a-405e88f73fe7",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 15,
+      "purpose": "Bound each retained region in inclusive pixel indices for the 2D moment calculation."
+    },
+    {
+      "filter": "ComputeMomentInvariants2DFilter",
+      "uuid": "650aa454-130c-406e-a9df-80b99f89e03c",
+      "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
+      "step": 16,
+      "purpose": "Describe the retained brightness-patch shapes with normalized Omega1, Omega2 and saved central moments; original singleton regions are intentionally not measured."
+    },
+    {
       "filter": "WriteFeatureDataCSVFilter",
       "uuid": "d734293f-3017-4699-b458-c05aca078b96",
       "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
-      "step": 6,
+      "step": 17,
       "purpose": "Export a normal CSV header and all positive feature ID rows; skip background row zero."
     },
     {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(03) Ti64 Minimum Size Cleanup.d3dpipeline",
-      "step": 7,
+      "step": 18,
       "purpose": "Save all predecessor geometries and arrays together with new labels and measurements."
     }
   ]

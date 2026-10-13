@@ -324,6 +324,299 @@
     },
     {
       "args": {
+        "data_object_path": {
+          "value": "Ti64/SelectionClassData",
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              2
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create two selection-class rows: zero is the unselected complement and one is selected bright pixels; these are not material phases.",
+      "filter": {
+        "name": "nx::core::CreateAttributeMatrixFilter",
+        "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "scalar_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "array_to_convert_path": {
+          "value": "Ti64/Cell Data/BrightOriginal",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "converted_array_name": {
+          "value": "OriginalSelectionClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the original binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask.",
+      "filter": {
+        "name": "nx::core::ConvertDataFilter",
+        "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_cell_array_path": {
+          "value": "Ti64/Cell Data/OriginalSelectionClass",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Ti64/Cell Data/FaceRegionIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "Ti64/FaceRegionData",
+          "version": 1
+        },
+        "created_array_name": {
+          "value": "SelectionClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the uniform selection class within each original region to its own feature table; this is not intensity aggregation.",
+      "filter": {
+        "name": "nx::core::CreateFeatureArrayFromElementArrayFilter",
+        "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_phases_array_path": {
+          "value": "Ti64/FaceRegionData/SelectionClass",
+          "version": 1
+        },
+        "ensemble_attribute_matrix_path": {
+          "value": "Ti64/SelectionClassData",
+          "version": 1
+        },
+        "num_features_array_name": {
+          "value": "OriginalRegionCount",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Count positive original region IDs by selection class; feature row zero is excluded.",
+      "filter": {
+        "name": "nx::core::ComputeNumFeaturesFilter",
+        "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_phases_array_path": {
+          "value": "Ti64/Cell Data/OriginalSelectionClass",
+          "version": 1
+        },
+        "cell_ensemble_attribute_matrix_path": {
+          "value": "Ti64/SelectionClassData",
+          "version": 1
+        },
+        "vol_fractions_array_name": {
+          "value": "OriginalAreaFraction",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Count original selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction.",
+      "filter": {
+        "name": "nx::core::ComputeVolumeFractionsFilter",
+        "uuid": "340b3433-193a-4287-a7d2-794e1bce061b"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "scalar_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "array_to_convert_path": {
+          "value": "Ti64/Cell Data/LargeRegionMask",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "converted_array_name": {
+          "value": "RetainedSelectionClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the retained binary mask to int32 selection classes 0 and 1 for ensemble statistics; preserve the mask.",
+      "filter": {
+        "name": "nx::core::ConvertDataFilter",
+        "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_cell_array_path": {
+          "value": "Ti64/Cell Data/RetainedSelectionClass",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "Ti64/Cell Data/LargeRegionIds",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "Ti64/LargeRegionData",
+          "version": 1
+        },
+        "created_array_name": {
+          "value": "SelectionClass",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the uniform selection class within each retained region to its own feature table; this is not intensity aggregation.",
+      "filter": {
+        "name": "nx::core::CreateFeatureArrayFromElementArrayFilter",
+        "uuid": "50e1be47-b027-4f40-8f70-1283682ee3e7"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_phases_array_path": {
+          "value": "Ti64/LargeRegionData/SelectionClass",
+          "version": 1
+        },
+        "ensemble_attribute_matrix_path": {
+          "value": "Ti64/SelectionClassData",
+          "version": 1
+        },
+        "num_features_array_name": {
+          "value": "RetainedRegionCount",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Count positive retained region IDs by selection class; feature row zero is excluded.",
+      "filter": {
+        "name": "nx::core::ComputeNumFeaturesFilter",
+        "uuid": "ec3388de-d7a7-4cf6-94f4-81061b0863c8"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_phases_array_path": {
+          "value": "Ti64/Cell Data/RetainedSelectionClass",
+          "version": 1
+        },
+        "cell_ensemble_attribute_matrix_path": {
+          "value": "Ti64/SelectionClassData",
+          "version": 1
+        },
+        "vol_fractions_array_name": {
+          "value": "RetainedAreaFraction",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Count retained selected pixels over the complete 596 by 596 crop; on this one-slice image the result is a 2D selected-area fraction.",
+      "filter": {
+        "name": "nx::core::ComputeVolumeFractionsFilter",
+        "uuid": "340b3433-193a-4287-a7d2-794e1bce061b"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_ids_array_path": {
+          "value": "Ti64/Cell Data/LargeRegionIds",
+          "version": 1
+        },
+        "feature_data_attribute_matrix_path": {
+          "value": "Ti64/LargeRegionData",
+          "version": 1
+        },
+        "feature_rect_array_name": {
+          "value": "FeatureRect",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Bound each retained region in inclusive pixel indices for the 2D moment calculation.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureRectFilter",
+        "uuid": "bf947c45-8610-44c9-917a-405e88f73fe7"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "Ti64",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "Ti64/LargeRegionData",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "Ti64/Cell Data/LargeRegionIds",
+          "version": 1
+        },
+        "feature_rect_array_path": {
+          "value": "Ti64/LargeRegionData/FeatureRect",
+          "version": 1
+        },
+        "normalize_moment_invariants": {
+          "value": true,
+          "version": 1
+        },
+        "omega1_array_name": {
+          "value": "Omega1",
+          "version": 1
+        },
+        "omega2_array_name": {
+          "value": "Omega2",
+          "version": 1
+        },
+        "save_central_moments": {
+          "value": true,
+          "version": 1
+        },
+        "central_moments_array_name": {
+          "value": "CentralMoments",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Describe the retained brightness-patch shapes with normalized Omega1, Omega2 and saved central moments; original singleton regions are intentionally not measured.",
+      "filter": {
+        "name": "nx::core::ComputeMomentInvariants2DFilter",
+        "uuid": "650aa454-130c-406e-a9df-80b99f89e03c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "feature_data_file": {
           "value": "Data/Output/Ti64_Segmentation_Examples/Cleanup/Ti64_MinimumSizeCleanup.csv",
           "version": 1

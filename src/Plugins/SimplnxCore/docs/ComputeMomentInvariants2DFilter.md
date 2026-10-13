@@ -6,9 +6,9 @@ Statistics (Statistics)
 
 ## Description
 
-This **Filter** computes the 2D **moment invariants** Omega-1 and Omega-2 for each **Feature** in a 2D image. A **Feature** is a contiguous region of like-segmented cells (for example a particle). **Moment invariants** are scalar shape descriptors derived from the *Central Moments* of a **Feature**: the **Filter** treats each **Feature** as a flat 2D shape, measures how its area is distributed about its own centroid, and condenses that distribution into two numbers that do not change when the shape is translated, rotated, or (after normalization) scaled. Omega-1 and Omega-2 are therefore dimensionless values that describe the *shape* of a **Feature**, independent of its position, orientation, or size.
+This **Filter** computes the 2D **moment invariants** Omega-1 and Omega-2 for each **Feature** in a 2D image. A **Feature** is a contiguous region of like-segmented cells (for example a particle). **Moment invariants** are scalar shape descriptors derived from the *Central Moments* of a **Feature**: the **Filter** treats each **Feature** as a flat 2D shape, measures how its area is distributed about its own centroid, and condenses that distribution into two numbers that do not change when the shape is translated, rotated, or uniformly scaled. Omega-1 and Omega-2 are therefore dimensionless values that describe the *shape* of a **Feature**, independent of its position, orientation, or size.
 
-In practice these values measure how elongated or irregular a **Feature** is. A perfect circle gives the smallest possible Omega values; the more a **Feature** deviates toward an elongated ellipse or an irregular shape, the larger the Omega values become. By thresholding Omega-1 and Omega-2, you can classify **Features** by shape, for example separating round particles from elongated or irregular ones.
+With circle normalization enabled, an ideal continuous circle gives Omega-1 = Omega-2 = 1. For a filled ellipse with semiaxes *a* and *b*, Omega-1 = 2ab/(a²+b²) decreases as the ellipse becomes more elongated, while Omega-2 = 1 for every ellipse aspect ratio. Omega-2 alone is therefore not an elongation measure. Compare both descriptors with the segmented shapes before choosing classification thresholds; pixel resolution and rasterized boundaries affect the measured values.
 
 Based on the paper by MacSleyne et al. [1], the algorithm calculates the 2D central moments for each **Feature** starting at *feature id = 1*. Because *feature id 0* is of special significance and is typically a matrix or background, it is ignored. If any **Feature** has a Z extent (Z Delta) greater than 1 cell, that **Feature** is skipped. The algorithm works strictly in the XY plane and is meant to be applied to a 2D image.
 
@@ -35,6 +35,12 @@ The figures below, from [1], can help classify objects by their Omega values. An
 # Acknowledgements
 
 The authors would like to thank Dr. Marc De Graef from Carnegie Mellon University for enlightening discussions and a concrete implementation from which to start this filter.
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
 
 ## License & Copyright
 
