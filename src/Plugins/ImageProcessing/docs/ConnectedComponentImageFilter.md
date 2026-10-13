@@ -42,6 +42,15 @@ All routes create labels at the same raster run starts. They preserve the same u
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
++ `(07) AM Melt-Pool and Track Inspection/(07) AM Melt-Pool and Track Inspection.d3dpipeline` (ImageProcessing)
++ `(08) Powder Particle Watershed Segmentation/(08) Powder Particle Watershed Segmentation.d3dpipeline` (ImageProcessing)
++ `(10) Binary Mask Repair and Skeletonization/(10) Binary Mask Repair and Skeletonization.d3dpipeline` (ImageProcessing)
++ `Ti64_Segmentation_Examples/(01) Ti64 Connected Bright Regions.d3dpipeline` (ImageProcessing)
++ `Ti64_Segmentation_Examples/(02) Ti64 Connectivity Comparison.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

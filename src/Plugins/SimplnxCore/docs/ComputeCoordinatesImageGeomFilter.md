@@ -52,6 +52,10 @@ Image Indices_0,Image Indices_1,Image Indices_2,Image Physical Coordinates_0,Ima
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

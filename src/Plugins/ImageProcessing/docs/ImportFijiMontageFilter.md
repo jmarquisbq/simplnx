@@ -79,6 +79,12 @@ references).
   pixels (native type, or the chosen output type; multi-component tiles use the
   component count as the last dimension).
 
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(20) Fiji Microscopy Montage Import/(20) Fiji Microscopy Montage Import.d3dpipeline` (ImageProcessing)
+
 ## References
 
 - Fiji / ImageJ: <https://imagej.net/software/fiji/>

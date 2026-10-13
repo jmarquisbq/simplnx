@@ -17,6 +17,10 @@ Applies a linear transformation to the intensity levels of the input image that 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

@@ -66,7 +66,10 @@ feature boundary, and use that voxel's orientation as the **reference orientatio
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (04) Small IN100 Crystallographic Statistics
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## Related Filters
 

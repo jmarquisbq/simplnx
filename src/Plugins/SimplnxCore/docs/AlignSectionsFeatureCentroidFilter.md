@@ -74,8 +74,10 @@ In previous versions a file would have been produced instead. If you wish to rec
 
 ## Example Pipelines
 
-+ `(02) Small IN100 Full Reconstruction`
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
++ `(02) Small IN100 Full Reconstruction`
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

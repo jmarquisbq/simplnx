@@ -83,8 +83,10 @@ The OOC optimization matters most for large datasets that exceed available RAM. 
 
 ## Example Pipelines
 
-+ `(02) Small IN100 Full Reconstruction`
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
++ `(02) Small IN100 Full Reconstruction`
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

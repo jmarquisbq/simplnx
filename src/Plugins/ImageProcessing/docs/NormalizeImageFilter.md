@@ -24,6 +24,13 @@ The filter first computes the global mean and sample variance, then applies the 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
++ `(07) AM Melt-Pool and Track Inspection/(07) AM Melt-Pool and Track Inspection.d3dpipeline` (ImageProcessing)
++ `(09) Microstructure Watershed Segmentation/(09) Microstructure Watershed Segmentation.d3dpipeline` (ImageProcessing)
++ `(13) Denoising and Edge Detection/(13) Denoising and Edge Detection.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

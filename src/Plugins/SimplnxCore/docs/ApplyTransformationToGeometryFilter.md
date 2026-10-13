@@ -101,9 +101,12 @@ represents the 4x4 matrix:
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 - Pipelines/SimplnxCore/Examples/apply_transformation_basic.d3dpipeline
 - Pipelines/SimplnxCore/Examples/apply_transformation_image.d3dpipeline
 - Pipelines/SimplnxCore/Examples/apply_transformation_node.d3dpipeline
++ `Small_IN100_Geometry_Examples/(03) Small IN100 Surface Transform and Export.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

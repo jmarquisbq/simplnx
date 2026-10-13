@@ -88,7 +88,10 @@ If *Use Mask Array* is enabled, cells flagged *false* in the mask (a boolean or 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 EBSD_Hexagonal_Data_Analysis
++ `Cambridge_Ti_CAxis_Examples/(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

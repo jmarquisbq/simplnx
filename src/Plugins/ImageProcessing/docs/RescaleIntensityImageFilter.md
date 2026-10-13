@@ -24,6 +24,11 @@ The filter first computes the global minimum and maximum, then applies the resca
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(15) Radiography Intensity Calibration/(15) Radiography Intensity Calibration.d3dpipeline` (ImageProcessing)
++ `Ti64_Image_Cleanup_Examples/(01) Ti64 Image Preparation.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

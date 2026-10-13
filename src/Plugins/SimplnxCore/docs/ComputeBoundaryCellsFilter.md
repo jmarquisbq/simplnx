@@ -27,7 +27,10 @@ The output is a per-**Cell** count ranging from **0** (an interior cell whose si
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + ComputeBoundaryCells.d3dpipeline
++ `Small_IN100_Boundary_Examples/(01) Small IN100 Boundary and Section Measurements.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

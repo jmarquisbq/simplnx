@@ -56,7 +56,10 @@ The simple per-element transform (quaternion to rotation matrix to c-axis vector
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + `EBSD_Hexagonal_Data_Analysis`
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

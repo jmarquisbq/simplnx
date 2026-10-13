@@ -47,6 +47,11 @@ Other cases retain the raw-ring fallback. If the ring reservation is unavailable
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(06) AM Powder-Bed Layer Inspection/(06) AM Powder-Bed Layer Inspection.d3dpipeline` (ImageProcessing)
++ `(10) Binary Mask Repair and Skeletonization/(10) Binary Mask Repair and Skeletonization.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

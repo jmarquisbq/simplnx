@@ -36,8 +36,11 @@ The output is always the same data type and component shape as the source Featur
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 - (02) Image Segmentation (ImageProcessing)
 - (04) Porosity Analysis (ImageProcessing)
++ `T12_Reporting_Examples/(02) T12 Feature to Cell Mapping.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

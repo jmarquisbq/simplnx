@@ -92,9 +92,12 @@ By modifying cell-level data, any feature-level data that was previously compute
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 - (08) SmallIN100 Full Reconstruction
 - (07) SmallIN100 Final Processing
 - 04_Steiner Compact
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

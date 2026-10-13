@@ -61,7 +61,10 @@ When *Renumber Features* is enabled and the Cell Feature Attribute Matrix contai
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 SimplnxCore/ResamplePorosityImage
++ `Bentheimer_Resolution_Examples/(02) Bentheimer Common Grid Comparison.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

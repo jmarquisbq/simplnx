@@ -34,6 +34,10 @@ None. The geometry is created from user-supplied parameters.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Bentheimer_Resolution_Examples/(01) Bentheimer Native Volume Preparation.d3dpipeline` (SimplnxCore)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

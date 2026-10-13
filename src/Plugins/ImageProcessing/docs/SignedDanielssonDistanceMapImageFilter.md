@@ -46,6 +46,10 @@ For the certified `512 x 512 x 128` uint8 image, each Danielsson transform reque
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(12) Pore Distance and Wall-Thickness Metrology/(12) Pore Distance and Wall-Thickness Metrology.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

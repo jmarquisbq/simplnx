@@ -38,6 +38,10 @@ For resident arrays, the filter uses a stack flood over equal-valued flat zones.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(08) Powder Particle Watershed Segmentation/(08) Powder Particle Watershed Segmentation.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

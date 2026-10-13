@@ -78,6 +78,8 @@ The in-core path achieves near-linear multi-threaded speedup. The OOC path is si
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (02) Small IN100 Full Reconstruction
 + (02) Single Hexagonal Phase Equiaxed
 + (03) Single Cubic Phase Rolled
@@ -90,6 +92,8 @@ The in-core path achieves near-linear multi-threaded speedup. The OOC path is si
 + (01) Single Cubic Phase Equiaxed
 + (04) Two Phase Cubic Hexagonal Particles Equiaxed
 + (06) SmallIN100 Synthetic
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

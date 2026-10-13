@@ -91,11 +91,18 @@ To illustrate why this is think about an image geometry with the dimensions of `
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (03) Small IN100 Morphological Statistics
 + (02) Small IN100 Full Reconstruction
 + InsertTransformationPhase
 + (06) SmallIN100 Synthetic
 + (09) Image Segmentation
++ `Cambridge_Ti_CAxis_Examples/(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline` (OrientationAnalysis)
++ `Cambridge_Ti_CAxis_Examples/(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

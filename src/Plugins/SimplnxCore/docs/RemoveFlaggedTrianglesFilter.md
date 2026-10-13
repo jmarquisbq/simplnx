@@ -51,7 +51,10 @@ The *Triangle Data Handling* parameter controls which triangle (face) data array
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 - Remove_Flagged_Triangles
++ `Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -45,6 +45,14 @@ The target array must be a **scalar** (single-component) array. *Replace Value* 
 
 % Auto generated parameter table will be inserted here
 
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
++ `Cambridge_Ti_CAxis_Examples/(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Spatial_Examples/(01) Small IN100 Feature Bounds.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

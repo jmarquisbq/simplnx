@@ -18,6 +18,11 @@ Resident input and output arrays are processed directly. For a 3D out-of-core im
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(06) AM Powder-Bed Layer Inspection/(06) AM Powder-Bed Layer Inspection.d3dpipeline` (ImageProcessing)
++ `Ti64_Image_Cleanup_Examples/(02) Ti64 Smoothing Comparison.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

@@ -42,6 +42,12 @@ The working memory is bounded by two image planes or a fixed-size Z slab rather 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(08) Powder Particle Watershed Segmentation/(08) Powder Particle Watershed Segmentation.d3dpipeline` (ImageProcessing)
++ `(13) Denoising and Edge Detection/(13) Denoising and Edge Detection.d3dpipeline` (ImageProcessing)
++ `Ti64_Image_Cleanup_Examples/(02) Ti64 Smoothing Comparison.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

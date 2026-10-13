@@ -54,8 +54,11 @@ When *Process Data Slice-By-Slice* is enabled, the *Slice-By-Slice Plane* parame
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (02) Small IN100 Full Reconstruction
 + INL Export
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

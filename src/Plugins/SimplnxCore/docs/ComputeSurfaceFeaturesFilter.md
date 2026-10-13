@@ -42,7 +42,12 @@ If the structure/data is actually 2D, then the dimension that is planar is not c
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (06) SmallIN100 Synthetic
++ `Small_IN100_Boundary_Examples/(01) Small IN100 Boundary and Section Measurements.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(03) Small IN100 Surface Selection Comparison.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(05) Small IN100 Combined Selection.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

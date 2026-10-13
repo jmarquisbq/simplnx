@@ -122,6 +122,8 @@ The chunked I/O within each parallel range avoids per-element virtual dispatch o
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + 02_Adaptive Alignment - Misorientation - Zero Shifts
 + (02) Small IN100 Full Reconstruction
 + INL Export
@@ -129,7 +131,9 @@ The chunked I/O within each parallel range avoids per-element virtual dispatch o
 + MassifPipeline
 + InsertTransformationPhase
 + 04_Steiner Compact
-
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

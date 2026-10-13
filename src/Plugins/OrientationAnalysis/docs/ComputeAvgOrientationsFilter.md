@@ -87,9 +87,15 @@ These values may be exposed as user-configurable parameters in a future release.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (02) Small IN100 Full Reconstruction
 + (05) SmallIN100 Crystallographic Statistics
 + (06) SmallIN100 Synthetic
++ `Cambridge_Ti_CAxis_Examples/(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Slip_Examples/(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

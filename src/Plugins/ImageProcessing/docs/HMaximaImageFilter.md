@@ -33,6 +33,10 @@ The filter lowers the input by **Height** and reconstructs that marker under the
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(09) Microstructure Watershed Segmentation/(09) Microstructure Watershed Segmentation.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

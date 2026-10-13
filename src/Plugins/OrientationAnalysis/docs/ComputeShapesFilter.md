@@ -46,8 +46,11 @@ For shape analysis on triangle geometry meshes rather than voxelized image geome
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + `(03) Small IN100 Morphological Statistics`
 + `(06) SmallIN100 Synthetic`
++ `Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

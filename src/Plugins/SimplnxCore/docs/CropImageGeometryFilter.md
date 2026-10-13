@@ -86,6 +86,12 @@ When *Renumber Features* is enabled and the Cell Feature Attribute Matrix contai
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Ti64_Image_Cleanup_Examples/(01) Ti64 Image Preparation.d3dpipeline` (ImageProcessing)
++ `Small_IN100_Examples/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

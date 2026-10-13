@@ -14,6 +14,10 @@ Computes `acos(x)` for every pixel. ITK-free, out-of-core-capable reimplementati
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(16) Phase and Angle Field Transforms/(16) Phase and Angle Field Transforms.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

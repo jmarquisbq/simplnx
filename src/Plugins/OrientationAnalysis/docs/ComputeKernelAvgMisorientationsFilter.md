@@ -85,8 +85,11 @@ The filter derives a cap for its dominant array-buffer payload from the **CacheM
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + `MassifPipeline`
 + `(05) SmallIN100 Crystallographic Statistics`
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -63,7 +63,20 @@ The per-feature columns come from any feature-level **Data Array**s present in t
 
 ## Example Pipelines
 
-None
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Ti64_Segmentation_Examples/(01) Ti64 Connected Bright Regions.d3dpipeline` (ImageProcessing)
++ `Ti64_Segmentation_Examples/(02) Ti64 Connectivity Comparison.d3dpipeline` (ImageProcessing)
++ `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
++ `Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(03) Small IN100 Surface Selection Comparison.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(04) Small IN100 Minimum Size Comparison.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(05) Small IN100 Combined Selection.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Slip_Examples/(01) Small IN100 Neighbor Orientation and Slip.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
++ `T12_Reporting_Examples/(03) T12 Compact Report.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

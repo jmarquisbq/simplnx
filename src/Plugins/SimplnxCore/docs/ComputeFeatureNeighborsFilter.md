@@ -71,6 +71,8 @@ The in-core Direct algorithm accesses data through per-element getValue() calls,
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (03) Small IN100 Morphological Statistics
 + (02) Small IN100 Full Reconstruction
 + (02) Single Hexagonal Phase Equiaxed
@@ -79,6 +81,9 @@ The in-core Direct algorithm accesses data through per-element getValue() calls,
 + (01) Single Cubic Phase Equiaxed
 + (04) Two Phase Cubic Hexagonal Particles Equiaxed
 + (06) SmallIN100 Synthetic
++ `Cambridge_Ti_CAxis_Examples/(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -56,12 +56,16 @@ When importing EBSD data from EDAX, the user typically rotates the sample refere
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + INL Export
 + Export Small IN100 ODF Data (StatsGenerator)
 + TxCopper_Exposed
 + TxCopper_Unexposed
 + Edax IPF Colors
 + Confidence Index Histogram
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
++ `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

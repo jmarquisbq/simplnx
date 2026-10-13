@@ -24,9 +24,12 @@ This filter is optimized for out-of-core (OOC) data storage. The Feature IDs arr
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (03) Small IN100 Morphological Statistics
 + InsertTransformationPhase
 + (06) SmallIN100 Synthetic
++ `Small_IN100_Examples/(02) Small IN100 Feature Measurements.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -21,6 +21,12 @@ This is a dimensionless fraction in the range [0, 1]. A value near 0 means the *
 
 % Auto generated parameter table will be inserted here
 
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Boundary_Examples/(01) Small IN100 Boundary and Section Measurements.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

@@ -44,6 +44,10 @@ Set/Get the stencil radius. Default is 2.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(13) Denoising and Edge Detection/(13) Denoising and Edge Detection.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

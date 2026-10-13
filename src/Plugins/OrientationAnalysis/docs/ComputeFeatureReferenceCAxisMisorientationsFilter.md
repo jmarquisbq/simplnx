@@ -57,7 +57,10 @@ The Z-slice processing pattern is well-suited for ImageGeom data where HDF5 chun
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + `EBSD_Hexagonal_Data_Analysis`
++ `Cambridge_Ti_CAxis_Examples/(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

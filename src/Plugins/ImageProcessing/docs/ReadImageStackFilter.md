@@ -104,6 +104,11 @@ None — this filter reads from a file list of image files on disk.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(06) AM Powder-Bed Layer Inspection/(06) AM Powder-Bed Layer Inspection.d3dpipeline` (ImageProcessing)
++ `(19) Serial-Section Stack Reconstruction/(19) Serial-Section Stack Reconstruction.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

@@ -48,6 +48,11 @@ On the bounded route, the X and Y passes stream one Z plane at a time into raw s
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
++ `(12) Pore Distance and Wall-Thickness Metrology/(12) Pore Distance and Wall-Thickness Metrology.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

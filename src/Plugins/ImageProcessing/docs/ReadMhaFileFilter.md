@@ -74,6 +74,16 @@ Not Applicable (this Filter creates a geometry).
   images use the component count as the last dimension). Optionally a
   `float32[16]` transformation-matrix array.
 
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
++ `(14) Projection-Based Quality Summaries/(14) Projection-Based Quality Summaries.d3dpipeline` (ImageProcessing)
++ `(15) Radiography Intensity Calibration/(15) Radiography Intensity Calibration.d3dpipeline` (ImageProcessing)
++ `(16) Phase and Angle Field Transforms/(16) Phase and Angle Field Transforms.d3dpipeline` (ImageProcessing)
++ `(17) Scientific Volume Interoperability/(17) Scientific Volume Interoperability.d3dpipeline` (ImageProcessing)
+
 ## References
 
 - MetaIO / MetaImage documentation: <https://itk.org/Wiki/ITK/MetaIO/Documentation>

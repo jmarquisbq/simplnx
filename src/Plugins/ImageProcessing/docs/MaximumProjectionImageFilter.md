@@ -24,6 +24,10 @@ The filter reduces each input pencil along the selected X, Y, or Z axis and writ
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(14) Projection-Based Quality Summaries/(14) Projection-Based Quality Summaries.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

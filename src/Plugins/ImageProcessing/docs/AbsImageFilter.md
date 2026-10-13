@@ -14,6 +14,10 @@ Computes `abs(x)` for every pixel. ITK-free, out-of-core-capable reimplementatio
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(15) Radiography Intensity Calibration/(15) Radiography Intensity Calibration.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.

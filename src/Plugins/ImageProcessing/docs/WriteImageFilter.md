@@ -123,6 +123,14 @@ The algorithm keeps the grouped source slab and one output slice in memory. A co
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `(05) AM XCT Porosity Segmentation/(05) AM XCT Porosity Segmentation.d3dpipeline` (ImageProcessing)
++ `(06) AM Powder-Bed Layer Inspection/(06) AM Powder-Bed Layer Inspection.d3dpipeline` (ImageProcessing)
++ `(07) AM Melt-Pool and Track Inspection/(07) AM Melt-Pool and Track Inspection.d3dpipeline` (ImageProcessing)
++ `(17) Scientific Volume Interoperability/(17) Scientific Volume Interoperability.d3dpipeline` (ImageProcessing)
++ `(19) Serial-Section Stack Reconstruction/(19) Serial-Section Stack Reconstruction.d3dpipeline` (ImageProcessing)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.
