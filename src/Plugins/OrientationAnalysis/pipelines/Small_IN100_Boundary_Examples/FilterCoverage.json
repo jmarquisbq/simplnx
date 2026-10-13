@@ -1,48 +1,62 @@
 {
   "version": 1,
-  "scope": "Selected boundary and section example; occurrences are not scientific validation or complete plugin coverage.",
+  "scope": "Selected combined boundary, distance, and centroid-box example; occurrences are not scientific validation or complete plugin coverage.",
   "filters": [
+    {
+      "filter": "ComputeBiasedFeaturesFilter",
+      "uuid": "d46f2fd7-dc68-4b57-bca3-693016512b2f",
+      "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
+      "step": 4,
+      "purpose": "Shrink the image bounding box using frame-contact feature centroids in feature-row order, then flag centroids on or outside its faces."
+    },
     {
       "filter": "ComputeBoundaryCellsFilter",
       "uuid": "a1dd1c29-9152-4648-836c-3b6967e32600",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 3,
+      "step": 6,
       "purpose": "Count unlike-label in-bounds face neighbors per cell, including label-0 contacts and excluding out-of-image faces."
     },
     {
       "filter": "ComputeBoundaryElementFractionsFilter",
       "uuid": "f268dab6-9a31-498e-8502-338cd7a549b4",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 4,
+      "step": 7,
       "purpose": "For each positive feature, count cells with at least one unlike in-bounds neighbor and divide by cell count."
     },
     {
       "filter": "ComputeSurfaceAreaToVolumeFilter",
       "uuid": "94e83e4f-797d-4594-b130-3819b7676f01",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 5,
+      "step": 8,
       "purpose": "Estimate voxel-face surface area divided by NumElements-based volume and sphericity on the isotropic 0.25 micrometer grid."
     },
     {
       "filter": "ComputeLargestCrossSectionsFilter",
       "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 6,
+      "step": 9,
       "purpose": "Find each feature’s largest grid-aligned XY slice area in square micrometers."
     },
     {
       "filter": "ComputeLargestCrossSectionsFilter",
       "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 7,
+      "step": 10,
       "purpose": "Find each feature’s largest grid-aligned XZ slice area in square micrometers."
     },
     {
       "filter": "ComputeLargestCrossSectionsFilter",
       "uuid": "18ba2f7a-4e3a-4547-bd8c-b0955d542a9f",
       "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
-      "step": 8,
+      "step": 11,
       "purpose": "Find each feature’s largest grid-aligned YZ slice area in square micrometers."
+    },
+    {
+      "filter": "ComputeEuclideanDistMapFilter",
+      "uuid": "ba9ae8f6-443e-41d3-bb45-a08a139325c1",
+      "pipeline": "(01) Small IN100 Boundary and Section Measurements.d3dpipeline",
+      "step": 12,
+      "purpose": "Count face-sharing grid steps from positive cells to the nearest unlike-label in-bounds boundary seed; background remains -1. No TJ/QP maps."
     }
   ]
 }

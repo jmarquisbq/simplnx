@@ -42,7 +42,10 @@ Resident scratch is proportional to one XY slice, not the volume. Euclidean mode
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 - (01) SmallIN100 Morphological Statistics
++ `Small_IN100_Boundary_Examples/(01) Small IN100 Boundary and Section Measurements.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

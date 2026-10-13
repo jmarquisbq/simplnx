@@ -1,6 +1,6 @@
 # Small IN100 boundary and section example
 
-This category contains one native pipeline for comparing cell-boundary exposure, voxel surface-to-volume ratio, and largest grid-aligned sections of reconstructed Small IN100 grains. The `.d3dpipeline` is executable authority; the matching Markdown explains interpretation, and its JSON-compatible YAML records the exact arguments. `FilterCoverage.json` lists the four new core-filter targets. `PythonGeneration.yaml` describes a future generated-Python check; generated execution is not established by the native run.
+This category contains one native pipeline for comparing cell-boundary exposure, grid-step boundary distance, centroid-box selection, voxel surface-to-volume ratio, and largest grid-aligned sections of reconstructed Small IN100 grains. The `.d3dpipeline` is executable authority; the matching Markdown explains interpretation, and its JSON-compatible YAML records the exact arguments. `FilterCoverage.json` lists the six core-filter targets. `PythonGeneration.yaml` describes a future generated-Python check; generated execution is not established by the native run.
 
 ## Run order and paths
 
@@ -36,6 +36,6 @@ foreach ($relative in @(
 }
 ```
 
-Create or copy the complete predecessor `Data/Output` tree before running only step 4. For the GUI, use **File > Open** and set absolute input/output paths if its working directory differs. The Windows in-memory Release CTest passed 1/1, and an independent saved-output audit passed 17/17 checks; the [companion](%2801%29%20Small%20IN100%20Boundary%20and%20Section%20Measurements.md) gives the scope and counts. OOC, generated Python, GUI, and exact paper-result reproduction remain unverified. A [confirmed surface-area defect](https://github.com/BlueQuartzSoftware/simplnx/issues/1780) affects X/Y-normal face weighting when X and Y spacing differ; this isotropic example is unaffected.
+Create or copy the complete predecessor `Data/Output` tree before running only step 4. For the GUI, use **File > Open** and set absolute input/output paths if its working directory differs. The registered native pipeline passed. Its saved output contains 2,317 occupied positive features, 1,349 original interior features, and 1,027 centroid-box interior features. The [companion](%2801%29%20Small%20IN100%20Boundary%20and%20Section%20Measurements.md) explains the measurements and selection limits. OOC, generated Python, GUI, and exact paper-result reproduction remain unverified. A [confirmed surface-area defect](https://github.com/BlueQuartzSoftware/simplnx/issues/1780) affects X/Y-normal face weighting when X and Y spacing differ; this isotropic example is unaffected.
 
 This example uses the full 189 × 201 × 117 measured-derived reconstruction on its isotropic 0.25 µm grid. The [Groeber and Jackson (2014) paper](https://doi.org/10.1186/2193-9772-3-5) provides reconstruction and feature-statistics context. The new descriptor comparison is illustrative; its numerical arrays are not claimed as a published result. The article is CC BY 2.0, while separate archive redistribution terms have not been established.
