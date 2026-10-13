@@ -33,6 +33,7 @@ When *Copy to New Parent* is toggled on, a new parameter appears. This parameter
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Examples/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Geometry_Examples/(02) Small IN100 Surface Smoothing.d3dpipeline` (OrientationAnalysis)

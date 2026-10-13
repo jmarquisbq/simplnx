@@ -83,6 +83,7 @@ set(known_outputs
     "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.csv"
     "Data/Output/Small_IN100_Examples/CombinedSelection/SmallIN100_CombinedSelection.dream3d"
     "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv"
+    "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv"
     "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d"
     "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_MeshROI.dream3d"
     "Data/Output/Small_IN100_Examples/VoxelMesh/SmallIN100_ROI24.inp"
@@ -192,6 +193,7 @@ require_comparison_csv("Data/Output/Small_IN100_Examples/CombinedSelection/Small
 
 run_pipeline("neighbor-relationships" "${EXAMPLE_DIR}/(06) Small IN100 Neighbor Relationships.d3dpipeline")
 require_output("Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv")
+require_output("Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv")
 require_output("Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d")
 
 set(neighbor_csv "${work_root}/Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.csv")
@@ -211,6 +213,25 @@ foreach(required_column NumElements NumNeighbors GeometrySurfaceFeatures SharedA
 endforeach()
 if(NOT neighbor_first_column STREQUAL "Feature_ID")
   message(FATAL_ERROR "Neighbor CSV lacks Feature_ID: ${neighbor_csv}")
+endif()
+
+set(spatial_csv "${work_root}/Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv")
+file(STRINGS "${spatial_csv}" spatial_lines LIMIT_COUNT 2)
+list(LENGTH spatial_lines spatial_line_count)
+if(spatial_line_count LESS 2)
+  message(FATAL_ERROR "Spatial neighborhood CSV has no data rows: ${spatial_csv}")
+endif()
+list(GET spatial_lines 0 spatial_header)
+string(REPLACE "," ";" spatial_columns "${spatial_header}")
+list(GET spatial_columns 0 spatial_first_column)
+foreach(required_column OriginalFeatureId NumElements EquivalentDiameters NumNeighborsWithin5um NumNeighborsWithinOwnDiameter)
+  list(FIND spatial_columns "${required_column}" spatial_column_index)
+  if(spatial_column_index LESS 0)
+    message(FATAL_ERROR "Spatial neighborhood CSV lacks ${required_column}: ${spatial_csv}")
+  endif()
+endforeach()
+if(NOT spatial_first_column STREQUAL "Feature_ID")
+  message(FATAL_ERROR "Spatial neighborhood CSV lacks Feature_ID: ${spatial_csv}")
 endif()
 
 run_pipeline("voxel-mesh" "${EXAMPLE_DIR}/(07) Small IN100 Bounded Voxel Mesh.d3dpipeline")

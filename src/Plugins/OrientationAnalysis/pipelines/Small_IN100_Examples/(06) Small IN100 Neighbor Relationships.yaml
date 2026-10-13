@@ -12,7 +12,12 @@
     "EBSD",
     "3D microstructure",
     "feature neighbors",
-    "shared contact area"
+    "shared contact area",
+    "centroid neighborhoods",
+    "fixed search radius",
+    "equivalent sphere diameter",
+    "compact feature table",
+    "original feature identity"
   ],
   "citations": [
     {
@@ -50,8 +55,8 @@
       "role": "Current registered UUIDs, parameter keys, and measurement implementations."
     }
   ],
-  "last_verified": "2026-10-02",
-  "verification_status": "Windows in-core Release isolated preflight/execution passed. Independent input-label oracle matched all packed neighbor IDs, both linked count datasets, physical areas, reductions, box flags, preserved arrays, and 22 CSV numeric columns. Validation-only anisotropic spacing exercised all three perpendicular face-area products. The registered seven-example Windows in-core Release chain passed 1/1 in 18.67 seconds; nested-stage shared content validation passed 7/7. All 30 flat source suite files matched the runtime and staged plugin install copies byte for byte after final prose edits. OOC, generated Python, native GUI, full application installation, and human interpretation remain unverified.",
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-core Release extended-branch preflight and execution passed. The registered seven-example chain passed 1/1 in 18.98 seconds. All 47 independent checks passed again against that final output: complete pairwise Euclidean neighborhoods in both modes, compact original-ID mapping, list/count consistency, fixed-radius reciprocity, 27 original input datasets, original feature/contact results, geometry, and CSV identity/count columns. The original contact CSV is byte-identical. Nested-stage shared bundle content validation passed 7/7 with exact sidecar arguments and coverage-step checks. All 389 enabled filter/pipeline references across 181 filter pages and 50 companion examples passed the reference audit. The four-panel figure was regenerated from the final native output and visually inspected. OOC, generated Python, native GUI, full application installation, and human interpretation remain unverified.",
   "python_generation": {
     "specification_file": "PythonGeneration.yaml",
     "resolve_from": "pipeline_suite_root",
@@ -66,7 +71,7 @@
     "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
     "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
     "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
-    "reference_visual": "Occupied-feature degree and total shared-area distributions.",
+    "reference_visual": "Occupied-feature contact counts and shared areas, compared with fixed-radius and own-diameter centroid neighborhoods.",
     "target_traits": [
       "117 measured EBSD sections",
       "189 by 201 image cells per section",
@@ -76,11 +81,12 @@
     "known_differences": "Archive identity with the publisher's NiPoly data is unproven. The current NX preparation is not an exact historical reconstruction, and the pilot disables periodic segmentation.",
     "archive_provenance_file": "README.md"
   },
-  "summary": "Measures direct face-sharing contacts and physical shared areas between final Small IN100 FeatureIds.",
+  "summary": "Compare final Small IN100 voxel-face contacts with fixed 5 micrometer and own-equivalent-diameter centroid neighborhoods, preserving original feature identity.",
   "use_cases": [
     "Inspect a segmented feature contact graph",
-    "Compare feature contact counts and shared areas",
-    "Trace reciprocal contact lists to final feature IDs"
+    "Compare contact and proximity definitions of a local grain environment",
+    "Compare a fixed physical search radius with a feature-size-dependent radius",
+    "Trace compact spatial-neighbor indices to final feature IDs"
   ],
   "inputs": [
     {
@@ -94,19 +100,29 @@
       "role": "Scalar positive-ID feature rows; excludes packed neighbor lists."
     },
     {
+      "path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv",
+      "role": "Rectangular occupied-feature rows: compact Feature_ID, original-ID mapping, measurements, and both spatial-neighbor counts; no packed lists or row zero."
+    },
+    {
       "path": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_NeighborRelationships.dream3d",
-      "role": "Complete image geometry, feature graph, area lists, reductions, and prior measurements."
+      "role": "Complete image geometry, original contact graph and measurements, plus compact SpatialFeatures with both spatial graphs and OriginalFeatureId mapping."
     }
   ],
   "mcp": {
     "user_intents": [
       "Find direct face-sharing features in Small IN100",
-      "Inspect physical contact areas and per-feature connectivity"
+      "Inspect physical contact areas and per-feature connectivity",
+      "Find occupied feature centroids within 5 micrometers",
+      "Compare fixed-distance and own-diameter neighborhoods",
+      "Remove unused feature rows from a separate table while preserving original IDs"
     ],
     "questions_to_ask": [
       "Does your input have final FeatureIds indexed by the feature matrix?",
       "What are the voxel spacing and physical length units?",
-      "Will you exclude unused rows using NumElements>0?"
+      "Will you exclude unused rows using NumElements>0?",
+      "Does the study require face contact, a fixed physical distance, or a radius based on each feature size?",
+      "Is row zero reserved, and which positive rows are unused?",
+      "How will compact spatial rows be mapped back to original feature IDs?"
     ],
     "constraints": [
       "This pipeline is configured for SmallIN100. Review input requirements and contact rules before adapting it.",
@@ -118,7 +134,16 @@
       "Unique shared area between positive feature IDs excludes background and exterior faces. Halve directed totals only for the complete positive-positive graph; do not halve a single feature total or an arbitrary subset with missing endpoints.",
       "GeometrySurfaceFeatures marks the image box only; background-adjacent contact uses a different rule.",
       "The publication provides context, not a numerical oracle for this example.",
-      "Use one writable CLI working folder; native GUI working-folder behavior remains unverified."
+      "Use one writable CLI working folder; native GUI working-folder behavior remains unverified.",
+      "SpatialFeatures contains reserved row zero plus occupied features only. Create OriginalFeatureId before removing unused positive rows.",
+      "The uint8 removal mask is (NumElements == 0) AND (OriginalFeatureId > 0); keep reserved row zero.",
+      "Spatial list endpoints and spatial CSV Feature_ID values are compact row indices. Use OriginalFeatureId to join to the original contact graph or cell labels.",
+      "The fixed radius is 5 micrometers, or 20 voxel edges for this fixture, and is illustrative rather than calibrated.",
+      "The own-diameter mode uses radius_i = EquivalentDiameters[i] * 1.0, not half the diameter or a population-average radius. Its relationships can be asymmetric.",
+      "Both spatial modes use inclusive Euclidean distance, exclude self and reserved row zero, and need not produce sorted lists.",
+      "Proximity does not require face contact. Finite-domain edge effects are not corrected and periodic wrapping is disabled.",
+      "Discard temporary vertex geometries after copying the compact table under the original micrometer image. The removal filter does not preserve vertex-geometry units.",
+      "Recompute feature measurements and both spatial searches after physical coordinate, spacing, or unit changes."
     ],
     "related_pipelines": [
       "(02) Small IN100 Feature Measurements.d3dpipeline",
@@ -149,12 +174,42 @@
       "reference_value": "SurfaceFeatures",
       "example_value": "GeometrySurfaceFeatures",
       "reason": "Distinguish image-box flags from pipeline 03's broader surface rule."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "parameter": "array_handling_index",
+      "reference_value": 1,
+      "example_value": 0,
+      "reason": "Copy centroid vertices so the original feature table remains intact."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "parameter": "initialization",
+      "reference_value": "Fill Value",
+      "example_value": "int32 incremental sequence from 0 with addition step 1 and inherited tuple dimensions",
+      "reason": "Carry original feature identity through removal of unused positive rows."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "parameter": "created_mask_type",
+      "reference_value": 10,
+      "example_value": 1,
+      "reason": "Use the supported uint8 removal mask for unused positive rows while retaining reserved row zero."
+    },
+    {
+      "filter": "ComputeNeighborhoodsFilter",
+      "parameter": "search_radius",
+      "reference_value": 1.0,
+      "example_value": 5.0,
+      "reason": "Compare a common illustrative 5 micrometer length with a radius equal to each feature own equivalent sphere diameter."
     }
   ],
   "measurement_labels": {
     "cell_feature_ids": "DataContainer/Cell Data/FeatureIds",
     "feature_matrix": "DataContainer/Cell Feature Data",
-    "not_used": "DataContainer/Cell Data/ParentIds"
+    "not_used": "DataContainer/Cell Data/ParentIds",
+    "spatial_matrix": "DataContainer/SpatialFeatures",
+    "compact_to_original_mapping": "DataContainer/SpatialFeatures/OriginalFeatureId"
   },
   "pipeline_file": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
   "markdown_file": "(06) Small IN100 Neighbor Relationships.md",
@@ -264,6 +319,331 @@
     },
     {
       "index": 4,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy measured centroids into a temporary micrometer vertex geometry so unused feature rows can be removed together with their measurements.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "NeighborhoodPreparation"
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "DataContainer/Cell Feature Data/Centroids"
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "NeighborhoodPreparation",
+        "warnings_as_errors": false,
+        "array_handling_index": 0,
+        "dimensions": [
+          20,
+          60,
+          200
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "DataContainer/Cell Feature Data/Centroids",
+        "vertex_attribute_matrix_name": "SpatialFeatures",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the measured positions, diameters, and occupancy counts into the temporary vertex attribute matrix; preserve the original feature table.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "DataContainer/Cell Feature Data/Centroids",
+            "DataContainer/Cell Feature Data/EquivalentDiameters",
+            "DataContainer/Cell Feature Data/NumElements"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "NeighborhoodPreparation/SpatialFeatures"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "DataContainer/Cell Feature Data/Centroids",
+          "DataContainer/Cell Feature Data/EquivalentDiameters",
+          "DataContainer/Cell Feature Data/NumElements"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "NeighborhoodPreparation/SpatialFeatures",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Record each original feature-row ID as a scalar int32 sequence beginning at zero; inherit the temporary feature tuple count.",
+      "paths": [
+        {
+          "parameter": "output_array_path",
+          "value": "NeighborhoodPreparation/SpatialFeatures/OriginalFeatureId"
+        }
+      ],
+      "key_parameters": {
+        "output_array_path": "NeighborhoodPreparation/SpatialFeatures/OriginalFeatureId",
+        "numeric_type_index": 4,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Flag unused positive rows with NumElements equal to zero AND OriginalFeatureId greater than zero; retain reserved row zero.",
+      "paths": [],
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "NeighborhoodPreparation/SpatialFeatures/NumElements",
+              "comparison": 2,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "NeighborhoodPreparation/SpatialFeatures/OriginalFeatureId",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "UnusedPositiveRows",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "RemoveFlaggedVerticesFilter",
+      "uuid": "46099b4c-ef90-4fb3-b5e9-6c8c543c5be1",
+      "role": "Remove flagged vertices and the same tuples from all temporary feature arrays, keeping the original-ID mapping aligned.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "NeighborhoodPreparation"
+        },
+        {
+          "parameter": "mask_path",
+          "value": "NeighborhoodPreparation/SpatialFeatures/UnusedPositiveRows"
+        },
+        {
+          "parameter": "output_vertex_geometry_path",
+          "value": "NeighborhoodCompacted"
+        }
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "NeighborhoodPreparation",
+        "mask_path": "NeighborhoodPreparation/SpatialFeatures/UnusedPositiveRows",
+        "output_vertex_geometry_path": "NeighborhoodCompacted"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Keep the compact SpatialFeatures table under the original micrometer image geometry.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "NeighborhoodCompacted/SpatialFeatures"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "NeighborhoodCompacted/SpatialFeatures"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "DataContainer",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Discard both temporary vertex geometries after preserving the compact table; the final spatial context is the original image geometry.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "NeighborhoodPreparation",
+            "NeighborhoodCompacted"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "NeighborhoodPreparation",
+          "NeighborhoodCompacted"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "ComputeNeighborhoodsFilter",
+      "uuid": "924c10e3-2f39-4c08-9d7a-7fe029f74f6d",
+      "role": "Find other occupied feature centroids within an illustrative fixed 5 micrometer radius; returned IDs index SpatialFeatures.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "equivalent_diameters_array_path",
+          "value": "DataContainer/SpatialFeatures/EquivalentDiameters"
+        },
+        {
+          "parameter": "centroids_array_path",
+          "value": "DataContainer/SpatialFeatures/Centroids"
+        }
+      ],
+      "key_parameters": {
+        "search_radius_type_index": 1,
+        "multiples_of_average": 1.0,
+        "search_radius": 5.0,
+        "input_image_geometry_path": "DataContainer",
+        "equivalent_diameters_array_path": "DataContainer/SpatialFeatures/EquivalentDiameters",
+        "centroids_array_path": "DataContainer/SpatialFeatures/Centroids",
+        "neighborhoods_array_name": "NumNeighborsWithin5um",
+        "neighborhood_list_array_name": "NeighborsWithin5um"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 12,
+      "filter": "ComputeNeighborhoodsFilter",
+      "uuid": "924c10e3-2f39-4c08-9d7a-7fe029f74f6d",
+      "role": "Find other occupied feature centroids within a radius equal to each target feature's own equivalent sphere diameter; these directed neighborhoods can be asymmetric.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "equivalent_diameters_array_path",
+          "value": "DataContainer/SpatialFeatures/EquivalentDiameters"
+        },
+        {
+          "parameter": "centroids_array_path",
+          "value": "DataContainer/SpatialFeatures/Centroids"
+        }
+      ],
+      "key_parameters": {
+        "search_radius_type_index": 0,
+        "multiples_of_average": 1.0,
+        "search_radius": 5.0,
+        "input_image_geometry_path": "DataContainer",
+        "equivalent_diameters_array_path": "DataContainer/SpatialFeatures/EquivalentDiameters",
+        "centroids_array_path": "DataContainer/SpatialFeatures/Centroids",
+        "neighborhoods_array_name": "NumNeighborsWithinOwnDiameter",
+        "neighborhood_list_array_name": "NeighborsWithinOwnDiameter"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 13,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export occupied compact rows, original feature IDs, measured centroids and diameters, and both neighborhood counts; omit reserved row zero and packed lists.",
+      "paths": [
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/SpatialFeatures"
+        },
+        {
+          "parameter": "feature_data_file",
+          "value": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv"
+        }
+      ],
+      "key_parameters": {
+        "cell_feature_attribute_matrix_path": "DataContainer/SpatialFeatures",
+        "delimiter_index": 2,
+        "feature_data_file": "Data/Output/Small_IN100_Examples/NeighborRelationships/SmallIN100_SpatialNeighborhoods.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the full graph, scalar reductions, original measurements, FeatureIds, and geometry.",
@@ -283,6 +663,90 @@
     }
   ],
   "validation": {
+    "date": "2026-10-13",
+    "configuration": "Windows in-core Release; controlled nxrunner snapshot",
+    "preflight_execution": "Extended branch preflight and execution both passed (exit 0).",
+    "independent_checks": "47/47 passed. Full pairwise distance comparison independently validates spatial bins. All original input datasets, original contact-result arrays, geometry units and coordinates, and contact CSV were preserved.",
+    "oracle_self_tests": [
+      "3-4-5 inclusive radius",
+      "directed per-point radii",
+      "no self or reserved row"
+    ],
+    "preserved_input_dataset_count": 27,
+    "compact_rows_including_reserved_zero": 2318,
+    "occupied_feature_count": 2317,
+    "removed_unused_positive_rows": 17,
+    "spatial_summaries": {
+      "Within5um": {
+        "directed_entries": 47074,
+        "reciprocal_pairs": 23537,
+        "one_way_entries": 0,
+        "count_min": 2,
+        "count_max": 47,
+        "contact_common_directed": 22118,
+        "proximity_only_directed": 24956,
+        "contact_only_directed": 5888,
+        "float32_vs_float64_membership_differences": 0
+      },
+      "WithinOwnDiameter": {
+        "directed_entries": 15987,
+        "reciprocal_pairs": 2107,
+        "one_way_entries": 11773,
+        "count_min": 0,
+        "count_max": 138,
+        "contact_common_directed": 12462,
+        "proximity_only_directed": 3525,
+        "contact_only_directed": 15544,
+        "float32_vs_float64_membership_differences": 0
+      }
+    },
+    "unverified": [
+      "full application installation",
+      "OOC",
+      "generated Python",
+      "native GUI behavior",
+      "human interpretation review"
+    ],
+    "registered_ctest": {
+      "name": "PIPELINE::OrientationAnalysis::Small_IN100_Examples",
+      "passed": 1,
+      "total": 1,
+      "seconds": 18.98
+    },
+    "static_bundle_examples": {
+      "passed": 7,
+      "total": 7,
+      "sidecar_arguments_and_coverage_steps_match": true
+    },
+    "reference_audit": {
+      "filter_pipeline_pairs": 389,
+      "filter_pages": 181,
+      "companion_examples": 50,
+      "passed": true
+    },
+    "native_output_sha256": "cd62938483825b86fc4a44964884711f0c0a73bd3071e0f3b51fc2fcc71f0cf1"
+  },
+  "result_visual": {
+    "path": "SmallIN100NeighborRelationships.png",
+    "role": "Data-derived occupied-feature contact and spatial-neighborhood comparison; not native GUI proof.",
+    "sha256": "3e879741e23393f46e54dace4a9b9726095bcad11d2e4c36ff98a4cd1298ee62",
+    "source_output_sha256": "cd62938483825b86fc4a44964884711f0c0a73bd3071e0f3b51fc2fcc71f0cf1",
+    "panels": [
+      "contact count histogram",
+      "shared-area histogram",
+      "fixed-radius versus contact counts",
+      "own-diameter radius versus directed count"
+    ],
+    "visual_inspection": "All four panels inspected for clipping, readable labels, units, and matching occupied-feature population."
+  },
+  "dimensional_scope": "3D volume reconstructed from 117 serial EBSD sections; a single slice does not support a measured 3D feature volume.",
+  "cli_usage": {
+    "instructions": "See README.md#quick-start-117-section-3d-example for extraction and Windows PowerShell commands.",
+    "working_directory": "A chosen writable folder containing Data/Small_IN100/Slice_1.ang through Slice_117.ang.",
+    "relative_path_base": "The CLI resolves the pipeline's relative Data/... file paths from its working directory.",
+    "gui_note": "Open pipelines with File > Open. If relative file paths do not resolve in the installed layout, set file input and output parameters to absolute paths. Native GUI execution remains unverified."
+  },
+  "prior_contact_validation": {
     "date": "2026-10-02",
     "configuration": "Windows in-core Release; isolated controlled nxrunner snapshot",
     "preflight_execution": "2/2 passed for original bundle; 2/2 passed for validation-only anisotropic case",
@@ -299,15 +763,11 @@
       "human interpretation review"
     ]
   },
-  "result_visual": {
-    "path": "SmallIN100NeighborRelationships.png",
-    "role": "Data-derived occupied-feature degree and area preview; not native GUI proof."
-  },
-  "dimensional_scope": "3D volume reconstructed from 117 serial EBSD sections; a single slice does not support a measured 3D feature volume.",
-  "cli_usage": {
-    "instructions": "See README.md#quick-start-117-section-3d-example for extraction and Windows PowerShell commands.",
-    "working_directory": "A chosen writable folder containing Data/Small_IN100/Slice_1.ang through Slice_117.ang.",
-    "relative_path_base": "The CLI resolves the pipeline's relative Data/... file paths from its working directory.",
-    "gui_note": "Open pipelines with File > Open. If relative file paths do not resolve in the installed layout, set file input and output parameters to absolute paths. Native GUI execution remains unverified."
-  }
+  "known_limitations": [
+    {
+      "issue": "https://github.com/BlueQuartzSoftware/simplnx/issues/1782",
+      "description": "RemoveFlaggedVertices does not preserve input geometry length-unit metadata.",
+      "workaround": "Copy only the compact SpatialFeatures table under the original micrometer image geometry, then delete both temporary vertex geometries. Resolve the issue before adapting this branch to retain a physical point cloud."
+    }
+  ]
 }

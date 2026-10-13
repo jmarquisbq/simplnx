@@ -129,6 +129,76 @@
       "purpose": "Reduce each shared-area list to count, mean, largest contact, and total area."
     },
     {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 4,
+      "purpose": "Copy measured centroids into a temporary micrometer vertex geometry so unused feature rows can be removed together with their measurements."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 5,
+      "purpose": "Copy the measured positions, diameters, and occupancy counts into the temporary vertex attribute matrix; preserve the original feature table."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 6,
+      "purpose": "Record each original feature-row ID as a scalar int32 sequence beginning at zero; inherit the temporary feature tuple count."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 7,
+      "purpose": "Flag unused positive rows with NumElements equal to zero AND OriginalFeatureId greater than zero; retain reserved row zero."
+    },
+    {
+      "filter": "RemoveFlaggedVerticesFilter",
+      "uuid": "46099b4c-ef90-4fb3-b5e9-6c8c543c5be1",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 8,
+      "purpose": "Remove flagged vertices and the same tuples from all temporary feature arrays, keeping the original-ID mapping aligned."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 9,
+      "purpose": "Keep the compact SpatialFeatures table under the original micrometer image geometry."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 10,
+      "purpose": "Discard both temporary vertex geometries after preserving the compact table; the final spatial context is the original image geometry."
+    },
+    {
+      "filter": "ComputeNeighborhoodsFilter",
+      "uuid": "924c10e3-2f39-4c08-9d7a-7fe029f74f6d",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 11,
+      "purpose": "Find other occupied feature centroids within an illustrative fixed 5 micrometer radius; returned IDs index SpatialFeatures."
+    },
+    {
+      "filter": "ComputeNeighborhoodsFilter",
+      "uuid": "924c10e3-2f39-4c08-9d7a-7fe029f74f6d",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 12,
+      "purpose": "Find other occupied feature centroids within a radius equal to each target feature's own equivalent sphere diameter; these directed neighborhoods can be asymmetric."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(06) Small IN100 Neighbor Relationships.d3dpipeline",
+      "step": 13,
+      "purpose": "Export occupied compact rows, original feature IDs, measured centroids and diameters, and both neighborhood counts; omit reserved row zero and packed lists."
+    },
+    {
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "pipeline": "(07) Small IN100 Bounded Voxel Mesh.d3dpipeline",

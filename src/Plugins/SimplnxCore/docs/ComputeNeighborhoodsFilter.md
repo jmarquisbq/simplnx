@@ -36,26 +36,24 @@ The figure below shows a single target feature and how progressively larger mult
 
 ### Multiplier
 
-The *Multiplier* parameter is **dimensionless** -- a multiple of the average ESD. Common values:
-
-- **1.0** -- search sphere is the same size as the average grain. Catches a feature's immediate neighbors and slightly beyond.
-- **2.0-3.0** -- second-nearest-neighbor analysis.
-- **5.0+** -- broader clustering / long-range arrangement studies.
+The *Multiples of Equivalent Diameter* parameter is **dimensionless**. It multiplies each target feature's own equivalent sphere diameter to obtain that feature's search **radius**. For a target with a 2 µm equivalent diameter, multipliers of *1.0*, *2.0*, and *3.0* give radii of 2 µm, 4 µm, and 6 µm, respectively. The radius is not halved. Choose the multiplier for the physical question; it does not specify a fixed number of neighbor shells.
 
 ### Required Input Sources
 
-- **Cell Feature Ids** -- produced by a segmentation filter such as [Segment Features (Misorientation)](../OrientationAnalysis/EBSDSegmentFeaturesFilter.md).
+- **Image Geometry** -- provides the spatial context for the search. Keep its spacing and length units consistent with the centroid coordinates and equivalent diameters; the absolute-radius option is specified in micrometers.
 - **Feature Centroids** -- produced by [Compute Feature Centroids](ComputeFeatureCentroidsFilter.md).
-- **Feature Equivalent Diameters** -- produced by [Compute Feature Sizes](ComputeFeatureSizesFilter.md).
-- **Feature Phases** -- produced by [Compute Feature Phases](ComputeFeaturePhasesFilter.md).
+- **Feature Equivalent Diameters** -- produced by [Compute Feature Sizes](ComputeFeatureSizesFilter.md); required only for *Multiples of Equivalent Diameter*. The array must have the same tuple count as the centroids.
 
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (03) Small IN100 Morphological Statistics
 + InsertTransformationPhase
 + (06) SmallIN100 Synthetic
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

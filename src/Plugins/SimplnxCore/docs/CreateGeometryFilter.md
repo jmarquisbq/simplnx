@@ -69,6 +69,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + CreateEdgeGeometry
 + CreateQuadGeometry
 + CreateRectilinearGrid
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Geometry_Examples/(02) Small IN100 Surface Smoothing.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Geometry_Examples/(03) Small IN100 Surface Transform and Export.d3dpipeline` (OrientationAnalysis)

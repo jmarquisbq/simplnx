@@ -37,6 +37,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Small_IN100_Examples/(03) Small IN100 Surface Selection Comparison.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Examples/(04) Small IN100 Minimum Size Comparison.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Examples/(05) Small IN100 Combined Selection.d3dpipeline` (OrientationAnalysis)
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline` (OrientationAnalysis)
 + `Small_IN100_Spatial_Examples/(01) Small IN100 Feature Bounds.d3dpipeline` (OrientationAnalysis)
 + `T12_Orientation_Examples/(01) T12 Orientation Case Study.d3dpipeline` (OrientationAnalysis)

@@ -16,6 +16,12 @@ This **Filter** removes **Vertices** from the supplied **Vertex Geometry** that 
 
 % Auto generated parameter table will be inserted here
 
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Examples/(06) Small IN100 Neighbor Relationships.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this plugin.
