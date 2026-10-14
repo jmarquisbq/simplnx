@@ -46,7 +46,8 @@
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check all relative input and output paths against source pipeline.",
     "execution": "Execute with documented predecessors. NOT VERIFIED.",
-    "storage": "Validate OOC separately."
+    "storage": "Validate OOC separately.",
+    "grid_contract": "Stage 04 must preserve both explicit Micrometer image geometries, the float64 interpolation copy, map error handling, both kernel/sigma settings, and contribution counts. Keep all source-point arrays and CSV columns unchanged."
   },
   "gui_note": "GUI working folders vary; use absolute file parameters when relative paths do not resolve."
 }

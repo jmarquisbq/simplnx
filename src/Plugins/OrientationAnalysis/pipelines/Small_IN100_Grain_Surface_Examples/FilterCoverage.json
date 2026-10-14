@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Four illustrative measured-derived Small IN100 grain-surface, point-cloud, and numeric interchange pipelines; occurrences are not independent filter verification. Stages 03 and 04 use complementary tiles and do not claim duplicate-removal coverage.",
+  "scope": "Four illustrative measured-derived Small IN100 grain-surface, point-cloud, numeric interchange, and point-to-grid pipelines; occurrences are not independent filter verification. Stages 03 and 04 use complementary tiles and do not claim duplicate-removal coverage.",
   "filters": [
     {
       "filter": "ExtractComponentAsArrayFilter",
@@ -162,6 +162,27 @@
       "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
       "step": 16,
       "purpose": "Export all point tuples, including valid row zero, in an explicit six-column CSV with headers."
+    },
+    {
+      "filter": "MapPointCloudToRegularGridFilter",
+      "uuid": "af53ac60-092f-4e4a-9e13-57f0034ce2c7",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 20,
+      "purpose": "Record each source point's containing cell and fail on any out-of-bounds point. GridCellIndex is an ownership/inspection result; Interpolate Point Cloud v4 independently computes its own indices from coordinates."
+    },
+    {
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 21,
+      "purpose": "Average ImageQuality64 only within each containing cell: Uniform kernel size 0.25 micrometers is below 0.5 micrometer spacing, so the integer radius is zero. Contribution counts distinguish observed cells from zero-filled empty cells."
+    },
+    {
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 22,
+      "purpose": "Spread ImageQuality64 into a 3 by 3 by 3 grid-cell neighborhood using Gaussian sigma 1 in each axis (one cell offset, or 0.5 micrometers here). Kernel weights use integer cell offsets, not exact point-to-center distances. Positive counts outside observed cells are estimates, not new measurements."
     }
   ]
 }

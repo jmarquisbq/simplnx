@@ -2,9 +2,9 @@
   "schema_version": 1,
   "pipeline_file": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
   "markdown_file": "(04) Small IN100 Point Cloud Interchange.md",
-  "pipeline_sha256": "38b86d08c65657653f74d2bfe4740b1649787f5c454df32a5172f584e907bb67",
+  "pipeline_sha256": "c51ded6b636edcc3b776fc62112e04841dc6d4b6fc20992f7f86f192b00f4d0a",
   "title": "Small IN100 Point Cloud Interchange",
-  "summary": "Import selected HDF5 point arrays, append complementary tile rows, split and recombine XYZ columns, reconstruct calibrated vertex geometry, and export a six-column CSV.",
+  "summary": "Reconstruct a calibrated point cloud from HDF5 arrays and export named CSV columns, then compare observed-cell and Gaussian image-quality estimates on the same grid.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -14,7 +14,8 @@
   ],
   "use_cases": [
     "Convert a documented numeric HDF5 point-table contract into vertex geometry.",
-    "Preserve identity and physical coordinates while assembling rows and naming columns for CSV interchange."
+    "Preserve identity and physical coordinates while assembling rows and naming columns for CSV interchange.",
+    "Distinguish cells containing observations from cells filled only by interpolation of a measured scalar field."
   ],
   "keywords": [
     "Small IN100",
@@ -26,13 +27,17 @@
     "concatenation",
     "CSV",
     "coordinate units",
-    "source-cell identity"
+    "source-cell identity",
+    "point to grid",
+    "Gaussian interpolation",
+    "contribution count",
+    "observed support"
   ],
   "inputs": [
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
       "role": "Stage 03 saved TileA and TileB numeric datasets; this file must already exist at preflight.",
-      "verified_sha256": "c6224377e5d9c073ef628b4e19cdc2c0d3b852dba733bd1ecae9703640db330a",
+      "verified_sha256": "2a4dd01d4a5cd4e9d86f68b24360362cceb47deadc64c44537a01f1fc28036a1",
       "checksum_scope": "Observed 2026-10-13 verification run; the upstream file includes stored seed metadata and may differ across complete chain runs."
     }
   ],
@@ -44,8 +49,8 @@
     },
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointCloudInterchange.dream3d",
-      "role": "ReassembledCloud with Micrometer units and six scalar arrays, plus numeric import and assembly checkpoints.",
-      "verified_sha256": "a7bd9b225edae7155eb73eada36f82e76fa8846fb0d296b37301537488cd5ffc"
+      "role": "Original reconstructed cloud and numeric checkpoints, plus ImageQuality64, source-point GridCellIndex, and identical calibrated ObservedGrid05um and GaussianGrid05um with interpolated values and contribution counts.",
+      "verified_sha256": "d76c06202356412f39249949457071881bea1ef26040f0adba167884518f60d2"
     }
   ],
   "input_data_strategy": {
@@ -63,9 +68,10 @@
       "24 by 24 by 24 measured-derived interior image crop at 0.25 micrometer spacing",
       "170 voxel centers with original reconstructed FeatureId 2205",
       "Complementary 89-point and 81-point tiles with a 170-point union and no overlap",
-      "Four numeric arrays per tile, explicit XYZ component order, int32 identities, and reconstructed Micrometer geometry"
+      "Four numeric arrays per tile, explicit XYZ component order, int32 identities, and reconstructed Micrometer geometry",
+      "Identical 5 by 7 by 6 Micrometer grids at 0.5 micrometer spacing compare containing-cell averages against a 3 by 3 by 3 Gaussian neighborhood."
     ],
-    "known_differences": "The two tiles are complementary subsets of the same measured-derived grain from stage 03, not independent acquisitions. The source is deliberately an NX-generated HDF5 file so imported numeric arrays can be checked against known geometry and metadata. No new measured data or exact paper reproduction is claimed.",
+    "known_differences": "The two tiles are complementary subsets of the same measured-derived grain from stage 03, not independent acquisitions. The source is deliberately an NX-generated HDF5 file so imported numeric arrays can be checked against known geometry and metadata. No new measured data or exact paper reproduction is claimed. The point-to-grid comparison aggregates measured voxel-center image quality; it does not create new observations, reconstruct a grain boundary, or calibrate a confidence field. Kernel spreading is an illustrative extension beyond the cited paper.",
     "archive_provenance_file": "README.md"
   },
   "prerequisites": [
@@ -585,6 +591,363 @@
     },
     {
       "index": 17,
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "role": "Preserve the original float32 Image Quality and create a float64 interpolation copy. This keeps fractional weighted means without changing the source metadata or CSV.",
+      "paths": [
+        {
+          "parameter": "array_to_convert_path",
+          "value": "ReassembledCloud/Vertex Data/Image Quality"
+        }
+      ],
+      "key_parameters": {
+        "scalar_type_index": 9,
+        "array_to_convert_path": "ReassembledCloud/Vertex Data/Image Quality",
+        "converted_array_name": "ImageQuality64",
+        "delete_original_array": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Create ObservedGrid05um as an explicit 5 by 7 by 6 Micrometer grid, with origin [24,25,14] and 0.5 micrometer spacing. Use identical grids so only kernel support and weighting change.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "ObservedGrid05um"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 0,
+        "length_unit_index": 6,
+        "output_geometry_path": "ObservedGrid05um",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          5,
+          7,
+          6
+        ],
+        "origin": [
+          24.0,
+          25.0,
+          14.0
+        ],
+        "spacing": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Create GaussianGrid05um as an explicit 5 by 7 by 6 Micrometer grid, with origin [24,25,14] and 0.5 micrometer spacing. Use identical grids so only kernel support and weighting change.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "GaussianGrid05um"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 0,
+        "length_unit_index": 6,
+        "output_geometry_path": "GaussianGrid05um",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          5,
+          7,
+          6
+        ],
+        "origin": [
+          24.0,
+          25.0,
+          14.0
+        ],
+        "spacing": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "MapPointCloudToRegularGridFilter",
+      "uuid": "af53ac60-092f-4e4a-9e13-57f0034ce2c7",
+      "role": "Record each source point's containing cell and fail on any out-of-bounds point. GridCellIndex is an ownership/inspection result; Interpolate Point Cloud v4 independently computes its own indices from coordinates.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "ReassembledCloud"
+        },
+        {
+          "parameter": "output_image_geometry_path",
+          "value": ""
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "ObservedGrid05um"
+        },
+        {
+          "parameter": "mask_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "sampling_grid_index": 1,
+        "grid_dimensions": [
+          5,
+          7,
+          6
+        ],
+        "input_vertex_geometry_path": "ReassembledCloud",
+        "output_image_geometry_path": "",
+        "input_image_geometry_path": "ObservedGrid05um",
+        "out_of_bounds_handling_index": 2,
+        "out_of_bounds_value": 18446744073709551615,
+        "use_mask": false,
+        "mask_path": "",
+        "voxel_indices_name": "GridCellIndex",
+        "cell_data_name": "Cell Data"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 21,
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "role": "Average ImageQuality64 only within each containing cell: Uniform kernel size 0.25 micrometers is below 0.5 micrometer spacing, so the integer radius is zero. Contribution counts distinguish observed cells from zero-filled empty cells.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "ReassembledCloud"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "ObservedGrid05um"
+        },
+        {
+          "parameter": "input_mask_path",
+          "value": ""
+        },
+        {
+          "parameter": "interpolate_arrays",
+          "value": [
+            "ReassembledCloud/Vertex Data/ImageQuality64"
+          ]
+        },
+        {
+          "parameter": "copy_arrays",
+          "value": []
+        }
+      ],
+      "key_parameters": {
+        "use_mask": false,
+        "interpolation_index": 0,
+        "kernel_size": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "gaussian_sigmas": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "input_vertex_geometry_path": "ReassembledCloud",
+        "input_image_geometry_path": "ObservedGrid05um",
+        "input_mask_path": "",
+        "interpolate_arrays": [
+          "ReassembledCloud/Vertex Data/ImageQuality64"
+        ],
+        "copy_arrays": [],
+        "find_length": true,
+        "find_min": false,
+        "find_max": false,
+        "find_mean": false,
+        "find_std_deviation": false,
+        "find_summation": false,
+        "length_suffix_name": "_ContributionCount",
+        "min_suffix_name": "_Minimum",
+        "max_suffix_name": "_Maximum",
+        "mean_suffix_name": "_Mean",
+        "std_deviation_suffix_name": "_StdDeviation",
+        "summation_suffix_name": "_Summation"
+      },
+      "parameters_version": 4
+    },
+    {
+      "index": 22,
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "role": "Spread ImageQuality64 into a 3 by 3 by 3 grid-cell neighborhood using Gaussian sigma 1 in each axis (one cell offset, or 0.5 micrometers here). Kernel weights use integer cell offsets, not exact point-to-center distances. Positive counts outside observed cells are estimates, not new measurements.",
+      "paths": [
+        {
+          "parameter": "input_vertex_geometry_path",
+          "value": "ReassembledCloud"
+        },
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "GaussianGrid05um"
+        },
+        {
+          "parameter": "input_mask_path",
+          "value": ""
+        },
+        {
+          "parameter": "interpolate_arrays",
+          "value": [
+            "ReassembledCloud/Vertex Data/ImageQuality64"
+          ]
+        },
+        {
+          "parameter": "copy_arrays",
+          "value": []
+        }
+      ],
+      "key_parameters": {
+        "use_mask": false,
+        "interpolation_index": 1,
+        "kernel_size": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "gaussian_sigmas": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "input_vertex_geometry_path": "ReassembledCloud",
+        "input_image_geometry_path": "GaussianGrid05um",
+        "input_mask_path": "",
+        "interpolate_arrays": [
+          "ReassembledCloud/Vertex Data/ImageQuality64"
+        ],
+        "copy_arrays": [],
+        "find_length": true,
+        "find_min": false,
+        "find_max": false,
+        "find_mean": false,
+        "find_std_deviation": false,
+        "find_summation": false,
+        "length_suffix_name": "_ContributionCount",
+        "min_suffix_name": "_Minimum",
+        "max_suffix_name": "_Maximum",
+        "mean_suffix_name": "_Mean",
+        "std_deviation_suffix_name": "_StdDeviation",
+        "summation_suffix_name": "_Summation"
+      },
+      "parameters_version": 4
+    },
+    {
+      "index": 23,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the calibrated reconstructed cloud and small numeric import/assembly checkpoints for checking row identity, axis order, and coordinate preservation.",
@@ -638,15 +1001,18 @@
     }
   ],
   "last_verified": "2026-10-13",
-  "verification_status": "Windows in-memory Release: registered four-pipeline CTest chain passed 1/1 in 22.76 s. Independent saved-output audit passed 51/51 checks: eight imported datasets preserve every value/type/shape; A-then-B rows, XYZ split/combine, moved scalar placements, and Micrometer geometry are correct. Final coordinates and scalar values equal CombinedTiles and recover ReferenceCloud by SourceROICellIndex. CSV retains all 170 points, including row zero, in six declared columns; integer IDs are exact and floats agree at eight significant digits. The preview was rendered from these native products and visually inspected. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "verification_status": "Windows in-memory Release: four-pipeline CTest chain passed 1/1 in 23.21 s. All 51 original interchange checks passed, with the expected column set extended only for ImageQuality64 and GridCellIndex. All 27 additional checks passed: 18 original datasets preserved, original CSV byte-identical, float64 copy exact, calibrated grid geometry, every source index/count/mean checked against independent binning and a 210-by-170 weight matrix. Direct means agree exactly; maximum Gaussian mean error is 1.2457437037483032e-7. The new preview uses these hash-identified native arrays and was visually inspected. OOC, generated Python, GUI, and installed-app execution are unverified.",
   "mcp": {
     "user_intents": [
-      "Assemble complementary point-table rows from HDF5 and export named coordinate columns without losing identity."
+      "Assemble complementary point-table rows from HDF5 and export named coordinate columns without losing identity.",
+      "Compare direct point occupancy with scalar interpolation while retaining the original point identities."
     ],
     "questions_to_ask": [
       "What dataset paths, numeric types, tuple/component shapes, axis order, and coordinate units does the source declare?",
       "Do all scalar arrays share the same row identity and tile order?",
-      "Is the goal a full NX structure import or selected numeric HDF5 interchange?"
+      "Is the goal a full NX structure import or selected numeric HDF5 interchange?",
+      "Which output cells must contain measured points, and may estimates extend into cells without observations?",
+      "What physical grid spacing and kernel support fit the measurement resolution and intended interpretation?"
     ],
     "constraints": [
       "Run stage 03 before preflighting stage 04; its HDF5 file must exist.",
@@ -657,7 +1023,17 @@
       "SourceROICellIndex is an X-fastest flat index into the cropped 24-cubed ROI, not a global acquisition ID.",
       "Both tiles derive from the same measured grain 2205; Image Quality is inherited metadata, not calibrated confidence.",
       "Disable normalization; create geometry with explicitly checked Micrometer units (index 6), not units inferred from numeric coordinates.",
-      "Export every point tuple, including row zero, with headers only and the six declared columns."
+      "Export every point tuple, including row zero, with headers only and the six declared columns.",
+      "Retain original float32 Image Quality and integer identity fields. Convert only an interpolation copy to float64; do not average source IDs or FeatureIds.",
+      "Both image geometries use Micrometer units, dimensions [5,7,6], origin [24,25,14], and spacing [0.5,0.5,0.5].",
+      "MapPointCloudToRegularGrid records containing-cell indices for inspection and errors on out-of-bounds points. InterpolatePointCloudToRegularGrid v4 recomputes indices and does not consume GridCellIndex.",
+      "Uniform kernel size [0.25,0.25,0.25] micrometers is below the spacing and affects only each point's containing cell. Gaussian size [1,1,1] micrometers gives integer radius [1,1,1].",
+      "Gaussian sigmas [1,1,1] are measured in integer grid-cell offsets: one cell offset is 0.5 micrometers here. Weights do not use exact point-to-cell-center distances.",
+      "The main interpolated output is sum(weight*value)/sum(weight). Length is an unweighted contribution count, not the sum of weights; all other optional statistics are disabled.",
+      "Empty cells contain zero values and zero counts. Use contribution counts to distinguish them from measured or interpolated zero values.",
+      "Gaussian-only cells are estimates outside observed occupancy. The comparison does not establish new measured coverage, grain geometry, calibrated confidence, or independent survey reconstruction.",
+      "Arrays to Copy is intentionally empty because it also averages values over kernel support; it does not preserve categorical identities.",
+      "The explicit float64 copy supports older snapshots with an interpolation output-type mismatch. Builds containing merged simplnx PR 1763 promote interpolated outputs themselves; float64 source input is not a universal requirement."
     ],
     "related_pipelines": [
       "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
@@ -669,6 +1045,39 @@
     "role": "Source tiles and reconstructed cloud on equal micrometer axes, with a small table read from the native CSV.",
     "sha256": "3376ee538dc5aeebaf378fbd1175cc7aac87e37cffa0dc64d6a7798f849a5abb",
     "source_output_sha256": "a7bd9b225edae7155eb73eada36f82e76fa8846fb0d296b37301537488cd5ffc",
-    "source_csv_sha256": "d644574fc87e184a2ea5c4a7209ad6cbdbb95655785437689ae011ca1dfaf64e"
+    "source_csv_sha256": "d644574fc87e184a2ea5c4a7209ad6cbdbb95655785437689ae011ca1dfaf64e",
+    "scope": "Historical interchange preview from the earlier verified output; the extended pipeline preserves every original source array and the CSV byte for byte. Its original hashes remain the figure provenance."
+  },
+  "grid_result_visual": {
+    "path": "SmallIN100PointGridComparison.png",
+    "role": "Native XY slice of both scalar outputs with shared viridis limits, and observed versus Gaussian-only support derived from the native contribution-count arrays.",
+    "sha256": "2e1bdeacd17657f806edcb24473a3485ffc17efee7107df8a5ff971b136ef8e1",
+    "source_output_sha256": "d76c06202356412f39249949457071881bea1ef26040f0adba167884518f60d2",
+    "slice_z_index": 2,
+    "slice_z_center_micrometers": 15.25,
+    "color_preset": "matplotlib viridis",
+    "color_limits": [
+      131.8000030517578,
+      205.30000114440918
+    ],
+    "source_array_paths": [
+      "DataStructure/ObservedGrid05um/Cell Data/ImageQuality64",
+      "DataStructure/ObservedGrid05um/Cell Data/ImageQuality64_ContributionCount",
+      "DataStructure/GaussianGrid05um/Cell Data/ImageQuality64",
+      "DataStructure/GaussianGrid05um/Cell Data/ImageQuality64_ContributionCount"
+    ]
+  },
+  "grid_summary": {
+    "points": 170,
+    "grid_cells": 210,
+    "observed_cells": 44,
+    "gaussian_only_cells": 144,
+    "empty_cells": 22,
+    "direct_count_sum": 170,
+    "gaussian_count_sum": 4590,
+    "max_mean_errors": {
+      "ObservedGrid05um": 0.0,
+      "GaussianGrid05um": 1.2457437037483032e-07
+    }
   }
 }

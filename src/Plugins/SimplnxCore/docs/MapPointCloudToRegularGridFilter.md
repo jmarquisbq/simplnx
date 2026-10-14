@@ -10,13 +10,13 @@ This **Filter** determines, for a user-defined grid, in which voxel each point i
 
 Additionally, the user may opt to use a mask; points for which the mask is false are ignored when computing voxel indices (instead, they are initialized to voxel 0).
 
-The per-vertex voxel indices produced by this filter are commonly used as the input to [Interpolate Point Cloud to Regular Grid](InterpolatePointCloudToRegularGridFilter.md), which transfers point-cloud attribute values onto the regular grid.
+The per-vertex indices identify which grid cell contains each point; they do not transfer point attributes to cells. [Interpolate Point Cloud to Regular Grid](InterpolatePointCloudToRegularGridFilter.md) transfers scalar attributes, but its current version computes indices directly from coordinates and does not consume this array. Mapping can still provide an ownership record and an explicit out-of-bounds check before interpolation.
 
 ### Sampling Grid Type
 
 The *Sampling Grid Type* parameter controls how the target grid is defined:
 
-- **Manual [0]**: The user specifies the grid dimensions directly as voxel counts along X, Y, and Z (dimensionless counts). The filter creates a new **Image Geometry** with those dimensions to use as the sampling grid.
+- **Manual [0]**: The user specifies the grid dimensions directly as voxel counts along X, Y, and Z (dimensionless counts). The filter derives a new **Image Geometry** from the selected point bounds. Its fitted dimensions can differ from the requested counts. Use an existing geometry when exact origin, spacing, dimensions, and units must be preserved.
 - **Use Existing Image Geometry [1]**: The user selects a pre-existing **Image Geometry** from the data structure to use as the sampling grid.
 
 ### Out of Bounds Handling
@@ -47,6 +47,12 @@ Continuing along the Out-of-Bounds discussion, the Out-of-Bounds value allows th
 - **Vertex Geometry** -- the input point cloud whose points are mapped to grid voxels, typically created by an import step or a filter that produces a **Vertex Geometry**.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(04) Small IN100 Point Cloud Interchange.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

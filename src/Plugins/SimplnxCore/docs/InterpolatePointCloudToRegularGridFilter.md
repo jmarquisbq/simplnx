@@ -12,12 +12,14 @@ This **Filter** interpolates the values of arrays stored in a **Vertex Geometry*
 
 The *Interpolation Technique* parameter provides the following choices:
 
-- **Uniform [0]**: Every voxel within the kernel radius receives equal weight (1.0).
-- **Gaussian [1]**: Voxel weights fall off with distance from the kernel center according to a Gaussian function, controlled by user-specified sigma values in each dimension.
+- **Uniform [0]**: Every voxel within the integer kernel support receives equal weight (1.0).
+- **Gaussian [1]**: Voxel weights fall off with integer grid-cell offset from the center cell according to a Gaussian function. Sigma values are in grid-cell offsets, not physical length units. The exact position of a point within its containing cell does not affect its weights.
 
 ### Kernel
 
-The user defines the (x, y, z) radii of a kernel in *real space units*. The kernel radii are converted to voxel units based on the spacing of the **Image Geometry**. If the kernel radius in a given dimension is smaller than the voxel spacing, the kernel has a zero extent in that dimension (i.e., each point only affects its own voxel along that axis).
+*Kernel Size* gives a physical extent along each axis, in the same length units as the **Image Geometry** spacing. It is not the integer radius. For each axis, the implementation uses `ceil(size / (2 * spacing))` as the inclusive radius in cells, except that a size below the spacing gives radius zero. Support is therefore quantized and clipped at grid boundaries.
+
+For a grid with 0.5 micrometer spacing, size 0.25 micrometers affects only the containing cell, while size 1 micrometer gives radius 1 cell, or three cells along that axis. Gaussian sigma 1 means one grid-cell offset (0.5 micrometers on this grid). Convert each desired physical standard deviation to cell offsets by dividing by that axis's spacing.
 
 ### Algorithm
 
@@ -44,11 +46,11 @@ For each voxel that received at least one contribution:
 
 Both options transfer data from the **Vertex Geometry** onto the **Image Geometry**, but they differ in how the kernel is applied:
 
-- **Arrays to Interpolate** use the selected kernel (Uniform or Gaussian). The kernel weight multiplies each vertex's value before being accumulated into surrounding voxels. The final output is a kernel-weighted average. Optional statistics (length, min, max, mean, standard deviation, summation) can be computed on the weighted contributions. The output array type is always *float64* because the weighted average produces floating-point values regardless of the input type.
+- **Arrays to Interpolate** use the selected kernel (Uniform or Gaussian). The kernel weight multiplies each vertex's value before being accumulated into surrounding voxels. The final output is a kernel-weighted average. Optional statistics (length, min, max, mean, standard deviation, summation) can be computed on the weighted contributions. Builds with the [output-type correction](https://github.com/BlueQuartzSoftware/simplnx/pull/1763) promote interpolated outputs to *float64*. For older snapshots, [Convert AttributeArray DataType](ConvertDataFilter.md) can first create a float64 copy while preserving the original values.
 
-- **Arrays to Copy** always use a uniform kernel (weight = 1.0), even when Gaussian interpolation is selected. The final output is a simple arithmetic average of all values that fell within the kernel radius. No statistics are computed for copied arrays. The output array type matches the source array type.
+- **Arrays to Copy** always use a uniform kernel (weight = 1.0), even when Gaussian interpolation is selected. The final output is a simple arithmetic average of all values contributing through the integer kernel support. No statistics are computed for copied arrays. The output array type matches the source array type.
 
-Use *Arrays to Interpolate* for data values that should be smoothed or blended by the kernel (e.g., measured scalar fields). Use *Arrays to Copy* for categorical or index data where Gaussian weighting would not be meaningful.
+Use *Arrays to Interpolate* for scalar fields that can meaningfully be averaged. *Arrays to Copy* also averages values; it does not preserve categorical labels or source identities. Keep feature IDs and point indices on the source points, or define a separate categorical assignment rule. Neither averaging mode is a majority vote or nearest-point selection.
 
 All arrays selected for interpolation or copying must be **scalar** (single-component) arrays.
 
@@ -65,13 +67,14 @@ Rather than storing all per-voxel contributions and computing statistics in a se
 | **Standard Deviation** | float32     | Population standard deviation of weighted values, computed via Welford's numerically stable online algorithm |
 | **Summation**          | float32     | Sum of all weighted values                                                                                   |
 
-Statistics are computed on the *weighted* values (`kernel_weight * source_value`), which are the same quantities that contribute to the interpolated average. Voxels with no contributions receive a value of zero for all statistics.
+Statistics are computed on the *weighted* values (`kernel_weight * source_value`), which are the same quantities that contribute to the interpolated average. Voxels with no contributions receive zero for both the main value and all statistics. Enable *Length* to distinguish empty cells from actual zero values. A positive contribution count in a cell without source points indicates kernel support, not a new observation.
 
 Median is not supported because it requires storing every vertex's contribution, which would negate the memory savings of the flat accumulation approach.
 
 ### Required Input Sources
 
 - **Vertex Geometry** -- the point cloud whose arrays will be interpolated, produced by a filter that creates a **Vertex Geometry** such as [Extract Vertex Geometry](ExtractVertexGeometryFilter.md) or [Create Geometry](CreateGeometryFilter.md).
+- **Image Geometry** -- the destination grid, for example defined explicitly by [Create Geometry](CreateGeometryFilter.md). Match its coordinate frame and physical units to the point cloud.
 
 ### Mask
 
@@ -86,6 +89,12 @@ This filter uses flat arrays rather than variable-length lists, so memory usage 
 The destination voxel for each vertex is computed on-the-fly from the vertex coordinates and the **Image Geometry**'s origin, spacing, and dimensions. There is no need to pre-compute a voxel indices array (e.g., via the [Map Point Cloud to Regular Grid](MapPointCloudToRegularGridFilter.md) filter). Vertices whose coordinates fall outside the **Image Geometry** bounds are silently skipped.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(04) Small IN100 Point Cloud Interchange.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

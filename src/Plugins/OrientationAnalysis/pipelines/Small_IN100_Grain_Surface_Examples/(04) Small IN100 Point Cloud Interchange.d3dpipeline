@@ -536,6 +536,516 @@
     },
     {
       "args": {
+        "scalar_type_index": {
+          "value": 9,
+          "version": 1
+        },
+        "array_to_convert_path": {
+          "value": "ReassembledCloud/Vertex Data/Image Quality",
+          "version": 1
+        },
+        "converted_array_name": {
+          "value": "ImageQuality64",
+          "version": 1
+        },
+        "delete_original_array": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Preserve the original float32 Image Quality and create a float64 interpolation copy. This keeps fractional weighted means without changing the source metadata or CSV.",
+      "filter": {
+        "name": "nx::core::ConvertDataFilter",
+        "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "ObservedGrid05um",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            5,
+            7,
+            6
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            24.0,
+            25.0,
+            14.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create ObservedGrid05um as an explicit 5 by 7 by 6 Micrometer grid, with origin [24,25,14] and 0.5 micrometer spacing. Use identical grids so only kernel support and weighting change.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "GaussianGrid05um",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            5,
+            7,
+            6
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            24.0,
+            25.0,
+            14.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create GaussianGrid05um as an explicit 5 by 7 by 6 Micrometer grid, with origin [24,25,14] and 0.5 micrometer spacing. Use identical grids so only kernel support and weighting change.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "sampling_grid_index": {
+          "value": 1,
+          "version": 1
+        },
+        "grid_dimensions": {
+          "value": [
+            5,
+            7,
+            6
+          ],
+          "version": 1
+        },
+        "input_vertex_geometry_path": {
+          "value": "ReassembledCloud",
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "ObservedGrid05um",
+          "version": 1
+        },
+        "out_of_bounds_handling_index": {
+          "value": 2,
+          "version": 1
+        },
+        "out_of_bounds_value": {
+          "value": 18446744073709551615,
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_path": {
+          "value": "",
+          "version": 1
+        },
+        "voxel_indices_name": {
+          "value": "GridCellIndex",
+          "version": 1
+        },
+        "cell_data_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Record each source point's containing cell and fail on any out-of-bounds point. GridCellIndex is an ownership/inspection result; Interpolate Point Cloud v4 independently computes its own indices from coordinates.",
+      "filter": {
+        "name": "nx::core::MapPointCloudToRegularGridFilter",
+        "uuid": "af53ac60-092f-4e4a-9e13-57f0034ce2c7"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "interpolation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "kernel_size": {
+          "value": [
+            0.25,
+            0.25,
+            0.25
+          ],
+          "version": 1
+        },
+        "gaussian_sigmas": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "input_vertex_geometry_path": {
+          "value": "ReassembledCloud",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "ObservedGrid05um",
+          "version": 1
+        },
+        "input_mask_path": {
+          "value": "",
+          "version": 1
+        },
+        "interpolate_arrays": {
+          "value": [
+            "ReassembledCloud/Vertex Data/ImageQuality64"
+          ],
+          "version": 1
+        },
+        "copy_arrays": {
+          "value": [],
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "find_min": {
+          "value": false,
+          "version": 1
+        },
+        "find_max": {
+          "value": false,
+          "version": 1
+        },
+        "find_mean": {
+          "value": false,
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "length_suffix_name": {
+          "value": "_ContributionCount",
+          "version": 1
+        },
+        "min_suffix_name": {
+          "value": "_Minimum",
+          "version": 1
+        },
+        "max_suffix_name": {
+          "value": "_Maximum",
+          "version": 1
+        },
+        "mean_suffix_name": {
+          "value": "_Mean",
+          "version": 1
+        },
+        "std_deviation_suffix_name": {
+          "value": "_StdDeviation",
+          "version": 1
+        },
+        "summation_suffix_name": {
+          "value": "_Summation",
+          "version": 1
+        },
+        "parameters_version": 4
+      },
+      "comments": "Average ImageQuality64 only within each containing cell: Uniform kernel size 0.25 micrometers is below 0.5 micrometer spacing, so the integer radius is zero. Contribution counts distinguish observed cells from zero-filled empty cells.",
+      "filter": {
+        "name": "nx::core::InterpolatePointCloudToRegularGridFilter",
+        "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "interpolation_index": {
+          "value": 1,
+          "version": 1
+        },
+        "kernel_size": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "gaussian_sigmas": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "input_vertex_geometry_path": {
+          "value": "ReassembledCloud",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "GaussianGrid05um",
+          "version": 1
+        },
+        "input_mask_path": {
+          "value": "",
+          "version": 1
+        },
+        "interpolate_arrays": {
+          "value": [
+            "ReassembledCloud/Vertex Data/ImageQuality64"
+          ],
+          "version": 1
+        },
+        "copy_arrays": {
+          "value": [],
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "find_min": {
+          "value": false,
+          "version": 1
+        },
+        "find_max": {
+          "value": false,
+          "version": 1
+        },
+        "find_mean": {
+          "value": false,
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "length_suffix_name": {
+          "value": "_ContributionCount",
+          "version": 1
+        },
+        "min_suffix_name": {
+          "value": "_Minimum",
+          "version": 1
+        },
+        "max_suffix_name": {
+          "value": "_Maximum",
+          "version": 1
+        },
+        "mean_suffix_name": {
+          "value": "_Mean",
+          "version": 1
+        },
+        "std_deviation_suffix_name": {
+          "value": "_StdDeviation",
+          "version": 1
+        },
+        "summation_suffix_name": {
+          "value": "_Summation",
+          "version": 1
+        },
+        "parameters_version": 4
+      },
+      "comments": "Spread ImageQuality64 into a 3 by 3 by 3 grid-cell neighborhood using Gaussian sigma 1 in each axis (one cell offset, or 0.5 micrometers here). Kernel weights use integer cell offsets, not exact point-to-center distances. Positive counts outside observed cells are estimates, not new measurements.",
+      "filter": {
+        "name": "nx::core::InterpolatePointCloudToRegularGridFilter",
+        "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Interchange/SmallIN100_Grain2205_PointCloudInterchange.dream3d",
           "version": 1
