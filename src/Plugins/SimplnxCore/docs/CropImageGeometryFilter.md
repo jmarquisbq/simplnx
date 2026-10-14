@@ -93,6 +93,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 + `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 
 + `OIM_Nickel_Pattern_Examples/(01) OIM Nickel Pattern Inspection.d3dpipeline` (OrientationAnalysis)
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

@@ -34,9 +34,11 @@ Each padded cell is initialized to the *Default Value* for every cell-level **At
 
 ### Update Origin
 
-If *Update Origin* is **OFF** (the default), the geometry's origin stays at its current location. New cells appear at coordinates less than the original origin, so the original data effectively shifts to "the middle" of the new bounds.
+If *Update Origin* is **OFF** (the default), the geometry's lower-corner origin stays fixed. The original cells move to higher indices and therefore shift physically by the lower-side pad count times spacing on each enabled axis. The new low-side cells occupy the beginning of the unchanged coordinate range; they are not placed below the unchanged origin.
 
 If *Update Origin* is **ON**, the geometry's origin is shifted so that the original data stays in its original physical coordinates. New cells extend to coordinates below the original origin.
+
+Padding fills every component of every cell array with the same default value outside the original region. A zero-filled coordinate array is not a valid position map for the new cells; remove it from a working copy and regenerate coordinates after padding with [Compute Coordinates/Indices Array From Image Geom](ComputeCoordinatesImageGeomFilter.md). Preserve an explicit support mask when fill values might also be valid measurements. Padding does not extend the measured field of view.
 
 ### Required Input Sources
 
@@ -46,7 +48,11 @@ If *Update Origin* is **ON**, the geometry's origin is shifted so that the origi
 
 ## Example Pipelines
 
-'pad_image_geometry.d3dpipline'
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Pad_Image_Geometry.d3dpipeline`
+
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

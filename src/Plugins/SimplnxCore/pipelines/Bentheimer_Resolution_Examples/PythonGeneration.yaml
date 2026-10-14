@@ -48,5 +48,6 @@
     "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
-  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "padding_fusion_contract": "Regenerate all20 stage03 steps. Preserve original full grids; crop working ROIs, pad the fine reference with updated origin, regenerate coordinates, and fuse coarse values into separate SampledVLR using its support mask for summaries. The reference geometry key input_reference_image_geometry__path contains two underscores."
 }

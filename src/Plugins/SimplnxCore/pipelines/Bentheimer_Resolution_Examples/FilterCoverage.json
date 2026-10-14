@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Filter occurrences in these illustrative Bentheimer examples; this is not scientific validation or complete plugin coverage.",
+  "scope": "Selected Bentheimer import, resolution, ROI, padding and fusion filter occurrences; not scientific validation.",
   "filters": [
     {
       "filter": "CreateImageGeometryFilter",
@@ -134,6 +134,62 @@
       "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
       "step": 10,
       "purpose": "Compute count, minimum, maximum and mean inside the full-cell InteriorROI mask. These are intensity summaries, not porosity, permeability, or accuracy scores."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 11,
+      "purpose": "Copy inclusive XYZ indices 15..59 from BentheimerVLR18um into BentheimerVLR_ROI18um; this is the already declared physical ROI [-405,405] micrometers. Retain the full original geometry."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 12,
+      "purpose": "Copy inclusive XYZ indices 45..179 from BentheimerLR6um into BentheimerLR_ROI6um; this is the already declared physical ROI [-405,405] micrometers. Retain the full original geometry."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 13,
+      "purpose": "Keep only ScaledIntensity and the all-one InteriorROI support mask in each working crop. Remove copied coordinate arrays and non-cell statistics from these copies; all original full-volume outputs remain intact."
+    },
+    {
+      "filter": "PadImageGeometryFilter",
+      "uuid": "1a003f19-aa26-406c-bbef-061f508fc422",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 14,
+      "purpose": "Add six 6-micrometer cells on every side into a separate 147-cubed reference grid. Update the lower-corner origin from -405 to -441 to preserve the selected data placement. Zero-filled margin means outside the chosen ROI, not unmeasured scanner area."
+    },
+    {
+      "filter": "ComputeCoordinatesImageGeomFilter",
+      "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 15,
+      "purpose": "Compute all reference cell centers after final padding and origin placement, including the added margin. Do not pad an old coordinate array with zero and treat it as valid reference coordinates."
+    },
+    {
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 16,
+      "purpose": "Create a separate 147 by 147 by 147 destination matrix for sampled coarse values; keep native fine values in CellData without name collisions."
+    },
+    {
+      "filter": "NearestPointFuseRegularGridsFilter",
+      "uuid": "c8746bf8-fa5f-48b0-8a47-11023402e543",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 17,
+      "purpose": "Copy coarse ScaledIntensity and InteriorROI onto the fixed padded fine grid. For these aligned 18-to-6 micrometer grids, each source voxel repeats 3 times per axis. Zero source-support mask marks fill outside the source ROI; no averaging, registration or super-resolution is performed."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 18,
+      "purpose": "Summarize copied coarse intensities only where sampled InteriorROI is nonzero. Exclude the zero-filled margin; repeated samples do not add independent measurements."
     }
   ]
 }
