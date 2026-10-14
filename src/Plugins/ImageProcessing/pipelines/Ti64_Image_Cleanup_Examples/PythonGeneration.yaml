@@ -46,5 +46,6 @@
     "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
-  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "threshold_morphology_contract": "Regenerate the current 21-step threshold pipeline: retain original uint8 branches, bool automatic mask, independent copied opening/closing, and Length/Summation-only new summaries. Do not invent a saved cutoff or Mean array."
 }

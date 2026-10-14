@@ -3,7 +3,7 @@
   "pipeline_file": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
   "markdown_file": "(03) Ti64 Threshold Sensitivity.md",
   "title": "Ti64 Threshold Sensitivity",
-  "summary": "Apply one inclusive normalized-intensity threshold to the original and three smoothed Ti-6Al-4V crop arrays; compare binary pixel selections and whole-crop counts.",
+  "summary": "Compare fixed-cutoff sensitivity to smoothing, then compare a gradient-weighted global cutoff and independent XY opening/closing of its bool mask on the same Ti64 crop.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -13,7 +13,9 @@
   ],
   "use_cases": [
     "Inspect how median and Gaussian smoothing change a fixed brightness selection",
-    "Compare selected-pixel counts and fractions before choosing a separately validated segmentation method"
+    "Compare selected-pixel counts and fractions before choosing a separately validated segmentation method",
+    "Compare a fixed and automatically derived cutoff without changing the input image",
+    "Inspect which selected pixels one-cell XY opening removes and closing adds"
   ],
   "keywords": [
     "Ti-6Al-4V",
@@ -22,7 +24,12 @@
     "fixed cutoff",
     "smoothing sensitivity",
     "uint8",
-    "uncalibrated pixels"
+    "uncalibrated pixels",
+    "gradient-weighted global threshold",
+    "boolean mask",
+    "opening",
+    "closing",
+    "four-neighbor cross"
   ],
   "inputs": [
     {
@@ -33,7 +40,8 @@
   "outputs": [
     {
       "path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
-      "role": "Both input geometries and all arrays plus four uint8 Bright* masks and four whole-crop Bright*Summary groups."
+      "role": "All predecessor arrays and both geometries, four original uint8 masks and summaries, GaussianV1Gradient, three new bool masks, and their Length/Summation summaries.",
+      "sha256": "2dbf44e043d873f9f6de4e714534f6b9fbbcf000f59d5346629c3f0a6499be2b"
     }
   ],
   "input_data_strategy": {
@@ -42,9 +50,11 @@
       "604 by 604 full source retained",
       "596 by 596 prepared Ti64 crop with 355216 cells",
       "four inputs thresholded independently at inclusive [0.35, 1.0]",
-      "uncalibrated pixel coordinates"
+      "uncalibrated pixel coordinates",
+      "Automatic global threshold uses GaussianV1 and its own pixel-space gradient",
+      "One-iteration XY opening and closing branch independently from the unchanged automatic mask"
     ],
-    "known_differences": "The fixed brightness selection is an illustrative native-filter comparison. It does not reproduce learned boundary-class predictions or watershed, and selected pixels have no validated phase or grain identity.",
+    "known_differences": "The fixed brightness selection is an illustrative native-filter comparison. It does not reproduce learned boundary-class predictions or watershed, and selected pixels have no validated phase or grain identity. The global gradient-weighted threshold and mask morphology are additional exploratory controls, not the paper's learned classifier or watershed.",
     "reference_visual": "Bimodal Ti-6Al-4V micrograph with globular regions, lath colonies, and bright boundaries.",
     "source_sha512": "6739da11d8d4098ef0f7086b521e9a75a55936b53ce198ac4caf1c802ca1af8a23bb96461e28213a1b6574ad0ab6807775113aeffc90da2eccfc2f7498d7412c",
     "paper_doi": "10.1007/s10853-023-08901-w",
@@ -68,7 +78,9 @@
     ],
     "user_intents": [
       "Compare a fixed bright-pixel selection across original and smoothed Ti-6Al-4V crops",
-      "Inspect mask changes and selected-pixel fractions before a validated segmentation study"
+      "Inspect mask changes and selected-pixel fractions before a validated segmentation study",
+      "Compare a fixed and automatically derived cutoff without changing the input image",
+      "Inspect which selected pixels one-cell XY opening removes and closing adds"
     ],
     "constraints": [
       "Run preparation and smoothing in order before this pipeline.",
@@ -76,12 +88,21 @@
       "Interpret 0/1 uint8 Mean as selected-pixel fraction and Summation as count.",
       "Treat original as the unfiltered normalized crop, not the 604 by 604 source frame.",
       "Do not infer phase, grain, porosity, or HADMA accuracy from brightness masks.",
-      "Read the .d3dpipeline arguments as executable authority."
+      "Read the .d3dpipeline arguments as executable authority.",
+      "Robust Automatic Threshold computes one global T = sum(I*G)/sum(G), with float32 accumulation, and selects I >= T. It is not local adaptive thresholding.",
+      "Use a finite, nonnegative gradient magnitude from exactly the same image/grid; zero total gradient makes the threshold undefined. The current filter does not reject that case.",
+      "The native threshold filter creates a bool mask, but does not save its cutoff. Label any reconstructed threshold as a verification calculation.",
+      "Opening and closing modify separate copies of RobustGaussianV1. Each uses one erosion and one dilation, X/Y enabled, Z disabled, and existing face neighbors only.",
+      "Morphology ignores out-of-image neighbors, includes no diagonal neighbors, and uses cell layers rather than calibrated physical distances.",
+      "New bool summaries save Length and Summation only; divide them for selected fraction. Do not look for a new Mean array.",
+      "Lower automatic cutoff and cleaner masks do not establish greater material accuracy or phase identity."
     ],
     "questions_to_ask": [
       "What labeled reference identifies the intended structure or phase?",
       "Does a new image share the prepared 0 to 1 intensity mapping?",
-      "Which downstream boundary and watershed validation would support grain measurements?"
+      "Which downstream boundary and watershed validation would support grain measurements?",
+      "Is a global cutoff meaningful under the image's illumination and contrast variation?",
+      "Which small selected structures or gaps are meaningful and must survive morphology?"
     ]
   },
   "citations": [
@@ -110,14 +131,14 @@
       "title": "Deep learning enhanced Watershed for microstructural analysis using a boundary class semantic segmentation"
     }
   ],
-  "last_verified": "2026-10-07",
-  "verification_status": "Windows in-memory Release full-chain preflight/execution passed. Every uint8 mask exactly matched independent thresholding of saved inputs and independent smoothing results; all seven summary fields, all 31 predecessor datasets and both geometries passed. Materials interpretation, GUI, OOC and generated Python remain unverified.",
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release: cleanup and downstream segmentation CTests passed. All 36 extension checks passed: original arrays preserved, independent central differences and existing-neighbor morphology, exact threshold mask under source-conformance float32 accumulation, and bool counts. This is not a material-classification accuracy claim; GUI, OOC and generated Python remain unverified.",
   "dimensional_scope": "Two-dimensional uncalibrated pixels; selected-pixel fractions are brightness fractions, not physical phase or grain fractions.",
   "steps": [
     {
-      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "index": 0,
       "filter": "ReadDREAM3DFilter",
-      "parameters_version": 1,
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "role": "Load the complete smoothing checkpoint, including both geometries, the common prepared crop, and all three smoothed arrays.",
       "key_parameters": {
         "import_data_object": {
@@ -126,12 +147,12 @@
           "path_import_policy": 0
         }
       },
-      "index": 0
+      "parameters_version": 1
     },
     {
-      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "index": 1,
       "filter": "BinaryThresholdImageFilter",
-      "parameters_version": 1,
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
       "role": "Select inclusive [0.35, 1.0] brightness from UnitIntensity into uint8 0/1 BrightOriginal.",
       "key_parameters": {
         "input_image_data_path": "Ti64/Cell Data/UnitIntensity",
@@ -142,12 +163,12 @@
         "outside_value": 0,
         "upper_threshold": 1
       },
-      "index": 1
+      "parameters_version": 1
     },
     {
-      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "index": 2,
       "filter": "BinaryThresholdImageFilter",
-      "parameters_version": 1,
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
       "role": "Select inclusive [0.35, 1.0] brightness from MedianR1 into uint8 0/1 BrightMedianR1.",
       "key_parameters": {
         "input_image_data_path": "Ti64/Cell Data/MedianR1",
@@ -158,12 +179,12 @@
         "outside_value": 0,
         "upper_threshold": 1
       },
-      "index": 2
+      "parameters_version": 1
     },
     {
-      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "index": 3,
       "filter": "BinaryThresholdImageFilter",
-      "parameters_version": 1,
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
       "role": "Select inclusive [0.35, 1.0] brightness from GaussianV1 into uint8 0/1 BrightGaussianV1.",
       "key_parameters": {
         "input_image_data_path": "Ti64/Cell Data/GaussianV1",
@@ -174,12 +195,12 @@
         "outside_value": 0,
         "upper_threshold": 1
       },
-      "index": 3
+      "parameters_version": 1
     },
     {
-      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "index": 4,
       "filter": "BinaryThresholdImageFilter",
-      "parameters_version": 1,
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
       "role": "Select inclusive [0.35, 1.0] brightness from GaussianV4 into uint8 0/1 BrightGaussianV4.",
       "key_parameters": {
         "input_image_data_path": "Ti64/Cell Data/GaussianV4",
@@ -190,12 +211,12 @@
         "outside_value": 0,
         "upper_threshold": 1
       },
-      "index": 4
+      "parameters_version": 1
     },
     {
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "index": 5,
       "filter": "ComputeArrayStatisticsFilter",
-      "parameters_version": 2,
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Summarize all 355216 cells of BrightOriginal; Summation counts selected pixels and Mean gives their fraction.",
       "key_parameters": {
         "selected_array_path": "Ti64/Cell Data/BrightOriginal",
@@ -232,12 +253,12 @@
         "find_unique_values": false,
         "number_unique_values_name": "NumUniqueValues"
       },
-      "index": 5
+      "parameters_version": 2
     },
     {
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "index": 6,
       "filter": "ComputeArrayStatisticsFilter",
-      "parameters_version": 2,
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Summarize all 355216 cells of BrightMedianR1; Summation counts selected pixels and Mean gives their fraction.",
       "key_parameters": {
         "selected_array_path": "Ti64/Cell Data/BrightMedianR1",
@@ -274,12 +295,12 @@
         "find_unique_values": false,
         "number_unique_values_name": "NumUniqueValues"
       },
-      "index": 6
+      "parameters_version": 2
     },
     {
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "index": 7,
       "filter": "ComputeArrayStatisticsFilter",
-      "parameters_version": 2,
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Summarize all 355216 cells of BrightGaussianV1; Summation counts selected pixels and Mean gives their fraction.",
       "key_parameters": {
         "selected_array_path": "Ti64/Cell Data/BrightGaussianV1",
@@ -316,12 +337,12 @@
         "find_unique_values": false,
         "number_unique_values_name": "NumUniqueValues"
       },
-      "index": 7
+      "parameters_version": 2
     },
     {
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "index": 8,
       "filter": "ComputeArrayStatisticsFilter",
-      "parameters_version": 2,
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Summarize all 355216 cells of BrightGaussianV4; Summation counts selected pixels and Mean gives their fraction.",
       "key_parameters": {
         "selected_array_path": "Ti64/Cell Data/BrightGaussianV4",
@@ -358,12 +379,257 @@
         "find_unique_values": false,
         "number_unique_values_name": "NumUniqueValues"
       },
-      "index": 8
+      "parameters_version": 2
     },
     {
-      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "index": 9,
+      "filter": "GradientMagnitudeImageFilter",
+      "uuid": "e9bc5ba0-a6db-4537-aff3-86d8b535327e",
+      "role": "Compute float32 central-difference gradient magnitude of the same GaussianV1 image, in pixel space. Flat regions contribute little weight; this is not a calibrated physical gradient.",
+      "key_parameters": {
+        "input_image_geometry_path": "Ti64",
+        "input_image_data_path": "Ti64/Cell Data/GaussianV1",
+        "output_array_name": "GaussianV1Gradient",
+        "use_image_spacing": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "RobustAutomaticThresholdFilter",
+      "uuid": "ade392e6-f0da-4cf3-bf11-dfe69e200b49",
+      "role": "Select GaussianV1 >= its single gradient-weighted global cutoff into a bool mask. The filter does not save the cutoff; it is not a local adaptive threshold or a material-phase classifier.",
+      "key_parameters": {
+        "input_array_path": "Ti64/Cell Data/GaussianV1",
+        "gradient_array_path": "Ti64/Cell Data/GaussianV1Gradient",
+        "created_mask_name": "RobustGaussianV1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Ti64/Cell Data/RobustGaussianV1"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_OpenedXY1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Ti64/Cell Data/RobustGaussianV1"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_ClosedXY1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "role": "Opening, first pass: erode true cells beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+      "key_parameters": {
+        "operation_index": 1,
+        "num_iterations": 1,
+        "x_dir_on": true,
+        "y_dir_on": true,
+        "z_dir_on": false,
+        "mask_array_path": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1",
+        "input_image_geometry_path": "Ti64"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "role": "Opening, second pass: dilate the eroded mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+      "key_parameters": {
+        "operation_index": 0,
+        "num_iterations": 1,
+        "x_dir_on": true,
+        "y_dir_on": true,
+        "z_dir_on": false,
+        "mask_array_path": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1",
+        "input_image_geometry_path": "Ti64"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "role": "Closing, first pass: dilate the original automatic mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+      "key_parameters": {
+        "operation_index": 0,
+        "num_iterations": 1,
+        "x_dir_on": true,
+        "y_dir_on": true,
+        "z_dir_on": false,
+        "mask_array_path": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1",
+        "input_image_geometry_path": "Ti64"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "role": "Closing, second pass: erode the dilated mask beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+      "key_parameters": {
+        "operation_index": 1,
+        "num_iterations": 1,
+        "x_dir_on": true,
+        "y_dir_on": true,
+        "z_dir_on": false,
+        "mask_array_path": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1",
+        "input_image_geometry_path": "Ti64"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all pixels and true pixels in RobustGaussianV1 using only Length and Summation; selected fraction is Summation/Length.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/RobustGaussianV1",
+        "destination_attribute_matrix_path": "Ti64/RobustGaussianV1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": false,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 18,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all pixels and true pixels in RobustGaussianV1_OpenedXY1 using only Length and Summation; selected fraction is Summation/Length.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1",
+        "destination_attribute_matrix_path": "Ti64/RobustGaussianV1_OpenedXY1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": false,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 19,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all pixels and true pixels in RobustGaussianV1_ClosedXY1 using only Length and Summation; selected fraction is Summation/Length.",
+      "key_parameters": {
+        "selected_array_path": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1",
+        "destination_attribute_matrix_path": "Ti64/RobustGaussianV1_ClosedXY1Summary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "Cell Data/FeatureIds",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "Reduced Feature Ids Indices",
+        "find_length": true,
+        "length_array_name": "Length",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": false,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 20,
       "filter": "WriteDREAM3DFilter",
-      "parameters_version": 2,
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save both geometries, all input arrays, four brightness masks, and four whole-crop summaries.",
       "key_parameters": {
         "export_file_path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
@@ -371,7 +637,123 @@
         "use_compression": true,
         "compression_level": 5
       },
-      "index": 9
+      "parameters_version": 2
     }
-  ]
+  ],
+  "threshold_morphology_contract": {
+    "input_image": "Ti64/Cell Data/GaussianV1",
+    "gradient": "Ti64/Cell Data/GaussianV1Gradient",
+    "use_image_spacing": false,
+    "gradient_units": "relative intensity per pixel",
+    "automatic_mask": "Ti64/Cell Data/RobustGaussianV1",
+    "threshold_scope": "One gradient-weighted global cutoff; not saved by the filter",
+    "threshold_comparison": "input >= float32 cutoff",
+    "branch_masks": [
+      "RobustGaussianV1_OpenedXY1",
+      "RobustGaussianV1_ClosedXY1"
+    ],
+    "operations": {
+      "opening": [
+        "erode",
+        "dilate"
+      ],
+      "closing": [
+        "dilate",
+        "erode"
+      ]
+    },
+    "iterations_per_pass": 1,
+    "active_axes": [
+      "X",
+      "Y"
+    ],
+    "neighborhood": "center plus existing four XY face neighbors; no diagonal neighbors or false exterior padding",
+    "new_mask_type": "bool",
+    "statistics": [
+      "Length",
+      "Summation"
+    ],
+    "selected_fraction": "Summation / Length"
+  },
+  "result_visual": {
+    "path": "Ti64AutomaticThresholdMorphology.png",
+    "sha256": "da6a7546a8af15ae0d15a8da9ccf8dd1909c112da7b9946aa9c3453844401385",
+    "source_outputs": [
+      {
+        "path": "Data/Output/Ti64_Image_Cleanup_Examples/Threshold/Ti64_ThresholdSensitivity.dream3d",
+        "sha256": "2dbf44e043d873f9f6de4e714534f6b9fbbcf000f59d5346629c3f0a6499be2b"
+      }
+    ],
+    "method": "Native GaussianV1 image and four saved masks; selections and set-difference overlays only. No threshold, gradient or morphology calculation in the plotting script. The reconstructed cutoff label is taken explicitly from the independent verification report.",
+    "source_window_xy_start": [
+      300,
+      250
+    ],
+    "source_window_size": [
+      180,
+      180
+    ],
+    "coordinate_extent": [
+      304,
+      484,
+      254,
+      434
+    ],
+    "counts": {
+      "BrightGaussianV1": 33536,
+      "RobustGaussianV1": 63782,
+      "RobustGaussianV1_OpenedXY1": 61470,
+      "RobustGaussianV1_ClosedXY1": 64991
+    },
+    "visual_review": "2026-10-13: inspected common window, axis/pixel units, preserved input contrast, removal/addition overlays, legends, full-image counts, explicit reconstructed-cutoff label, attribution and margins.",
+    "role": "Four native masks on the same GaussianV1 window, with removed/added pixels highlighted and full-image selected counts."
+  },
+  "validation": {
+    "date": "2026-10-13",
+    "configuration": "Windows in-memory Release",
+    "pipeline_tests": [
+      {
+        "name": "PIPELINE::ImageProcessing::Ti64_Image_Cleanup_Examples",
+        "passed": true,
+        "elapsed_seconds": 1.44
+      },
+      {
+        "name": "PIPELINE::ImageProcessing::Ti64_Segmentation_Examples",
+        "passed": true,
+        "elapsed_seconds": 3.7
+      }
+    ],
+    "independent_checks": {
+      "passed": 36,
+      "total": 36,
+      "scope": "Native Windows Release in-memory; brightness selection only, no phase or calibrated morphology claim. Gradient independently reconstructed; global threshold float32 recurrence is explicitly source-conformance."
+    },
+    "results": {
+      "threshold_float32_source_conformance": 0.2751420736312866,
+      "weighted_ratio_float64": 0.2751449551605927,
+      "gradient_total_float64": 9120.14821190634,
+      "pixels": 355216,
+      "counts": {
+        "RobustGaussianV1": 63782,
+        "RobustGaussianV1_OpenedXY1": 61470,
+        "RobustGaussianV1_ClosedXY1": 64991
+      },
+      "fixed_count": 33536,
+      "removed_by_opening": 2312,
+      "added_by_closing": 1209
+    },
+    "preserved_dataset_counts": {
+      "Preparation": 10,
+      "Smoothing": 31,
+      "Threshold": 63
+    },
+    "pipeline_sha256": "50193e2945c32b91091a4f1ebbdd3b24eefad6a37eab13a39eaf94ed7b05409b",
+    "unverified": [
+      "material or phase classification accuracy",
+      "calibrated physical morphology",
+      "GUI",
+      "OOC",
+      "generated Python execution"
+    ]
+  }
 }

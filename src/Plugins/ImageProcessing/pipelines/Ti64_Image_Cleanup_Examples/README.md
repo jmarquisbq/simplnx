@@ -30,9 +30,9 @@ Relative paths resolve from that CLI working folder. In the GUI, open the pipeli
 
 [(02) Smoothing Comparison](%2802%29%20Ti64%20Smoothing%20Comparison.md) reads that checkpoint and compares median radius 1 with discrete Gaussian variances 1 and 4. Each filter reads the same normalized input; the outputs are not rescaled or fed into one another. It saves all arrays and their summaries under `Smoothing/Ti64_SmoothingComparison.dream3d` in the same example output root.
 
-[(03) Threshold Sensitivity](%2803%29%20Ti64%20Threshold%20Sensitivity.md) reads the smoothing checkpoint and applies the same 0.35–1.0 interval to all four intensity arrays. It saves brightness masks and count/fraction summaries under `Threshold/Ti64_ThresholdSensitivity.dream3d`. Run **01 → 02 → 03**; each stage depends on the preceding checkpoint. Selected pixels are not automatically a material phase or grain population.
+[(03) Threshold Sensitivity](%2803%29%20Ti64%20Threshold%20Sensitivity.md) reads the smoothing checkpoint and applies the same 0.35–1.0 interval to all four intensity arrays. It also computes a gradient-weighted global cutoff for `GaussianV1`, then independently opens and closes copies of that bool mask using one-cell XY face-neighbor passes. It saves all masks and count summaries under `Threshold/Ti64_ThresholdSensitivity.dream3d`; the new bool summaries contain Length and Summation only. Run **01 → 02 → 03**; each stage depends on the preceding checkpoint. Selected pixels are not automatically a material phase or grain population.
 
-Spatial coordinates are uncalibrated pixels with spacing 1 and unit choice **Unknown**. Intensity is relative image brightness. Neither represents a physical phase identity, material acceptance threshold, or calibrated length. The crop is a documented example choice, not a paper-prescribed region or a representative-volume claim.
+Spatial coordinates are uncalibrated pixels with spacing 1 and unit choice **Unknown**. Intensity is relative image brightness. Neither represents a physical phase identity, material acceptance threshold, or calibrated length. The automatic cutoff is global, not a local adaptive method. Morphology may remove real thin structures or close meaningful gaps; cleaner appearance is not an accuracy measure. The crop is a documented example choice, not a paper-prescribed region or a representative-volume claim.
 
 ## Source and paper relationship
 
@@ -44,4 +44,4 @@ The `.d3dpipeline` files define the executable steps; matching Markdown and JSON
 
 ## Execution scope
 
-Reference results were checked with the Windows CLI and in-memory storage. Scientific interpretation, native GUI use, out-of-core storage, and generated Python execution remain pending separate review or verification.
+The extended cleanup and downstream segmentation chains passed Windows in-memory Release CTest on October 13, 2026. Thirty-six saved-output checks verified preservation, gradient, cutoff selection, morphology and counts. The automatic/opened/closed masks contain 63,782 / 61,470 / 64,991 selected pixels; these are brightness selections, not physical phase fractions. Scientific interpretation, native GUI use, out-of-core storage, and generated Python execution remain pending separate review or verification.

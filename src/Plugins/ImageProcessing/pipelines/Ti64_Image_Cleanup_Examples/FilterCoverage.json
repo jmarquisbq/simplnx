@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected filters in the measured Ti64 cleanup examples.",
+  "scope": "Selected filters in measured Ti64 cleanup, threshold and mask-morphology examples.",
   "filters": [
     {
       "filter": "ReadImageFilter",
@@ -71,6 +71,132 @@
       "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
       "step": 1,
       "purpose": "Select inclusive [0.35, 1.0] brightness from UnitIntensity into uint8 0/1 BrightOriginal."
+    },
+    {
+      "filter": "BinaryThresholdImageFilter",
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 2,
+      "purpose": "Select inclusive [0.35, 1.0] brightness from MedianR1 into uint8 0/1 BrightMedianR1."
+    },
+    {
+      "filter": "BinaryThresholdImageFilter",
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 3,
+      "purpose": "Select inclusive [0.35, 1.0] brightness from GaussianV1 into uint8 0/1 BrightGaussianV1."
+    },
+    {
+      "filter": "BinaryThresholdImageFilter",
+      "uuid": "4bf09378-e159-4437-9ce2-3f4c3b5ad7ae",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 4,
+      "purpose": "Select inclusive [0.35, 1.0] brightness from GaussianV4 into uint8 0/1 BrightGaussianV4."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 5,
+      "purpose": "Summarize all 355216 cells of BrightOriginal; Summation counts selected pixels and Mean gives their fraction."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 6,
+      "purpose": "Summarize all 355216 cells of BrightMedianR1; Summation counts selected pixels and Mean gives their fraction."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 7,
+      "purpose": "Summarize all 355216 cells of BrightGaussianV1; Summation counts selected pixels and Mean gives their fraction."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 8,
+      "purpose": "Summarize all 355216 cells of BrightGaussianV4; Summation counts selected pixels and Mean gives their fraction."
+    },
+    {
+      "filter": "GradientMagnitudeImageFilter",
+      "uuid": "e9bc5ba0-a6db-4537-aff3-86d8b535327e",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 9,
+      "purpose": "Compute float32 central-difference gradient magnitude of the same GaussianV1 image, in pixel space. Flat regions contribute little weight; this is not a calibrated physical gradient."
+    },
+    {
+      "filter": "RobustAutomaticThresholdFilter",
+      "uuid": "ade392e6-f0da-4cf3-bf11-dfe69e200b49",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 10,
+      "purpose": "Select GaussianV1 >= its single gradient-weighted global cutoff into a bool mask. The filter does not save the cutoff; it is not a local adaptive threshold or a material-phase classifier."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 11,
+      "purpose": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 12,
+      "purpose": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches."
+    },
+    {
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 13,
+      "purpose": "Opening, first pass: erode true cells beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored."
+    },
+    {
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 14,
+      "purpose": "Opening, second pass: dilate the eroded mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored."
+    },
+    {
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 15,
+      "purpose": "Closing, first pass: dilate the original automatic mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored."
+    },
+    {
+      "filter": "ErodeDilateMaskFilter",
+      "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 16,
+      "purpose": "Closing, second pass: erode the dilated mask beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 17,
+      "purpose": "Count all pixels and true pixels in RobustGaussianV1 using only Length and Summation; selected fraction is Summation/Length."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 18,
+      "purpose": "Count all pixels and true pixels in RobustGaussianV1_OpenedXY1 using only Length and Summation; selected fraction is Summation/Length."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Ti64 Threshold Sensitivity.d3dpipeline",
+      "step": 19,
+      "purpose": "Count all pixels and true pixels in RobustGaussianV1_ClosedXY1 using only Length and Summation; selected fraction is Summation/Length."
     }
   ]
 }

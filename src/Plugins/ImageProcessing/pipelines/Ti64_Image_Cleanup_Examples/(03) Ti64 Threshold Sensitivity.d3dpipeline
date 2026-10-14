@@ -719,6 +719,672 @@
                          "isDisabled":  false
                      },
                      {
+                         "args": {
+                             "input_image_geometry_path": {
+                                 "value": "Ti64",
+                                 "version": 1
+                             },
+                             "input_image_data_path": {
+                                 "value": "Ti64/Cell Data/GaussianV1",
+                                 "version": 1
+                             },
+                             "output_array_name": {
+                                 "value": "GaussianV1Gradient",
+                                 "version": 1
+                             },
+                             "use_image_spacing": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Compute float32 central-difference gradient magnitude of the same GaussianV1 image, in pixel space. Flat regions contribute little weight; this is not a calibrated physical gradient.",
+                         "filter": {
+                             "name": "nx::core::GradientMagnitudeImageFilter",
+                             "uuid": "e9bc5ba0-a6db-4537-aff3-86d8b535327e"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "input_array_path": {
+                                 "value": "Ti64/Cell Data/GaussianV1",
+                                 "version": 1
+                             },
+                             "gradient_array_path": {
+                                 "value": "Ti64/Cell Data/GaussianV1Gradient",
+                                 "version": 1
+                             },
+                             "created_mask_name": {
+                                 "value": "RobustGaussianV1",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Select GaussianV1 >= its single gradient-weighted global cutoff into a bool mask. The filter does not save the cutoff; it is not a local adaptive threshold or a material-phase classifier.",
+                         "filter": {
+                             "name": "nx::core::RobustAutomaticThresholdFilter",
+                             "uuid": "ade392e6-f0da-4cf3-bf11-dfe69e200b49"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "existing_data_path": {
+                                 "value": [
+                                     "Ti64/Cell Data/RobustGaussianV1"
+                                 ],
+                                 "version": 1
+                             },
+                             "use_new_parent": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "new_data_path": {
+                                 "value": "",
+                                 "version": 1
+                             },
+                             "new_path_suffix": {
+                                 "value": "_OpenedXY1",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches.",
+                         "filter": {
+                             "name": "nx::core::CopyDataObjectFilter",
+                             "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "existing_data_path": {
+                                 "value": [
+                                     "Ti64/Cell Data/RobustGaussianV1"
+                                 ],
+                                 "version": 1
+                             },
+                             "use_new_parent": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "new_data_path": {
+                                 "value": "",
+                                 "version": 1
+                             },
+                             "new_path_suffix": {
+                                 "value": "_ClosedXY1",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Copy the unchanged automatic bool mask in the same parent before in-place morphology; keep opening and closing as independent branches.",
+                         "filter": {
+                             "name": "nx::core::CopyDataObjectFilter",
+                             "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "operation_index": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "num_iterations": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "x_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "y_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "z_dir_on": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "mask_array_path": {
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1",
+                                 "version": 1
+                             },
+                             "input_image_geometry_path": {
+                                 "value": "Ti64",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Opening, first pass: erode true cells beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+                         "filter": {
+                             "name": "nx::core::ErodeDilateMaskFilter",
+                             "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "operation_index": {
+                                 "value": 0,
+                                 "version": 1
+                             },
+                             "num_iterations": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "x_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "y_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "z_dir_on": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "mask_array_path": {
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1",
+                                 "version": 1
+                             },
+                             "input_image_geometry_path": {
+                                 "value": "Ti64",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Opening, second pass: dilate the eroded mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+                         "filter": {
+                             "name": "nx::core::ErodeDilateMaskFilter",
+                             "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "operation_index": {
+                                 "value": 0,
+                                 "version": 1
+                             },
+                             "num_iterations": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "x_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "y_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "z_dir_on": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "mask_array_path": {
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1",
+                                 "version": 1
+                             },
+                             "input_image_geometry_path": {
+                                 "value": "Ti64",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Closing, first pass: dilate the original automatic mask by one existing XY face-neighbor layer. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+                         "filter": {
+                             "name": "nx::core::ErodeDilateMaskFilter",
+                             "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "operation_index": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "num_iterations": {
+                                 "value": 1,
+                                 "version": 1
+                             },
+                             "x_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "y_dir_on": {
+                                 "value": true,
+                                 "version": 1
+                             },
+                             "z_dir_on": {
+                                 "value": false,
+                                 "version": 1
+                             },
+                             "mask_array_path": {
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1",
+                                 "version": 1
+                             },
+                             "input_image_geometry_path": {
+                                 "value": "Ti64",
+                                 "version": 1
+                             },
+                             "parameters_version": 1
+                         },
+                         "comments": "Closing, second pass: erode the dilated mask beside existing false XY neighbors. Each pass uses a four-neighbor cross, not a square or disk; out-of-image neighbors are ignored.",
+                         "filter": {
+                             "name": "nx::core::ErodeDilateMaskFilter",
+                             "uuid": "cab66cd1-f64c-42b4-8f94-18f0835a967f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "selected_array_path": {
+                                 "version": 1,
+                                 "value": "Ti64/Cell Data/RobustGaussianV1"
+                             },
+                             "destination_attribute_matrix_path": {
+                                 "version": 1,
+                                 "value": "Ti64/RobustGaussianV1Summary"
+                             },
+                             "use_mask": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mask_array_path": {
+                                 "version": 1,
+                                 "value": ""
+                             },
+                             "compute_by_index": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "feature_ids_path": {
+                                 "version": 1,
+                                 "value": "Cell Data/FeatureIds"
+                             },
+                             "feature_has_data_array_name": {
+                                 "version": 1,
+                                 "value": "FeatureHasData"
+                             },
+                             "range_type_index": {
+                                 "version": 1,
+                                 "value": 0
+                             },
+                             "range": {
+                                 "version": 1,
+                                 "value": [
+                                     0,
+                                     -1
+                                 ]
+                             },
+                             "feature_ids_indexing_name": {
+                                 "version": 1,
+                                 "value": "Reduced Feature Ids Indices"
+                             },
+                             "find_length": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "length_array_name": {
+                                 "version": 1,
+                                 "value": "Length"
+                             },
+                             "find_min": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "minimum_array_name": {
+                                 "version": 1,
+                                 "value": "Minimum"
+                             },
+                             "find_max": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "maximum_array_name": {
+                                 "version": 1,
+                                 "value": "Maximum"
+                             },
+                             "find_mean": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mean_array_name": {
+                                 "version": 1,
+                                 "value": "Mean"
+                             },
+                             "find_median": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "median_array_name": {
+                                 "version": 1,
+                                 "value": "Median"
+                             },
+                             "find_mode": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mode_array_name": {
+                                 "version": 1,
+                                 "value": "Mode"
+                             },
+                             "find_std_deviation": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "std_deviation_array_name": {
+                                 "version": 1,
+                                 "value": "StandardDeviation"
+                             },
+                             "find_summation": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "summation_array_name": {
+                                 "version": 1,
+                                 "value": "Summation"
+                             },
+                             "standardize_data": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "standardized_array_name": {
+                                 "version": 1,
+                                 "value": "Standardized"
+                             },
+                             "find_unique_values": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "number_unique_values_name": {
+                                 "version": 1,
+                                 "value": "NumUniqueValues"
+                             },
+                             "parameters_version": 2
+                         },
+                         "comments": "Count all pixels and true pixels in RobustGaussianV1 using only Length and Summation; selected fraction is Summation/Length.",
+                         "filter": {
+                             "name": "nx::core::ComputeArrayStatisticsFilter",
+                             "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "selected_array_path": {
+                                 "version": 1,
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_OpenedXY1"
+                             },
+                             "destination_attribute_matrix_path": {
+                                 "version": 1,
+                                 "value": "Ti64/RobustGaussianV1_OpenedXY1Summary"
+                             },
+                             "use_mask": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mask_array_path": {
+                                 "version": 1,
+                                 "value": ""
+                             },
+                             "compute_by_index": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "feature_ids_path": {
+                                 "version": 1,
+                                 "value": "Cell Data/FeatureIds"
+                             },
+                             "feature_has_data_array_name": {
+                                 "version": 1,
+                                 "value": "FeatureHasData"
+                             },
+                             "range_type_index": {
+                                 "version": 1,
+                                 "value": 0
+                             },
+                             "range": {
+                                 "version": 1,
+                                 "value": [
+                                     0,
+                                     -1
+                                 ]
+                             },
+                             "feature_ids_indexing_name": {
+                                 "version": 1,
+                                 "value": "Reduced Feature Ids Indices"
+                             },
+                             "find_length": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "length_array_name": {
+                                 "version": 1,
+                                 "value": "Length"
+                             },
+                             "find_min": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "minimum_array_name": {
+                                 "version": 1,
+                                 "value": "Minimum"
+                             },
+                             "find_max": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "maximum_array_name": {
+                                 "version": 1,
+                                 "value": "Maximum"
+                             },
+                             "find_mean": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mean_array_name": {
+                                 "version": 1,
+                                 "value": "Mean"
+                             },
+                             "find_median": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "median_array_name": {
+                                 "version": 1,
+                                 "value": "Median"
+                             },
+                             "find_mode": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mode_array_name": {
+                                 "version": 1,
+                                 "value": "Mode"
+                             },
+                             "find_std_deviation": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "std_deviation_array_name": {
+                                 "version": 1,
+                                 "value": "StandardDeviation"
+                             },
+                             "find_summation": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "summation_array_name": {
+                                 "version": 1,
+                                 "value": "Summation"
+                             },
+                             "standardize_data": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "standardized_array_name": {
+                                 "version": 1,
+                                 "value": "Standardized"
+                             },
+                             "find_unique_values": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "number_unique_values_name": {
+                                 "version": 1,
+                                 "value": "NumUniqueValues"
+                             },
+                             "parameters_version": 2
+                         },
+                         "comments": "Count all pixels and true pixels in RobustGaussianV1_OpenedXY1 using only Length and Summation; selected fraction is Summation/Length.",
+                         "filter": {
+                             "name": "nx::core::ComputeArrayStatisticsFilter",
+                             "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
+                         "args": {
+                             "selected_array_path": {
+                                 "version": 1,
+                                 "value": "Ti64/Cell Data/RobustGaussianV1_ClosedXY1"
+                             },
+                             "destination_attribute_matrix_path": {
+                                 "version": 1,
+                                 "value": "Ti64/RobustGaussianV1_ClosedXY1Summary"
+                             },
+                             "use_mask": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mask_array_path": {
+                                 "version": 1,
+                                 "value": ""
+                             },
+                             "compute_by_index": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "feature_ids_path": {
+                                 "version": 1,
+                                 "value": "Cell Data/FeatureIds"
+                             },
+                             "feature_has_data_array_name": {
+                                 "version": 1,
+                                 "value": "FeatureHasData"
+                             },
+                             "range_type_index": {
+                                 "version": 1,
+                                 "value": 0
+                             },
+                             "range": {
+                                 "version": 1,
+                                 "value": [
+                                     0,
+                                     -1
+                                 ]
+                             },
+                             "feature_ids_indexing_name": {
+                                 "version": 1,
+                                 "value": "Reduced Feature Ids Indices"
+                             },
+                             "find_length": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "length_array_name": {
+                                 "version": 1,
+                                 "value": "Length"
+                             },
+                             "find_min": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "minimum_array_name": {
+                                 "version": 1,
+                                 "value": "Minimum"
+                             },
+                             "find_max": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "maximum_array_name": {
+                                 "version": 1,
+                                 "value": "Maximum"
+                             },
+                             "find_mean": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mean_array_name": {
+                                 "version": 1,
+                                 "value": "Mean"
+                             },
+                             "find_median": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "median_array_name": {
+                                 "version": 1,
+                                 "value": "Median"
+                             },
+                             "find_mode": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "mode_array_name": {
+                                 "version": 1,
+                                 "value": "Mode"
+                             },
+                             "find_std_deviation": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "std_deviation_array_name": {
+                                 "version": 1,
+                                 "value": "StandardDeviation"
+                             },
+                             "find_summation": {
+                                 "version": 1,
+                                 "value": true
+                             },
+                             "summation_array_name": {
+                                 "version": 1,
+                                 "value": "Summation"
+                             },
+                             "standardize_data": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "standardized_array_name": {
+                                 "version": 1,
+                                 "value": "Standardized"
+                             },
+                             "find_unique_values": {
+                                 "version": 1,
+                                 "value": false
+                             },
+                             "number_unique_values_name": {
+                                 "version": 1,
+                                 "value": "NumUniqueValues"
+                             },
+                             "parameters_version": 2
+                         },
+                         "comments": "Count all pixels and true pixels in RobustGaussianV1_ClosedXY1 using only Length and Summation; selected fraction is Summation/Length.",
+                         "filter": {
+                             "name": "nx::core::ComputeArrayStatisticsFilter",
+                             "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+                         },
+                         "isDisabled": false
+                     },
+                     {
                          "args":  {
                                       "export_file_path":  {
                                                                "version":  1,

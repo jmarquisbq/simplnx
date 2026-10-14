@@ -8,7 +8,7 @@ Processing (Cleanup)
 
 This **Filter** grows or shrinks the *true* region of a boolean *mask* array by one cell-layer per iteration, using standard image-morphology operations. The mask is a cell-level boolean array (typically produced by a threshold operation such as [Multi-Threshold Objects](MultiThresholdObjectsFilter.md)) where *true* marks cells of interest and *false* marks excluded cells.
 
-Only the **Mask** array is modified; no other cell data is changed.
+Only the **Mask** array is modified, **in place**; no other cell data is changed. Use [Copy Data Object](CopyDataObjectFilter.md) before comparing independent morphology branches or retaining the original selection. The input must be bool; a uint8 0/1 array requires conversion first.
 
 The example images below show the IPF-colored data after the filter has run. Black pixels are cells where the mask is *false*; colored pixels are where the mask is *true*.
 
@@ -35,6 +35,8 @@ Chaining an erode and a dilate pass (with equal iteration counts) performs the t
 
 - *Number of Iterations* is in **cell-layers**. An iteration count of 3 grows or shrinks the *true* region by 3 cells. The value must be at least 1; values below 1 fail preflight.
 - *X Direction*, *Y Direction*, and *Z Direction* toggle whether the morphology is applied along that axis. Disable an axis to perform anisotropic morphology -- useful when serial-sectioning resolution is anisotropic (typically Z is coarser than X and Y) and you want to limit growth or shrinking along the fine axes.
+
+Only existing face neighbors participate. With X and Y enabled and Z disabled, each pass uses a four-neighbor cross, not a 3-by-3 square or disk. Out-of-image neighbors are ignored rather than treated as false, so erosion at a crop edge can differ from a library that pads with background. Iterations are cell layers, not physical-length tolerances.
 
 ### Required Input Sources
 
@@ -67,6 +69,9 @@ This algorithm is optimized for both in-memory and out-of-core (OOC) data stores
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
++ `Ti64_Image_Cleanup_Examples/(03) Ti64 Threshold Sensitivity.d3dpipeline` (ImageProcessing)
 
 ## License & Copyright
 
