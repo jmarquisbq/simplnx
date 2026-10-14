@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "relative_directory": "Data/Vendor_EBSD_Import_Examples",
+  "license": "Official public DREAM3D/simplnx example archive. No separate standard dataset license or additional redistribution permission established. Raw packaging is deferred until approval.",
+  "attribution": "Bruker nickel example supplied through the official archive; Oxford AZtec source acknowledgement thanks Sanida National Lab (archive spelling retained). See SourceDataLicense.md.",
+  "provenance": "Two independent measured vendor exports, retained unchanged. No shared specimen or registration is implied.",
+  "archives": [
+    {
+      "archive": "H5Oina_Test_Data.tar.gz",
+      "sha512": "346573ac6b96983680078e8b0a401aa25bd9302dff382ca86ae4e503ded6db3947c4c5611ee603db519d8a8dc6ed35b044a7bfea9880fade5ab54479d140ea03",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/H5Oina_Test_Data.tar.gz",
+      "bytes": 186664897,
+      "asset_created_at": "2024-03-19T19:29:50Z"
+    },
+    {
+      "archive": "6_6_ImportH5Data.tar.gz",
+      "sha512": "68cf620d28a515d04040d66c4f8fa9d8d46707c65138b366b47f40d1d56a36c40e2e2cd0c9d35168b68c2cb5b2ce95650fa2a0d4e6ffce980d0dd0654908f40d",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+      "bytes": 176594692,
+      "asset_created_at": "2023-03-24T19:17:50Z"
+    }
+  ],
+  "files": [
+    {
+      "filename": "H5Oina_Test_Data.h5oina",
+      "archive_path": "H5Oina_Test_Data/H5Oina_Test_Data.h5oina",
+      "bytes": 203434350,
+      "sha256": "dc20daed20a940e81c02ca3f80dfa444dccc3dda83d030bd486403234078e903",
+      "archive": "H5Oina_Test_Data.tar.gz",
+      "source_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/H5Oina_Test_Data.tar.gz",
+      "consuming_pipelines": [
+        "(01) Vendor EBSD Import Checks.d3dpipeline"
+      ]
+    },
+    {
+      "filename": "H5EspritReaderTest.h5",
+      "archive_path": "6_6_ImportH5Data/H5EspritReaderTest.h5",
+      "bytes": 29905456,
+      "sha256": "de15a435431329da2e8e8bab59ba5a4894fb9430c3aa1874e158663d6a340ee8",
+      "archive": "6_6_ImportH5Data.tar.gz",
+      "source_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+      "consuming_pipelines": [
+        "(01) Vendor EBSD Import Checks.d3dpipeline"
+      ]
+    }
+  ],
+  "packaging_status": "Neither source is added to normal data installation by this example. Existing caches and test staging are not package inclusion."
+}

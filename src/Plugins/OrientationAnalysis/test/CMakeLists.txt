@@ -556,3 +556,15 @@ add_test(NAME PIPELINE::OrientationAnalysis::OIM_Nickel_Pattern_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/OIMNickelPatternExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::OIM_Nickel_Pattern_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;OIM_Nickel_Pattern_Examples")
+
+# Vendor-specific import, coordinate-order audit, and quality summaries.
+add_test(NAME PIPELINE::OrientationAnalysis::Vendor_EBSD_Import_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Vendor_EBSD_Import_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Vendor_EBSD_Import_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    "-DARCHIVE_DATA_DIR=${DREAM3D_DATA_DIR}/TestFiles"
+    -P "${CMAKE_CURRENT_LIST_DIR}/VendorEbsdImportExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Vendor_EBSD_Import_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;Vendor_EBSD_Import_Examples")

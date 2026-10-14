@@ -163,6 +163,11 @@ change values that an existing pipeline may compare against.
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Vendor_EBSD_Import_Examples/(01) Vendor EBSD Import Checks.d3dpipeline` (OrientationAnalysis)
+
+
 ## References
 
 [1] Wright, S. I. and De Graef, M., "Electron backscatter diffraction," *International Tables for Crystallography*. [EBSD reference-frame conventions](https://onlinelibrary.wiley.com/iucr/itc/Cc/wf5160/).

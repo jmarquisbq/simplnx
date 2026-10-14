@@ -1,0 +1,864 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Vendor EBSD Import Checks.d3dpipeline",
+  "markdown_file": "(01) Vendor EBSD Import Checks.md",
+  "title": "Vendor EBSD Import Checks",
+  "summary": "Import real Bruker nickel and Oxford cubic-titanium maps, preserve distinct field conventions, count phase-positive indexing and inspect selected quality fields without assigning a universal quality threshold.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Electron microscopy",
+    "Metallurgy"
+  ],
+  "use_cases": [
+    "Check vendor EBSD import before segmentation or orientation analysis",
+    "Retain supplementary HDF5 quality columns through a documented sample rotation",
+    "Distinguish missing calibration, phase validity and vendor-specific error codes"
+  ],
+  "keywords": [
+    "EBSD",
+    "Bruker Esprit",
+    "Oxford AZtec",
+    "H5OINA",
+    "nickel",
+    "titanium",
+    "import quality",
+    "phase mask"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Vendor_EBSD_Import_Examples/H5Oina_Test_Data.h5oina",
+      "role": "Original vendor export; checksum and archive member are listed in DataSources.json."
+    },
+    {
+      "path": "Data/Vendor_EBSD_Import_Examples/H5EspritReaderTest.h5",
+      "role": "Original vendor export; checksum and archive member are listed in DataSources.json."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/VendorEBSD_ImportChecks.dream3d",
+      "role": "Native imported maps and summaries",
+      "sha256": "0965624378eb82d7b80b253f7a000ff59117f3f33cdb0f7b1f215f8004a84120"
+    },
+    {
+      "path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/BrukerNi_ImportSummary.csv",
+      "role": "One-row vendor-specific indexing and quality report",
+      "sha256": "723c2b26512c2796c6a19cda5b9b8a90ab1b003c2117851c7a51e96fa93a396a"
+    },
+    {
+      "path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/OxfordTi_ImportSummary.csv",
+      "role": "One-row vendor-specific indexing and quality report",
+      "sha256": "cd98fbb2666ecd60904be722257776fc625dfd252309b85985a708bd66ce2d58"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "public-measured-example",
+    "asset_keys": [
+      "H5Oina_Test_Data.h5oina",
+      "H5EspritReaderTest.h5"
+    ],
+    "source_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/tag/Data_Archive",
+    "reference_visual": "Native MAD/mask and Oxford Band Contrast/Pattern Quality arrays; no recomputed scientific outputs.",
+    "target_traits": [
+      "Measured600x600 Bruker nickel map with absent XY calibration",
+      "Measured25x25 Oxford cubic-titanium map,4 micrometer XY spacing",
+      "Vendor-specific phase/error semantics and supplementary Pattern Quality"
+    ],
+    "known_differences": "No paper reproduction or cross-specimen property comparison. Bruker XY spacing is a reader fallback, not a measurement. Oxford sample rotation follows the documented historical convention without establishing loading axes. No scientific quality cutoff is imposed.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "vendor-ebsd-import-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Import a vendor EBSD map with traceable quality checks",
+      "Choose a phase-valid mask without borrowing another format error convention",
+      "Add unsupported scalar HDF5 columns before sample rotation"
+    ],
+    "questions_to_ask": [
+      "Which vendor format and scan does the source actually contain?",
+      "Is XY spacing measured, and what are the acquisition/sample frame conventions?",
+      "Which quality criterion is justified for the next analysis, separate from indexing status?"
+    ],
+    "constraints": [
+      "The maps are different measured specimens. Keep them separate; their quality metrics and indexed fractions do not rank instruments or materials.",
+      "Bruker file tuple order differs from the complete beam-coordinate raster at 11146 records. The native BeamOrderDifference/OutOfRasterOrder arrays and OrderingSummary expose this failed spatial prerequisite (#1804). Quality summaries remain order-invariant. Do not segment grains, compute neighborhoods or trust a native image preview until all associated fields are consistently reordered or the importer rejects unsupported order.",
+      "The Bruker figure scatters native MAD/mask values at native X BEAM/Y BEAM coordinates. It does not show the uncorrected native ImageGeometry raster or repair that geometry. The 600-column audit constant belongs only to this source header.",
+      "Bruker Section_435 has XSTEP=YSTEP=0 and zero X SAMPLE/Y SAMPLE fields. The importer falls back to1-micrometer XY metadata; use pixel indices only until independent calibration is supplied. This task does not establish Bruker sample/crystal frame corrections.",
+      "Bruker original phi1/PHI/phi2 are degrees; degrees_to_radians=true creates EulerAngles radians. All other imported scalar fields retain original values. No pattern array is present in this sample.",
+      "Oxford scan1 is25x25 with4-micrometer XY spacing. Euler is already radians; Phase is widened from UInt8 to Int32. Cubic phase needs no hexagonal alignment; set that option false. Import Pattern Data is unsupported and off.",
+      "Oxford Pattern Quality is imported through ReadHDF5Dataset before sample rotation, using tuple shape[1,25,25] and scalar component shape[1]. The large Processed Patterns stack remains unread.",
+      "SourceTupleIndex0..624 is generated before the Oxford180-degreeY sample rotation. All fields including supplementary quality follow the same permutation. Original X/Y acquisition columns are not the corrected geometry coordinates.",
+      "Both masks are UInt8 0/1 from Phase>0. On this Oxford file Error=1 at all587 indexed points and Error=2 at38 phase-zero points; Error=0 selects none. Do not generalize these codes to CTF or other vendors.",
+      "Native summaries measure all-mask count/sum/mean and selected quality min/max/mean/population standard deviation. Summing the0/1 mask counts indexed points for multiphase data; summing phase IDs does not.",
+      "Quality acceptance is not inferred from Phase>0. MAD, Band Contrast and Pattern Quality retain distinct vendor meanings and scales. No additional threshold is imposed.",
+      "Z spacing1 is a single-slice placeholder for both maps, not measured thickness. Do not derive volume or calibrated Bruker grain dimensions.",
+      "The pipeline JSON is authoritative. Raw source installation requires later dataset/pipeline and redistribution approval."
+    ]
+  },
+  "citations": [
+    {
+      "title": "Official DREAM3D example data: H5Oina_Test_Data.tar.gz",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2024,
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/H5Oina_Test_Data.tar.gz",
+      "scope": "pipeline_workflow",
+      "role": "Public original vendor export used for import/quality inspection; not a scientific workflow paper.",
+      "date_note": "Year is repository asset upload year, not necessarily acquisition year; accessed 2026-10-14.",
+      "dataset": {
+        "availability": "Public official release archive; original raw member manually staged or supplied to CTest.",
+        "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/H5Oina_Test_Data.tar.gz",
+        "license": "Official public DREAM3D/simplnx example archive. No separate standard dataset license or additional redistribution permission established. Raw packaging is deferred until approval.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "No scientific publication result is reproduced. Two independent specimens illustrate vendor-specific import, mask and calibration checks."
+      }
+    },
+    {
+      "title": "Official DREAM3D example data: 6_6_ImportH5Data.tar.gz",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2023,
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+      "scope": "pipeline_workflow",
+      "role": "Public original vendor export used for import/quality inspection; not a scientific workflow paper.",
+      "date_note": "Year is repository asset upload year, not necessarily acquisition year; accessed 2026-10-14.",
+      "dataset": {
+        "availability": "Public official release archive; original raw member manually staged or supplied to CTest.",
+        "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+        "license": "Official public DREAM3D/simplnx example archive. No separate standard dataset license or additional redistribution permission established. Raw packaging is deferred until approval.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "No scientific publication result is reproduced. Two independent specimens illustrate vendor-specific import, mask and calibration checks."
+      }
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows Release in-core preflight/execution passed; 69/69 independent checks passed. GUI, OOC, generated Python and materials interpretation remain unverified.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadH5EspritDataFilter",
+      "uuid": "694a0d54-b492-41bc-993b-ce0f5006e927",
+      "role": "Import the original 600 by 600 nickel Esprit scan and convert Euler degrees to radians. Source XSTEP/YSTEP and X SAMPLE/Y SAMPLE are zero, so the reader uses fallback 1-micrometer metadata; treat XY as uncalibrated pixel indices. No Bruker frame correction is asserted by this import-only quality inspection.",
+      "key_parameters": {
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_ensemble_attribute_matrix_name": "Cell Ensemble Data",
+        "degrees_to_radians": true,
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "output_image_geometry_path": "BrukerNi",
+        "read_pattern_data": false,
+        "selected_scan_names": {
+          "input_file_path": "Data/Vendor_EBSD_Import_Examples/H5EspritReaderTest.h5",
+          "scan_names": [
+            "Section_435"
+          ],
+          "stacking_order": 0
+        },
+        "z_spacing": 1.0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Record raw source tuple indices before checking whether file order matches the measured beam-coordinate raster.",
+      "key_parameters": {
+        "output_array_path": "BrukerNi/Cell Data/SourceTupleIndex",
+        "numeric_type_index": 4,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Compare each source tuple index with its declared 600-column beam raster index. Nonzero differences reveal that unchanged file order is not a spatially valid raster order. The width600 is source-specific, not a reusable constant.",
+      "key_parameters": {
+        "calculated_array_path": "BrukerNi/Cell Data/BeamOrderDifference",
+        "calculator_parameter": {
+          "equation": "abs(\"X BEAM\"+600*\"Y BEAM\"-SourceTupleIndex)",
+          "selected_group": "BrukerNi/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Define UInt8 0/1 admission from Phase > 0. Vendor error and quality fields have different semantics; this mask establishes indexing, not a universal quality threshold.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "BrukerNi/Cell Data/Phase",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "IndexedPixels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Flag source tuples whose beam location differs from their current raster slot. Do not run spatial grain analysis on this storage-order ImageGeometry until ordering is resolved.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "BrukerNi/Cell Data/BeamOrderDifference",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "OutOfRasterOrder"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count out-of-raster-order source tuples independently of indexing validity. A nonzero result is a failed spatial-order prerequisite, not a claim that the measured scalar values were changed.",
+      "key_parameters": {
+        "selected_array_path": "BrukerNi/Cell Data/OutOfRasterOrder",
+        "destination_attribute_matrix_path": "BrukerNi/OrderingSummary",
+        "use_mask": false,
+        "mask_array_path": "BrukerNi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "TotalPixels",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "OutOfOrderFraction",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "OutOfOrderCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize the 0/1 mask over all imported pixels. Count is the sum; fraction is the mean. This remains valid for multiphase maps, unlike averaging phase IDs.",
+      "key_parameters": {
+        "selected_array_path": "BrukerNi/Cell Data/IndexedPixels",
+        "destination_attribute_matrix_path": "BrukerNi/IndexingSummary",
+        "use_mask": false,
+        "mask_array_path": "BrukerNi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "TotalPixels",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "IndexedFraction",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "IndexedCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 7,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize MAD only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics.",
+      "key_parameters": {
+        "selected_array_path": "BrukerNi/Cell Data/MAD",
+        "destination_attribute_matrix_path": "BrukerNi/MADSummary",
+        "use_mask": true,
+        "mask_array_path": "BrukerNi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "MAD_SelectedPixels",
+        "find_min": true,
+        "minimum_array_name": "MAD_Minimum",
+        "find_max": true,
+        "maximum_array_name": "MAD_Maximum",
+        "find_mean": true,
+        "mean_array_name": "MAD_Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "MAD_StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "IndexedCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 8,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write the one-row indexing/quality summary including row zero. Keep this vendor report separate: fields and samples are not interchangeable between the two datasets.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/BrukerNi_ImportSummary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "BrukerNi/IndexingSummary/TotalPixels",
+          "BrukerNi/IndexingSummary/IndexedCount",
+          "BrukerNi/IndexingSummary/IndexedFraction",
+          "BrukerNi/OrderingSummary/OutOfOrderCount",
+          "BrukerNi/MADSummary/MAD_SelectedPixels",
+          "BrukerNi/MADSummary/MAD_Minimum",
+          "BrukerNi/MADSummary/MAD_Maximum",
+          "BrukerNi/MADSummary/MAD_Mean",
+          "BrukerNi/MADSummary/MAD_StandardDeviation"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "ReadH5OinaDataFilter",
+      "uuid": "fad3d47f-f1e1-4429-bc65-5e021be62ba0",
+      "role": "Import the measured 25 by 25 AZtec titanium-cubic map; retain Euler radians, widen Phase to Int32 and preserve the phase metadata. XY spacing is 4 micrometers; Z=1 is a single-slice placeholder. Pattern import is unsupported and remains off; no hexagonal correction is needed for this cubic phase.",
+      "key_parameters": {
+        "selected_scan_names": {
+          "input_file_path": "Data/Vendor_EBSD_Import_Examples/H5Oina_Test_Data.h5oina",
+          "scan_names": [
+            "1"
+          ],
+          "stacking_order": 0
+        },
+        "edax_hexagonal_alignment": false,
+        "convert_phase_to_int32": true,
+        "z_spacing": 1.0,
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "read_pattern_data": false,
+        "output_image_geometry_path": "OxfordTi",
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_ensemble_attribute_matrix_name": "Cell Ensemble Data"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 10,
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "role": "Supplement the vendor reader with the original 625-value Pattern Quality dataset, which it does not import. Match the cell tuple shape before any sample rotation so the extra field follows the same pixels. Do not import the large processed-pattern stack for this scalar-map task.",
+      "key_parameters": {
+        "import_hdf5_object": {
+          "input_file": "Data/Vendor_EBSD_Import_Examples/H5Oina_Test_Data.h5oina",
+          "parent_group": "OxfordTi/Cell Data",
+          "data_paths": [
+            {
+              "dataset_path": "/1/EBSD/Data/Pattern Quality",
+              "component_dimensions": "1",
+              "tuple_dimensions": "1,25,25"
+            }
+          ]
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Record raw source tuple indices 0 through 624 before the sample rotation; keep this join key attached to all imported scalar and orientation arrays.",
+      "key_parameters": {
+        "output_array_path": "OxfordTi/Cell Data/SourceTupleIndex",
+        "numeric_type_index": 4,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "role": "Apply the documented historical Oxford/HKL sample-frame convention: 180 degrees about Y, retaining transformed origin. This rearranges cells and the supplementary quality field together; Euler values are unchanged. It is not a claim that specimen loading/rolling axes are established.",
+      "key_parameters": {
+        "input_image_geometry_path": "OxfordTi",
+        "keep_input_geometry_origin": false,
+        "output_image_geometry_path": "",
+        "remove_original_geometry": true,
+        "rotate_slice_by_slice": false,
+        "rotation_axis_angle": [
+          0.0,
+          1.0,
+          0.0,
+          180.0
+        ],
+        "rotation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_representation_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Define UInt8 0/1 admission from Phase > 0. Vendor error and quality fields have different semantics; this mask establishes indexing, not a universal quality threshold.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "OxfordTi/Cell Data/Phase",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "IndexedPixels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize the 0/1 mask over all imported pixels. Count is the sum; fraction is the mean. This remains valid for multiphase maps, unlike averaging phase IDs.",
+      "key_parameters": {
+        "selected_array_path": "OxfordTi/Cell Data/IndexedPixels",
+        "destination_attribute_matrix_path": "OxfordTi/IndexingSummary",
+        "use_mask": false,
+        "mask_array_path": "OxfordTi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "TotalPixels",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "IndexedFraction",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "IndexedCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 15,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize Band Contrast only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics.",
+      "key_parameters": {
+        "selected_array_path": "OxfordTi/Cell Data/Band Contrast",
+        "destination_attribute_matrix_path": "OxfordTi/BandContrastSummary",
+        "use_mask": true,
+        "mask_array_path": "OxfordTi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "BandContrast_SelectedPixels",
+        "find_min": true,
+        "minimum_array_name": "BandContrast_Minimum",
+        "find_max": true,
+        "maximum_array_name": "BandContrast_Maximum",
+        "find_mean": true,
+        "mean_array_name": "BandContrast_Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "BandContrast_StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "IndexedCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 16,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize Pattern Quality only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics.",
+      "key_parameters": {
+        "selected_array_path": "OxfordTi/Cell Data/Pattern Quality",
+        "destination_attribute_matrix_path": "OxfordTi/PatternQualitySummary",
+        "use_mask": true,
+        "mask_array_path": "OxfordTi/Cell Data/IndexedPixels",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "PatternQuality_SelectedPixels",
+        "find_min": true,
+        "minimum_array_name": "PatternQuality_Minimum",
+        "find_max": true,
+        "maximum_array_name": "PatternQuality_Maximum",
+        "find_mean": true,
+        "mean_array_name": "PatternQuality_Mean",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": true,
+        "std_deviation_array_name": "PatternQuality_StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "IndexedCount",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 17,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write the one-row indexing/quality summary including row zero. Keep this vendor report separate: fields and samples are not interchangeable between the two datasets.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/OxfordTi_ImportSummary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "OxfordTi/IndexingSummary/TotalPixels",
+          "OxfordTi/IndexingSummary/IndexedCount",
+          "OxfordTi/IndexingSummary/IndexedFraction",
+          "OxfordTi/BandContrastSummary/BandContrast_SelectedPixels",
+          "OxfordTi/BandContrastSummary/BandContrast_Minimum",
+          "OxfordTi/BandContrastSummary/BandContrast_Maximum",
+          "OxfordTi/BandContrastSummary/BandContrast_Mean",
+          "OxfordTi/BandContrastSummary/BandContrast_StandardDeviation",
+          "OxfordTi/PatternQualitySummary/PatternQuality_SelectedPixels",
+          "OxfordTi/PatternQualitySummary/PatternQuality_Minimum",
+          "OxfordTi/PatternQualitySummary/PatternQuality_Maximum",
+          "OxfordTi/PatternQualitySummary/PatternQuality_Mean",
+          "OxfordTi/PatternQualitySummary/PatternQuality_StandardDeviation"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save both independent measured maps, masks, native quality/indexing summaries and phase metadata. This demonstrates format-aware import checks, not registration or material-property comparison between the specimens.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Vendor_EBSD_Import_Examples/Inspection/VendorEBSD_ImportChecks.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "verified_results": {
+    "bruker_euler_max_error_rad": 1.4332076903045277e-07,
+    "bruker_ordering": {
+      "misordered_tuples": 11146,
+      "maximum_absolute_tuple_offset": 5,
+      "scope": "Source values are retained, but file tuple order differs from beam raster order. Scalar summaries are valid; spatial analysis of the uncorrected ImageGeometry is not validated."
+    },
+    "BrukerNi": {
+      "pixels": 360000,
+      "indexed": 255044,
+      "fraction": 0.7084555555555555,
+      "quality": {
+        "MAD": {
+          "independent": {
+            "SelectedPixels": 255044,
+            "Minimum": 0.1587442308664322,
+            "Maximum": 2.3381354808807373,
+            "Mean": 1.249696664701983,
+            "StandardDeviation": 0.20541692453344484
+          },
+          "native": {
+            "SelectedPixels": 255044.0,
+            "Minimum": 0.1587442308664322,
+            "Maximum": 2.3381354808807373,
+            "Mean": 1.2496966123580933,
+            "StandardDeviation": 0.20541691780090332
+          }
+        }
+      }
+    },
+    "OxfordTi": {
+      "pixels": 625,
+      "indexed": 587,
+      "fraction": 0.9392,
+      "quality": {
+        "Band Contrast": {
+          "independent": {
+            "SelectedPixels": 587,
+            "Minimum": 60.0,
+            "Maximum": 213.0,
+            "Mean": 166.93696763202726,
+            "StandardDeviation": 30.392959257138937
+          },
+          "native": {
+            "SelectedPixels": 587.0,
+            "Minimum": 60.0,
+            "Maximum": 213.0,
+            "Mean": 166.9369659423828,
+            "StandardDeviation": 30.392959594726562
+          }
+        },
+        "Pattern Quality": {
+          "independent": {
+            "SelectedPixels": 587,
+            "Minimum": 421.4388122558594,
+            "Maximum": 762.2298583984375,
+            "Mean": 668.6053268718557,
+            "StandardDeviation": 61.437491756209994
+          },
+          "native": {
+            "SelectedPixels": 587.0,
+            "Minimum": 421.4388122558594,
+            "Maximum": 762.2298583984375,
+            "Mean": 668.6052856445312,
+            "StandardDeviation": 61.43749237060547
+          }
+        }
+      }
+    }
+  },
+  "figures": [
+    {
+      "image": "VendorEBSDImportChecks.png",
+      "sha256": "af8c545ca1916a036bc209baf489bce79851c9fda41f5b274d996b47f265c6d2",
+      "native_source_sha256": "0965624378eb82d7b80b253f7a000ff59117f3f33cdb0f7b1f215f8004a84120",
+      "method": "Scatter native Bruker values at native saved X BEAM/Y BEAM coordinates rather than the incorrect storage-order raster; display native Oxford image fields. No orientations, phases, masks or summary statistics recomputed for the figure.",
+      "arrays": [
+        "BrukerNi/Cell Data/MAD",
+        "BrukerNi/Cell Data/IndexedPixels",
+        "BrukerNi/Cell Data/X BEAM",
+        "BrukerNi/Cell Data/Y BEAM",
+        "OxfordTi/Cell Data/Band Contrast",
+        "OxfordTi/Cell Data/Pattern Quality",
+        "OxfordTi/Cell Data/IndexedPixels"
+      ],
+      "colormaps": "viridis for scalar fields; gray/green categorical indexing mask",
+      "coordinates": "Bruker saved beam pixel indices because source XY step is missing and raw tuple order differs from beam order; Oxford native corrected geometry extent in micrometers."
+    }
+  ],
+  "native_chain": {
+    "ctest": "PIPELINE::OrientationAnalysis::Vendor_EBSD_Import_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS, 4.29 seconds, source archives hashed and exact original members extracted in isolated work directory."
+  }
+}

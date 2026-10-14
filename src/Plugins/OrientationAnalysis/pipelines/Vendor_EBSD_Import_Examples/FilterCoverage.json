@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "plugin": "OrientationAnalysis",
+  "suite": "Vendor_EBSD_Import_Examples",
+  "filters": [
+    {
+      "filter": "ReadH5EspritDataFilter",
+      "uuid": "694a0d54-b492-41bc-993b-ce0f5006e927",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 0,
+      "purpose": "Import the original 600 by 600 nickel Esprit scan and convert Euler degrees to radians. Source XSTEP/YSTEP and X SAMPLE/Y SAMPLE are zero, so the reader uses fallback 1-micrometer metadata; treat XY as uncalibrated pixel indices. No Bruker frame correction is asserted by this import-only quality inspection."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 1,
+      "purpose": "Record raw source tuple indices before checking whether file order matches the measured beam-coordinate raster."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 2,
+      "purpose": "Compare each source tuple index with its declared 600-column beam raster index. Nonzero differences reveal that unchanged file order is not a spatially valid raster order. The width600 is source-specific, not a reusable constant."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 3,
+      "purpose": "Define UInt8 0/1 admission from Phase > 0. Vendor error and quality fields have different semantics; this mask establishes indexing, not a universal quality threshold."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 4,
+      "purpose": "Flag source tuples whose beam location differs from their current raster slot. Do not run spatial grain analysis on this storage-order ImageGeometry until ordering is resolved."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 5,
+      "purpose": "Count out-of-raster-order source tuples independently of indexing validity. A nonzero result is a failed spatial-order prerequisite, not a claim that the measured scalar values were changed."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 6,
+      "purpose": "Summarize the 0/1 mask over all imported pixels. Count is the sum; fraction is the mean. This remains valid for multiphase maps, unlike averaging phase IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 7,
+      "purpose": "Summarize MAD only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 8,
+      "purpose": "Write the one-row indexing/quality summary including row zero. Keep this vendor report separate: fields and samples are not interchangeable between the two datasets."
+    },
+    {
+      "filter": "ReadH5OinaDataFilter",
+      "uuid": "fad3d47f-f1e1-4429-bc65-5e021be62ba0",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 9,
+      "purpose": "Import the measured 25 by 25 AZtec titanium-cubic map; retain Euler radians, widen Phase to Int32 and preserve the phase metadata. XY spacing is 4 micrometers; Z=1 is a single-slice placeholder. Pattern import is unsupported and remains off; no hexagonal correction is needed for this cubic phase."
+    },
+    {
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 10,
+      "purpose": "Supplement the vendor reader with the original 625-value Pattern Quality dataset, which it does not import. Match the cell tuple shape before any sample rotation so the extra field follows the same pixels. Do not import the large processed-pattern stack for this scalar-map task."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 11,
+      "purpose": "Record raw source tuple indices 0 through 624 before the sample rotation; keep this join key attached to all imported scalar and orientation arrays."
+    },
+    {
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 12,
+      "purpose": "Apply the documented historical Oxford/HKL sample-frame convention: 180 degrees about Y, retaining transformed origin. This rearranges cells and the supplementary quality field together; Euler values are unchanged. It is not a claim that specimen loading/rolling axes are established."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 13,
+      "purpose": "Define UInt8 0/1 admission from Phase > 0. Vendor error and quality fields have different semantics; this mask establishes indexing, not a universal quality threshold."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 14,
+      "purpose": "Summarize the 0/1 mask over all imported pixels. Count is the sum; fraction is the mean. This remains valid for multiphase maps, unlike averaging phase IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 15,
+      "purpose": "Summarize Band Contrast only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 16,
+      "purpose": "Summarize Pattern Quality only at phase-positive pixels. Its units and interpretation belong to this vendor field; do not compare numeric values across unlike quality metrics."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 17,
+      "purpose": "Write the one-row indexing/quality summary including row zero. Keep this vendor report separate: fields and samples are not interchangeable between the two datasets."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Vendor EBSD Import Checks.d3dpipeline",
+      "step": 18,
+      "purpose": "Save both independent measured maps, masks, native quality/indexing summaries and phase metadata. This demonstrates format-aware import checks, not registration or material-property comparison between the specimens."
+    }
+  ]
+}

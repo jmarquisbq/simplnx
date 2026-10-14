@@ -30,11 +30,15 @@ If the data has come from a TSL acquisition system and the settings of the acqui
 + Sample Reference Frame: 180<sup>o</sup> about the <010> Axis
 + Crystal Reference Frame: 90<sup>o</sup> about the <001> Axis
 
+Those TSL-specific rotations are not established defaults for an Esprit export. Confirm the actual acquisition and export conventions before applying either rotation to Bruker data.
+
 The user also may want to assign un-indexed pixels to be ignored by flagging them as "bad". The [Multi-Threshold Objects](../SimplnxCore/MultiThresholdObjectsFilter.md) filter can be used to define this *mask* by thresholding on values such as *Mean Angular Deviation (MAD)* > xx. The **Mean Angular Deviation (MAD)** is a per-pixel metric describing how well the indexed solution fit the measured pattern (lower is better).
 
 + Note: If the X Step or Y Step within the HDF5 file for a scan is ZERO, those values will be set to 1.0 micron when the filter runs. This is needed
 as the user has no effective way to fix the HDF5 file. If the user needs a different
 spacing value, the user can utilize the [Set Origin & Spacing (Image Geom)](../SimplnxCore/SetImageGeomOriginScalingFilter.md) filter.
+
+Also check whether file tuple order matches `Y BEAM * NCOLS + X BEAM`. The official `H5EspritReaderTest.h5` sample contains 11,146 out-of-order records despite covering each beam location exactly once. The current importer retains file order in the image geometry ([#1804](https://github.com/BlueQuartzSoftware/simplnx/issues/1804)). Scalar summaries can remain correct while spatial associations are wrong; resolve this ordering before segmentation or neighborhood analysis. The companion example below exposes the discrepancy and does not claim to repair it.
 
 ### Downstream Processing
 
@@ -45,6 +49,13 @@ Once the reference frames are correct, the imported Euler angles are typically c
 None — this filter reads directly from a `.h5` file on disk.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Vendor_EBSD_Import_Examples/(01) Vendor EBSD Import Checks.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 
