@@ -48,5 +48,6 @@
     "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
-  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "text_layout_contract": "Regenerate all eight steps of stage 01. Keep the typed columns and masked summary, read exactly seven header strings and 21413 scalar Float64 values, copy before reshaping, and keep tuple dimensions [3059,7] with component dimensions [1]. Reshape is not a transpose or a component conversion."
 }

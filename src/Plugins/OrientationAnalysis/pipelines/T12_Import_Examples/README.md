@@ -28,3 +28,6 @@ Both imports retain the same 1,443 reportable grains and mean GOS **2.325059°**
 If the upstream cohort or measurements change, regenerate the compact report, check the CSV's actual header and row count, update the CSV tuple dimension if needed, and rerun the desired import. `PythonGeneration.yaml` describes optional temporary Python conversion.
 
 Both examples passed Windows in-memory preflight/execution and independent output checks. GUI use, OOC, generated Python and full application installation remain unverified; upstream measurement validity is a separate question.
+
+
+Import example 01 also retains the seven header strings and compares a generic Float64 token stream with the same values arranged as 3,059 rows by seven columns. The typed table and selected-grain summary remain unchanged. The companion distinguishes tuple shape, component shape and field units; it also explains why reshaping is not transposition and why tuple count must be checked explicitly. No additional input data or execution stage is required.

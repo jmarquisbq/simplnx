@@ -42,7 +42,7 @@ The example data below has 10 Tuples. The AttributeMatrix would need to have dim
 
 ### Data Format Notes
 
-If the input file has a single string per line then the delimiter does not matter.
+For one complete string per line, use the New Line delimiter to preserve spaces or other separators inside that string. For delimited lines, set the expected string count to match complete records. This reader splits literal delimiters; it does not implement quoted-CSV escaping. Use [Read CSV File](ReadCSVFileFilter.md) for a supported table-import contract rather than treating embedded delimiters as ordinary string content.
 
 ### Delimiter
 
@@ -62,6 +62,10 @@ None — this filter reads directly from a plain text file on disk.
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Import_Examples/(01) T12 Typed CSV Import.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

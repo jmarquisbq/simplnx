@@ -23,7 +23,7 @@ does not need to store that data into an AttributeMatrix. In this case the follo
 parameters should be set:
 
 - Set Tuple Dimensions should be **ON**
-- DataArray Dimensions should also be created. At the minimum the user will need to set the value to the total number of values that will be read.
+- Set Data Array Dimensions to the required tuple shape. Its product is the numeric token count divided by Number of Components, not the token count when components exceed one.
 
 ### Use Case 2
 
@@ -37,11 +37,7 @@ with the following values:
 
 ### Example Data
 
-The example data below has 50 elements. This means that it could successfully be read into an array that 
-has 10 Tuples and 5 Components or 50 Tuples and 1 Component. The AttributeMatrix would need to 
-have dimensions such that multiplying all the dimensions together yields 50. For example the AttributeMatrix 
-could have X=5, Y=5 and Z=2 or X=10, Y=5 and Z=1. This filter does not require any type of Geometry 
-as the filter is reading data directly into an array.
+The example data below has 50 scalar values. It can be read as 10 tuples with 5 components or 50 tuples with 1 component. An enclosing Attribute Matrix must have the chosen **tuple count**, excluding components: 10 tuples for the first layout or 50 for the second. No geometry is required. Confirm `tuple count × component count` against the number of numeric tokens to read; changing line breaks does not define a new array or column type.
 
     0    1    2    3    4    5    6    7    8    9
     10    11    12    13    14    15    16    17    18    19
@@ -83,6 +79,10 @@ None — this filter reads directly from a plain text file on disk.
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Import_Examples/(01) T12 Typed CSV Import.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

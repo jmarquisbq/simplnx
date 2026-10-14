@@ -3,7 +3,7 @@
   "pipeline_file": "(01) T12 Typed CSV Import.d3dpipeline",
   "markdown_file": "(01) T12 Typed CSV Import.md",
   "title": "T12 Typed CSV Import",
-  "summary": "Parse the compact T12 feature report with explicit column types, then summarize reportable grain GOS.",
+  "summary": "Import the typed grain report and selected-population summary; compare header strings and a generic Float64 token stream with its lossless row/column tuple layout.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -32,7 +32,8 @@
   "outputs": [
     {
       "path": "Data/Output/T12_Import_Examples/CSV/T12_CSVImport.dream3d",
-      "role": "Imported table and masked GOS summary."
+      "role": "Imported table and masked GOS summary. Includes CSVLayoutComparison with ColumnNames, FlatValues and FlatValues_Rows.",
+      "sha256": "18ae1ed860a7d225ae18be2c5524e2b0d93f29afb9fadc8ad5eeb2415fea057e"
     }
   ],
   "input_data_strategy": {
@@ -52,7 +53,7 @@
       "Cubic phase symmetry from the CTF checkpoint",
       "ReportableFeatures selects grains with at least four pixels"
     ],
-    "known_differences": "These are NX import demonstrations using the paper-linked map, not paper import methods or numerical reproduction.",
+    "known_differences": "These are NX import demonstrations using the paper-linked map, not paper import methods or numerical reproduction. Generic text and shape comparison is an illustrative report-interchange exercise. Its numeric matrix has mixed-unit columns and no spatial geometry; the original typed columns remain the analysis table.",
     "archive_provenance_file": "README.md"
   },
   "python_generation": {
@@ -116,7 +117,7 @@
       "role": "Current ReadCSV, ReadDREAM3D, masked statistics, and writer behavior and serialized parameter contracts."
     }
   ],
-  "last_verified": "2026-10-09",
+  "last_verified": "2026-10-14",
   "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
   "steps": [
     {
@@ -213,6 +214,104 @@
     },
     {
       "index": 2,
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "role": "Keep free-form string and numeric layouts outside the typed Attribute Matrix so their distinct tuple shapes do not imply common feature rows.",
+      "paths": [
+        "CSVLayoutComparison"
+      ],
+      "key_parameters": {
+        "data_object_path": "CSVLayoutComparison"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ReadStringDataArrayFilter",
+      "uuid": "55f7df3f-ca3e-4634-adda-732c0e56efd4",
+      "role": "Read the seven unquoted header tokens as strings. The requested count matches this complete header line; this generic string reader is not a quoted-CSV parser.",
+      "paths": [
+        "CSVLayoutComparison/ColumnNames"
+      ],
+      "key_parameters": {
+        "input_file": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+        "skip_line_count": 0,
+        "delimiter_index": 0,
+        "output_data_array_path": "CSVLayoutComparison/ColumnNames",
+        "data_format": "",
+        "set_tuple_dimensions": true,
+        "number_tuples": [
+          [
+            7.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ReadTextDataArrayFilter",
+      "uuid": "25f7df3e-ca3e-4634-adda-732c0e56efd4",
+      "role": "Read exactly 3059 times 7 numeric tokens as scalar Float64 values in file order. This generic layout gives every column one common storage type; retain the typed table and its units for analysis.",
+      "paths": [
+        "CSVLayoutComparison/FlatValues"
+      ],
+      "key_parameters": {
+        "input_file": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+        "scalar_type_index": 9,
+        "number_tuples": [
+          [
+            21413.0
+          ]
+        ],
+        "number_comp": 1,
+        "skip_line_count": 1,
+        "delimiter_index": 0,
+        "output_data_array_path": "CSVLayoutComparison/FlatValues",
+        "data_format": "",
+        "set_tuple_dimensions": true
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Keep the original flat token stream as a reference before changing the copied array tuple shape.",
+      "paths": [
+        "_Rows"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "CSVLayoutComparison/FlatValues"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_Rows"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ReshapeDataArrayFilter",
+      "uuid": "9831f05e-8b35-4c3d-b733-8c0a24bbd5ca",
+      "role": "Interpret the copy as 3059 rows by 7 columns, last tuple dimension varying fastest. Preserve all 21413 scalar tuples and component shape [1]; this does not transpose values, form a seven-component array, or create spatial geometry.",
+      "paths": [
+        "CSVLayoutComparison/FlatValues_Rows"
+      ],
+      "key_parameters": {
+        "input_array_path": "CSVLayoutComparison/FlatValues_Rows",
+        "tuple_dims": [
+          [
+            3059.0,
+            7.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "parameters_version": 2,
@@ -259,5 +358,54 @@
     "background_included": false,
     "mask_type": "uint8",
     "maximum_diameter_roundtrip_error_micrometers": 9.5367431640625e-07
+  },
+  "verification_status": "Native Windows in-memory Release and independent token/type/shape checks. Expert interpretation, OOC, generated Python, GUI and full installation remain separate checks.",
+  "text_layout_validation": {
+    "passed": 23,
+    "total": 23,
+    "preserved_prior_datasets": 9,
+    "source_csv_sha256": "7006618e9d04c5adcc7349e41c778eac868d5f91cbb584fc0384d4d5579b3659",
+    "column_names": [
+      "Feature_ID",
+      "EquivalentCircleDiameters",
+      "GOSZScore",
+      "GrainOrientationSpread",
+      "NumElements",
+      "PixelAreas",
+      "ReportableFeatures"
+    ],
+    "shape": {
+      "flat_tuples": [
+        21413
+      ],
+      "row_tuples": [
+        3059,
+        7
+      ],
+      "components": [
+        1
+      ]
+    },
+    "typed_vs_float64_maximum_difference": {
+      "Feature_ID": 0.0,
+      "EquivalentCircleDiameters": 4.996337885643243e-07,
+      "GOSZScore": 4.985046375693969e-08,
+      "GrainOrientationSpread": 4.9957275205514406e-08,
+      "NumElements": 0.0,
+      "PixelAreas": 0.0,
+      "ReportableFeatures": 0.0
+    },
+    "selected_count": 1443,
+    "selected_float64_mean": 2.325058801884962,
+    "native_float32_mean": 2.325058698654175,
+    "pipeline_sha256": "519c1e970d74f93af04301bca44b10d5bd587e4311a4224e87e6e733e7853b39",
+    "scope": "Exact full-token order and bytes across lossless reshape, independent CSV parsing, and all typed columns after declared casts. No geometry or precision gain is inferred.",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::T12_Import_Examples",
+      "passed": true,
+      "elapsed_seconds": 8.86,
+      "configuration": "Release, serial",
+      "scope": "Reporting and orientation prerequisites plus both import examples"
+    }
   }
 }

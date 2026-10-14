@@ -3,27 +3,6 @@
   "scope": "The two T12 import demonstrations only.",
   "filters": [
     {
-      "filter": "ReadCSVFileFilter",
-      "uuid": "373be1f8-31cf-49f6-aa5d-e356f4f3f261",
-      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
-      "step": 0,
-      "purpose": "Import seven named scalar columns as explicit numeric types into a 3059-row Attribute Matrix. CSV row zero represents Feature_ID 1."
-    },
-    {
-      "filter": "ComputeArrayStatisticsFilter",
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
-      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
-      "step": 1,
-      "purpose": "Count reportable features and calculate their equal-feature mean GOS in degrees; inspect Length and Mean."
-    },
-    {
-      "filter": "WriteDREAM3DFilter",
-      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
-      "step": 2,
-      "purpose": "Save the imported table and its independently calculated one-row summary."
-    },
-    {
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(02) T12 Selective DREAM3D Import.d3dpipeline",
@@ -42,6 +21,62 @@
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(02) T12 Selective DREAM3D Import.d3dpipeline",
       "step": 2,
+      "purpose": "Save the imported table and its independently calculated one-row summary."
+    },
+    {
+      "filter": "ReadCSVFileFilter",
+      "uuid": "373be1f8-31cf-49f6-aa5d-e356f4f3f261",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 0,
+      "purpose": "Import seven named scalar columns as explicit numeric types into a 3059-row Attribute Matrix. CSV row zero represents Feature_ID 1."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 1,
+      "purpose": "Count reportable features and calculate their equal-feature mean GOS in degrees; inspect Length and Mean."
+    },
+    {
+      "filter": "CreateDataGroupFilter",
+      "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 2,
+      "purpose": "Keep free-form string and numeric layouts outside the typed Attribute Matrix so their distinct tuple shapes do not imply common feature rows."
+    },
+    {
+      "filter": "ReadStringDataArrayFilter",
+      "uuid": "55f7df3f-ca3e-4634-adda-732c0e56efd4",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 3,
+      "purpose": "Read the seven unquoted header tokens as strings. The requested count matches this complete header line; this generic string reader is not a quoted-CSV parser."
+    },
+    {
+      "filter": "ReadTextDataArrayFilter",
+      "uuid": "25f7df3e-ca3e-4634-adda-732c0e56efd4",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 4,
+      "purpose": "Read exactly 3059 times 7 numeric tokens as scalar Float64 values in file order. This generic layout gives every column one common storage type; retain the typed table and its units for analysis."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 5,
+      "purpose": "Keep the original flat token stream as a reference before changing the copied array tuple shape."
+    },
+    {
+      "filter": "ReshapeDataArrayFilter",
+      "uuid": "9831f05e-8b35-4c3d-b733-8c0a24bbd5ca",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 6,
+      "purpose": "Interpret the copy as 3059 rows by 7 columns, last tuple dimension varying fastest. Preserve all 21413 scalar tuples and component shape [1]; this does not transpose values, form a seven-component array, or create spatial geometry."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Typed CSV Import.d3dpipeline",
+      "step": 7,
       "purpose": "Save the imported table and its independently calculated one-row summary."
     }
   ]

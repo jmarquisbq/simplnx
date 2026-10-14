@@ -197,6 +197,168 @@
     },
     {
       "args": {
+        "data_object_path": {
+          "value": "CSVLayoutComparison",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep free-form string and numeric layouts outside the typed Attribute Matrix so their distinct tuple shapes do not imply common feature rows.",
+      "filter": {
+        "name": "nx::core::CreateDataGroupFilter",
+        "uuid": "e7d2f9b8-4131-4b28-a843-ea3c6950f101"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_file": {
+          "value": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+          "version": 1
+        },
+        "skip_line_count": {
+          "value": 0,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_data_array_path": {
+          "value": "CSVLayoutComparison/ColumnNames",
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": true,
+          "version": 1
+        },
+        "number_tuples": {
+          "value": [
+            [
+              7.0
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read the seven unquoted header tokens as strings. The requested count matches this complete header line; this generic string reader is not a quoted-CSV parser.",
+      "filter": {
+        "name": "nx::core::ReadStringDataArrayFilter",
+        "uuid": "55f7df3f-ca3e-4634-adda-732c0e56efd4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_file": {
+          "value": "Data/Output/T12_Reporting_Examples/Report/T12_CompactReport.csv",
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 9,
+          "version": 1
+        },
+        "number_tuples": {
+          "value": [
+            [
+              21413.0
+            ]
+          ],
+          "version": 1
+        },
+        "number_comp": {
+          "value": 1,
+          "version": 1
+        },
+        "skip_line_count": {
+          "value": 1,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_data_array_path": {
+          "value": "CSVLayoutComparison/FlatValues",
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": true,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Read exactly 3059 times 7 numeric tokens as scalar Float64 values in file order. This generic layout gives every column one common storage type; retain the typed table and its units for analysis.",
+      "filter": {
+        "name": "nx::core::ReadTextDataArrayFilter",
+        "uuid": "25f7df3e-ca3e-4634-adda-732c0e56efd4"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "CSVLayoutComparison/FlatValues"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": false,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "_Rows",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep the original flat token stream as a reference before changing the copied array tuple shape.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_array_path": {
+          "value": "CSVLayoutComparison/FlatValues_Rows",
+          "version": 1
+        },
+        "tuple_dims": {
+          "value": [
+            [
+              3059.0,
+              7.0
+            ]
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Interpret the copy as 3059 rows by 7 columns, last tuple dimension varying fastest. Preserve all 21413 scalar tuples and component shape [1]; this does not transpose values, form a seven-component array, or create spatial geometry.",
+      "filter": {
+        "name": "nx::core::ReshapeDataArrayFilter",
+        "uuid": "9831f05e-8b35-4c3d-b733-8c0a24bbd5ca"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "compression_level": {
           "value": 5,
           "version": 1

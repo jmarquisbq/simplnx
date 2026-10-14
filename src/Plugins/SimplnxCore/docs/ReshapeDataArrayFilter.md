@@ -6,11 +6,11 @@ Core (Generation)
 
 ## Description
 
-This **Filter** updates the **tuple dimensions** (the *shape* metadata) of an existing **Data Array**, **Neighbor List**, or **String Array** in place. The total number of tuples is unchanged; only how the shape is described is changed.
+This **Filter** replaces an array with a copy using new **tuple dimensions**, preserving its component shape and flat tuple order. Use the same total tuple count for a lossless shape change. The implementation also permits a different count: a smaller result retains only the leading tuples, and a larger result retains the original tuples followed by newly allocated entries. Do not use count-changing behavior when the intention is only to reinterpret layout.
 
 ## ⚠ CRITICAL WARNING: Values Are Not Reordered
 
-**This filter does NOT move any data in memory.** It only updates the tuple-dimensions metadata. If the data's existing memory layout does not match the new shape's expected layout, **the filter will silently produce incorrectly-shaped data** that downstream filters will misinterpret.
+**This filter does not transpose or reorder values.** It allocates a replacement array and copies the common leading tuple range. If existing flat order does not match the intended new layout, downstream filters can misinterpret the result even when total tuple counts agree.
 
 ### When This Is Safe vs Dangerous
 
@@ -24,7 +24,7 @@ To actually transpose or reorder data, use external preprocessing (e.g., reshape
 
 ### Validation
 
-The filter validates that the new tuple dimensions are positive and that the total tuple count matches the array's existing total. A shape change that would alter the total tuple count fails preflight.
+Use positive integer dimensions and independently check that their product equals the original tuple count when preserving all values. A changed total count is allowed by the implementation, so successful preflight does not establish a lossless reshape. An unchanged shape is rejected as unnecessary. Reshape a free array outside an Attribute Matrix when its new tuple shape would disagree with that matrix's other arrays.
 
 ### Neighbor Lists and String Arrays
 
@@ -37,6 +37,10 @@ Neighbor Lists and String Arrays do not support multi-dimensional tuple shapes. 
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Import_Examples/(01) T12 Typed CSV Import.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 
