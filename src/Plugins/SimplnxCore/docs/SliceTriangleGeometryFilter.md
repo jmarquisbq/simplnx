@@ -6,9 +6,9 @@ Sampling (Geometry)
 
 ## Description
 
-This **Filter** slices an input **Triangle Geometry**, producing an **Edge Geometry**.  The user can control the range over which to slice (either the entire range of the geometry or a specified subregion), and the spacing between slices. Currently this filter only supports slicing along the direction of the z axis. The total area and perimeter of each slice is also computed and stored as an attribute on each created slice.
+This **Filter** intersects an input **Triangle Geometry** with planes perpendicular to the Z axis, producing an **Edge Geometry**. The user controls the range and spacing of the planes. The output edges carry zero-based slice IDs. The created slice attribute matrix does not currently contain computed area or perimeter arrays; those measurements require additional processing.
 
-Both the *Slice Spacing* and the *User Defined Range* values are specified in the same physical units as the input **Triangle Geometry** coordinates (for example, microns if the mesh is in microns). The computed slice area and perimeter are likewise reported in those physical units (squared, for area).
+Both the *Slice Spacing* and the *User Defined Range* values use the input coordinate units (for example, micrometers for a mesh calibrated in micrometers). Use positive spacing and inspect planes that coincide with vertices or horizontal faces. Current output geometry does not retain the input length-unit metadata ([issue #1796](https://github.com/BlueQuartzSoftware/simplnx/issues/1796)); preserve the coordinate numbers and explicitly restore the intended units before interpreting the result.
 
 Additionally, if the input **Triangle Geometry** is labeled with an identifier array (such as different regions or features), the user may select this array and the resulting edges will inherit these identifiers.
 
@@ -39,6 +39,10 @@ The *Slice Range* parameter controls which portion of the geometry is sliced:
 ## Example Pipelines
 
 CreateScanVectors
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `NIST_AMBench_2018_Examples/(01) NIST Bridge Contour Inspection.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright 
 

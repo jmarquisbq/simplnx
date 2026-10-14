@@ -45,6 +45,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` (OrientationAnalysis)
 
++ `NIST_AMBench_2018_Examples/(01) NIST Bridge Contour Inspection.d3dpipeline` (SimplnxCore)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

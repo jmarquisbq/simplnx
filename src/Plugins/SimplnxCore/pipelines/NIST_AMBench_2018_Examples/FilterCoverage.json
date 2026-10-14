@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "scope": "Enabled occurrences in the combined NIST contour inspection example; not full filter validation.",
+  "filters": [
+    {
+      "filter": "ReadStlFileFilter",
+      "uuid": "2f64bd45-9d28-4254-9e07-6aa7c6d3d015",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the original NIST AMB2018-01 single-part binary STL without scaling. This is nominal design geometry, not an as-built measurement."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 1,
+      "purpose": "Publish NominalCAD with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 2,
+      "purpose": "Retain Face Normals on the corresponding NominalCAD tuples; copying does not change row order."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 3,
+      "purpose": "Remove the temporary CAD_Raw after retaining its calibrated geometry and required arrays."
+    },
+    {
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 4,
+      "purpose": "Label every face as one nominal CAD part. Region 1 is not a grain, phase, material, or build-plate part number."
+    },
+    {
+      "filter": "SliceTriangleGeometryFilter",
+      "uuid": "754a47c0-149a-4109-a810-2b2968743895",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 5,
+      "purpose": "Intersect 13 diagnostic planes at Z=0.25, 1.25, ..., 12.25 mm. Avoid horizontal CAD facets; this coarse inspection is not the published 0.02 mm build-layer sequence."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 6,
+      "purpose": "Publish AllContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 7,
+      "purpose": "Retain SliceIds, RegionIds on the corresponding AllContours tuples; copying does not change row order."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 8,
+      "purpose": "Remove the temporary Contours_Raw after retaining its calibrated geometry and required arrays."
+    },
+    {
+      "filter": "CropEdgeGeometryFilter",
+      "uuid": "e3e794c9-ef0c-4ed2-a25f-8d19b6b2ce4c",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 9,
+      "purpose": "Keep the left inspection region through X=32.5 mm, clipping edges with one endpoint outside. The lower bound includes the original X=0 edge. Cropped contours may be open and no closing edges are inserted; this is not solid clipping."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 10,
+      "purpose": "Publish CroppedContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 11,
+      "purpose": "Retain SliceIds, RegionIds on the corresponding CroppedContours tuples; copying does not change row order."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 12,
+      "purpose": "Remove the temporary Cropped_Raw after retaining its calibrated geometry and required arrays."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 13,
+      "purpose": "Mark SliceIds != 6 for removal, retaining Z=6.25 mm through the bridge overhangs. True means remove; slice IDs are zero-based diagnostic-plane indices."
+    },
+    {
+      "filter": "RemoveFlaggedEdgesFilter",
+      "uuid": "48155f61-2709-4731-be95-43745bb3f8d8",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 14,
+      "purpose": "Extract the selected contour edges and their slice/region labels, compacting vertex indices. Preserve the full and cropped contour geometries for comparison."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 15,
+      "purpose": "Publish SelectedContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 16,
+      "purpose": "Retain SliceIds, RegionIds on the corresponding SelectedContours tuples; copying does not change row order."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 17,
+      "purpose": "Remove the temporary Selected_Raw after retaining its calibrated geometry and required arrays."
+    },
+    {
+      "filter": "PointSampleEdgeGeometryFilter",
+      "uuid": "116d56d1-163c-4ab2-9a8c-234fba0b15c0",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 18,
+      "purpose": "Place interior samples along each retained edge with a requested 0.25 mm maximum spacing. Endpoints are excluded and each edge restarts sampling; SourceEdgeIds refer to SelectedContours, not the original STL or full slices."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 19,
+      "purpose": "Publish InspectionSamples with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 20,
+      "purpose": "Retain SourceEdgeIds, SliceIds, RegionIds on the corresponding InspectionSamples tuples; copying does not change row order."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 21,
+      "purpose": "Remove the temporary Samples_Raw after retaining its calibrated geometry and required arrays."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 22,
+      "purpose": "Save nominal CAD, all contours, cropped contours, one selected section and its inspection samples together. No hatch path, machine motion, measurement, or physical prediction is produced."
+    }
+  ]
+}

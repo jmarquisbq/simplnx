@@ -346,3 +346,14 @@ add_test(NAME PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/BentheimerResolutionExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Bentheimer_Resolution_Examples;Network")
+
+# NIST_AMBench_2018_Examples combined contour inspection
+add_test(NAME PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/NIST_AMBench_2018_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/NIST_AMBench_2018_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/NISTAMBench2018ExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 600 LABELS "ExamplePipeline;NIST_AMBench_2018_Examples;Network")

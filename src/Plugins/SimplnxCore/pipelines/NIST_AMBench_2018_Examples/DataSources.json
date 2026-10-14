@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "dataset_title": "Additive Manufacturing Benchmark Test Series (AM-Bench) 2018 Test Descriptions",
+  "source_url": "https://www.nist.gov/ambench/amb2018-01-description",
+  "catalog_url": "https://catalog.data.gov/dataset/additive-manufacturing-benchmark-test-series-am-bench-2018-test-descriptions",
+  "catalog_identifier": "64025BCB4178C48EE0531A5706814E1C1889",
+  "license": "NIST open non-SRD data terms: reuse and redistribution with acknowledgement and identification of changes; see https://www.nist.gov/open/license.",
+  "license_url": "https://www.nist.gov/open/license",
+  "attribution": "National Institute of Standards and Technology (NIST), AM-Bench 2018, AMB2018-01 single-part CAD.",
+  "subset": "One complete original single-part STL; no build plate or four-part layout.",
+  "files": [
+    {
+      "filename": "AMB2018_01_Part.STL",
+      "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+      "bytes": 18884,
+      "sha256": "2ceda46b2b840b39c7c41bc91436087e412ac43b52b0a5d106bbb50060a7c631",
+      "sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+      "data_type": "Binary STL; 376 original nominal CAD triangles",
+      "units": "Millimeter, established by official dimensions; STL has no unit field",
+      "processing": "None: original released bytes retained."
+    }
+  ],
+  "source_data_included_in_repository": false,
+  "runtime_directory": "Data/NIST_AMBench_2018_Examples",
+  "checksums_verified": "2026-10-14: downloaded SHA256 agrees with NIST adjacent .STL.sha256; SHA512 calculated on the same bytes."
+}

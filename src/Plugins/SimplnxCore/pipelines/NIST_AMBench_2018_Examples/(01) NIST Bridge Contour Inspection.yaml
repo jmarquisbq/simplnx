@@ -1,0 +1,763 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+  "markdown_file": "(01) NIST Bridge Contour Inspection.md",
+  "title": "NIST Bridge Contour Inspection",
+  "summary": "Extract, crop, select and sample nominal design contours for a local inspection reference.",
+  "primary_industries": [
+    "Additive manufacturing"
+  ],
+  "secondary_industries": [
+    "Dimensional inspection",
+    "CAD processing"
+  ],
+  "use_cases": [
+    "Prepare nominal contour points for a later measurement comparison",
+    "Inspect cross-sections through legs and overhangs"
+  ],
+  "keywords": [
+    "NIST",
+    "AM-Bench 2018",
+    "binary STL",
+    "nominal CAD",
+    "slice",
+    "edge crop",
+    "point sampling",
+    "millimeters"
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "AMB2018_01_Part.STL"
+    ],
+    "source_url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+    "source_sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+    "source_assets": [
+      {
+        "filename": "AMB2018_01_Part.STL",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "bytes": 18884,
+        "sha256": "2ceda46b2b840b39c7c41bc91436087e412ac43b52b0a5d106bbb50060a7c631",
+        "sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+        "data_type": "Binary STL; 376 original nominal CAD triangles",
+        "units": "Millimeter, established by official dimensions; STL has no unit field",
+        "processing": "None: original released bytes retained."
+      }
+    ],
+    "reference_visual": "Official NIST description Figures 2 and 4-6 reviewed for geometry and process context. The companion figure renders this pipeline native outputs; no NIST figure is copied.",
+    "target_traits": [
+      "Complete nominal bridge CAD with varied legs, overhangs and top ridges",
+      "75 by 5 by 12.5 mm coordinate bounds",
+      "Original binary STL, 376 triangles"
+    ],
+    "known_differences": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "nist-ambench-2018-python-generation-v1"
+  },
+  "citations": [
+    {
+      "title": "2018 AM-Bench Test Descriptions for AMB2018-01",
+      "authors": [
+        "National Institute of Standards and Technology (NIST)"
+      ],
+      "year": 2018,
+      "url": "https://www.nist.gov/ambench/amb2018-01-description",
+      "scope": "pipeline_workflow",
+      "role": "Primary benchmark description, original CAD and process context; not a paper result reproduced by this example.",
+      "dataset": {
+        "availability": "Original single-part binary STL publicly downloadable from the NIST-linked S3 asset.",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "license": "NIST open non-SRD data terms: reuse and redistribution with acknowledgement and identification of changes; see https://www.nist.gov/open/license.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795."
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "path": "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL",
+      "role": "Original nominal CAD; match checksum before use."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
+      "role": "Calibrated CAD, full and cropped contours, selected section and inspection samples.",
+      "sha256": "65b66b2f3d2bd6d9531becf02b5c364dba7fcf8b5810b6b22709f25bf364b6e0"
+    }
+  ],
+  "prerequisites": [],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadStlFileFilter",
+      "uuid": "2f64bd45-9d28-4254-9e07-6aa7c6d3d015",
+      "role": "Read the original NIST AMB2018-01 single-part binary STL without scaling. This is nominal design geometry, not an as-built measurement.",
+      "paths": [
+        "CAD_Raw",
+        "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL"
+      ],
+      "key_parameters": {
+        "create_face_labels": false,
+        "face_attribute_matrix_name": "Face Data",
+        "face_labels_name": "Face Labels",
+        "face_normals_name": "Face Normals",
+        "output_triangle_geometry_path": "CAD_Raw",
+        "scale_factor": 1.0,
+        "scale_output": false,
+        "stl_file_path": "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL",
+        "vertex_attribute_matrix_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish NominalCAD with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata.",
+      "paths": [
+        "NominalCAD",
+        "CAD_Raw/Shared Vertex List",
+        "CAD_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "NominalCAD",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "CAD_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "CAD_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain Face Normals on the corresponding NominalCAD tuples; copying does not change row order.",
+      "paths": [
+        "NominalCAD/Face Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "CAD_Raw/Face Data/Face Normals"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "NominalCAD/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary CAD_Raw after retaining its calibrated geometry and required arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "CAD_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "role": "Label every face as one nominal CAD part. Region 1 is not a grain, phase, material, or build-plate part number.",
+      "paths": [
+        "NominalCAD/Face Data/RegionIds"
+      ],
+      "key_parameters": {
+        "component_count": 1,
+        "data_format": "",
+        "initialization_value_str": "1",
+        "numeric_type_index": 4,
+        "output_array_path": "NominalCAD/Face Data/RegionIds",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "SliceTriangleGeometryFilter",
+      "uuid": "754a47c0-149a-4109-a810-2b2968743895",
+      "role": "Intersect 13 diagnostic planes at Z=0.25, 1.25, ..., 12.25 mm. Avoid horizontal CAD facets; this coarse inspection is not the published 0.02 mm build-layer sequence.",
+      "paths": [
+        "NominalCAD/Face Data/RegionIds",
+        "NominalCAD",
+        "Contours_Raw"
+      ],
+      "key_parameters": {
+        "slice_range_index": 1,
+        "z_start_value": 0.25,
+        "z_end_value": 12.25,
+        "slice_spacing_value": 1.0,
+        "have_region_ids": true,
+        "region_ids_array_path": "NominalCAD/Face Data/RegionIds",
+        "input_triangle_geometry_path": "NominalCAD",
+        "output_edge_geometry_path": "Contours_Raw",
+        "edge_attribute_matrix_name": "Edge Data",
+        "slice_attribute_matrix_name": "Slice Data",
+        "slice_ids_array_name": "SliceIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish AllContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata.",
+      "paths": [
+        "AllContours",
+        "Contours_Raw/Shared Vertex List",
+        "Contours_Raw/Shared Edge List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 3,
+        "length_unit_index": 7,
+        "output_geometry_path": "AllContours",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Contours_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "Contours_Raw/Shared Edge List",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain SliceIds, RegionIds on the corresponding AllContours tuples; copying does not change row order.",
+      "paths": [
+        "AllContours/Edge Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Contours_Raw/Edge Data/SliceIds",
+          "Contours_Raw/Edge Data/RegionIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "AllContours/Edge Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary Contours_Raw after retaining its calibrated geometry and required arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Contours_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "CropEdgeGeometryFilter",
+      "uuid": "e3e794c9-ef0c-4ed2-a25f-8d19b6b2ce4c",
+      "role": "Keep the left inspection region through X=32.5 mm, clipping edges with one endpoint outside. The lower bound includes the original X=0 edge. Cropped contours may be open and no closing edges are inserted; this is not solid clipping.",
+      "paths": [
+        "AllContours",
+        "Cropped_Raw"
+      ],
+      "key_parameters": {
+        "crop_x_dim": true,
+        "crop_y_dim": false,
+        "crop_z_dim": false,
+        "min_coord": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          32.5,
+          0.0,
+          0.0
+        ],
+        "input_image_geometry_path": "AllContours",
+        "output_image_geometry_path": "Cropped_Raw",
+        "remove_original_geometry": false,
+        "boundary_intersection_behavior_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish CroppedContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata.",
+      "paths": [
+        "CroppedContours",
+        "Cropped_Raw/Shared Vertex List",
+        "Cropped_Raw/Shared Edge List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 3,
+        "length_unit_index": 7,
+        "output_geometry_path": "CroppedContours",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Cropped_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "Cropped_Raw/Shared Edge List",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain SliceIds, RegionIds on the corresponding CroppedContours tuples; copying does not change row order.",
+      "paths": [
+        "CroppedContours/Edge Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Cropped_Raw/Edge Data/SliceIds",
+          "Cropped_Raw/Edge Data/RegionIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "CroppedContours/Edge Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary Cropped_Raw after retaining its calibrated geometry and required arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Cropped_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark SliceIds != 6 for removal, retaining Z=6.25 mm through the bridge overhangs. True means remove; slice IDs are zero-based diagnostic-plane indices.",
+      "paths": [],
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "CroppedContours/Edge Data/SliceIds",
+              "comparison": 3,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 6.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 10,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "RemoveOtherSlices",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "RemoveFlaggedEdgesFilter",
+      "uuid": "48155f61-2709-4731-be95-43745bb3f8d8",
+      "role": "Extract the selected contour edges and their slice/region labels, compacting vertex indices. Preserve the full and cropped contour geometries for comparison.",
+      "paths": [
+        "CroppedContours",
+        "CroppedContours/Edge Data/RemoveOtherSlices",
+        "Selected_Raw"
+      ],
+      "key_parameters": {
+        "input_edge_geometry_path": "CroppedContours",
+        "mask_array_path": "CroppedContours/Edge Data/RemoveOtherSlices",
+        "output_edge_geometry_path": "Selected_Raw",
+        "edge_data_handling_index": 0,
+        "edge_data_selected_array_paths": [
+          "CroppedContours/Edge Data/SliceIds",
+          "CroppedContours/Edge Data/RegionIds"
+        ],
+        "edge_data_selected_attribute_matrix_path": "",
+        "vertex_data_handling_index": 0,
+        "vertex_data_selected_array_paths": [],
+        "vertex_data_selected_attribute_matrix_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish SelectedContours with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata.",
+      "paths": [
+        "SelectedContours",
+        "Selected_Raw/Shared Vertex List",
+        "Selected_Raw/Shared Edge List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 3,
+        "length_unit_index": 7,
+        "output_geometry_path": "SelectedContours",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Selected_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "Selected_Raw/Shared Edge List",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain SliceIds, RegionIds on the corresponding SelectedContours tuples; copying does not change row order.",
+      "paths": [
+        "SelectedContours/Edge Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Selected_Raw/Edge Data/SliceIds",
+          "Selected_Raw/Edge Data/RegionIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SelectedContours/Edge Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary Selected_Raw after retaining its calibrated geometry and required arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Selected_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "PointSampleEdgeGeometryFilter",
+      "uuid": "116d56d1-163c-4ab2-9a8c-234fba0b15c0",
+      "role": "Place interior samples along each retained edge with a requested 0.25 mm maximum spacing. Endpoints are excluded and each edge restarts sampling; SourceEdgeIds refer to SelectedContours, not the original STL or full slices.",
+      "paths": [
+        "SelectedContours",
+        "Samples_Raw"
+      ],
+      "key_parameters": {
+        "scan_vector_sampling_resolution": 0.25,
+        "scan_vector_geometry_path": "SelectedContours",
+        "calculate_cumulative_sample_distance": false,
+        "cumulative_sample_distance_array_name": "UnusedDistance",
+        "edge_ids_array_name": "SourceEdgeIds",
+        "sampled_vertex_geometry_path": "Samples_Raw",
+        "input_data_array_paths": [
+          "SelectedContours/Edge Data/SliceIds",
+          "SelectedContours/Edge Data/RegionIds"
+        ],
+        "vertex_data_group_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish InspectionSamples with explicit Millimeter units by copying coordinates and connectivity without rescaling. STL units come from the NIST dimensions; derived filters do not consistently retain unit metadata.",
+      "paths": [
+        "InspectionSamples",
+        "Samples_Raw/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 7,
+        "output_geometry_path": "InspectionSamples",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Samples_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain SourceEdgeIds, SliceIds, RegionIds on the corresponding InspectionSamples tuples; copying does not change row order.",
+      "paths": [
+        "InspectionSamples/Vertex Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Samples_Raw/Vertex Data/SourceEdgeIds",
+          "Samples_Raw/Vertex Data/SliceIds",
+          "Samples_Raw/Vertex Data/RegionIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "InspectionSamples/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 21,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the temporary Samples_Raw after retaining its calibrated geometry and required arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Samples_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save nominal CAD, all contours, cropped contours, one selected section and its inspection samples together. No hatch path, machine motion, measurement, or physical prediction is produced.",
+      "paths": [
+        "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d"
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows in-memory Release; independent numerical and artifact checks. Expert interpretation remains pending.",
+  "geometry_units": {
+    "length": "Millimeter",
+    "source": "NIST published dimensions; explicit geometry-copy metadata without numeric scaling"
+  },
+  "validation": {
+    "date": "2026-10-14",
+    "configuration": "Windows in-memory Release",
+    "independent_checks": {
+      "passed": 57,
+      "total": 57,
+      "scope": "Independent STL triangle-plane intersections, single-plane line clipping, selected-edge identity, centered subdivision and copied labels."
+    },
+    "expected_current_fixture": {
+      "triangles": 376,
+      "sections": 13,
+      "all_contour_edges": 1442,
+      "cropped_edges": 671,
+      "clipped_edges": 24,
+      "selected_edges": 63,
+      "samples": 522
+    },
+    "section_max_error_mm": 3.051757815342171e-06,
+    "sample_max_error_mm": 1.9073486328125e-06,
+    "pipeline_sha256": "6c325d200c2ad4797edef8767dad68ae891921e1ddd000b5afd9208adcd558cb",
+    "unverified": [
+      "native GUI",
+      "OOC",
+      "generated Python",
+      "full application installation",
+      "materials interpretation",
+      "complete solid watertightness",
+      "machine control"
+    ],
+    "pipeline_chain": {
+      "test": "PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples",
+      "passed": true,
+      "elapsed_seconds": 1.04,
+      "pipelines": 1
+    }
+  },
+  "result_visual": {
+    "image": "ContourInspection.png",
+    "sha256": "d50aeaa308abd140339a51586db2a3c394df77fe06dbbcf8955a257a6251b24d",
+    "native_output": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
+    "native_output_sha256": "65b66b2f3d2bd6d9531becf02b5c364dba7fcf8b5810b6b22709f25bf364b6e0",
+    "arrays": [
+      "NominalCAD/Shared Vertex List",
+      "NominalCAD/Shared Faces List",
+      "AllContours/Shared Vertex List",
+      "AllContours/Shared Edge List",
+      "AllContours/Edge Data/SliceIds",
+      "SelectedContours/Shared Vertex List",
+      "SelectedContours/Shared Edge List",
+      "InspectionSamples/Shared Vertex List"
+    ],
+    "rendering": "Matplotlib renders native filter outputs directly. No paper figure copied; no slicing, cropping or sampling algorithm reimplemented for the figure. Independent arithmetic exists only in the validation script.",
+    "coordinate_units": "millimeters"
+  },
+  "known_limitations": [
+    {
+      "issue": "https://github.com/BlueQuartzSoftware/simplnx/issues/1795",
+      "handling": "No hatch generator in this pipeline."
+    },
+    {
+      "issue": "https://github.com/BlueQuartzSoftware/simplnx/issues/1796",
+      "handling": "Explicit Millimeter geometry copies after derived operations."
+    },
+    {
+      "issue": "https://github.com/BlueQuartzSoftware/simplnx/issues/1797",
+      "handling": "Optional cumulative sample distance disabled."
+    }
+  ]
+}
