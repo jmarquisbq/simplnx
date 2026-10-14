@@ -8,8 +8,8 @@ Executable pipeline: `(02) T12 Orientation Interchange.d3dpipeline`
 
 - **Question:** How can the same measured orientations be prepared for another program without losing their original representation?
 - **Input:** The `Preparation/T12_Orientations.dream3d` checkpoint from [(01) T12 Orientation Case Study](%2801%29%20T12%20Orientation%20Case%20Study.md).
-- **Result:** Degree Euler angles, scalar-first quaternions, unit/order round trips, a separate conjugate branch, a phase-specific angle text file, and a compact grain table that checks crystal-symmetry-equivalent representations.
-- **Run:** Execute (01), then this 29-step pipeline from the same working folder. See the [README](README.md) for data setup and commands.
+- **Result:** Explicit orientation representations and round trips, a pixel angle export, a compact grain table, orientation-space point clouds, and an equal-grain pole figure.
+- **Run:** Execute (01), then this 32-step pipeline from the same working folder. See the [README](README.md) for data setup and commands.
 - **Main choices:** Keep source arrays; name units and component order; export only indexed pixels; separate conjugation from symmetry reduction; retain source grain IDs when excluding background.
 
 ## Purpose and real-world setting
@@ -30,7 +30,10 @@ The public T12 map comes from the steel study by [Allain-Bonasso et al. (2012)](
 | 11–17: Feature phases; source IDs; five tuple splits | Derive grain phases from the cells, then copy rows into a working group using identical **[1, 3059]** splits. `_1` retains background and `_2` contains occupied grains. Carry `SourceFeatureId` and `NumElements` alongside the orientations so identity and population survive the split. |
 | 18–23: Fundamental-zone quaternions; calculator; combine; Rodrigues converter | Select a cubic-symmetry-equivalent quaternion near identity. Form the dimensionless vector **r = [qx, qy, qz]/qw**, combine X/Y/Z without normalization, then convert to **[unit axis, magnitude]**. The two Rodrigues layouts are different; the latter is the four-component input expected by Convert Orientations. |
 | 24–27: Convert orientations; three misorientation comparisons | Convert four-component Rodrigues to Euler radians. Compare original and recovered orientations under cubic symmetry, then compare each with the same identity reference **[0, 0, 1, 0°]**. Euler components can change while the physical crystal orientation and reference angle agree. |
-| 28–29: Write ASCII Data; Write DREAM3D | Export every compact grain row, including row zero, with its source ID; save original data and all comparison arrays. The six cell arrays add about **96 MiB** before compression; the small grain branch does not duplicate the geometry. |
+| 28: Write ASCII Data | Export every compact grain row, including row zero, with its source ID. |
+| 29–30: Convert Orientations To Rodrigues Geometry, FZ off/on | Create two native point clouds linked to the same source grains. Despite the filter's name, its coordinates are stereographic **qv/(1+w)**, not Rodrigues **qv/w**. Comparing them shows which representatives change under crystal symmetry. |
+| 31: Generate and Write Pole Figure Images | Plot original average Euler radians, one orientation per occupied grain. Discrete mode avoids choosing a smoothing scale; saved count arrays retain multiplicity hidden by overlapping markers. |
+| 32: Write DREAM3D | Save original data, comparisons and native visualizations. The six cell representation arrays add about **96 MiB** before compression; the grain visualizations are small. |
 
 All three conversion filters process every cell without a mask. `IndexedPixels` remains the measurement-admission rule: **Phases > 0 AND Error == 0**. Finite converted values at excluded pixels do not make those orientations valid.
 
@@ -67,6 +70,22 @@ The fixed ROI uses corrected-grid indices `x=400:800`, `y=250:650`. Euler panels
 The verified grain branch retained all 3,059 positive grains and every previous dataset/export. Symmetry reduction changed **107** quaternion representatives; the largest recovered-orientation difference was **7.73 × 10⁻⁵°**. The smallest `w` was **0.8561** and Rodrigues norms ranged **0.04979–0.60364**, confirming this input avoids both singular domains.
 
 Each point is one grain in dimensionless Rodrigues space, colored by its saved misorientation angle to identity. These are **orientation coordinates, not specimen XYZ positions**. Euclidean distance between plotted points is not crystal misorientation. The saved original/recovered reference angles should agree and `RepresentationDifference_AxisAngleDeg` component 3 should be near zero; inspect that angle rather than comparing Euler components or quaternion signs.
+
+### Native orientation points and pole figures
+
+`T12GrainOrientationPoints` and `T12GrainOrientationPointsFZ` each contain **3,059 vertices**, linked to original grains by `Grain Data/SourceFeatureId_2`. Both copy phase, pixel count and identity-reference angle. The latter geometry moves **107** representatives under cubic symmetry. Its coordinate norms range **0.02488–0.27842**. These are stereographic quaternion coordinates **qv/(1+w)** in the positive quaternion hemisphere; the earlier figure and `RodriguesVector` use **qv/w**. Neither is a physical point cloud, and changing crystal representatives does not rotate the specimen.
+
+The same original average orientations generate this native filter image, also saved as `T12GrainPoleFigure/Cell Data/Phase_1` and `T12_GrainPoles_Phase_1.png`:
+
+![Native discrete pole figures for all 3059 occupied T12 grains](T12GrainPoleFigure.png)
+
+Unlike an orientation-space point, a pole is a **crystal direction expressed in the sample frame**. Here each grain contributes symmetry-related directions to the three stereographic disks. A1/A2 denote sample axes; do not relabel them as rolling/loading directions without establishing that mapping. The predecessor already applies the Oxford/HKL sample correction; this step adds no Euler rotation. An EDAX/ANG correction would be inappropriate to add blindly to this CTF workflow.
+
+The **256-pixel disks** and **1-pixel marker radius** are display choices, not measurement resolution. Equal grain sampling gives small grains the same contribution as large grains; this deliberately differs from the area-weighted pixel angle export. All occupied grains are included, even those below four pixels. To use the article-inspired reporting population instead, select the same `ReportableFeatures` rows from both average Euler and phase arrays before plotting. To study area weighting, use cell Euler/phase arrays with `IndexedPixels`; to inspect smoothed texture, choose Color Intensity and explicitly assess its Lambert-grid/normalization settings.
+
+Inspect `T12GrainPoleCounts/Cell Data/Phase_1_001`, `_011` and `_111`: their sums are **18,354**, **36,708** and **24,472**. These equal **6N, 12N and 8N**, including both antipodes before northern-hemisphere folding, for N=3,059 grains. They are unnormalized discrete counts, **not MRD or an ODF**. Marker overlap hides these multiplicities in the PNG. Lambert size and color count do not control this discrete mode; the metadata's Lambert-size line is incidental.
+
+**Current metadata limitation:** [#1803](https://github.com/BlueQuartzSoftware/simplnx/issues/1803) tracks default Meter labels on the orientation points and Micrometer labels on pole image/count geometries. Interpret their coordinates as dimensionless values and display pixels respectively. Do not use their geometric distances, areas or scale bars as specimen measurements.
 
 ## Checks before another handoff
 

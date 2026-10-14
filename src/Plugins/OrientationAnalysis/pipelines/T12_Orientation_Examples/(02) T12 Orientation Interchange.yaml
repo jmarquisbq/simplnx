@@ -3,7 +3,7 @@
   "pipeline_file": "(02) T12 Orientation Interchange.d3dpipeline",
   "markdown_file": "(02) T12 Orientation Interchange.md",
   "title": "T12 Orientation Interchange",
-  "summary": "Preserve measured EBSD orientations while changing angle units and quaternion order, inspecting conjugation, exporting indexed pixel records, and checking cubic fundamental-zone/Rodrigues grain representations with source identity retained.",
+  "summary": "Preserve measured EBSD orientations while changing angle units and quaternion order, inspecting conjugation, exporting indexed pixel records, and checking cubic fundamental-zone/Rodrigues grain representations with source identity retained. Compare native dimensionless orientation point clouds and generate a discrete pole figure with one average orientation per occupied grain.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -52,7 +52,7 @@
   "outputs": [
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
-      "role": "Unchanged preparation objects, six cell representation arrays, feature phases/source IDs, and compact positive-grain symmetry/Rodrigues comparisons."
+      "role": "Unchanged preparation objects, six cell representation arrays, feature phases/source IDs, and compact positive-grain symmetry/Rodrigues comparisons. Also retains unreduced/FZ orientation point clouds, a native RGB pole image and discrete pole-count arrays."
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
@@ -61,6 +61,10 @@
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainOrientationInterchange.csv",
       "role": "All 3059 positive-grain rows, including compact row zero, with source feature IDs, phases, pixel counts, dimensionless Rodrigues vector and three axis-angle comparisons; angle is component 3 in degrees."
+    },
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_GrainPoles_Phase_1.png",
+      "role": "Native discrete cubic pole-figure PNG: 3059 equally weighted occupied grains, original average Euler radians, no additional frame correction."
     }
   ],
   "input_data_strategy": {
@@ -99,7 +103,9 @@
       "Compare a quaternion with its conjugate and round trips",
       "Export indexed phase-specific Euler angle records",
       "Compare cubic-symmetry-equivalent grain representations",
-      "Export a compact grain orientation table linked to original feature IDs"
+      "Export a compact grain orientation table linked to original feature IDs",
+      "View measured grain orientations as dimensionless points with source grain IDs",
+      "Compare equal-grain pole sampling with the existing area-weighted pixel angle export"
     ],
     "questions_to_ask": [
       "Does the receiving program expect radians or degrees and Bunge Z-X-Z Euler angles?",
@@ -131,7 +137,15 @@
       "RodriguesConvertor divides by vector norm, so zero vectors need separate handling; qv/w is singular at a 180-degree rotation. Require finite nonzero input without changing measurements to hide singularities.",
       "ComputeMisorientations reads Euler radians and phase symmetry. Its four output components are axis x,y,z and angle in degrees. Axis is not meaningful at near-zero angle.",
       "Both reference comparisons use identity axis-angle [0,0,1,0 degrees]. The saved angle is not grain spread, strain, loading direction, or Euclidean distance in Rodrigues space.",
-      "The grain CSV has equal grain rows, whereas the separate indexed-pixel angle file samples area; do not infer equal statistical weighting between the two."
+      "The grain CSV has equal grain rows, whereas the separate indexed-pixel angle file samples area; do not infer equal statistical weighting between the two.",
+      "Convert Orientations To Rodrigues Geometry currently emits stereographic quaternion coordinates q_vector/(1+w), not Rodrigues q_vector/w. FZ conversion chooses crystal-symmetry representatives; no specimen positions or length scales are created.",
+      "Both point clouds copy SourceFeatureId_2, FeaturePhases_2, NumElements_2 and OriginalToIdentity_AxisAngleDeg. Row zero is valid source feature 1, not background. Compare source IDs across the two clouds.",
+      "Pole input is original AvgEulerAngles_2 in radians with FeaturePhases_2 and original ensemble metadata. All 3059 occupied grains are included, including sub-four-pixel grains. No mask is needed after explicit background exclusion; different populations require deliberate selection.",
+      "Discrete mode uses a 256-pixel stereographic disk and 1-pixel markers; overlapping markers hide multiplicity. Save Count Images is enabled and MRD normalization disabled. Lambert size and color count are inactive for this mode.",
+      "Count totals include both antipodes: 6N, 12N and 8N for cubic 001, 011 and 111 families. For N=3059, expect 18354, 36708 and 24472; these are not grain counts, ODF values or MRD.",
+      "The predecessor already establishes the Oxford/HKL frame. Pole figures use Euler orientations, not cell coordinates; do not add an EDAX/ANG Euler correction to this CTF example.",
+      "Current library output units are misleading: orientation points default to Meter and pole image/count grids to Micrometer (#1803). Interpret the former as dimensionless and the latter as display pixels; do not measure specimen lengths from them.",
+      "PNG is generated by the native filter and copied unchanged to the companion. File prefix T12_GrainPoles_Phase_ gains numeric phase 1 and .png; no extra Phase token is appended by the writer."
     ],
     "related_pipelines": [
       "(01) T12 Orientation Case Study.d3dpipeline"
@@ -175,8 +189,8 @@
       "role": "Current angle conversion, component reordering, scalar-last conjugation, phase-split masked export, file header, and tuple-order semantics. Fundamental-zone, tuple-split, Rodrigues layout and phase-aware axis-angle semantics are taken from these implementations; the branch does not claim an article method."
     }
   ],
-  "last_verified": "2026-10-13",
-  "verification_status": "Windows in-memory Release predecessor-to-extended-interchange preflight/execution passed on 2026-10-13. Forty-three independent extension checks passed for all 3059 positive grains: all 23 preparation and all 29 previous interchange datasets preserved; original pixel angle export byte-identical; phase homogeneity and occupancy; all five splits/source identities; independent 24-element cubic group orbit and FZ bounds; Rodrigues arithmetic and recovered Euler orientation; pairwise and identity-reference angles; every grain CSV row and component. The original 28 all-cell/export checks remain supported by exact preservation. This verifies representation arithmetic and file content, not materials interpretation. GUI, OOC, generated Python, downstream StatsGenerator import/run, ODF computation, and cross-platform behavior remain unverified.",
+  "last_verified": "2026-10-14",
+  "verification_status": "Windows Release in-core extended pipeline preflight/execution passed. All 27 new independent checks passed, including exact preservation of 51 earlier datasets, quaternion-projection coordinates, copied grain identities, all three independent discrete pole histograms and native RGB/PNG equality. Materials interpretation, GUI, OOC, generated Python and cross-platform behavior remain unverified.",
   "dimensional_scope": "Measured 2D EBSD map. Geometry spacing [0.5,0.5,1] and origin [-627.5,0,-1] are inherited unchanged. Angle-file rows weight admitted pixels equally; no 3D ODF or grain-equal weighting is implied.",
   "input_contract": {
     "geometry": "T12",
@@ -960,9 +974,89 @@
     },
     {
       "index": 28,
+      "filter": "ConvertOrientationsToVertexGeometryFilter",
+      "uuid": "fd32e338-a4c3-477c-9027-e105285078fd",
+      "role": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), using the positive quaternion hemisphere without crystal-symmetry reduction. These points are orientations, not specimen positions. Copy source grain IDs, populations and reference angles to preserve identity.",
+      "key_parameters": {
+        "input_representation_index": 2,
+        "input_orientation_array_path": "T12/Orientation Space Working/AvgQuats_2",
+        "copy_vertex_array_paths": [
+          "T12/Orientation Space Working/SourceFeatureId_2",
+          "T12/Orientation Space Working/FeaturePhases_2",
+          "T12/Orientation Space Working/NumElements_2",
+          "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg"
+        ],
+        "convert_to_fundamental_zone": false,
+        "cell_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "output_vertex_geometry_path": "T12GrainOrientationPoints",
+        "output_vertex_attr_matrix_name": "Grain Data",
+        "output_shared_vertex_list_name": "Orientation Coordinates"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
+      "filter": "ConvertOrientationsToVertexGeometryFilter",
+      "uuid": "fd32e338-a4c3-477c-9027-e105285078fd",
+      "role": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), after cubic fundamental-zone reduction. Compare with saved FZQuats_XYZW; this is not Rodrigues q_vector/w. Copy source grain IDs, populations and reference angles to preserve identity.",
+      "key_parameters": {
+        "input_representation_index": 2,
+        "input_orientation_array_path": "T12/Orientation Space Working/AvgQuats_2",
+        "copy_vertex_array_paths": [
+          "T12/Orientation Space Working/SourceFeatureId_2",
+          "T12/Orientation Space Working/FeaturePhases_2",
+          "T12/Orientation Space Working/NumElements_2",
+          "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg"
+        ],
+        "convert_to_fundamental_zone": true,
+        "cell_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "output_vertex_geometry_path": "T12GrainOrientationPointsFZ",
+        "output_vertex_attr_matrix_name": "Grain Data",
+        "output_shared_vertex_list_name": "Orientation Coordinates"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 30,
+      "filter": "WritePoleFigureFilter",
+      "uuid": "00cbb97e-a5c2-43e6-9a35-17a0f9ce26ed",
+      "role": "Plot original average Euler radians for all 3059 occupied grains, one orientation per grain, with cubic-high phase symmetry. Discrete northern-hemisphere stereographic poles and unnormalized counts expose the sampled population without smoothing or MRD claims. This differs from indexed-pixel area weighting; no new sample/Euler frame correction is applied. Phase 0 is absent from this compact input.",
+      "key_parameters": {
+        "title": "T12 occupied grains - equal grain weighting",
+        "generation_algorithm_index": 1,
+        "lambert_size": 64,
+        "num_colors": 32,
+        "discrete_marker_radius": 1,
+        "image_layout_index": 0,
+        "output_path": "Data/Output/T12_Orientation_Examples/Interchange",
+        "image_prefix": "T12_GrainPoles_Phase_",
+        "image_size": 256,
+        "use_mask": false,
+        "cell_euler_angles_array_path": "T12/Orientation Space Working/AvgEulerAngles_2",
+        "cell_phases_array_path": "T12/Orientation Space Working/FeaturePhases_2",
+        "mask_array_path": "",
+        "crystal_structures_array_path": "T12/Cell Ensemble Data/CrystalStructures",
+        "material_name_array_path": "T12/Cell Ensemble Data/MaterialName",
+        "save_as_image_geometry": true,
+        "write_image_to_disk": true,
+        "output_image_geometry_path": "T12GrainPoleFigure",
+        "save_intensity_plots": true,
+        "normalize_to_mrd": false,
+        "intensity_geometry_path": "T12GrainPoleCounts",
+        "intensity_plot_1_name": "001",
+        "intensity_plot_2_name": "011",
+        "intensity_plot_3_name": "111",
+        "hex_convention_index": 0
+      },
+      "parameters_version": 3
+    },
+    {
+      "index": 31,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "role": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs.",
+      "role": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs. Retain the two dimensionless orientation point clouds, native pole image and discrete count arrays.",
       "input_paths": [
         "T12"
       ],
@@ -1055,18 +1149,69 @@
       "csv_columns": 18,
       "csv_numeric_contract": "Integer IDs/phases/counts exact; floating columns checked against native arrays within eight significant digits.",
       "domain": "All retained FZ quaternions have positive w >= 0.8561164; Rodrigues norms are 0.0497893 through 0.6036364. No zero Rodrigues vector or near-180-degree division is used."
+    },
+    "orientation_visualization": {
+      "previous_datasets_exact": 51,
+      "T12GrainOrientationPoints": {
+        "formula_max_error": 7.450218636462225e-09,
+        "norm_range": [
+          0.024879246950149536,
+          0.2996523082256317
+        ],
+        "native_units_enum": 10
+      },
+      "T12GrainOrientationPointsFZ": {
+        "formula_max_error": 1.7021556386609404e-08,
+        "norm_range": [
+          0.024879246950149536,
+          0.27842167019844055
+        ],
+        "native_units_enum": 10
+      },
+      "symmetry_moved_points": 107,
+      "pole_families": {
+        "001": {
+          "total": 18354.0,
+          "independent_histogram_l1_difference": 0.0,
+          "nonzero_bins": 7078,
+          "max_bin": 26.0
+        },
+        "011": {
+          "total": 36708.0,
+          "independent_histogram_l1_difference": 0.0,
+          "nonzero_bins": 12583,
+          "max_bin": 30.0
+        },
+        "111": {
+          "total": 24472.0,
+          "independent_histogram_l1_difference": 0.0,
+          "nonzero_bins": 8750,
+          "max_bin": 34.0
+        }
+      },
+      "png_dimensions": [
+        1160,
+        352
+      ],
+      "pole_metadata": "Phase Num: 1\nMaterial Name: Iron bcc (old)\nLaue Group: Cubic m-3m (Oh)\nHemisphere: Northern\nSamples: 3059\nLambert Square Dim: 64",
+      "image_units_enum": 6,
+      "count_units_enum": 6,
+      "previous_exports_byte_identical": [
+        "T12_IndexedAngles_Phase_1.txt",
+        "T12_GrainOrientationInterchange.csv"
+      ]
     }
   },
   "reference_artifacts": [
     {
       "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
-      "role": "Native preparation checkpoint consumed by the verified extended run",
-      "sha256": "41303483c8274c685e1010decd45895c41caf3f4e374493c0cafb120200c4b9f"
+      "role": "Current native output; previous figure source hashes retained separately and all 51 earlier datasets verified exact.",
+      "sha256": "6854dbb6cabc81fff4db9d34bc28afcac3ab4b7c5af630a4c142c19afe5be423"
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_OrientationInterchange.dream3d",
-      "role": "Extended native interchange output used for the symmetry checks and second figure; original cell figure retains its own earlier native-source hash below.",
-      "sha256": "49555ac4356c90473911a19962b92966ec00c8a6993f3e2953dfbb801c3b760f"
+      "role": "Current native output; previous figure source hashes retained separately and all 51 earlier datasets verified exact.",
+      "sha256": "61a8078c0768918a4d5960473a3010b3d4ab7d1000da8848ad37f1bd34475ada"
     },
     {
       "path": "Data/Output/T12_Orientation_Examples/Interchange/T12_IndexedAngles_Phase_1.txt",
@@ -1135,5 +1280,27 @@
       -0.43,
       0.43
     ]
+  },
+  "visualization_artifacts": [
+    {
+      "path": "T12_OrientationInterchange.dream3d",
+      "sha256": "61a8078c0768918a4d5960473a3010b3d4ab7d1000da8848ad37f1bd34475ada"
+    },
+    {
+      "path": "T12_GrainPoles_Phase_1.png",
+      "sha256": "5581aa0e026dee2d1ded6abb29a121ea4bba47a96f0ed75d92dc8bef32c1323e"
+    }
+  ],
+  "pole_figure": {
+    "path": "T12GrainPoleFigure.png",
+    "source": "Native WritePoleFigureFilter PNG, copied byte-for-byte from T12_GrainPoles_Phase_1.png",
+    "sha256": "5581aa0e026dee2d1ded6abb29a121ea4bba47a96f0ed75d92dc8bef32c1323e",
+    "population": "3059 occupied grains, one AvgEulerAngles orientation each",
+    "mode": "Discrete stereographic, image size 256, marker radius 1 pixel, count normalization off"
+  },
+  "native_chain": {
+    "ctest": "PIPELINE::OrientationAnalysis::T12_Orientation_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS: both stages preflight/execute from original CTF, 7.52 seconds"
   }
 }

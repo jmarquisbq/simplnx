@@ -14,7 +14,7 @@ The filter reads **Euler angles** (in *radians*, Bunge Z-X-Z convention) describ
 
 Two rendering methods are available through the *Pole Figure Type* parameter:
 
-- **Color Intensity [0]**: Produces a continuous color intensity map. To do this the filter accumulates orientation counts onto a **modified Lambert square** -- an equal-area grid laid over a square that can be folded onto a hemisphere -- and interpolates that grid onto the unit circle. This is a **Lambert (equal-area) projection**. EBSD OEM software does not use this exact interpolation, so the output may look slightly different from an OEM-generated pole figure.
+- **Color Intensity [0]**: Produces a continuous color intensity map. The filter accumulates directions on **modified Lambert squares**, which provide equal-area sampling, then interpolates them onto a **stereographic** disk. The internal grid and final projection are different. EBSD OEM software does not use this exact interpolation, so the output may look slightly different from an OEM-generated pole figure.
 - **Discrete [1]**: Produces a point-based plot, drawing a small filled circle at each projected orientation. The circle size is controlled by the *Discrete Marker Radius (Pixels)* parameter so markers stay visible at any image size (legacy DREAM3D marked each hit as a single pixel). This uses a **stereographic** projection, the classic pole-figure projection that maps directions from a sphere onto a plane while preserving angles.
 
 The crystal symmetry used when folding orientations into the pole figure is determined by each phase's **Laue Class** -- the point-group symmetry class of the crystal (for example, cubic m-3m or hexagonal 6/mmm). The Laue Class is looked up from the per-**Ensemble** Crystal Structures array.
@@ -60,7 +60,11 @@ When *Save Output as Image Geometry* is enabled, the combined pole-figure image 
 
 ### Save Count Data Arrays
 
-When *Save Count Images* is enabled, the per-direction count data for each pole figure is stored as a Data Array inside an **Image Geometry**, allowing custom color plots to be made later. A string Data Array is also stored that records the metadata used to build each plot (number of points, hemisphere, phase name, etc.). When *Normalize Count Data to MRD* is enabled, the counts are normalized to **multiples of a random distribution (MRD)**, where *1.0* means "as common as a random arrangement."
+When *Save Count Images* is enabled, the per-direction count data for each pole figure is stored as a Data Array inside an **Image Geometry**, allowing custom color plots to be made later. A string Data Array also records the plot metadata (number of points, hemisphere, phase name, etc.). In Color Intensity mode, *Normalize Count Data to MRD* normalizes the internal Lambert squares to **multiples of a random distribution (MRD)**, where *1.0* means "as common as a random arrangement."
+
+MRD normalization applies to the Color Intensity route. Discrete mode stores unnormalized projected counts even if that option is enabled; turn it off to make the intended contract explicit. For cubic-high symmetry, the three count totals are 6, 12 and 8 times the selected orientation count because both antipodes are included before hemisphere folding. Those totals are not numbers of distinct grains. Overlapping markers can hide multiplicity in the composed PNG.
+
+Choose the sampling population deliberately: one average orientation per grain gives equal grain weighting, while one per uniformly spaced indexed pixel samples area. The native image/count geometries use display pixel coordinates; their current default Micrometer unit metadata is misleading ([#1803](https://github.com/BlueQuartzSoftware/simplnx/issues/1803)) and does not calibrate specimen lengths.
 
 ### Image Size
 
@@ -86,6 +90,11 @@ The available layout choices are:
 
 - TxCopper_Exposed
 - TxCopper_Unexposed
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 

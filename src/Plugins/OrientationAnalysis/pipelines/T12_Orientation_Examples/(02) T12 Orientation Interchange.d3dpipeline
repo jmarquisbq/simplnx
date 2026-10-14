@@ -1070,6 +1070,221 @@
       "isDisabled": false
     },
     {
+      "filter": {
+        "name": "nx::core::ConvertOrientationsToVertexGeometryFilter",
+        "uuid": "fd32e338-a4c3-477c-9027-e105285078fd"
+      },
+      "args": {
+        "input_representation_index": {
+          "value": 2,
+          "version": 1
+        },
+        "input_orientation_array_path": {
+          "value": "T12/Orientation Space Working/AvgQuats_2",
+          "version": 1
+        },
+        "copy_vertex_array_paths": {
+          "value": [
+            "T12/Orientation Space Working/SourceFeatureId_2",
+            "T12/Orientation Space Working/FeaturePhases_2",
+            "T12/Orientation Space Working/NumElements_2",
+            "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg"
+          ],
+          "version": 1
+        },
+        "convert_to_fundamental_zone": {
+          "value": false,
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "T12GrainOrientationPoints",
+          "version": 1
+        },
+        "output_vertex_attr_matrix_name": {
+          "value": "Grain Data",
+          "version": 1
+        },
+        "output_shared_vertex_list_name": {
+          "value": "Orientation Coordinates",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "isDisabled": false,
+      "comments": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), using the positive quaternion hemisphere without crystal-symmetry reduction. These points are orientations, not specimen positions. Copy source grain IDs, populations and reference angles to preserve identity."
+    },
+    {
+      "filter": {
+        "name": "nx::core::ConvertOrientationsToVertexGeometryFilter",
+        "uuid": "fd32e338-a4c3-477c-9027-e105285078fd"
+      },
+      "args": {
+        "input_representation_index": {
+          "value": 2,
+          "version": 1
+        },
+        "input_orientation_array_path": {
+          "value": "T12/Orientation Space Working/AvgQuats_2",
+          "version": 1
+        },
+        "copy_vertex_array_paths": {
+          "value": [
+            "T12/Orientation Space Working/SourceFeatureId_2",
+            "T12/Orientation Space Working/FeaturePhases_2",
+            "T12/Orientation Space Working/NumElements_2",
+            "T12/Orientation Space Working/OriginalToIdentity_AxisAngleDeg"
+          ],
+          "version": 1
+        },
+        "convert_to_fundamental_zone": {
+          "value": true,
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "T12GrainOrientationPointsFZ",
+          "version": 1
+        },
+        "output_vertex_attr_matrix_name": {
+          "value": "Grain Data",
+          "version": 1
+        },
+        "output_shared_vertex_list_name": {
+          "value": "Orientation Coordinates",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "isDisabled": false,
+      "comments": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), after cubic fundamental-zone reduction. Compare with saved FZQuats_XYZW; this is not Rodrigues q_vector/w. Copy source grain IDs, populations and reference angles to preserve identity."
+    },
+    {
+      "filter": {
+        "name": "nx::core::WritePoleFigureFilter",
+        "uuid": "00cbb97e-a5c2-43e6-9a35-17a0f9ce26ed"
+      },
+      "args": {
+        "title": {
+          "value": "T12 occupied grains - equal grain weighting",
+          "version": 1
+        },
+        "generation_algorithm_index": {
+          "value": 1,
+          "version": 1
+        },
+        "lambert_size": {
+          "value": 64,
+          "version": 1
+        },
+        "num_colors": {
+          "value": 32,
+          "version": 1
+        },
+        "discrete_marker_radius": {
+          "value": 1,
+          "version": 1
+        },
+        "image_layout_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_path": {
+          "value": "Data/Output/T12_Orientation_Examples/Interchange",
+          "version": 1
+        },
+        "image_prefix": {
+          "value": "T12_GrainPoles_Phase_",
+          "version": 1
+        },
+        "image_size": {
+          "value": 256,
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "cell_euler_angles_array_path": {
+          "value": "T12/Orientation Space Working/AvgEulerAngles_2",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "T12/Orientation Space Working/FeaturePhases_2",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "T12/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "material_name_array_path": {
+          "value": "T12/Cell Ensemble Data/MaterialName",
+          "version": 1
+        },
+        "save_as_image_geometry": {
+          "value": true,
+          "version": 1
+        },
+        "write_image_to_disk": {
+          "value": true,
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "T12GrainPoleFigure",
+          "version": 1
+        },
+        "save_intensity_plots": {
+          "value": true,
+          "version": 1
+        },
+        "normalize_to_mrd": {
+          "value": false,
+          "version": 1
+        },
+        "intensity_geometry_path": {
+          "value": "T12GrainPoleCounts",
+          "version": 1
+        },
+        "intensity_plot_1_name": {
+          "value": "001",
+          "version": 1
+        },
+        "intensity_plot_2_name": {
+          "value": "011",
+          "version": 1
+        },
+        "intensity_plot_3_name": {
+          "value": "111",
+          "version": 1
+        },
+        "hex_convention_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 3
+      },
+      "isDisabled": false,
+      "comments": "Plot original average Euler radians for all 3059 occupied grains, one orientation per grain, with cubic-high phase symmetry. Discrete northern-hemisphere stereographic poles and unnormalized counts expose the sampled population without smoothing or MRD claims. This differs from indexed-pixel area weighting; no new sample/Euler frame correction is applied. Phase 0 is absent from this compact input."
+    },
+    {
       "args": {
         "compression_level": {
           "value": 5,
@@ -1089,7 +1304,7 @@
         },
         "parameters_version": 2
       },
-      "comments": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs.",
+      "comments": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs. Retain the two dimensionless orientation point clouds, native pole image and discrete count arrays.",
       "filter": {
         "name": "nx::core::WriteDREAM3DFilter",
         "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"

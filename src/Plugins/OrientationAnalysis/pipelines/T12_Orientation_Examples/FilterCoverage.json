@@ -360,11 +360,32 @@
       "purpose": "Export all 3059 compact grain rows, including row zero, with source feature IDs and voxel counts. Misorientation columns are axis x/y/z then angle degrees; the Rodrigues columns are dimensionless. This table weights grains equally, unlike the pixel angle file."
     },
     {
+      "filter": "ConvertOrientationsToVertexGeometryFilter",
+      "uuid": "fd32e338-a4c3-477c-9027-e105285078fd",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 28,
+      "purpose": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), using the positive quaternion hemisphere without crystal-symmetry reduction. These points are orientations, not specimen positions. Copy source grain IDs, populations and reference angles to preserve identity."
+    },
+    {
+      "filter": "ConvertOrientationsToVertexGeometryFilter",
+      "uuid": "fd32e338-a4c3-477c-9027-e105285078fd",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 29,
+      "purpose": "Map each occupied grain to dimensionless stereographic quaternion coordinates q_vector/(1+w), after cubic fundamental-zone reduction. Compare with saved FZQuats_XYZW; this is not Rodrigues q_vector/w. Copy source grain IDs, populations and reference angles to preserve identity."
+    },
+    {
+      "filter": "WritePoleFigureFilter",
+      "uuid": "00cbb97e-a5c2-43e6-9a35-17a0f9ce26ed",
+      "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
+      "step": 30,
+      "purpose": "Plot original average Euler radians for all 3059 occupied grains, one orientation per grain, with cubic-high phase symmetry. Discrete northern-hemisphere stereographic poles and unnormalized counts expose the sampled population without smoothing or MRD claims. This differs from indexed-pixel area weighting; no new sample/Euler frame correction is applied. Phase 0 is absent from this compact input."
+    },
+    {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(02) T12 Orientation Interchange.d3dpipeline",
-      "step": 28,
-      "purpose": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs."
+      "step": 31,
+      "purpose": "Save every original preparation object, the six cell representation arrays, and the compact positive-grain symmetry/Rodrigues comparison with source feature IDs. Retain the two dimensionless orientation point clouds, native pole image and discrete count arrays."
     }
   ]
 }
