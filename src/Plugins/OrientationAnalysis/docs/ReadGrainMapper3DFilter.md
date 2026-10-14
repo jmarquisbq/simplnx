@@ -26,6 +26,8 @@ PhaseId data will be converted to *int32* (when the *Create Compatible Phase Dat
 
 IPF (inverse pole figure) colors can be stored in the file as either *uint8* or *float32* values. To immediately view the IPF colors that came from the file, the user should check the box for *Create Compatible IPFColor Data*, which converts any *float32* color data to *uint8*.
 
+**Current single-direction limitation:** When only float32 `IPF001` is present, the compatible-color option attempts missing `IPF010`/`IPF100` arrays and fails during execution ([#1805](https://github.com/BlueQuartzSoftware/simplnx/issues/1805)). Keep that option off for such files. The companion example explicitly scales the one existing normalized RGB array to UInt8 and separately computes colours using the selected NX key. If the reader later performs the byte conversion, remove the extra scaling step.
+
 ## Algorithm
 
 The reader transfers each LabDCT and AbsorptionCT HDF5 dataset in C-order
@@ -60,6 +62,10 @@ None. This filter reads directly from a `.h5` GrainMapper3D file and creates the
 [https://xnovotech.com/3d-crystallographic-imaging-software/](https://xnovotech.com/3d-crystallographic-imaging-software/)
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
 
 
 ## License & Copyright

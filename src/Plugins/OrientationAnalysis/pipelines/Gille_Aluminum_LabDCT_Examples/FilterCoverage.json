@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "plugin": "OrientationAnalysis",
+  "suite": "Gille_Aluminum_LabDCT_Examples",
+  "filters": [
+    {
+      "filter": "ReadGrainMapper3DFilter",
+      "uuid": "ed46afcf-de32-4f37-98bc-8f0fd4b3c122",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 0,
+      "purpose": "Import the original public AA6016 T4 LabDCT crop only, retaining millimeter geometry and source grain IDs. Convert PhaseId to Int32 and inverse-convention Rodrigues triples to NX unit-axis/magnitude form. Preserve source IPF001 float colors: built-in compatible-color conversion fails on this single-direction file (#1805). Omit the much larger AbsorptionCT volume because this task does not register scans or reproduce the paper strain analysis."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 1,
+      "purpose": "Retain supplied mask, positive phase and positive grain identity together. All 1,650,000 cells pass for this public crop; the mask is an admission contract, not an added completeness threshold."
+    },
+    {
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 2,
+      "purpose": "Convert the reader-produced four-component Rodrigues representation to Bunge Euler radians. The reader already inverted the source convention; do not conjugate again or apply an EBSD acquisition-frame correction."
+    },
+    {
+      "filter": "ComputeIPFColorsFilter",
+      "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 3,
+      "purpose": "Recompute sample-Z IPF colors using the DREAM3D-NX cubic color key and compatible orientations. These are the colors to pair with the NX legend; stored vendor colors use their own convention."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 4,
+      "purpose": "Scale the original normalized vendor RGB components to UInt8 for display, retaining the original float array. This explicit single-array conversion avoids issue 1805 but does not change the vendor color legend."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 5,
+      "purpose": "Create the per-grain table using original GrainId values and summarize the supplied reconstruction completeness. Row 0 stays unused; all 1,666 positive IDs are occupied. Completeness is a reconstruction field, not a measured strain or a statistical probability."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 6,
+      "purpose": "Measure voxel counts, observed volume in cubic millimeters and equal-volume sphere diameter in millimeters. Preserve the source 0.004 mm spacing. A grain cut by the crop has only its observed fraction measured here; this is not its whole-grain size."
+    },
+    {
+      "filter": "ComputeSurfaceFeaturesFilter",
+      "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 7,
+      "purpose": "Flag grains touching any of the six faces of this released crop. Crop faces are not physical specimen free surfaces. Use the flag before interpreting observed volumes as complete grains."
+    },
+    {
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 8,
+      "purpose": "Retain phase identity alongside the original grain IDs; all positive grains must stay phase 1, cubic-high aluminum. Investigate a mixed-phase warning rather than treating it as a new phase assignment."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 9,
+      "purpose": "Audit the paper/catalogue 27-voxel statement without deleting measured crop data. This download contains grain 1049 with 23 voxels at a crop face; preserve and flag it. Feature 0 is excluded explicitly."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 10,
+      "purpose": "Export all 1,666 occupied grain rows with their original Feature_ID, completeness, observed sizes, phase and crop/small-fragment flags. The feature writer omits reserved row 0; it does not renumber the grains."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 11,
+      "purpose": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed."
+    }
+  ]
+}

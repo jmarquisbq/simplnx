@@ -568,3 +568,17 @@ add_test(NAME PIPELINE::OrientationAnalysis::Vendor_EBSD_Import_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/VendorEbsdImportExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::Vendor_EBSD_Import_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;Vendor_EBSD_Import_Examples")
+
+# Public measured LabDCT crop; the large external source is not yet packaged.
+set(SIMPLNX_GILLE_LABDCT_EXAMPLE_FILE "" CACHE FILEPATH "Original public Gille LabDCT HDF5 for the optional example test")
+add_test(NAME PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Gille_Aluminum_LabDCT_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Gille_Aluminum_LabDCT_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    "-DRAW_DATA_FILE=${SIMPLNX_GILLE_LABDCT_EXAMPLE_FILE}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/GilleAluminumLabDCTExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;ExternalData;Gille_Aluminum_LabDCT_Examples"
+    SKIP_REGULAR_EXPRESSION "SKIP_SOURCE_DATA:")

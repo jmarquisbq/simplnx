@@ -1,0 +1,498 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+  "markdown_file": "(01) Gille Aluminum LabDCT Preparation.md",
+  "title": "Gille Aluminum LabDCT Preparation",
+  "summary": "Import a measured AA6016 T4 grain-map crop with explicit units and orientation compatibility, compare vendor and native IPF displays, and prepare per-grain observed-size/completeness reports that retain crop-boundary and small-fragment flags.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Automotive aluminum",
+    "Microstructure-informed simulation"
+  ],
+  "use_cases": [
+    "Import LabDCT microstructures with traceable orientation conventions",
+    "Prepare measured grain labels and observed-size tables before further meshing or simulation work",
+    "Distinguish cropped grain fragments from complete grains"
+  ],
+  "keywords": [
+    "AA6016 T4",
+    "LabDCT",
+    "GrainMapper3D",
+    "Rodrigues",
+    "IPF",
+    "millimeters",
+    "cropped grains",
+    "completeness"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Gille_Aluminum_LabDCT_Examples/sample_S_undeformed_6_grain_center_slice.h5",
+      "role": "Original public measured GrainMapper3D HDF5; SHA-pinned, source untouched."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
+      "role": "Native source-preserving preparation",
+      "sha256": "e5421897e7dabb1610869174c1acb5df65445efeb8c3c82f5e413dd300c07cbb"
+    },
+    {
+      "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_Grains.csv",
+      "role": "1666 original grain IDs with observed sizes, completeness, phase and crop/small-fragment flags",
+      "sha256": "a744b5b8bd6800c44662abb63b4cf97669961f54ee73fe98dbc7144ba3cbd2b0"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "sample_S_undeformed_6_grain_center_slice.h5"
+    ],
+    "paper_doi": "10.1016/j.ijplas.2024.104146",
+    "paper_url": "https://doi.org/10.1016/j.ijplas.2024.104146",
+    "source_url": "https://data.materialsdatafacility.org/mdf_open/0989ee07-e015-494d-8805-8e2703e76763/1.0/sample_S_undeformed_6_grain_center_slice.h5",
+    "source_sha512": "ef9a48a6f1e090035f27d621b4d891555da59290f7b30dc178e6bdb61b5560673cb882f032ae864d673662932ee8ff8c55a2fb77ada474313105a5f1dadd8410",
+    "reference_visual": "Native stored vendor RGB, recomputed TSL sample-Z RGB and supplied completeness on the same Y-normal slice. No paper figure is copied.",
+    "target_traits": [
+      "Measured cropped reconstruction, 110 x 60 x 250 voxels at 0.004 mm spacing",
+      "1,666 original grain IDs, 931 touching crop faces and 735 interior",
+      "One cubic-high aluminum phase, no void labels in this prepared grain map",
+      "Version 5 source contains only IPF001; compatible-color option remains off for issue 1805"
+    ],
+    "known_differences": "Preparation of a released undeformed crop only. No Neper tessellation/meshing, multimodal registration, projection-DIC, constitutive calibration, CP-FE simulation or fracture result is reproduced. The downloaded crop includes a 23-voxel boundary grain despite the catalogue minimum 27 statement; preserve and flag it instead of repeating removal/filling. A dense grain label map is not a porosity measurement.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "gille-aluminum-labdct-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Read a measured GrainMapper3D result into an interpretable NX data structure",
+      "Recompute IPF colors with a specified NX legend",
+      "Inspect observed grain sizes while identifying crop truncation"
+    ],
+    "questions_to_ask": [
+      "Which GrainMapper3D orientation representations and IPF arrays are present?",
+      "Are geometry units and the source reference frame established?",
+      "Which grains are cut by the crop, and what preprocessing has the source already undergone?"
+    ],
+    "constraints": [
+      "Keep source grain IDs and their cell association unchanged. This is a published crop of an already reconstructed/prepared map, not raw diffraction data.",
+      "Read LabDCT=true and AbsorptionCT=false. The original file is 567,693,056 bytes, mostly an unused CT volume; no ACT/DCT alignment or loading sequence is processed.",
+      "Geometry units are Millimeter with spacing [0.004,0.004,0.004]. Origin is Center - Extent/2 + VirtualShift, approximately [0.19552725,-0.34209903,3.68725684] mm. Do not substitute micron numbers without changing both scale and unit metadata.",
+      "Compatible orientation conversion changes source Rodrigues r to [-r/|r|,|r|]; source vectors must be finite and nonzero for this current reader. Convert that four-component array to NX Euler radians. Do not conjugate twice or add CTF/ANG frame rotations.",
+      "Compatible IPFColor conversion is off because this source has only IPF001 and the current importer wrongly requires missing color directions (#1805). Preserve IPF001 float, explicitly scale it to UInt8, and compute a separate NX_IPF001_RGB with color key 0, TSL. Source and NX legends are not interchangeable.",
+      "ValidGrainVoxels combines supplied Mask > 0, PhaseId > 0 and GrainId > 0; all 1,650,000 cells pass. No completeness threshold or grain relabeling is added.",
+      "Grain Data row 0 is unused. Rows 1..1666 preserve original grain IDs. Feature CSV excludes row 0 and writes 1,666 feature records with Feature_ID.",
+      "ObservedVolume_mm3 and ObservedEquivalentDiameter_mm describe only retained voxels. AtCropBoundary flags 931 grains touching the crop, not physical free surfaces. Do not report these as full-grain sizes.",
+      "Below27Voxels flags only grain 1049, 23 voxels,AtCropBoundary=1. The catalogue minimum 27 claim does not match this file; cropping can truncate grains, but its exact historical cause is not established. No corrective deletion/filling is applied.",
+      "Completeness is a supplied reconstruction-quality field, not strain or a probability. Grouped means use Float32 accumulation; the independent Float64 comparison differed by at most 2.08e-6 in this run.",
+      "No Laguerre tessellation, quadratic tetrahedral meshing, projection-DIC, Z-set model calibration, loading boundary conditions or CP-FE/fracture prediction is implemented. Follow the cited external workflow and obtain the necessary additional data to reproduce those steps.",
+      "The public crop has dense grain labels and no void labels; it does not establish absence of pores or intermetallic particles in the real alloy. Source dataset licensing is CC BY 4.0; raw packaging remains subject to project approval.",
+      "ValidGrainVoxels controls IPF colors and completeness statistics; ComputeFeatureSizes and feature-phase assignment use all retained GrainId labels. All source voxels pass here. Resolve invalid labels and mixed-phase grains explicitly when adapting; do not assume the mask applies to every downstream filter."
+    ]
+  },
+  "citations": [
+    {
+      "title": "3D strain heterogeneity and fracture studied by X-ray tomography and crystal plasticity in an aluminium alloy",
+      "authors": [
+        "Maryse Gille",
+        "Henry Proudhon",
+        "Jette Oddershede",
+        "Romain Quey",
+        "Thilo F. Morgeneyer"
+      ],
+      "year": 2024,
+      "journal": "International Journal of Plasticity 183, 104146",
+      "doi": "10.1016/j.ijplas.2024.104146",
+      "url": "https://doi.org/10.1016/j.ijplas.2024.104146",
+      "scope": "pipeline_workflow",
+      "role": "Measured-microstructure context and explanation of preprocessing/meshing/deformation steps omitted from this import preparation. Full scientific text and appendices consulted in the author-uploaded public version.",
+      "dataset": {
+        "availability": "Original public HDF5 download linked from the authors/vendor tutorial and MDF record.",
+        "url": "https://data.materialsdatafacility.org/mdf_open/0989ee07-e015-494d-8805-8e2703e76763/1.0/sample_S_undeformed_6_grain_center_slice.h5",
+        "doi": "10.18126/yc1m-nk41",
+        "license": "CC BY 4.0",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Preparation of a released undeformed crop only. No Neper tessellation/meshing, multimodal registration, projection-DIC, constitutive calibration, CP-FE simulation or fracture result is reproduced."
+      }
+    },
+    {
+      "title": "LabDCT data for investigation of 3D strain heterogeneity and fracture in an aluminium alloy",
+      "authors": [
+        "Maryse Gille",
+        "Henry Proudhon",
+        "Jette Oddershede",
+        "Romain Quey",
+        "Thilo F. Morgeneyer"
+      ],
+      "year": 2025,
+      "doi": "10.18126/yc1m-nk41",
+      "url": "https://acdc.alcf.anl.gov/mdf/detail/0989ee07-e015-494d-8805-8e2703e76763-1.0/",
+      "scope": "pipeline_workflow",
+      "role": "Public measured crop, axis/spacing/population description and explicit CC BY 4.0 license; catalogue minimum-grain discrepancy is reported separately.",
+      "dataset": {
+        "availability": "Original public HDF5 download linked from the authors/vendor tutorial and MDF record.",
+        "url": "https://data.materialsdatafacility.org/mdf_open/0989ee07-e015-494d-8805-8e2703e76763/1.0/sample_S_undeformed_6_grain_center_slice.h5",
+        "doi": "10.18126/yc1m-nk41",
+        "license": "CC BY 4.0",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Preparation of a released undeformed crop only. No Neper tessellation/meshing, multimodal registration, projection-DIC, constitutive calibration, CP-FE simulation or fracture result is reproduced."
+      }
+    },
+    {
+      "title": "Neper pipeline for LabDCT",
+      "authors": [
+        "Xnovo Technology"
+      ],
+      "year": 2025,
+      "url": "https://xnovotech.com/neper-pipeline-for-labdct/",
+      "scope": "pipeline_workflow",
+      "role": "Author/vendor tutorial links this exact HDF5 and describes an external tessellation/mesh continuation. It is not implemented by this example.",
+      "dataset": {
+        "availability": "Original public HDF5 download linked from the authors/vendor tutorial and MDF record.",
+        "url": "https://data.materialsdatafacility.org/mdf_open/0989ee07-e015-494d-8805-8e2703e76763/1.0/sample_S_undeformed_6_grain_center_slice.h5",
+        "doi": "10.18126/yc1m-nk41",
+        "license": "CC BY 4.0",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Preparation of a released undeformed crop only. No Neper tessellation/meshing, multimodal registration, projection-DIC, constitutive calibration, CP-FE simulation or fracture result is reproduced."
+      }
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows Release in-core preflight/execution passed; 40/40 independent checks passed against source HDF5 and analytical orientation/geometry expectations. Materials interpretation, GUI, OOC, generated Python and external simulation remain unverified.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadGrainMapper3DFilter",
+      "uuid": "ed46afcf-de32-4f37-98bc-8f0fd4b3c122",
+      "role": "Import the original public AA6016 T4 LabDCT crop only, retaining millimeter geometry and source grain IDs. Convert PhaseId to Int32 and inverse-convention Rodrigues triples to NX unit-axis/magnitude form. Preserve source IPF001 float colors: built-in compatible-color conversion fails on this single-direction file (#1805). Omit the much larger AbsorptionCT volume because this task does not register scans or reproduce the paper strain analysis.",
+      "key_parameters": {
+        "input_file": "Data/Gille_Aluminum_LabDCT_Examples/sample_S_undeformed_6_grain_center_slice.h5",
+        "read_lab_dct_data": true,
+        "output_dct_image_geometry_path": "AluminumLabDCT",
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_ensemble_attribute_matrix_name": "Cell Ensemble Data",
+        "convert_phase_to_int32": true,
+        "convert_orientation_data": true,
+        "read_absorption_ct_data": false,
+        "output_absorption_image_geometry_path": "UnusedAbsorption",
+        "cell_absorption_attribute_matrix_name": "Cell Data",
+        "convert_ipfcolor_data": false
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 1,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Retain supplied mask, positive phase and positive grain identity together. All 1,650,000 cells pass for this public crop; the mask is an admission contract, not an added completeness threshold.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "AluminumLabDCT/Cell Data/Mask",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "AluminumLabDCT/Cell Data/PhaseId",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "AluminumLabDCT/Cell Data/GrainId",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "ValidGrainVoxels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "role": "Convert the reader-produced four-component Rodrigues representation to Bunge Euler radians. The reader already inverted the source convention; do not conjugate again or apply an EBSD acquisition-frame correction.",
+      "key_parameters": {
+        "input_orientation_array_path": "AluminumLabDCT/Cell Data/Rodrigues",
+        "input_representation_index": 4,
+        "output_orientation_array_name": "EulerAngles_NX_Radians",
+        "output_representation_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ComputeIPFColorsFilter",
+      "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
+      "role": "Recompute sample-Z IPF colors using the DREAM3D-NX cubic color key and compatible orientations. These are the colors to pair with the NX legend; stored vendor colors use their own convention.",
+      "key_parameters": {
+        "cell_euler_angles_array_path": "AluminumLabDCT/Cell Data/EulerAngles_NX_Radians",
+        "cell_ipf_colors_array_name": "NX_IPF001_RGB",
+        "cell_phases_array_path": "AluminumLabDCT/Cell Data/PhaseId",
+        "color_key_index": 0,
+        "crystal_structures_array_path": "AluminumLabDCT/Cell Ensemble Data/CrystalStructures",
+        "mask_array_path": "AluminumLabDCT/Cell Data/ValidGrainVoxels",
+        "reference_dir": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "use_mask": true
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 4,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Scale the original normalized vendor RGB components to UInt8 for display, retaining the original float array. This explicit single-array conversion avoids issue 1805 but does not change the vendor color legend.",
+      "key_parameters": {
+        "calculated_array_path": "AluminumLabDCT/Cell Data/VendorIPF001_RGB",
+        "calculator_parameter": {
+          "equation": "IPF001*255",
+          "selected_group": "AluminumLabDCT/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 1
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Create the per-grain table using original GrainId values and summarize the supplied reconstruction completeness. Row 0 stays unused; all 1,666 positive IDs are occupied. Completeness is a reconstruction field, not a measured strain or a statistical probability.",
+      "key_parameters": {
+        "selected_array_path": "AluminumLabDCT/Cell Data/Completeness",
+        "destination_attribute_matrix_path": "AluminumLabDCT/Grain Data",
+        "use_mask": true,
+        "mask_array_path": "AluminumLabDCT/Cell Data/ValidGrainVoxels",
+        "compute_by_index": true,
+        "feature_ids_path": "AluminumLabDCT/Cell Data/GrainId",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": false,
+        "length_array_name": "PixelCount",
+        "find_min": true,
+        "minimum_array_name": "MinimumCompleteness",
+        "find_max": true,
+        "maximum_array_name": "MaximumCompleteness",
+        "find_mean": true,
+        "mean_array_name": "MeanCompleteness",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "Summation",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "role": "Measure voxel counts, observed volume in cubic millimeters and equal-volume sphere diameter in millimeters. Preserve the source 0.004 mm spacing. A grain cut by the crop has only its observed fraction measured here; this is not its whole-grain size.",
+      "key_parameters": {
+        "equivalent_diameters_name": "ObservedEquivalentDiameter_mm",
+        "feature_attribute_matrix_path": "AluminumLabDCT/Grain Data",
+        "feature_ids_path": "AluminumLabDCT/Cell Data/GrainId",
+        "input_image_geometry_path": "AluminumLabDCT",
+        "num_elements_name": "NumElements",
+        "save_element_sizes": false,
+        "volumes_name": "ObservedVolume_mm3"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 7,
+      "filter": "ComputeSurfaceFeaturesFilter",
+      "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948",
+      "role": "Flag grains touching any of the six faces of this released crop. Crop faces are not physical specimen free surfaces. Use the flag before interpreting observed volumes as complete grains.",
+      "key_parameters": {
+        "mark_feature_0_neighbors": true,
+        "input_image_geometry_path": "AluminumLabDCT",
+        "feature_ids_path": "AluminumLabDCT/Cell Data/GrainId",
+        "feature_attribute_matrix_path": "AluminumLabDCT/Grain Data",
+        "surface_features_array_name": "AtCropBoundary"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "role": "Retain phase identity alongside the original grain IDs; all positive grains must stay phase 1, cubic-high aluminum. Investigate a mixed-phase warning rather than treating it as a new phase assignment.",
+      "key_parameters": {
+        "cell_features_attribute_matrix_path": "AluminumLabDCT/Grain Data",
+        "cell_phases_array_path": "AluminumLabDCT/Cell Data/PhaseId",
+        "feature_ids_path": "AluminumLabDCT/Cell Data/GrainId",
+        "feature_phases_array_name": "FeaturePhases"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Audit the paper/catalogue 27-voxel statement without deleting measured crop data. This download contains grain 1049 with 23 voxels at a crop face; preserve and flag it. Feature 0 is excluded explicitly.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "AluminumLabDCT/Grain Data/NumElements",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "AluminumLabDCT/Grain Data/NumElements",
+              "comparison": 1,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 27.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "Below27Voxels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "role": "Export all 1,666 occupied grain rows with their original Feature_ID, completeness, observed sizes, phase and crop/small-fragment flags. The feature writer omits reserved row 0; it does not renumber the grains.",
+      "key_parameters": {
+        "feature_data_file": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_Grains.csv",
+        "write_neighborlist_data": false,
+        "write_num_features_line": false,
+        "delimiter_index": 2,
+        "cell_feature_attribute_matrix_path": "AluminumLabDCT/Grain Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "reference_results": {
+    "orientation_max_quaternion_distance": 2.2388766759679296e-06,
+    "orientation_max_angle_error_deg": 0.0002565563687665359,
+    "NX_color_max_byte_error": 0,
+    "NX_color_exact_component_fraction": 1.0,
+    "completeness_mean_max_abs_error": 2.071793772540076e-06,
+    "completeness_mean_precision": "Float32 per-grain sums and division, independently reproduced bitwise; comparison to Float64 mean also bounded to5e-6.",
+    "total_voxels": 1650000,
+    "grains": 1666,
+    "crop_boundary_grains": 931,
+    "interior_grains": 735,
+    "small_fragments": [
+      {
+        "id": 1049,
+        "voxels": 23,
+        "at_crop_boundary": true
+      }
+    ],
+    "total_observed_volume_mm3": 0.10560002042063843,
+    "expected_total_volume_mm3": 0.10560000000000001,
+    "mean_completeness_range": [
+      0.38319696577227846,
+      0.7152534405768017
+    ],
+    "origin_mm": [
+      0.19552725219726566,
+      -0.3420990295410156,
+      3.6872568359375
+    ],
+    "spacing_mm": [
+      0.004,
+      0.004,
+      0.004
+    ]
+  },
+  "figure": {
+    "file": "GilleAluminumLabDCT.png",
+    "sha256": "07fc14165bb318f09c5525712f000ecd69d7bb64c3fdaf5b58b18c39fce9c324",
+    "native_source_sha256": "e5421897e7dabb1610869174c1acb5df65445efeb8c3c82f5e413dd300c07cbb",
+    "method": "Display saved native VendorIPF001_RGB, NX_IPF001_RGB and supplied Completeness arrays at Y index30. Only axis labels are expressed in micrometers; stored geometry remains millimeters. No orientations, IPF colors or completeness values are recomputed by the plotter.",
+    "arrays": [
+      "AluminumLabDCT/Cell Data/VendorIPF001_RGB",
+      "AluminumLabDCT/Cell Data/NX_IPF001_RGB",
+      "AluminumLabDCT/Cell Data/Completeness"
+    ],
+    "slice_y_index": 30,
+    "native_color_key": "TSL",
+    "completeness_colormap": "viridis, fixed0..1",
+    "coordinate_units": "Plot axes micrometers; source/native geometry millimeters"
+  },
+  "native_chain": {
+    "ctest": "PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS, 3.54 seconds,original source explicitly supplied; unconfigured-source skip and configured-missing/hash guards separately verified."
+  }
+}

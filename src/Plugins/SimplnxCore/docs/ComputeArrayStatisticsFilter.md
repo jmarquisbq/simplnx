@@ -90,6 +90,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `Vendor_EBSD_Import_Examples/(01) Vendor EBSD Import Checks.d3dpipeline` (OrientationAnalysis)
 
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 

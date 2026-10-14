@@ -106,6 +106,9 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline` (OrientationAnalysis)
 
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
+
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

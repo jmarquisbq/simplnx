@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "relative_directory": "Data/Gille_Aluminum_LabDCT_Examples",
+  "dataset_doi": "10.18126/yc1m-nk41",
+  "dataset_url": "https://doi.org/10.18126/yc1m-nk41",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "license_evidence": "https://acdc.alcf.anl.gov/mdf/detail/0989ee07-e015-494d-8805-8e2703e76763-1.0/",
+  "attribution": "Gille, Maryse; Proudhon, Henry; Oddershede, Jette; Quey, Romain; Morgeneyer, Thilo F. (2025), LabDCT data for investigation of 3D strain heterogeneity and fracture studied by X-ray tomography and crystal plasticity in an aluminium alloy, Materials Data Facility, DOI 10.18126/yc1m-nk41.",
+  "provenance": "Original published 2025 crop from the measured AA6016 T4 study; no source arrays modified. This is not the entire experimental volume or loading series.",
+  "files": [
+    {
+      "filename": "sample_S_undeformed_6_grain_center_slice.h5",
+      "url": "https://data.materialsdatafacility.org/mdf_open/0989ee07-e015-494d-8805-8e2703e76763/1.0/sample_S_undeformed_6_grain_center_slice.h5",
+      "bytes": 567693056,
+      "sha256": "8802bbe5413f766330ac394c150a8d75818dd458d9e47123b05b7c8dc53cb522",
+      "sha512": "ef9a48a6f1e090035f27d621b4d891555da59290f7b30dc178e6bdb61b5560673cb882f032ae864d673662932ee8ff8c55a2fb77ada474313105a5f1dadd8410",
+      "format": "GrainMapper3D result HDF5 version 5",
+      "map_dimensions_xyz": [
+        110,
+        60,
+        250
+      ],
+      "spacing_mm": [
+        0.004,
+        0.004,
+        0.004
+      ],
+      "original_grain_ids": "1 through 1666, all occupied",
+      "processing": "Author-published crop retained unchanged; example imports LabDCT only and leaves AbsorptionCT unread.",
+      "consuming_pipelines": [
+        "(01) Gille Aluminum LabDCT Preparation.d3dpipeline"
+      ]
+    }
+  ],
+  "catalogue_discrepancy": "The catalogue/tutorial state all grains have at least 27 voxels. The actual download contains grain 1049 with 23 voxels touching a crop face. The example preserves and flags it; historical cause is not established by the file.",
+  "packaging_status": "Not added to normal data installation. Track the original 567,693,056-byte file for later dataset/pipeline approval; a lossless smaller runtime derivative is a separate packaging decision."
+}

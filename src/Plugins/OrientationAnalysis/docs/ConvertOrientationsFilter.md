@@ -137,6 +137,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
 
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 

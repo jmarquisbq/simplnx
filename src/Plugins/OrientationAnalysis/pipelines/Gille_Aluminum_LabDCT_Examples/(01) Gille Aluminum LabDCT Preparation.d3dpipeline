@@ -1,0 +1,589 @@
+{
+  "isDisabled": false,
+  "name": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "filter": {
+        "name": "nx::core::ReadGrainMapper3DFilter",
+        "uuid": "ed46afcf-de32-4f37-98bc-8f0fd4b3c122"
+      },
+      "args": {
+        "input_file": {
+          "value": "Data/Gille_Aluminum_LabDCT_Examples/sample_S_undeformed_6_grain_center_slice.h5",
+          "version": 1
+        },
+        "read_lab_dct_data": {
+          "value": true,
+          "version": 1
+        },
+        "output_dct_image_geometry_path": {
+          "value": "AluminumLabDCT",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "cell_ensemble_attribute_matrix_name": {
+          "value": "Cell Ensemble Data",
+          "version": 1
+        },
+        "convert_phase_to_int32": {
+          "value": true,
+          "version": 1
+        },
+        "convert_orientation_data": {
+          "value": true,
+          "version": 1
+        },
+        "read_absorption_ct_data": {
+          "value": false,
+          "version": 1
+        },
+        "output_absorption_image_geometry_path": {
+          "value": "UnusedAbsorption",
+          "version": 1
+        },
+        "cell_absorption_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "convert_ipfcolor_data": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Import the original public AA6016 T4 LabDCT crop only, retaining millimeter geometry and source grain IDs. Convert PhaseId to Int32 and inverse-convention Rodrigues triples to NX unit-axis/magnitude form. Preserve source IPF001 float colors: built-in compatible-color conversion fails on this single-direction file (#1805). Omit the much larger AbsorptionCT volume because this task does not register scans or reproduce the paper strain analysis.",
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "AluminumLabDCT/Cell Data/Mask",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              },
+              {
+                "array_path": "AluminumLabDCT/Cell Data/PhaseId",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              },
+              {
+                "array_path": "AluminumLabDCT/Cell Data/GrainId",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 1,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "ValidGrainVoxels",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Retain supplied mask, positive phase and positive grain identity together. All 1,650,000 cells pass for this public crop; the mask is an admission contract, not an added completeness threshold.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_orientation_array_path": {
+          "value": "AluminumLabDCT/Cell Data/Rodrigues",
+          "version": 1
+        },
+        "input_representation_index": {
+          "value": 4,
+          "version": 1
+        },
+        "output_orientation_array_name": {
+          "value": "EulerAngles_NX_Radians",
+          "version": 1
+        },
+        "output_representation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Convert the reader-produced four-component Rodrigues representation to Bunge Euler radians. The reader already inverted the source convention; do not conjugate again or apply an EBSD acquisition-frame correction.",
+      "filter": {
+        "name": "nx::core::ConvertOrientationsFilter",
+        "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_euler_angles_array_path": {
+          "value": "AluminumLabDCT/Cell Data/EulerAngles_NX_Radians",
+          "version": 1
+        },
+        "cell_ipf_colors_array_name": {
+          "value": "NX_IPF001_RGB",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "AluminumLabDCT/Cell Data/PhaseId",
+          "version": 1
+        },
+        "color_key_index": {
+          "value": 0,
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "AluminumLabDCT/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "AluminumLabDCT/Cell Data/ValidGrainVoxels",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "reference_dir": {
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        }
+      },
+      "comments": "Recompute sample-Z IPF colors using the DREAM3D-NX cubic color key and compatible orientations. These are the colors to pair with the NX legend; stored vendor colors use their own convention.",
+      "filter": {
+        "name": "nx::core::ComputeIPFColorsFilter",
+        "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculated_array_path": {
+          "value": "AluminumLabDCT/Cell Data/VendorIPF001_RGB",
+          "version": 1
+        },
+        "calculator_parameter": {
+          "value": {
+            "equation": "IPF001*255",
+            "selected_group": "AluminumLabDCT/Cell Data",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Scale the original normalized vendor RGB components to UInt8 for display, retaining the original float array. This explicit single-array conversion avoids issue 1805 but does not change the vendor color legend.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_array_path": {
+          "value": "AluminumLabDCT/Cell Data/Completeness",
+          "version": 1
+        },
+        "destination_attribute_matrix_path": {
+          "value": "AluminumLabDCT/Grain Data",
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "AluminumLabDCT/Cell Data/ValidGrainVoxels",
+          "version": 1
+        },
+        "compute_by_index": {
+          "value": true,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "feature_has_data_array_name": {
+          "value": "FeatureHasData",
+          "version": 1
+        },
+        "range_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "range": {
+          "value": [
+            0,
+            -1
+          ],
+          "version": 1
+        },
+        "feature_ids_indexing_name": {
+          "value": "FeatureIdsIndexing",
+          "version": 1
+        },
+        "find_length": {
+          "value": false,
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "PixelCount",
+          "version": 1
+        },
+        "find_min": {
+          "value": true,
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "MinimumCompleteness",
+          "version": 1
+        },
+        "find_max": {
+          "value": true,
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "MaximumCompleteness",
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "MeanCompleteness",
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "Median",
+          "version": 1
+        },
+        "find_mode": {
+          "value": false,
+          "version": 1
+        },
+        "mode_array_name": {
+          "value": "Mode",
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "std_deviation_array_name": {
+          "value": "StandardDeviation",
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "Summation",
+          "version": 1
+        },
+        "standardize_data": {
+          "value": false,
+          "version": 1
+        },
+        "standardized_array_name": {
+          "value": "Standardized",
+          "version": 1
+        },
+        "find_unique_values": {
+          "value": false,
+          "version": 1
+        },
+        "number_unique_values_name": {
+          "value": "NumUniqueValues",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Create the per-grain table using original GrainId values and summarize the supplied reconstruction completeness. Row 0 stays unused; all 1,666 positive IDs are occupied. Completeness is a reconstruction field, not a measured strain or a statistical probability.",
+      "filter": {
+        "name": "nx::core::ComputeArrayStatisticsFilter",
+        "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "equivalent_diameters_name": {
+          "value": "ObservedEquivalentDiameter_mm",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "AluminumLabDCT/Grain Data",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "AluminumLabDCT",
+          "version": 1
+        },
+        "num_elements_name": {
+          "value": "NumElements",
+          "version": 1
+        },
+        "parameters_version": 2,
+        "save_element_sizes": {
+          "value": false,
+          "version": 1
+        },
+        "volumes_name": {
+          "value": "ObservedVolume_mm3",
+          "version": 1
+        }
+      },
+      "comments": "Measure voxel counts, observed volume in cubic millimeters and equal-volume sphere diameter in millimeters. Preserve the source 0.004 mm spacing. A grain cut by the crop has only its observed fraction measured here; this is not its whole-grain size.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureSizesFilter",
+        "uuid": "c666ee17-ca58-4969-80d0-819986c72485"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "mark_feature_0_neighbors": {
+          "value": true,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "AluminumLabDCT",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "feature_attribute_matrix_path": {
+          "value": "AluminumLabDCT/Grain Data",
+          "version": 1
+        },
+        "surface_features_array_name": {
+          "value": "AtCropBoundary",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Flag grains touching any of the six faces of this released crop. Crop faces are not physical specimen free surfaces. Use the flag before interpreting observed volumes as complete grains.",
+      "filter": {
+        "name": "nx::core::ComputeSurfaceFeaturesFilter",
+        "uuid": "0893e490-5d24-4c21-95e7-e8372baa8948"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "cell_features_attribute_matrix_path": {
+          "value": "AluminumLabDCT/Grain Data",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "AluminumLabDCT/Cell Data/PhaseId",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "FeaturePhases",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Retain phase identity alongside the original grain IDs; all positive grains must stay phase 1, cubic-high aluminum. Investigate a mixed-phase warning rather than treating it as a new phase assignment.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesFilter",
+        "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "array_thresholds_object": {
+          "value": {
+            "inverted": false,
+            "thresholds": [
+              {
+                "array_path": "AluminumLabDCT/Grain Data/NumElements",
+                "comparison": 0,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 0.0
+              },
+              {
+                "array_path": "AluminumLabDCT/Grain Data/NumElements",
+                "comparison": 1,
+                "component_index": 0,
+                "inverted": false,
+                "type": "array",
+                "union": 0,
+                "value": 27.0
+              }
+            ],
+            "type": "collection",
+            "union": 0
+          },
+          "version": 2
+        },
+        "created_mask_type": {
+          "value": 1,
+          "version": 1
+        },
+        "use_custom_true_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_true_value": {
+          "value": 1.0,
+          "version": 1
+        },
+        "use_custom_false_value": {
+          "value": false,
+          "version": 1
+        },
+        "custom_false_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "output_data_array_name": {
+          "value": "Below27Voxels",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Audit the paper/catalogue 27-voxel statement without deleting measured crop data. This download contains grain 1049 with 23 voxels at a crop face; preserve and flag it. Feature 0 is excluded explicitly.",
+      "filter": {
+        "name": "nx::core::MultiThresholdObjectsFilter",
+        "uuid": "4246245e-1011-4add-8436-0af6bed19228"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "feature_data_file": {
+          "value": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_Grains.csv",
+          "version": 1
+        },
+        "write_neighborlist_data": {
+          "value": false,
+          "version": 1
+        },
+        "write_num_features_line": {
+          "value": false,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "AluminumLabDCT/Grain Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export all 1,666 occupied grain rows with their original Feature_ID, completeness, observed sizes, phase and crop/small-fragment flags. The feature writer omits reserved row 0; it does not renumber the grains.",
+      "filter": {
+        "name": "nx::core::WriteFeatureDataCSVFilter",
+        "uuid": "d734293f-3017-4699-b458-c05aca078b96"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}
