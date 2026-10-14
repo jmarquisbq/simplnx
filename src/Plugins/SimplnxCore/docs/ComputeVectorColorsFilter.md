@@ -6,11 +6,13 @@ Generic (Coloring)
 
 ## Description
 
-This filter generates an RGB color for each **Cell** based on the vector assigned to that **Cell** in the input vector data. The input is a 3-component (float32) vector **Cell** array, and the output is a 3-component unsigned 8-bit (uint8) RGB array with values in the range 0-255. Each input vector is normalized to unit length before its direction is mapped to a color, so only the *direction* of the vector affects the color; its magnitude is ignored. The color scheme assigns a unique color to every direction on the unit hemisphere using an HSV-like scheme. The color space is approximately represented by the following legend.
+This filter generates an RGB color for each 3-component float32 vector. The output is a 3-component uint8 array with values from 0 to 255. Each vector is normalized, so magnitude is discarded. Vectors with negative Z are reversed before coloring. Sample-plane azimuth selects a hue through red, green and blue; approaching +Z blends it toward white. This generic hemisphere encoding does not apply crystallographic symmetry or generate an IPF key. Quantization and hemisphere folding prevent exact recovery of the original vector from its color. The legend approximates the color space.
 
 ![Images/VectorColors](Images/VectorColors.png)
 
 When *Apply to Good Voxels Only* is enabled, the supplied boolean or uint8 **Mask** array marks which **Cells** are valid; **Cells** flagged as bad are left black (RGB 0,0,0) instead of being colored.
+
+Mask undefined, nonfinite or zero-length vectors before coloring. Retain the source vectors and their coordinate-frame convention for analysis; a direction-colored array is a display representation.
 
 ### Required Input Sources
 
@@ -19,6 +21,10 @@ When *Apply to Good Voxels Only* is enabled, the supplied boolean or uint8 **Mas
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

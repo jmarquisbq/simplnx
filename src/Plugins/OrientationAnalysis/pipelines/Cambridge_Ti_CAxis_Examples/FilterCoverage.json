@@ -3,69 +3,6 @@
   "scope": "All steps of the three Cambridge Ti c-axis examples; zero-based step indices. Illustrative c-axis extension of the paper.",
   "filters": [
     {
-      "filter": "ReadChannel5DataFilter",
-      "uuid": "6651923c-afb9-4032-8372-5578325c69a4",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 0,
-      "purpose": "Import original Oxford CPR/CRC pair; retain native crystal basis and measured arrays."
-    },
-    {
-      "filter": "RotateSampleRefFrameFilter",
-      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 1,
-      "purpose": "Apply the documented Oxford 180 degree sample-Y spatial correction, with no extra crystal/Euler rotation."
-    },
-    {
-      "filter": "MultiThresholdObjectsFilter",
-      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 2,
-      "purpose": "Mark only Error=0, Bands>0, Phases=1 pixels as indexed; retain all original values."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 3,
-      "purpose": "Copy raw Phases so the analysis mask can exclude invalid cells without altering imported phases."
-    },
-    {
-      "filter": "RenameDataObjectFilter",
-      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 4,
-      "purpose": "Name the copied phase array AnalysisPhases."
-    },
-    {
-      "filter": "ConditionalSetValueFilter",
-      "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 5,
-      "purpose": "Set excluded analysis phases to zero; keep raw Phases unchanged."
-    },
-    {
-      "filter": "ConvertOrientationsFilter",
-      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 6,
-      "purpose": "Convert imported Euler angles in radians to quaternions without changing crystal axes."
-    },
-    {
-      "filter": "ComputeCAxisLocationsFilter",
-      "uuid": "a51c257a-ddc1-499a-9b21-f2d25a19d098",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 7,
-      "purpose": "Project alpha-Ti c axes into the corrected sample frame; excluded pixels remain undefined."
-    },
-    {
-      "filter": "WriteDREAM3DFilter",
-      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
-      "step": 8,
-      "purpose": "Save the complete checkpoint for the next example and independent checks."
-    },
-    {
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline",
@@ -203,6 +140,118 @@
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline",
       "step": 8,
+      "purpose": "Save the complete checkpoint for the next example and independent checks."
+    },
+    {
+      "filter": "ReadChannel5DataFilter",
+      "uuid": "6651923c-afb9-4032-8372-5578325c69a4",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 0,
+      "purpose": "Import original Oxford CPR/CRC pair; retain native crystal basis and measured arrays."
+    },
+    {
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 1,
+      "purpose": "Apply the documented Oxford 180 degree sample-Y spatial correction, with no extra crystal/Euler rotation."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 2,
+      "purpose": "Mark only Error=0, Bands>0, Phases=1 pixels as indexed; retain all original values."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 3,
+      "purpose": "Copy raw Phases so the analysis mask can exclude invalid cells without altering imported phases."
+    },
+    {
+      "filter": "RenameDataObjectFilter",
+      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 4,
+      "purpose": "Name the copied phase array AnalysisPhases."
+    },
+    {
+      "filter": "ConditionalSetValueFilter",
+      "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 5,
+      "purpose": "Set excluded analysis phases to zero; keep raw Phases unchanged."
+    },
+    {
+      "filter": "ConvertOrientationsFilter",
+      "uuid": "501e54e6-a66f-4eeb-ae37-00e649c00d4b",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 6,
+      "purpose": "Convert imported Euler angles in radians to quaternions without changing crystal axes."
+    },
+    {
+      "filter": "ComputeCAxisLocationsFilter",
+      "uuid": "a51c257a-ddc1-499a-9b21-f2d25a19d098",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 7,
+      "purpose": "Project alpha-Ti c axes into the corrected sample frame; excluded pixels remain undefined."
+    },
+    {
+      "filter": "ComputeVectorColorsFilter",
+      "uuid": "1a35650d-a9f5-4ea2-af70-5b9ce894e45f",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 8,
+      "purpose": "Encode valid c-axis directions with generic normalized-vector colors: sample-plane trend selects hue and proximity to +Z whitens it. Mask excluded NaN vectors to black. This is not an IPF key or a full crystal-orientation encoding."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 9,
+      "purpose": "Persist sample-X c-axis inclination in degrees, with antipodal absolute value. Excluded input vectors remain undefined (NaN); this scalar is not a strain or misorientation between two crystals."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 10,
+      "purpose": "Keep the scientific inclination field unchanged while preparing a finite scalar copy for color-map range calculation."
+    },
+    {
+      "filter": "ConditionalSetValueFilter",
+      "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 11,
+      "purpose": "Replace only excluded display values with a finite 90-degree placeholder. Create Color Map scans all values for its range before masking, so NaNs must not enter that scan. The placeholder is not an observed inclination."
+    },
+    {
+      "filter": "CreateColorMapFilter",
+      "uuid": "d1731177-4d70-41c0-9334-566a0b482796",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 12,
+      "purpose": "Encode the finite inclination display copy with the named native Viridis preset. The input range includes excluded 90-degree placeholders; masked output pixels are black. Retain the original scalar field for quantitative use."
+    },
+    {
+      "filter": "ConvertColorToGrayScaleFilter",
+      "uuid": "d938a2aa-fee2-4db9-aa2f-2c34a9736580",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 13,
+      "purpose": "Create a weighted-RGB monochrome preview of CAxisVectorRGB. Select one array per invocation to avoid issue 1759, where multiple inputs overwrite the first output. Gray levels are display intensities, not angles, directions or new measurements."
+    },
+    {
+      "filter": "ConvertColorToGrayScaleFilter",
+      "uuid": "d938a2aa-fee2-4db9-aa2f-2c34a9736580",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 14,
+      "purpose": "Create a weighted-RGB monochrome preview of CAxisInclinationX_RGB. Select one array per invocation to avoid issue 1759, where multiple inputs overwrite the first output. Gray levels are display intensities, not angles, directions or new measurements."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
+      "step": 15,
       "purpose": "Save the complete checkpoint for the next example and independent checks."
     }
   ]

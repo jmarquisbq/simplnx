@@ -326,6 +326,237 @@
     },
     {
       "args": {
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "vectors_array_path": {
+          "value": "Titanium/Cell Data/CAxisDirections",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "cell_vector_colors_array_name": {
+          "value": "CAxisVectorRGB",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Encode valid c-axis directions with generic normalized-vector colors: sample-plane trend selects hue and proximity to +Z whitens it. Mask excluded NaN vectors to black. This is not an IPF key or a full crystal-orientation encoding.",
+      "filter": {
+        "name": "nx::core::ComputeVectorColorsFilter",
+        "uuid": "1a35650d-a9f5-4ea2-af70-5b9ce894e45f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculator_parameter": {
+          "value": {
+            "equation": "acos(abs(CAxisDirections[0]))",
+            "selected_group": "Titanium/Cell Data",
+            "units": 1
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "calculated_array_path": {
+          "value": "Titanium/Cell Data/CAxisInclinationXDegrees",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Persist sample-X c-axis inclination in degrees, with antipodal absolute value. Excluded input vectors remain undefined (NaN); this scalar is not a strain or misorientation between two crystals.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "Titanium/Cell Data/CAxisInclinationXDegrees"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": false,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "_Display",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep the scientific inclination field unchanged while preparing a finite scalar copy for color-map range calculation.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_conditional": {
+          "value": true,
+          "version": 1
+        },
+        "conditional_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "invert_mask": {
+          "value": true,
+          "version": 1
+        },
+        "remove_value": {
+          "value": "0",
+          "version": 1
+        },
+        "replace_value": {
+          "value": "90",
+          "version": 1
+        },
+        "selected_array_path": {
+          "value": "Titanium/Cell Data/CAxisInclinationXDegrees_Display",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Replace only excluded display values with a finite 90-degree placeholder. Create Color Map scans all values for its range before masking, so NaNs must not enter that scan. The placeholder is not an observed inclination.",
+      "filter": {
+        "name": "nx::core::ConditionalSetValueFilter",
+        "uuid": "bad9b7bd-1dc9-4f21-a889-6520e7a41881"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_preset": {
+          "value": "Viridis (matplotlib)",
+          "version": 1
+        },
+        "input_data_array_path": {
+          "value": "Titanium/Cell Data/CAxisInclinationXDegrees_Display",
+          "version": 1
+        },
+        "output_rgb_array_name": {
+          "value": "CAxisInclinationX_RGB",
+          "version": 1
+        },
+        "use_mask": {
+          "value": true,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "Titanium/Cell Data/IndexedPixels",
+          "version": 1
+        },
+        "invalid_color_value": {
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Encode the finite inclination display copy with the named native Viridis preset. The input range includes excluded 90-degree placeholders; masked output pixels are black. Retain the original scalar field for quantitative use.",
+      "filter": {
+        "name": "nx::core::CreateColorMapFilter",
+        "uuid": "d1731177-4d70-41c0-9334-566a0b482796"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "conversion_algorithm_index": {
+          "value": 0,
+          "version": 1
+        },
+        "color_weights": {
+          "value": [
+            0.2125,
+            0.7154,
+            0.0721
+          ],
+          "version": 1
+        },
+        "color_channel": {
+          "value": 0,
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "Titanium/Cell Data/CAxisVectorRGB"
+          ],
+          "version": 1
+        },
+        "output_array_prefix": {
+          "value": "Gray_",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create a weighted-RGB monochrome preview of CAxisVectorRGB. Select one array per invocation to avoid issue 1759, where multiple inputs overwrite the first output. Gray levels are display intensities, not angles, directions or new measurements.",
+      "filter": {
+        "name": "nx::core::ConvertColorToGrayScaleFilter",
+        "uuid": "d938a2aa-fee2-4db9-aa2f-2c34a9736580"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "conversion_algorithm_index": {
+          "value": 0,
+          "version": 1
+        },
+        "color_weights": {
+          "value": [
+            0.2125,
+            0.7154,
+            0.0721
+          ],
+          "version": 1
+        },
+        "color_channel": {
+          "value": 0,
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "Titanium/Cell Data/CAxisInclinationX_RGB"
+          ],
+          "version": 1
+        },
+        "output_array_prefix": {
+          "value": "Gray_",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Create a weighted-RGB monochrome preview of CAxisInclinationX_RGB. Select one array per invocation to avoid issue 1759, where multiple inputs overwrite the first output. Gray levels are display intensities, not angles, directions or new measurements.",
+      "filter": {
+        "name": "nx::core::ConvertColorToGrayScaleFilter",
+        "uuid": "d938a2aa-fee2-4db9-aa2f-2c34a9736580"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "compression_level": {
           "value": 5,
           "version": 1

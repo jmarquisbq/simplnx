@@ -51,5 +51,6 @@
     "(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline",
     "(02) Cambridge Ti Grain C-Axis Metrics.d3dpipeline",
     "(03) Cambridge Ti C-Axis Grouping Comparison.d3dpipeline"
-  ]
+  ],
+  "color_contract": "Regenerate all 16 preparation steps. Preserve original reference-frame and hexagonal-alignment choices, IndexedPixels, undefined scientific inclination values, the separate finite 90-degree display placeholder, exact Viridis preset name and one selected array in each grayscale invocation."
 }

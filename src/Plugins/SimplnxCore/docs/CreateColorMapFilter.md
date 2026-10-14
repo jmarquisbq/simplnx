@@ -12,6 +12,12 @@ is normalized and converted to a color based on where the value falls in the spe
 The user can apply an optional data mask and then set the RGB values (0-255) that will be used if the data mask has a FALSE
 value.
 
+### Range and mask behavior
+
+The input minimum and maximum are calculated across the entire scalar array, including masked tuples. The mask changes output colors; it does not exclude values from range calculation. Use a separate finite display copy when analysis values contain NaNs or other undefined entries, and document the chosen placeholders. Retain the original scalar array and validity mask for quantitative work.
+
+The same preset can therefore assign different colors to the same physical value in different datasets. For comparisons requiring a fixed numeric range, explicitly control the visualization range instead of assuming the preset name establishes one.
+
 ### Required Input Sources
 
 - A single-component (scalar) **Data Array** to colorize. This can be any scalar array already present in the **DataStructure**, for example a Confidence Index or Image Quality array read by an EBSD reader, a Feature ID array, or any computed scalar metric.
@@ -143,6 +149,12 @@ These are the valid preset strings that can be used. This table is maintained by
 | Yellow 15 | Lab | ![Yellow 15](Images/ColorTable_Yellow_15.png) |
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

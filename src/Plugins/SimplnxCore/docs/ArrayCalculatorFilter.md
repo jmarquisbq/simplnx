@@ -151,6 +151,7 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)
 
++ `Cambridge_Ti_CAxis_Examples/(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

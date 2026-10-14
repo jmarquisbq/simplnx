@@ -2,7 +2,7 @@
 
 Executable pipeline: `(01) Cambridge Ti Import and C-Axis Directions.d3dpipeline`
 
-> **Before adapting:** **Validation warning:** Do not treat this example as a validated acceptance procedure. Adapt and validate it for the scanner, material, resolution, and quality requirement.
+> **Before adapting:** Confirm the indexed-pixel rule and sample/crystal reference frames. Keep the validity mask with numeric and display arrays; RGB and gray fields are derived display encodings.
 
 Use this stage when you need a validity-aware, measured alpha-Ti map before any segmentation. Place the original `case_study_2_titanium_data.cpr` and `.crc` together in `Data/CambridgeTitanium/` and run from a writable working directory. The map is one XY slice of 507 by 381 pixels with 0.25 µm spacing. The importer creates unit z spacing for software geometry; it is not a measured 3D section. Preserve the raw arrays and decide your own indexed-pixel rule for another scanner or dataset.
 
@@ -12,9 +12,9 @@ Use this stage when you need a validity-aware, measured alpha-Ti map before any 
 | --- | --- |
 | Input | `Data/CambridgeTitanium/case_study_2_titanium_data.cpr` plus paired `.crc` |
 | Output | `Data/Output/Cambridge_Ti_CAxis_Examples/Prepared/CambridgeTi_Prepared.dream3d` |
-| Main fields | `IndexedPixels`, unchanged `Phases`, `AnalysisPhases`, `Quats`, `CAxisDirections` |
+| Main fields | `IndexedPixels`, unchanged `Phases`, `AnalysisPhases`, `Quats`, `CAxisDirections`, `CAxisInclinationXDegrees` |
 | Measured map | 193,167 pixels; 164,274 indexed, 28,893 excluded by the stated quality rule |
-| Preview | [Sample-X c-axis inclination](CambridgeTiCAxisInclination.png) derived from native `CAxisDirections` |
+| Preview | [Native vector, inclination and gray display layers](CambridgeTiCAxisInclination.png) |
 
 ## Purpose and real-world setting
 
@@ -24,13 +24,29 @@ The paper compares spatial orientation relationships in commercially pure alpha 
 
 `ReadChannel5DataFilter` reads both Oxford files and retains the native hexagonal crystal alignment with `edax_hexagonal_alignment=false`. `RotateSampleRefFrameFilter` applies the documented Oxford **sample** correction: 180° about sample Y. It remaps pixels without an additional crystal/Euler rotation. A basal crystal-reference change would not change projected c-axis directions, but it can change full misorientation coordinates.
 
-`MultiThresholdObjectsFilter` marks `Error == 0 AND Bands > 0 AND Phases == 1`. The original map reports raw `Phases=1` even at unusable pixels. `CopyDataObjectFilter` and `RenameDataObjectFilter` preserve this raw array as `Phases` and create `AnalysisPhases`; `ConditionalSetValueFilter` sets only excluded analysis phases to zero. This prevents finite but unindexed orientations from entering c-axis calculations. No pixel infill or cleanup occurs. `ConvertOrientationsFilter` converts radians-based Euler angles to `Quats`, then `ComputeCAxisLocationsFilter` writes sample-frame `CAxisDirections`. `WriteDREAM3DFilter` saves the full checkpoint.
+`MultiThresholdObjectsFilter` marks `Error == 0 AND Bands > 0 AND Phases == 1`. The original map reports raw `Phases=1` even at unusable pixels. `CopyDataObjectFilter` and `RenameDataObjectFilter` preserve this raw array as `Phases` and create `AnalysisPhases`; `ConditionalSetValueFilter` sets only excluded analysis phases to zero. This prevents finite but unindexed orientations from entering c-axis calculations. No pixel infill or cleanup occurs. `ConvertOrientationsFilter` converts radians-based Euler angles to `Quats`, then `ComputeCAxisLocationsFilter` writes sample-frame `CAxisDirections`. The display steps below use those prepared vectors before `WriteDREAM3DFilter` saves the full checkpoint.
 
-The preview plots `acos(abs(c_x))` in degrees for indexed cells from the saved native vector array. This scalar is a **derived visual quantity**, not a separate native filter output. The antipodal absolute value makes ±c equivalent. The corrected NX sample-frame view has a different left/right display convention from paper figure 10; do not transfer figure labels to this map.
+The following display steps preserve those inputs and keep quantitative values separate from presentation choices:
+
+| Operation | Choice and reason |
+| --- | --- |
+| Generate Vector Colors | Normalize valid `CAxisDirections` and color their sample-plane azimuth, blending toward white near +Z. Negative-Z vectors are reversed; this generic hemisphere key is useful for an axis field but does not encode full crystallographic orientation or vector magnitude. |
+| Array Calculator | Save `acos(abs(CAxisDirections[0]))` with **Degrees** selected as `CAxisInclinationXDegrees`. The absolute value treats ±c as equivalent. Excluded directions produce NaNs, which remain undefined analysis values. |
+| Copy; Replace Value in Array | Create `CAxisInclinationXDegrees_Display` and replace only excluded entries with 90. Color-map range calculation scans masked values too; the separate finite copy makes that behavior explicit without changing scientific values. The placeholder is not an observation. |
+| Create Color Map | Use the exact preset **Viridis (matplotlib)** on the display copy; `IndexedPixels` makes excluded RGB pixels black. For this fixture, the native scalar range is about **0.04423 to 90 degrees**. |
+| Color to GrayScale, twice | Make `Gray_CAxisVectorRGB` and `Gray_CAxisInclinationX_RGB` with weights [0.2125, 0.7154, 0.0721]. Select one RGB array per call to avoid [#1759](https://github.com/BlueQuartzSoftware/simplnx/issues/1759). These are monochrome previews of display colors. |
+
+The corrected NX sample-frame view has a different left/right display convention from paper figure 10; do not transfer figure labels to this map.
 
 ## Outputs and interpretation
 
 Indexed c-axis vectors are finite, approximately unit length, and oriented with nonnegative z by the native filter. Excluded vectors are undefined; mask them before visualization or statistics. For this source, the accepted and excluded counts above came from the native output. A small inclination means c is close to sample X, not a measured slip response or strain estimate.
+
+![Native direction RGB, inclination preset RGB and its grayscale preview](CambridgeTiCAxisInclination.png)
+
+All panels display saved native arrays. In `Titanium/Cell Data`, compare `CAxisVectorRGB` with `CAxisInclinationX_RGB`: the first conveys the generic direction key, while the second represents one scalar inclination. Both are uint8 RGB arrays and leave the 28,893 excluded pixels black. Gray copies also have zero at excluded pixels; accepted gray ranges are 20-251 for direction RGB and 21-222 for inclination RGB. Gray levels are dimensionless display values, not degrees or detector intensity.
+
+Keep `CAxisInclinationXDegrees` and `IndexedPixels` for quantitative work. The finite `_Display` copy exists only for rendering. The color-map filter normalizes the whole input array, so the same preset need not give the same numeric value the same color on another map. Use a controlled scalar visualization range when cross-map comparison is required. Grayscale can merge distinct colors and cannot recover the original direction or angle.
 
 ## Adaptation, alternatives, and pitfalls
 
