@@ -4,6 +4,7 @@ set(pipeline_stems
   "(01) Bentheimer Native Volume Preparation"
   "(02) Bentheimer Common Grid Comparison"
   "(03) Bentheimer Interior Region Comparison"
+  "(04) Bentheimer VTK Interchange"
 )
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")

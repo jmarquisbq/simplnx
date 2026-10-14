@@ -39,7 +39,12 @@
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
       "role": "Original centered full volumes, coordinates, masks and summaries plus two reduced working crops and a padded fine reference containing native and sampled coarse fields.",
-      "sha256": "62ce25dba81d9a396efded793cbda9c697abb3606b6ed3b33df0cdcd7c65da7d"
+      "sha256": "8b214fcba9621f76f8c1c009fa2061408399a36a5cb9b3ece83e19c268d4b0b2"
+    },
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+      "role": "Binary VTK CELL_DATA export of padded fine intensity and support; required by example 04.",
+      "sha256": "ef063f80c7680477fdd4164b10059a500f12570dbca7dc7067fe7bcdd163cdf4"
     }
   ],
   "input_data_strategy": {
@@ -866,6 +871,23 @@
     },
     {
       "index": 19,
+      "filter": "WriteVtkStructuredPointsFilter",
+      "uuid": "68a4d758-c5ff-43d3-a394-1508ad00a0d2",
+      "role": "Export selected cell intensity and support as binary legacy STRUCTURED_POINTS. Point dimensions are 148 cubed; cell values are 147 cubed. Coordinates retain micrometer numbers, but VTK does not store that unit.",
+      "paths": [],
+      "key_parameters": {
+        "output_file": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+        "write_binary_file": true,
+        "input_image_geometry_path": "BentheimerPaddedROI6um",
+        "input_data_array_paths": [
+          "BentheimerPaddedROI6um/CellData/ScaledIntensity",
+          "BentheimerPaddedROI6um/CellData/InteriorROI"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
@@ -949,7 +971,7 @@
       }
     }
   ],
-  "last_verified": "2026-10-13",
+  "last_verified": "2026-10-14",
   "dimensional_scope": "Full released Core1/Subvol1 cubes; X fastest; native 75^3 / 225^3 with 18 / 6 micrometer spacing.",
   "cli_usage": {
     "working_directory": "One chosen writable folder containing Data/Bentheimer_Resolution_Examples and Data/Output.",
@@ -1070,7 +1092,7 @@
     "support_semantics": "selected ROI overlap, not absence of acquisition measurements",
     "summary": "SampledVLRIntensityStatistics excludes fill with SampledVLR/InteriorROI"
   },
-  "verification_status": "Windows in-memory Release: the three-pipeline CTest passed. All 366 original suite checks and 51 padding/fusion checks passed. Native fusion matches independent triple replication and nearest-center assignment for this aligned coarse-to-fine case; no general shifted-grid mapping or materials conclusion is claimed.",
+  "verification_status": "Four-stage Windows in-memory Release CTest passed in 4.02 seconds on 2026-10-14. Existing region results were preserved and 36 interchange checks passed; other runtime modes and scientific approval remain separate.",
   "additional_visuals": [
     {
       "path": "Regions.png",
@@ -1107,15 +1129,13 @@
     }
   ],
   "validation": {
-    "date": "2026-10-13",
+    "date": "2026-10-14",
     "configuration": "Windows in-memory Release",
     "pipeline_chain": {
       "test": "PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples",
       "passed": true,
-      "pipelines": 3,
-      "preflight_and_execute": true,
-      "elapsed_seconds": 2.63,
-      "input_acquisition": "Verified cached source files; no missing-cache network claim."
+      "elapsed_seconds": 4.02,
+      "pipelines": 4
     },
     "original_suite_checks": {
       "passed": 366,
@@ -1153,7 +1173,7 @@
         45
       ]
     },
-    "pipeline_sha256": "970a95cdda204f1aa688705eeab8cbda70cbb40f4608755f53d9a7e36f9f4321",
+    "pipeline_sha256": "54a94b4aa4486c16562697db0d956b36677f7deb971345337cbd185ed581a0ab",
     "unverified": [
       "OOC",
       "generated Python execution",
@@ -1164,6 +1184,31 @@
       "exact paper-result reproduction",
       "scanner/world-axis orientation",
       "porosity or permeability validation"
-    ]
+    ],
+    "vtk_export_checks": {
+      "passed": 36,
+      "scope": "Original region datasets preserved; independent VTK binary payload and imported geometry/mask/value checks passed."
+    }
+  },
+  "vtk_export": {
+    "geometry": "BentheimerPaddedROI6um",
+    "arrays": [
+      "CellData/ScaledIntensity",
+      "CellData/InteriorROI"
+    ],
+    "encoding": "Legacy STRUCTURED_POINTS binary, big-endian numeric payloads",
+    "association": "CELL_DATA",
+    "point_dimensions": [
+      148,
+      148,
+      148
+    ],
+    "cell_dimensions": [
+      147,
+      147,
+      147
+    ],
+    "units": "Coordinate numbers are micrometers by source provenance; no unit declaration in file.",
+    "consumer": "(04) Bentheimer VTK Interchange.d3dpipeline"
   }
 }

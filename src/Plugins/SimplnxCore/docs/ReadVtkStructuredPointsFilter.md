@@ -21,7 +21,7 @@ When both are read, two independent outputs are created: the **Cell Data** is pl
 
 ### Spacing, Origin, and Units
 
-The grid dimensions, spacing, and origin are read directly from the `.vtk` file's `DIMENSIONS`, `SPACING`, and `ORIGIN` records. The spacing and origin are plain numbers with no embedded unit, so their length unit is whatever the file's author intended (dimensionless to the reader).
+The grid dimensions, spacing, and origin come from the `.vtk` file's `DIMENSIONS`, `SPACING`, and `ORIGIN` records. For `CELL_DATA`, the cell dimensions are one smaller per axis than the declared point dimensions. Coordinate numbers have no embedded unit declaration. The current reader creates Image Geometries with default Micrometer metadata; that default does not establish an arbitrary file's physical units. Confirm units from the source before interpreting physical measurements.
 
 ### Example Input
 
@@ -50,6 +50,10 @@ None — this filter reads directly from a `.vtk` file on disk.
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

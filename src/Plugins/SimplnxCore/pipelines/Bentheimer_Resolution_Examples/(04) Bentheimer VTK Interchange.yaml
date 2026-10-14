@@ -1,0 +1,432 @@
+{
+  "schema_version": 1,
+  "primary_industries": [
+    "Digital rock analysis"
+  ],
+  "secondary_industries": [
+    "Geoscience",
+    "Porous materials characterization"
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+      "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw"
+    ],
+    "paper_doi": "10.1103/PhysRevApplied.17.054046",
+    "paper_url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+    "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+    "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+    "source_assets": [
+      {
+        "key": "Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_18micron_75cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "c99ce145a16c1ceee4fa807fb3235113068c0f51790c60161ddf69a5a31f5db7eba2ef464666b3538e037d26068799222e778cb048b82185432e63d01fba906b",
+        "bytes": 843750,
+        "dimensions_xyz": [
+          75,
+          75,
+          75
+        ],
+        "spacing_um": [
+          18,
+          18,
+          18
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      },
+      {
+        "key": "Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "path": "Data/Bentheimer_Resolution_Examples/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw",
+        "source_url": "https://zenodo.org/api/records/5542624/files/Core1_Subvol1_6micron_225cube_16bit_LE_normalised.raw/content",
+        "source_sha512": "a158bbfb76a8f465627065e4e898cff089aed9e8a5da80439ec4b970833323ebfe7fb707df47c9d4c5d98f06a52bc911304d3b5beb04cc04d9dd7be42da71c15",
+        "bytes": 22781250,
+        "dimensions_xyz": [
+          225,
+          225,
+          225
+        ],
+        "spacing_um": [
+          6,
+          6,
+          6
+        ],
+        "dtype": "UInt16 little endian",
+        "components": 1,
+        "header_bytes": 0,
+        "order": "C [Z,Y,X], X fastest",
+        "transformation": "None: exact author-normalized released bytes; reconstruction, registration and normalization were performed by the authors."
+      }
+    ],
+    "reference_visual": "Primary paper Figures 1-3 and supplement Figures S1-S3 motivate registered multiresolution comparison. The new figures show this suite's outputs; no paper figure or numerical result is reproduced.",
+    "target_traits": [
+      "Measured-derived, mutually registered Core 1 / Subvolume 1 scans",
+      "Native 75 cubed at 18 micrometers and 225 cubed at 6 micrometers",
+      "Identical 1350 micrometer cubic field of view",
+      "Scalar author-normalized UInt16 little-endian voxels"
+    ],
+    "known_differences": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices. Derived 810-micrometer ROI crops, a 36-micrometer zero-filled margin, and coarse-to-fine fusion are illustrative processing choices. The full source scans cover the added margin, but the selected ROI inputs deliberately do not.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "bentheimer-resolution-python-generation-v1"
+  },
+  "citations": [
+    {
+      "title": "Deep Learning of Multiresolution X-Ray Micro-Computed-Tomography Images for Multiscale Modeling",
+      "authors": [
+        "Samuel J. Jackson",
+        "Yufu Niu",
+        "Sojwal Manoorkar",
+        "Peyman Mostaghimi",
+        "Ryan T. Armstrong"
+      ],
+      "year": 2022,
+      "journal": "Physical Review Applied",
+      "doi": "10.1103/PhysRevApplied.17.054046",
+      "url": "https://doi.org/10.1103/PhysRevApplied.17.054046",
+      "scope": "pipeline_workflow",
+      "role": "Public dataset and multiresolution workflow context. VTK interchange is an additional illustrative processing exercise, not a reported paper result.",
+      "dataset": {
+        "availability": "The paper-linked Zenodo record supplies registered author-normalized 18 and 6 micrometer Core1/Subvol1 raw cubes. Both complete released cubes are retained; additional working ROI copies are created in example 03.",
+        "url": "https://zenodo.org/records/5542624",
+        "doi": "10.5281/zenodo.5542624",
+        "license": "Creative Commons Attribution 4.0 International (CC BY 4.0). See SourceDataLicense.md for attribution and transformations.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative native preprocessing and comparison only. The paper released the 18 micrometer scan for further work but did not analyze it. This suite does not reproduce 6-to-2 micrometer EDSR, cubic interpolation, filtering, pore segmentation, porosity, permeability, or an accuracy result. The local origins and 810 micrometer ROI are example choices."
+      }
+    }
+  ],
+  "pipeline_file": "(04) Bentheimer VTK Interchange.d3dpipeline",
+  "markdown_file": "(04) Bentheimer VTK Interchange.md",
+  "title": "Bentheimer VTK Interchange",
+  "summary": "Transfer measured-derived intensity and its support mask through binary legacy VTK, checking values, geometry and supported statistics against a retained native reference.",
+  "use_cases": [
+    "Transfer a calibrated volume to scientific visualization software",
+    "Distinguish grid-point counts from cell counts",
+    "Retain a support mask and coordinate meaning across file formats"
+  ],
+  "keywords": [
+    "Bentheimer",
+    "micro-CT",
+    "legacy VTK",
+    "STRUCTURED_POINTS",
+    "CELL_DATA",
+    "binary",
+    "round trip",
+    "support mask",
+    "coordinate units"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+      "role": "Binary export produced by completed example 03; must exist before preflight."
+    },
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
+      "role": "Reference padded geometry from the same producer run."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
+      "role": "Native reference, imported grid, coordinate/intensity diagnostics and masked summaries.",
+      "sha256": "e62b0b914dceeb0fd0c8a73b5cddeddcb909ab6ab27c069e00b56e66f834048a"
+    }
+  ],
+  "prerequisites": [
+    {
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "produces": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+      "also_produces": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Load the original padded geometry as the independent reference, including its support and coordinate context.",
+      "paths": [],
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [
+            "BentheimerPaddedROI6um"
+          ],
+          "file_path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "ReadVtkStructuredPointsFilter",
+      "uuid": "60d55662-ca7a-4be7-b0a0-ed6e785eb51b",
+      "role": "Read CELL_DATA only from the predecessor export. The file must exist before preflight; point counts in its header are one larger per axis than the imported cell dimensions.",
+      "paths": [],
+      "key_parameters": {
+        "input_file": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+        "read_point_data": false,
+        "read_cell_data": true,
+        "output_vertex_geometry_path": "UnusedPointData",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "output_image_geometry_path": "VTKImportedROI",
+        "cell_attribute_matrix_name": "CellData"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeCoordinatesImageGeomFilter",
+      "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
+      "role": "Reconstruct cell-center positions from the imported header geometry. Micrometers come from this example's provenance, not a unit declaration in the VTK file.",
+      "paths": [],
+      "key_parameters": {
+        "output_type_index": 0,
+        "selected_image_geom_path": "VTKImportedROI",
+        "coords_array_path": "VTKImportedROI/CellData/CoordinatesMicrometers",
+        "indices_array_path": "VTKImportedROI/CellData/UnusedIndices"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary.",
+      "paths": [],
+      "key_parameters": {
+        "first_input_array_path": "BentheimerPaddedROI6um/CellData/ScaledIntensity",
+        "second_input_array_path": "VTKImportedROI/CellData/ScaledIntensity",
+        "difference_map_array_path": "VTKImportedROI/CellData/AbsoluteIntensityDifference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary.",
+      "paths": [],
+      "key_parameters": {
+        "first_input_array_path": "BentheimerPaddedROI6um/CellData/CoordinatesMicrometers",
+        "second_input_array_path": "VTKImportedROI/CellData/CoordinatesMicrometers",
+        "difference_map_array_path": "VTKImportedROI/CellData/AbsoluteCoordinateDifference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Use the imported support mask to exclude the fill margin from count and intensity statistics; zero intensity alone is not a validity test.",
+      "paths": [],
+      "key_parameters": {
+        "selected_array_path": "VTKImportedROI/CellData/ScaledIntensity",
+        "destination_attribute_matrix_path": "VTKImportedROI/SupportedIntensityStatistics",
+        "use_mask": true,
+        "mask_array_path": "VTKImportedROI/CellData/InteriorROI",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "HasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "UnusedFeatureIndices",
+        "standardize_data": false,
+        "standardized_array_name": "UnusedStandardized",
+        "find_length": true,
+        "length_array_name": "CellCount",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "UnusedMedian",
+        "find_mode": false,
+        "mode_array_name": "UnusedMode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "UnusedStandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "find_unique_values": false,
+        "number_unique_values_name": "UnusedUniqueCount"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review.",
+      "paths": [],
+      "key_parameters": {
+        "export_file_path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Four-stage Windows in-memory Release CTest passed in 4.02 seconds; 36 independent file/output checks passed and the native figure was inspected. No OOC, generated-Python, external-GUI or full-installer claim.",
+  "dimensional_scope": {
+    "cell_dimensions": [
+      147,
+      147,
+      147
+    ],
+    "point_dimensions_in_file": [
+      148,
+      148,
+      148
+    ],
+    "spacing_micrometers": [
+      6,
+      6,
+      6
+    ],
+    "lower_corner_origin_micrometers": [
+      -441,
+      -441,
+      -441
+    ],
+    "association": "scalar cell data; coordinates generated as flat three-component X-fastest tuples"
+  },
+  "geometry_units": {
+    "context": "Micrometers established by source dataset and prior pipeline.",
+    "file_contract": "Legacy VTK header has no unit declaration.",
+    "reader_default": "Current Image Geometry default is Micrometer; do not infer arbitrary-file units from that default."
+  },
+  "file_format_reference": {
+    "title": "Simple Legacy Formats - VTK documentation",
+    "url": "https://docs.vtk.org/en/latest/vtk_file_formats/vtk_legacy_file_format.html",
+    "accessed": "2026-10-13",
+    "role": "Primary file-format reference, not a materials-method citation."
+  },
+  "mcp": {
+    "user_intents": [
+      "Export/import a regular volume without losing scalar values, support or placement"
+    ],
+    "questions": [
+      "What units do the coordinate numbers represent?",
+      "Are values attached to cells or points?",
+      "Which arrays and validity masks must travel together?"
+    ],
+    "constraints": [
+      "Run example 03 first; the reader requires its VTK file at preflight.",
+      "Preserve both ScaledIntensity and InteriorROI.",
+      "148-cubed point dimensions describe 147-cubed cells here.",
+      "Check coordinates and support as well as scalar differences.",
+      "Mask zero is outside the chosen ROI, not proof of unmeasured acquisition.",
+      "File carries selected cell arrays only, not all NX context or provenance.",
+      "This case does not validate arbitrary VTK dataset types, external applications, pore segmentation or physical properties."
+    ],
+    "related_pipelines": [
+      "(03) Bentheimer Interior Region Comparison.d3dpipeline"
+    ]
+  },
+  "validation": {
+    "date": "2026-10-14",
+    "configuration": "Windows in-memory Release",
+    "independent_checks": {
+      "passed": 36,
+      "total": 36,
+      "scope": "Independent binary payload parser, all original-data preservation, geometry/coordinate oracle, exact float32/uint8 transfer and masked summaries."
+    },
+    "expected_current_fixture": {
+      "supported_count": 2460375,
+      "fill_count": 716148,
+      "masked_mean": 0.5453459024429321,
+      "unmasked_mean_for_comparison": 0.4223974843943873,
+      "minimum": 0.2877500057220459,
+      "maximum": 2.9291000366210938
+    },
+    "pipeline_sha256": "4bb076f57e130b97b8fb151229206c5b1468f1aaa08241a4fdb74c86be018f81",
+    "unverified": [
+      "native GUI",
+      "OOC",
+      "generated Python",
+      "external application import",
+      "full application installation",
+      "materials interpretation"
+    ],
+    "pipeline_chain": {
+      "test": "PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples",
+      "passed": true,
+      "elapsed_seconds": 4.02,
+      "pipelines": 4
+    },
+    "file_contract": {
+      "version": "# vtk DataFile Version 3.0",
+      "title": "vtk output",
+      "encoding": "BINARY",
+      "dataset": "DATASET STRUCTURED_POINTS",
+      "point_dimensions": [
+        148,
+        148,
+        148
+      ],
+      "cell_count": 3176523,
+      "origin": [
+        -441.0,
+        -441.0,
+        -441.0
+      ],
+      "spacing": [
+        6.0,
+        6.0,
+        6.0
+      ],
+      "arrays": [
+        {
+          "name": "ScaledIntensity",
+          "vtk_type": "float",
+          "components": 1,
+          "payload_offset": 201,
+          "bytes": 12706092
+        },
+        {
+          "name": "InteriorROI",
+          "vtk_type": "unsigned_char",
+          "components": 1,
+          "payload_offset": 12706351,
+          "bytes": 3176523
+        }
+      ]
+    }
+  },
+  "result_visual": {
+    "path": "VTKInterchange.png",
+    "sha256": "9159506ac66a372dec04323b3176d5de9c980eb670b32c182c840c8b78099582",
+    "source_outputs": [
+      {
+        "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
+        "sha256": "e62b0b914dceeb0fd0c8a73b5cddeddcb909ab6ab27c069e00b56e66f834048a"
+      }
+    ],
+    "method": "Matplotlib display of saved reference/imported intensity and support at slice73. Header and counts taken from independent file/output verification. No format algorithm or scientific transformation reimplemented in plotting.",
+    "display_limits": [
+      0,
+      1
+    ],
+    "slice_center_micrometers": 0,
+    "data_license": "CC BY 4.0; see SourceDataLicense.md.",
+    "role": "Matched reference and imported padded fine intensity/support with point-versus-cell header contract.",
+    "visual_review": "2026-10-14: axes, shared display scale, support hatching, header text, captions and margins inspected."
+  }
+}

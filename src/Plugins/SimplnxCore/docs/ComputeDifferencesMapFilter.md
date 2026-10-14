@@ -30,6 +30,10 @@ None -- this filter operates on any two generic **Attribute Arrays** that share 
 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
++ `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)
+
+
+
 + `Bentheimer_Resolution_Examples/(02) Bentheimer Common Grid Comparison.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright

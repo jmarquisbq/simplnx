@@ -1192,6 +1192,36 @@
     },
     {
       "args": {
+        "output_file": {
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
+          "version": 1
+        },
+        "write_binary_file": {
+          "value": true,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "BentheimerPaddedROI6um",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "BentheimerPaddedROI6um/CellData/ScaledIntensity",
+            "BentheimerPaddedROI6um/CellData/InteriorROI"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export selected cell intensity and support as binary legacy STRUCTURED_POINTS. Point dimensions are 148 cubed; cell values are 147 cubed. Coordinates retain micrometer numbers, but VTK does not store that unit.",
+      "filter": {
+        "name": "nx::core::WriteVtkStructuredPointsFilter",
+        "uuid": "68a4d758-c5ff-43d3-a394-1508ad00a0d2"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
           "version": 1

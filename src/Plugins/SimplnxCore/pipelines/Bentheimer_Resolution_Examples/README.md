@@ -1,6 +1,6 @@
 # Bentheimer resolution examples
 
-These three pipelines import two registered Bentheimer sandstone CT scans at their native voxel sizes, compare them on one grid, and measure a matching interior region before a padding/fusion exercise. They use the full released Core 1 / Subvolume 1 author-normalized cubes from [Zenodo](https://doi.org/10.5281/zenodo.5542624). Each pipeline preserves its inputs in a reusable checkpoint.
+These four pipelines import two registered Bentheimer sandstone CT scans at their native voxel sizes, compare them on one grid, examine a matching interior region with padding/fusion, and check a binary VTK transfer. They use the full released Core 1 / Subvolume 1 author-normalized cubes from [Zenodo](https://doi.org/10.5281/zenodo.5542624). Each pipeline retains its relevant input context in a reusable checkpoint.
 
 > **Before adapting:** Do not treat this example as a validated acceptance procedure. Adapt and validate it for the scanner, material, resolution, and quality requirement.
 
@@ -9,6 +9,7 @@ These three pipelines import two registered Bentheimer sandstone CT scans at the
 | `(01) Bentheimer Native Volume Preparation` | How do I import headerless CT data while preserving physical size? | Two verified raw files |
 | `(02) Bentheimer Common Grid Comparison` | Where do the registered scans differ on a common grid? | Example 01 |
 | `(03) Bentheimer Interior Region Comparison` | How do I compare the same interior, pad a fixed fine grid, and distinguish sampled coarse data from fill? | Example 02 |
+| `(04) Bentheimer VTK Interchange` | Do selected intensity values, support and placement survive a legacy VTK transfer? | Example 03's VTK file and NX checkpoint |
 
 ## Acquire the data and run
 
@@ -40,20 +41,22 @@ foreach ($asset in $manifest.files) {
 New-Item -ItemType Directory -Force -Path `
   'Data/Output/Bentheimer_Resolution_Examples/Preparation', `
   'Data/Output/Bentheimer_Resolution_Examples/Comparison', `
-  'Data/Output/Bentheimer_Resolution_Examples/Regions' | Out-Null
+  'Data/Output/Bentheimer_Resolution_Examples/Regions', `
+  'Data/Output/Bentheimer_Resolution_Examples/Interchange' | Out-Null
 
 $nxrunner = 'C:\path\to\nxrunner.exe'
 foreach ($name in @(
   '(01) Bentheimer Native Volume Preparation.d3dpipeline',
   '(02) Bentheimer Common Grid Comparison.d3dpipeline',
-  '(03) Bentheimer Interior Region Comparison.d3dpipeline'
+  '(03) Bentheimer Interior Region Comparison.d3dpipeline',
+  '(04) Bentheimer VTK Interchange.d3dpipeline'
 )) {
   & $nxrunner --execute (Join-Path $suite $name)
   if ($LASTEXITCODE -ne 0) { throw "Pipeline failed: $name (exit $LASTEXITCODE)" }
 }
 ```
 
-In DREAM3D-NX, open each pipeline through File > Open or the prebuilt category. If relative paths do not resolve from the GUI's working directory, set absolute file input/output paths. Re-run all three examples after changing source data or import geometry; re-run examples 02 and 03 after changing scaling or mapping; re-run example 03 after changing the local frame or ROI.
+In DREAM3D-NX, open each pipeline through File > Open or the prebuilt category. If relative paths do not resolve from the GUI's working directory, set absolute file input/output paths. Re-run all four examples after changing source data or import geometry; re-run 02 through 04 after changing scaling or mapping; re-run 03 and 04 after changing the local frame or ROI. Example 04 requires the completed export from 03 before preflight.
 
 ## Outputs and interpretation
 
@@ -64,6 +67,8 @@ Paths below begin with `Data/Output/Bentheimer_Resolution_Examples/`.
 | `Preparation/ImportedVolumes.dream3d` | Both native geometries and original UInt16 intensities |
 | `Comparison/CommonGridComparison.dream3d` | Native and mapped Float32 intensities, absolute difference, whole-volume summaries |
 | `Regions/InteriorRegionComparison.dream3d` | Centered full geometries, native ROI results, working crops, and a padded fine reference with separate sampled-coarse data and support masks |
+| `Regions/BentheimerPaddedROI6um.vtk` | Binary legacy VTK export of padded fine intensity and support, written by example 03 |
+| `Interchange/VTKRoundTrip.dream3d` | Reference and imported padded grids, intensity/coordinate diagnostics and supported-intensity statistics |
 
 The native geometries are `BentheimerVLR18um` and `BentheimerLR6um`; their scalar source arrays are `CellData/AuthorNormalizedIntensity`. Both cover a 1,350 µm cube. The initial lower corner is zero on all axes. Example 02 computes `ScaledIntensity = AuthorNormalizedIntensity / 20000` as Float32, preserving values above one. The fixed divisor follows the paper's display range; this is not an independent min-max normalization or probability conversion.
 
@@ -81,7 +86,7 @@ For these aligned coarse-to-fine grids, the source-index mapper repeats each coa
 
 The data are measured-derived: the authors reconstructed, mutually registered, and normalized independent CT acquisitions. Their normalization procedure is not rerun here. The full released cubes are retained with source bytes unchanged; example 03 adds separate working ROI crops. The 6 µm Core 1 / Subvolume 1 data served the paper's training workflow. The 18 µm data were shared for further work and were not used in its reported analysis.
 
-All three examples have **illustrative** reproduction status. Nearest-neighbor 18-to-6 µm mapping is a transparent comparison baseline; it does not reproduce the paper's 6-to-2 µm EDSR or cubic interpolation. The local origin and 810 µm interior cube are example choices, not scanner coordinates, the paper's 600 µm display crop, or its representative elementary volume. No pore segmentation, porosity, permeability, or acceptance claim is made.
+All four examples have **illustrative** reproduction status. Nearest-neighbor 18-to-6 µm mapping is a transparent comparison baseline; it does not reproduce the paper's 6-to-2 µm EDSR or cubic interpolation. The local origin and 810 µm interior cube are example choices, not scanner coordinates, the paper's 600 µm display crop, or its representative elementary volume. VTK interchange is an additional processing exercise. No pore segmentation, porosity, permeability, or acceptance claim is made.
 
 The data are CC BY 4.0. [SourceDataLicense.md](SourceDataLicense.md) provides attribution and transformation details, while [DataSources.json](DataSources.json) records file-level provenance. Raw and processed volume files are not committed in this source category. The PNGs are newly rendered from saved pipeline outputs and carry the same source attribution.
 
@@ -89,7 +94,7 @@ The data are CC BY 4.0. [SourceDataLicense.md](SourceDataLicense.md) provides at
 
 The `.d3dpipeline` is executable authority. Markdown explains each task; JSON-compatible YAML records zero-based filter order, UUIDs, argument versions, source provenance, and constraints. `FilterCoverage.json` records occurrences, not scientific validation or complete plugin coverage. `PythonGeneration.yaml` specifies temporary conversion through `simplnx_utilities.generate_python_pipeline`; report missing bindings or unsupported arguments instead of silently writing a replacement implementation.
 
-On October 13, 2026, all three pipelines passed the Windows in-memory Release CTest chain in 2.63 seconds, using verified cached inputs. All 366 original saved-output checks and 51 padding/fusion checks passed. The new checks include full original-data preservation, exact ROI copies, coordinate/unit placement, explicit fill support, triple coarse-voxel replication, independent nearest-center agreement for this aligned case, and masked statistics. The padded grid has 2,460,375 supported cells and 716,148 fill cells.
+On October 14, 2026, all four pipelines passed the Windows in-memory Release CTest chain in 4.02 seconds, using verified cached inputs. The VTK addition passed 36 independent binary-file, geometry, value, mask and summary checks; its original region datasets remain exact. All 366 original saved-output checks and 51 padding/fusion checks passed. The new checks include full original-data preservation, exact ROI copies, coordinate/unit placement, explicit fill support, triple coarse-voxel replication, independent nearest-center agreement for this aligned case, and masked statistics. The padded grid has 2,460,375 supported cells and 716,148 fill cells.
 
 The saved whole-volume mean absolute difference is 0.0478134714. The native VLR and LR ROI scaled-intensity means are 0.5362334251 and 0.5453459024; the ROI mean absolute difference is 0.0473593697. Values above one were retained: one native VLR voxel and 718 native LR voxels. These are fixture-specific discrepancy and intensity summaries, not material-property targets. The original three PNGs were rendered from these saved outputs and inspected for physical axes, display limits, labels, and layout.
 

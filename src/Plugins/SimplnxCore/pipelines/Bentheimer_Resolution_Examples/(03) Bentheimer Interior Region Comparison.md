@@ -36,6 +36,7 @@ Run examples 01 and 02 using the [README](README.md). This example reads `Data/O
 | Compute fresh reference coordinates | Describe every padded reference cell center, including the margin |
 | Create Attribute Matrix, then Fuse Regular Grids | Keep fine data in `CellData`; put sampled coarse values and support in separate `SampledVLR` on the same reference grid |
 | Masked sampled-intensity summary | Count only supported values; zero fill must not lower the intensity mean |
+| Write Vtk Structured Points | Export padded fine intensity and its support mask for the follow-up interchange check; retain the calibrated grid and typed binary values |
 | Write DREAM3D | Save full scans, working crops, padded reference, masks, coordinates, and summaries |
 
 The origin edit is a metadata translation into an example-local centered frame. `center_origin` is false because the supplied origin is already the lower corner; the pipeline does not ask the filter to interpret −675 as the center. Bounds become [-675,675] micrometers for the three original full-volume grids. Translating only one geometry would destroy their common placement even though the arrays retained identical shapes.
@@ -69,6 +70,8 @@ The padded fine values remain in `CellData`. Fuse Regular Grids reads the coarse
 The sampled `InteriorROI` is the validity indicator: 1 means the destination samples the selected source ROI; 0 means fill. The margin is outside the **chosen ROI**, not proof that the scanner failed to measure it. In fact, the preserved full scans cover that margin. Zero intensity alone cannot distinguish a valid dark observation from fill. `SampledVLRIntensityStatistics` therefore uses the sampled mask, and repeated voxels must not be counted as additional independent measurements.
 
 `CellData/CoordinatesMicrometers` is regenerated after padding, using `origin + (index + 0.5) * spacing` for the entire reference. Copying and zero-padding the old coordinate array would give invalid margin coordinates. No source coordinate array is fused into `SampledVLR`.
+
+The binary export `Regions/BentheimerPaddedROI6um.vtk` contains the fine `CellData/ScaledIntensity` and `InteriorROI` arrays. Its 148-cubed point grid encloses the 147-cubed cells; coordinate units remain a documented micrometer convention because legacy VTK does not encode them. Example 04 reads this file and compares its values and placement against the NX checkpoint. Keep the support mask and source attribution when transferring the volume.
 
 ![Padded fine reference, copied coarse values, and sampled ROI support](PaddingFusion.png)
 

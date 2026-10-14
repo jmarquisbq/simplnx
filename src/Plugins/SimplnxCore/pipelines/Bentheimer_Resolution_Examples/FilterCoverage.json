@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Selected Bentheimer import, resolution, ROI, padding and fusion filter occurrences; not scientific validation.",
+  "scope": "Selected Bentheimer import, resolution, ROI, padding, fusion and VTK interchange occurrences; not full filter validation.",
   "filters": [
     {
       "filter": "CreateImageGeometryFilter",
@@ -29,6 +29,20 @@
       "pipeline": "(01) Bentheimer Native Volume Preparation.d3dpipeline",
       "step": 3,
       "purpose": "Import exact author-normalized UInt16 little-endian bytes as one scalar per cell. Inherit tuple dimensions from CellData; no byte header, normalization, cropping, or axis permutation is applied."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Bentheimer Native Volume Preparation.d3dpipeline",
+      "step": 4,
+      "purpose": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) Bentheimer Common Grid Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete predecessor checkpoint; retain both native grids and all saved arrays."
     },
     {
       "filter": "ArrayCalculatorFilter",
@@ -64,6 +78,20 @@
       "pipeline": "(02) Bentheimer Common Grid Comparison.d3dpipeline",
       "step": 5,
       "purpose": "Compute count, minimum, maximum and mean over every common-grid cell. These are intensity summaries, not porosity, permeability, or accuracy scores."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) Bentheimer Common Grid Comparison.d3dpipeline",
+      "step": 6,
+      "purpose": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete predecessor checkpoint; retain both native grids and all saved arrays."
     },
     {
       "filter": "SetImageGeomOriginScalingFilter",
@@ -190,6 +218,69 @@
       "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
       "step": 18,
       "purpose": "Summarize copied coarse intensities only where sampled InteriorROI is nonzero. Exclude the zero-filled margin; repeated samples do not add independent measurements."
+    },
+    {
+      "filter": "WriteVtkStructuredPointsFilter",
+      "uuid": "68a4d758-c5ff-43d3-a394-1508ad00a0d2",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 19,
+      "purpose": "Export selected cell intensity and support as binary legacy STRUCTURED_POINTS. Point dimensions are 148 cubed; cell values are 147 cubed. Coordinates retain micrometer numbers, but VTK does not store that unit."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 20,
+      "purpose": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 0,
+      "purpose": "Load the original padded geometry as the independent reference, including its support and coordinate context."
+    },
+    {
+      "filter": "ReadVtkStructuredPointsFilter",
+      "uuid": "60d55662-ca7a-4be7-b0a0-ed6e785eb51b",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 1,
+      "purpose": "Read CELL_DATA only from the predecessor export. The file must exist before preflight; point counts in its header are one larger per axis than the imported cell dimensions."
+    },
+    {
+      "filter": "ComputeCoordinatesImageGeomFilter",
+      "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 2,
+      "purpose": "Reconstruct cell-center positions from the imported header geometry. Micrometers come from this example's provenance, not a unit declaration in the VTK file."
+    },
+    {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 3,
+      "purpose": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary."
+    },
+    {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 4,
+      "purpose": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 5,
+      "purpose": "Use the imported support mask to exclude the fill margin from count and intensity statistics; zero intensity alone is not a validity test."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 6,
+      "purpose": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review."
     }
   ]
 }

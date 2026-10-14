@@ -65,6 +65,10 @@ For any range selection other than *None*, the filter also creates a *Feature Id
 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
++ `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)
+
+
+
 + `Ti64_Image_Cleanup_Examples/(01) Ti64 Image Preparation.d3dpipeline` (ImageProcessing)
 + `Ti64_Image_Cleanup_Examples/(02) Ti64 Smoothing Comparison.d3dpipeline` (ImageProcessing)
 + `Ti64_Image_Cleanup_Examples/(03) Ti64 Threshold Sensitivity.d3dpipeline` (ImageProcessing)

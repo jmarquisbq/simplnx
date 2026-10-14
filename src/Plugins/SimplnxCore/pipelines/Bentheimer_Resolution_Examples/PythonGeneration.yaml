@@ -18,8 +18,8 @@
   "path_rules": {
     "pipeline_reference_base": "pipeline_suite_root",
     "runtime_data_base": "chosen_cli_working_directory",
-    "input_paths": "Preserve both Data/Bentheimer_Resolution_Examples raw filenames and the Preparation/Comparison checkpoint paths exactly.",
-    "output_paths": "Preserve exact Data/Output/Bentheimer_Resolution_Examples paths and run 01 -> 02 -> 03."
+    "input_paths": "Preserve both source raw filenames and all predecessor checkpoint/VTK paths.",
+    "output_paths": "Preserve exact Data/Output/Bentheimer_Resolution_Examples paths and run 01 -> 02 -> 03 -> 04."
   },
   "generation": {
     "language": "Python",
@@ -49,5 +49,6 @@
     "storage": "Validate OOC separately before claiming OOC support."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
-  "padding_fusion_contract": "Regenerate all20 stage03 steps. Preserve original full grids; crop working ROIs, pad the fine reference with updated origin, regenerate coordinates, and fuse coarse values into separate SampledVLR using its support mask for summaries. The reference geometry key input_reference_image_geometry__path contains two underscores."
+  "padding_fusion_contract": "Regenerate the padding/fusion steps in stage 03. Preserve original full grids; crop working ROIs, pad the fine reference with updated origin, regenerate coordinates, and fuse coarse values into separate SampledVLR using its support mask for summaries. The reference geometry key input_reference_image_geometry__path contains two underscores.",
+  "vtk_interchange_contract": "Generate stage 03 (21 filters) and stage 04 (7 filters). Complete stage 03 before stage 04 so the VTK input exists at preflight. Preserve cell association, source units, both exported fields and reference comparisons."
 }
