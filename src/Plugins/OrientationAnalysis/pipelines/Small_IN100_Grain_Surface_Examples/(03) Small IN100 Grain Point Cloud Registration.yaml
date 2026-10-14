@@ -3,7 +3,7 @@
   "pipeline_file": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
   "markdown_file": "(03) Small IN100 Grain Point Cloud Registration.md",
   "title": "Small IN100 Grain Point Cloud Registration",
-  "summary": "Reassemble voxel-center tiles and recover a controlled rigid pose; compare area-weighted surface samples, point-cloud hull resolution and spatial partitions of the source image.",
+  "summary": "Prepare grain point clouds, verify sequential and composed pose order, recover registration, and compare surface sampling, hull resolution and spatial bins.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -38,8 +38,8 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
-      "role": "Source image and grain mesh, reference cloud, complementary tiles, reassembled cloud, three moving checkpoints, KnownTransform, and ICPResidualTransform. Adds SurfaceSamples, Hull025um, Hull05um, SurfaceSamplingSeed and source-image SpatialPartitionIds with PointPartitionGrid.",
-      "sha256": "ffb13f3d61fa5b2cfc49ea89a8cfe55a7709ccd1d9c1edb3aa322efe19050aa3"
+      "role": "Source image/mesh context; reference, tiled and reassembled points; sequential and composed challenge poses, coarse/registered poses and matrices; surface samples, hull comparisons and source-image spatial bins.",
+      "sha256": "63713632b24ee72956dd148ce0d95497a145f0408606980267d34273cb57cb36"
     }
   ],
   "input_data_strategy": {
@@ -823,22 +823,243 @@
     },
     {
       "index": 21,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy CombinedTiles into a separate Micrometer vertex geometry for a sequential-versus-composed transform comparison; the original clouds remain independent.",
+      "paths": [
+        "SequentialChallenge",
+        "CombinedTiles/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "SequentialChallenge",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "CombinedTiles/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain source-cell identity and scalar metadata on the sequential comparison cloud.",
+      "paths": [
+        "SequentialChallenge/Vertex Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "CombinedTiles/Vertex Data/SourceROICellIndex",
+          "CombinedTiles/Vertex Data/FeatureIds",
+          "CombinedTiles/Vertex Data/Image Quality"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "SequentialChallenge/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
       "filter": "ApplyTransformationToGeometryFilter",
       "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
-      "role": "Apply the known synthetic challenge to real voxel-center coordinates: rotate 2 degrees about global Z, then translate [1,-0.75,0.5] micrometers. Preserve the challenge separately.",
+      "role": "Apply this part of the existing challenge to SequentialChallenge and save KnownRotationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation.",
       "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "MovingChallenge"
-        },
-        {
-          "parameter": "output_transform_matrix_path",
-          "value": "KnownTransform"
-        }
+        "SequentialChallenge",
+        "KnownRotationMatrix"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "SequentialChallenge",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            0.9993908270190958,
+            -0.034899496702501,
+            0.0,
+            0.0
+          ],
+          [
+            0.034899496702501,
+            0.9993908270190958,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "KnownRotationMatrix"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 24,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Apply this part of the existing challenge to SequentialChallenge and save KnownTranslationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation.",
+      "paths": [
+        "SequentialChallenge",
+        "KnownTranslationMatrix"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "SequentialChallenge",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            -0.75
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.5
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "KnownTranslationMatrix"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 25,
+      "filter": "CombineTransformationMatricesFilter",
+      "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697",
+      "role": "Compose the intended motion: first listed rotation acts first, then translation, so the stored matrix is T times R. Apply the resulting matrix once.",
+      "paths": [
+        "PreparedChallengeTransform"
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "KnownRotationMatrix",
+          "KnownTranslationMatrix"
+        ],
+        "output_array_path": "PreparedChallengeTransform"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "CombineTransformationMatricesFilter",
+      "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697",
+      "role": "Retain the alternate order R times T for inspection only. It describes a different motion and is not applied to the registration challenge.",
+      "paths": [
+        "TranslationThenRotation"
+      ],
+      "key_parameters": {
+        "input_arrays": [
+          "KnownTranslationMatrix",
+          "KnownRotationMatrix"
+        ],
+        "output_array_path": "TranslationThenRotation"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Apply the computed T times R matrix once to MovingChallenge. Preserve the existing KnownTransform snapshot and original two-degree rotation followed by [1,-0.75,0.5] micrometer translation; no origin-centering option is enabled.",
+      "paths": [
+        "MovingChallenge",
+        "PreparedChallengeTransform",
+        "KnownTransform"
       ],
       "key_parameters": {
         "input_image_geometry_path": "MovingChallenge",
-        "transformation_type_index": 2,
+        "transformation_type_index": 1,
         "interpolation_type_index": 2,
         "manual_transformation_matrix": [
           [
@@ -882,7 +1103,7 @@
           1.0,
           1.0
         ],
-        "computed_transformation_matrix_path": "",
+        "computed_transformation_matrix_path": "PreparedChallengeTransform",
         "translate_geometry_to_global_origin": false,
         "cell_attribute_matrix_path": "",
         "save_transform_matrix": true,
@@ -891,7 +1112,24 @@
       "parameters_version": 2
     },
     {
-      "index": 22,
+      "index": 28,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Compare corresponding sequential and composed point coordinates in micrometers. Both describe the same intended motion, but sequential Float32 storage can introduce small rounding differences; this is not an acquisition-accuracy estimate.",
+      "paths": [
+        "SequentialChallenge/Shared Vertex List",
+        "MovingChallenge/Shared Vertex List",
+        "SequentialChallenge/Vertex Data/AbsoluteComposedCoordinateDifference"
+      ],
+      "key_parameters": {
+        "first_input_array_path": "SequentialChallenge/Shared Vertex List",
+        "second_input_array_path": "MovingChallenge/Shared Vertex List",
+        "difference_map_array_path": "SequentialChallenge/Vertex Data/AbsoluteComposedCoordinateDifference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Copy MovingChallenge coordinates into independent MovingCoarse with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
@@ -943,7 +1181,7 @@
       "parameters_version": 1
     },
     {
-      "index": 23,
+      "index": 30,
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "role": "Deep-copy all retained scalar metadata into MovingCoarse; keep source-cell identity and inherited image quality unchanged.",
@@ -974,7 +1212,7 @@
       "parameters_version": 1
     },
     {
-      "index": 24,
+      "index": 31,
       "filter": "AlignGeometriesFilter",
       "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d",
       "role": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP.",
@@ -996,7 +1234,7 @@
       "parameters_version": 1
     },
     {
-      "index": 25,
+      "index": 32,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Copy MovingCoarse coordinates into independent MovingRegistered with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit.",
@@ -1048,7 +1286,7 @@
       "parameters_version": 1
     },
     {
-      "index": 26,
+      "index": 33,
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "role": "Deep-copy all retained scalar metadata into MovingRegistered; keep source-cell identity and inherited image quality unchanged.",
@@ -1079,7 +1317,7 @@
       "parameters_version": 1
     },
     {
-      "index": 27,
+      "index": 34,
       "filter": "IterativeClosestPointFilter",
       "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98",
       "role": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation.",
@@ -1107,7 +1345,7 @@
       "parameters_version": 1
     },
     {
-      "index": 28,
+      "index": 35,
       "filter": "PointSampleTriangleGeometryFilter",
       "uuid": "ee34ef95-aa04-4ad3-8232-5783a880d279",
       "role": "Draw 5000 points from the repaired measured-derived grain shell, selecting triangles in proportion to area. Fixed seed 2205 supports repeatable runs in the same implementation. Transfer no face arrays because of issue 1799; this is derived sampling, not new acquisition data.",
@@ -1132,7 +1370,7 @@
       "parameters_version": 1
     },
     {
-      "index": 29,
+      "index": 36,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Publish SurfaceSamples as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
@@ -1178,7 +1416,7 @@
       "parameters_version": 1
     },
     {
-      "index": 30,
+      "index": 37,
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "role": "Remove only temporary SurfaceSamples_Raw after its calibrated geometry and required arrays are retained.",
@@ -1191,7 +1429,7 @@
       "parameters_version": 1
     },
     {
-      "index": 31,
+      "index": 38,
       "filter": "ComputeVertexToTriangleDistancesFilter",
       "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
       "role": "Check that generated SurfaceSamples lie on Grain2205, retaining signed micrometer distances and nearest triangle row IDs. This is a geometric association after sampling; tied boundary triangles need not equal the original random choice.",
@@ -1210,7 +1448,7 @@
       "parameters_version": 1
     },
     {
-      "index": 32,
+      "index": 39,
       "filter": "ApproximatePointCloudHullFilter",
       "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
       "role": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.25 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
@@ -1231,7 +1469,7 @@
       "parameters_version": 1
     },
     {
-      "index": 33,
+      "index": 40,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Publish Hull025um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
@@ -1277,7 +1515,7 @@
       "parameters_version": 1
     },
     {
-      "index": 34,
+      "index": 41,
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "role": "Remove only temporary Hull025um_Raw after its calibrated geometry and required arrays are retained.",
@@ -1290,7 +1528,7 @@
       "parameters_version": 1
     },
     {
-      "index": 35,
+      "index": 42,
       "filter": "ApproximatePointCloudHullFilter",
       "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
       "role": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.5 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
@@ -1311,7 +1549,7 @@
       "parameters_version": 1
     },
     {
-      "index": 36,
+      "index": 43,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Publish Hull05um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
@@ -1357,7 +1595,7 @@
       "parameters_version": 1
     },
     {
-      "index": 37,
+      "index": 44,
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "role": "Remove only temporary Hull05um_Raw after its calibrated geometry and required arrays are retained.",
@@ -1370,7 +1608,7 @@
       "parameters_version": 1
     },
     {
-      "index": 38,
+      "index": 45,
       "filter": "PartitionGeometryFilter",
       "uuid": "aad29ebc-bf1c-5dd3-ad25-0f7f8907a02d",
       "role": "Partition source image cells on an explicit 0.5 micrometer grid with bounds [24,25,14] to [26.5,28,17]. SpatialPartitionIds 1..180 describe bins, not grains; zero marks source cells outside this grid. Preserve original FeatureIds. Vertex-mode preflight remains deferred for issue 1798.",
@@ -1422,7 +1660,7 @@
       "parameters_version": 1
     },
     {
-      "index": 39,
+      "index": 46,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms.",
@@ -1514,14 +1752,15 @@
     "image": "SmallIN100SurfaceSampling.png",
     "sha256": "406f1aed72e8c64e78f567298f8a59cd23f865894464baf277a3118db73437ed",
     "native_output": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
-    "native_output_sha256": "ffb13f3d61fa5b2cfc49ea89a8cfe55a7709ccd1d9c1edb3aa322efe19050aa3",
+    "native_output_sha256": "63713632b24ee72956dd148ce0d95497a145f0408606980267d34273cb57cb36",
     "arrays": [
       "ReferenceCloud/Shared Vertex List",
       "SurfaceSamples/Shared Vertex List",
       "Hull025um/Shared Vertex List",
       "Hull05um/Shared Vertex List"
     ],
-    "rendering": "Matplotlib scatters all native point coordinates with identical physical limits, aspect and camera. No sampling or hull algorithm is used to make this figure. Surface points use smaller translucent markers solely for visibility."
+    "rendering": "Matplotlib scatters all native point coordinates with identical physical limits, aspect and camera. No sampling or hull algorithm is used to make this figure. Surface points use smaller translucent markers solely for visibility.",
+    "preservation_note": "All 95 prior dataset values remain exact; the source arrays for this figure are unchanged."
   },
   "sampling_validation": {
     "independent_checks": {
@@ -1568,7 +1807,7 @@
     },
     "scope": "One fixed-seed statistical sanity check, not RNG certification. Nearest triangle IDs are a post-sampling geometric association; tied boundary faces may differ from the randomly selected face. Hulls have no topology or volume.",
     "fixed_seed_repeat": "Two native runs produced bitwise identical 5000-point coordinates. No cross-platform RNG identity claim.",
-    "pipeline_sha256": "69b8dd1d59f5b2683ad943bd2fc292f160e50b92db5aeaf3514f4e6cced0ad87",
+    "pipeline_sha256": "1eb46dbeef69aaed54c494d41441106bab23dedf40a6f73e736adad22970106d",
     "issues": {
       "face_transfer_disabled": "https://github.com/BlueQuartzSoftware/simplnx/issues/1799",
       "vertex_partition_deferred": "https://github.com/BlueQuartzSoftware/simplnx/issues/1798",
@@ -1582,5 +1821,36 @@
       "configuration": "Release, serial"
     },
     "downstream_prior_datasets_exact": 24
+  },
+  "matrix_composition_validation": {
+    "passed": 26,
+    "total": 26,
+    "preserved_prior_datasets": 95,
+    "intended_translation_um": [
+      1.0,
+      -0.75,
+      0.5
+    ],
+    "alternate_translation_um": [
+      1.025565505027771,
+      -0.714643657207489,
+      0.5
+    ],
+    "alternate_order_displacement_um": [
+      0.025565505027770996,
+      0.035356342792510986,
+      0.0
+    ],
+    "alternate_order_displacement_length_um": 0.04363102133787986,
+    "sequential_composed_max_coordinate_difference_um": 0.0,
+    "independent_point_max_error_um": 1.5539162632194348e-06,
+    "scope": "Homogeneous pose composition on measured-derived node coordinates; no image regridding or independent instrument-registration accuracy claim.",
+    "pipeline_sha256": "1eb46dbeef69aaed54c494d41441106bab23dedf40a6f73e736adad22970106d",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples",
+      "passed": true,
+      "configuration": "Release, serial",
+      "pipelines": 4
+    }
   }
 }

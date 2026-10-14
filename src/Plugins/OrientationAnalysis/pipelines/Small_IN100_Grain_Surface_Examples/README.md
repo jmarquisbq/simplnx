@@ -56,3 +56,6 @@ Stage 03 also compares 5,000 native surface samples with the 170 source voxel ce
 
 
 Stage 02 now samples the complete shell back onto the source grid and exactly recovers its 170 cells. It compares the unique-surface-vertex mean with a reconstructed-volume centroid, then uses fixed-seed positioning bounds of 0.05 and 0.20 micrometers to illustrate correlated row/slice sampling effects. Correctly associated output grids retain 170 and 180 selected cells; the larger case changes 62 memberships without changing the mesh. The companion explains local labels, nominal storage positions, the metadata workaround and why triangle-shape outputs remain deferred. The original CSV columns remain intact and nominal voxel measurements are added.
+
+
+Stage 03 now saves the individual challenge rotation and translation, combines them as T*R, and applies the composite once. A separate sequential cloud verifies the same intended motion; the reverse-order R*T matrix is retained for inspection and changes the translation by about 0.043631 micrometers. Original challenge, registration, sampling and scalar data remain unchanged. The companion describes the sixteen-scalar matrix layout and multiplication order.

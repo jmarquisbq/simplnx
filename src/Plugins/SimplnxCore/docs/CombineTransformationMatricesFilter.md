@@ -27,7 +27,7 @@ represents the 4x4 matrix:
     9   10  11  12
     13  14  15  16
 
-The component shape can be any layout that yields 16 total elements (4×4, 16×1, or 1×16). All input matrices must share the same tuple and component layout.
+Use **one component per tuple** and 16 scalar tuples, for example tuple dimensions `[4,4]` or `[16]`. Native saved transformation matrices use `[4,4]` tuples with component shape `[1]`. A single tuple with 16 components is not interchangeable here: current preflight rejects that component layout. Tuple reshaping does not transpose the row-major values or convert components into tuples.
 
 ### Multiplication Order
 
@@ -42,6 +42,12 @@ which corresponds to applying M_1 first to a vector v: `v' = M_combined * v = M_
 - **Transformation Matrices** -- at least two 4x4 float32 matrices, typically authored by hand or produced by an earlier [Apply Transformation to Geometry](ApplyTransformationToGeometryFilter.md) run with the *Saving the Final Transformation Matrix* option enabled.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

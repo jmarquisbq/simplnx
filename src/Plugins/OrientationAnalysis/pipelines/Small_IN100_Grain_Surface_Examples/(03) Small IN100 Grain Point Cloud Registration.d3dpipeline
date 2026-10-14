@@ -1086,12 +1086,388 @@
     },
     {
       "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "SequentialChallenge",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "CombinedTiles/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy CombinedTiles into a separate Micrometer vertex geometry for a sequential-versus-composed transform comparison; the original clouds remain independent.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "CombinedTiles/Vertex Data/SourceROICellIndex",
+            "CombinedTiles/Vertex Data/FeatureIds",
+            "CombinedTiles/Vertex Data/Image Quality"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "SequentialChallenge/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Retain source-cell identity and scalar metadata on the sequential comparison cloud.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "SequentialChallenge",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              0.9993908270190958,
+              -0.034899496702501,
+              0.0,
+              0.0
+            ],
+            [
+              0.034899496702501,
+              0.9993908270190958,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "KnownRotationMatrix",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Apply this part of the existing challenge to SequentialChallenge and save KnownRotationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "SequentialChallenge",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -0.75
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.5
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "KnownTranslationMatrix",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Apply this part of the existing challenge to SequentialChallenge and save KnownTranslationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_arrays": {
+          "value": [
+            "KnownRotationMatrix",
+            "KnownTranslationMatrix"
+          ],
+          "version": 1
+        },
+        "output_array_path": {
+          "value": "PreparedChallengeTransform",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compose the intended motion: first listed rotation acts first, then translation, so the stored matrix is T times R. Apply the resulting matrix once.",
+      "filter": {
+        "name": "nx::core::CombineTransformationMatricesFilter",
+        "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_arrays": {
+          "value": [
+            "KnownTranslationMatrix",
+            "KnownRotationMatrix"
+          ],
+          "version": 1
+        },
+        "output_array_path": {
+          "value": "TranslationThenRotation",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Retain the alternate order R times T for inspection only. It describes a different motion and is not applied to the registration challenge.",
+      "filter": {
+        "name": "nx::core::CombineTransformationMatricesFilter",
+        "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "input_image_geometry_path": {
           "value": "MovingChallenge",
           "version": 1
         },
         "transformation_type_index": {
-          "value": 2,
+          "value": 1,
           "version": 1
         },
         "interpolation_type_index": {
@@ -1153,7 +1529,7 @@
           "version": 1
         },
         "computed_transformation_matrix_path": {
-          "value": "",
+          "value": "PreparedChallengeTransform",
           "version": 1
         },
         "translate_geometry_to_global_origin": {
@@ -1174,10 +1550,33 @@
         },
         "parameters_version": 2
       },
-      "comments": "Apply the known synthetic challenge to real voxel-center coordinates: rotate 2 degrees about global Z, then translate [1,-0.75,0.5] micrometers. Preserve the challenge separately.",
+      "comments": "Apply the computed T times R matrix once to MovingChallenge. Preserve the existing KnownTransform snapshot and original two-degree rotation followed by [1,-0.75,0.5] micrometer translation; no origin-centering option is enabled.",
       "filter": {
         "name": "nx::core::ApplyTransformationToGeometryFilter",
         "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "first_input_array_path": {
+          "value": "SequentialChallenge/Shared Vertex List",
+          "version": 1
+        },
+        "second_input_array_path": {
+          "value": "MovingChallenge/Shared Vertex List",
+          "version": 1
+        },
+        "difference_map_array_path": {
+          "value": "SequentialChallenge/Vertex Data/AbsoluteComposedCoordinateDifference",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compare corresponding sequential and composed point coordinates in micrometers. Both describe the same intended motion, but sequential Float32 storage can introduce small rounding differences; this is not an acquisition-accuracy estimate.",
+      "filter": {
+        "name": "nx::core::ComputeDifferencesMapFilter",
+        "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099"
       },
       "isDisabled": false
     },

@@ -8,7 +8,7 @@ Executable pipeline: `(03) Small IN100 Grain Point Cloud Registration.d3dpipelin
 
 | Item | This example |
 |---|---|
-| Task | Reassemble and register point-cloud tiles; compare volume points, surface samples, hull resolution and spatial bins. |
+| Task | Prepare and register grain point clouds, with explicit pose order and sampling comparisons. |
 | Input | Stage 01's cropped Small IN100 image and complete grain-2205 surface checkpoint. |
 | Points | 170 voxel centers from original reconstructed `FeatureId` 2205; 0.25 µm source spacing. |
 | Challenge | Tiles with 89 and 81 points, then a 2° Z rotation and `[1, -0.75, 0.5]` µm translation. |
@@ -31,7 +31,7 @@ The checkpoint contains a 24 × 24 × 24 **Image Geometry** named `DataContainer
 
 ## Data flow and parameter rationale
 
-The executable contains 40 steps. Repeated copy and unit-preservation helpers are grouped here by purpose.
+The executable contains 47 steps. Repeated copy and unit-preservation helpers are grouped here by purpose.
 
 | Operation and filters | Choice and reason |
 |---|---|
@@ -40,7 +40,9 @@ The executable contains 40 steps. Repeated copy and unit-preservation helpers ar
 | Crop Vertex Geometry, twice | Tile A uses min `[24.5,25.5,14.5]`, max `[25.25,27.75,16.5]` µm; tile B uses min `[25.25,25.5,14.5]`, max `[26,27.75,16.5]` µm. The split plane lies between voxel centers, retaining 89 and 81 points with no overlap. |
 | Combine Node Based Geometries | Reassemble the 170 points and matching scalar arrays. Compare by source-cell index because concatenation changes tuple order. No deduplication is performed. |
 | Create Geometry, Copy Data Object, Delete Data | After extraction, cropping, and combination, copy coordinates into an explicit Micrometer geometry, copy scalar arrays, and delete only the temporary raw geometry. Use the same calibrated copying method for each moving checkpoint, preserving its source. |
-| Apply Transformation to Geometry | Create `MovingChallenge` from `CombinedTiles` and apply the stated rotation about global Z followed by translation. Save its 4 × 4 `KnownTransform`. No translation to a local origin is enabled. |
+| Sequential transforms and saved matrices | On a separate `SequentialChallenge`, apply the existing 2-degree global-Z rotation, then the translation, saving `KnownRotationMatrix` and `KnownTranslationMatrix`. Scalar metadata and Micrometer units stay with this independent point copy. |
+| Combine Transformation Matrices | List rotation R first and translation T second to produce `PreparedChallengeTransform = T × R`, using homogeneous column vectors. Retain the reverse order as `TranslationThenRotation = R × T` for inspection only. |
+| Apply Transformation; Compute Differences Map | Apply the intended composite once to `MovingChallenge`, using the precomputed-matrix option. Save its original `KnownTransform` snapshot and compare corresponding coordinates with the sequential result. No local-origin centering is enabled. |
 | Align Geometries | Preserve the challenge. Origin alignment translates `MovingCoarse` until its coordinate-wise minimum equals the reference minimum. This is a bounding-box alignment, not a centroid fit. |
 | Iterative Closest Point, Write DREAM3D | Preserve the coarse checkpoint, run 10 rigid iterations on `MovingRegistered`, apply the result, and save `ICPResidualTransform` plus all retained data. |
 | Point Sample Triangle Geometry | Generate 5,000 locations on the repaired 508-triangle shell, weighted by face area, with fixed seed 2205. This illustrates surface sampling; it does not create new observations or evenly spaced points. |
@@ -57,6 +59,15 @@ The output is `Data/Output/Small_IN100_Grain_Surface_Examples/Registration/Small
 ![Native reference, displaced challenge, coarse pose, and registered voxel-center clouds on matching axes](SmallIN100PointCloudRegistration.png)
 
 The preview uses native coordinates, common axis limits, and equal scale. Match points by `SourceROICellIndex` rather than tuple position. The measured paired root-mean-square (RMS) displacement falls from 0.51654 µm to 0.029778 µm after origin alignment and 0.00000648 µm after ICP.
+
+`SequentialChallenge` and `MovingChallenge` have identical coordinates in this checked case; `SequentialChallenge/Vertex Data/AbsoluteComposedCoordinateDifference` is zero. The matrices are sixteen scalar Float32 entries in row-major order. Their rotation entries are dimensionless and translation entries use micrometers. Inspect both composition orders:
+
+| Applied order | Matrix | Translation column (µm) |
+| --- | --- | --- |
+| Rotation, then translation | `PreparedChallengeTransform = T × R` | [1, -0.75, 0.5] |
+| Translation, then rotation | `TranslationThenRotation = R × T` | [1.0255655, -0.7146437, 0.5] |
+
+Reversing the order changes every resulting point by about 0.043631 µm; it describes a different motion. Only the first order is applied to the registration challenge. For other node coordinates, sequential Float32 operations can add rounding differences. For image geometries, composing before applying also avoids repeated re-gridding; this point-cloud example does not test image interpolation.
 
 `ICPResidualTransform` maps the coarse pose to the registered pose. It does not include the earlier origin translation. With homogeneous column vectors, verify `ICPResidualTransform × CoarseTranslation × KnownTransform` against identity. Derive `CoarseTranslation` from the saved challenge and coarse clouds.
 

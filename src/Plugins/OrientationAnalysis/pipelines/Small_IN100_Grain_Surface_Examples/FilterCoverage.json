@@ -131,286 +131,6 @@
     {
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 0,
-      "purpose": "Read stage 01: retain the cropped source image and grain surface as context. Stage 02 is not required."
-    },
-    {
-      "filter": "CreateDataArrayAdvancedFilter",
-      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 1,
-      "purpose": "Index all 24-cubed cropped image cells from 0 to 13823 in flat storage order; this is an ROI-local tuple index, not a global acquisition ID."
-    },
-    {
-      "filter": "MultiThresholdObjectsFilter",
-      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 2,
-      "purpose": "Keep the 170 source cells whose original reconstructed FeatureId equals 2205; true means extract."
-    },
-    {
-      "filter": "ExtractVertexGeometryFilter",
-      "uuid": "621a71ca-124b-4471-ad1a-02f05ffba099",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 3,
-      "purpose": "Extract measured-derived voxel centers and COPY three scalar arrays. These 170 points are distinct from the 256 grain surface vertices."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 4,
-      "purpose": "Copy ReferenceCloud_Raw coordinates into independent ReferenceCloud with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 5,
-      "purpose": "Deep-copy all retained scalar metadata into ReferenceCloud; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 6,
-      "purpose": "Delete only temporary ReferenceCloud_Raw after coordinates and scalar arrays have been copied into ReferenceCloud."
-    },
-    {
-      "filter": "CropVertexGeometryFilter",
-      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 7,
-      "purpose": "Create TileA as a complementary spatial tile with 89 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 8,
-      "purpose": "Copy TileA_Raw coordinates into independent TileA with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 9,
-      "purpose": "Deep-copy all retained scalar metadata into TileA; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 10,
-      "purpose": "Delete only temporary TileA_Raw after coordinates and scalar arrays have been copied into TileA."
-    },
-    {
-      "filter": "CropVertexGeometryFilter",
-      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 11,
-      "purpose": "Create TileB as a complementary spatial tile with 81 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 12,
-      "purpose": "Copy TileB_Raw coordinates into independent TileB with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 13,
-      "purpose": "Deep-copy all retained scalar metadata into TileB; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 14,
-      "purpose": "Delete only temporary TileB_Raw after coordinates and scalar arrays have been copied into TileB."
-    },
-    {
-      "filter": "CombineNodeBasedGeometriesFilter",
-      "uuid": "15669036-b417-4450-a937-d5bb2f59124c",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 15,
-      "purpose": "Reassemble the complementary spatial tiles and matching scalar metadata: 89 plus 81 equals 170 unique source-cell centers. No deduplication is performed."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 16,
-      "purpose": "Copy CombinedTiles_Raw coordinates into independent CombinedTiles with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 17,
-      "purpose": "Deep-copy all retained scalar metadata into CombinedTiles; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 18,
-      "purpose": "Delete only temporary CombinedTiles_Raw after coordinates and scalar arrays have been copied into CombinedTiles."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 19,
-      "purpose": "Copy CombinedTiles coordinates into independent MovingChallenge with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 20,
-      "purpose": "Deep-copy all retained scalar metadata into MovingChallenge; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "ApplyTransformationToGeometryFilter",
-      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 21,
-      "purpose": "Apply the known synthetic challenge to real voxel-center coordinates: rotate 2 degrees about global Z, then translate [1,-0.75,0.5] micrometers. Preserve the challenge separately."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 22,
-      "purpose": "Copy MovingChallenge coordinates into independent MovingCoarse with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 23,
-      "purpose": "Deep-copy all retained scalar metadata into MovingCoarse; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "AlignGeometriesFilter",
-      "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 24,
-      "purpose": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 25,
-      "purpose": "Copy MovingCoarse coordinates into independent MovingRegistered with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
-    },
-    {
-      "filter": "CopyDataObjectFilter",
-      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 26,
-      "purpose": "Deep-copy all retained scalar metadata into MovingRegistered; keep source-cell identity and inherited image quality unchanged."
-    },
-    {
-      "filter": "IterativeClosestPointFilter",
-      "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 27,
-      "purpose": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation."
-    },
-    {
-      "filter": "PointSampleTriangleGeometryFilter",
-      "uuid": "ee34ef95-aa04-4ad3-8232-5783a880d279",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 28,
-      "purpose": "Draw 5000 points from the repaired measured-derived grain shell, selecting triangles in proportion to area. Fixed seed 2205 supports repeatable runs in the same implementation. Transfer no face arrays because of issue 1799; this is derived sampling, not new acquisition data."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 29,
-      "purpose": "Publish SurfaceSamples as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 30,
-      "purpose": "Remove only temporary SurfaceSamples_Raw after its calibrated geometry and required arrays are retained."
-    },
-    {
-      "filter": "ComputeVertexToTriangleDistancesFilter",
-      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 31,
-      "purpose": "Check that generated SurfaceSamples lie on Grain2205, retaining signed micrometer distances and nearest triangle row IDs. This is a geometric association after sampling; tied boundary triangles need not equal the original random choice."
-    },
-    {
-      "filter": "ApproximatePointCloudHullFilter",
-      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 32,
-      "purpose": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.25 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 33,
-      "purpose": "Publish Hull025um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 34,
-      "purpose": "Remove only temporary Hull025um_Raw after its calibrated geometry and required arrays are retained."
-    },
-    {
-      "filter": "ApproximatePointCloudHullFilter",
-      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 35,
-      "purpose": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.5 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh."
-    },
-    {
-      "filter": "CreateGeometryFilter",
-      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 36,
-      "purpose": "Publish Hull05um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
-    },
-    {
-      "filter": "DeleteDataFilter",
-      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 37,
-      "purpose": "Remove only temporary Hull05um_Raw after its calibrated geometry and required arrays are retained."
-    },
-    {
-      "filter": "PartitionGeometryFilter",
-      "uuid": "aad29ebc-bf1c-5dd3-ad25-0f7f8907a02d",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 38,
-      "purpose": "Partition source image cells on an explicit 0.5 micrometer grid with bounds [24,25,14] to [26.5,28,17]. SpatialPartitionIds 1..180 describe bins, not grains; zero marks source cells outside this grid. Preserve original FeatureIds. Vertex-mode preflight remains deferred for issue 1798."
-    },
-    {
-      "filter": "WriteDREAM3DFilter",
-      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
-      "step": 39,
-      "purpose": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms."
-    },
-    {
-      "filter": "ReadDREAM3DFilter",
-      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
       "step": 0,
       "purpose": "Read the verified complete-grain checkpoint; this stage does not rerun extraction."
@@ -603,6 +323,335 @@
       "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
       "step": 27,
       "purpose": "Save the calibrated shell with original identity, local labels, and audited measurements."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 0,
+      "purpose": "Read stage 01: retain the cropped source image and grain surface as context. Stage 02 is not required."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 1,
+      "purpose": "Index all 24-cubed cropped image cells from 0 to 13823 in flat storage order; this is an ROI-local tuple index, not a global acquisition ID."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 2,
+      "purpose": "Keep the 170 source cells whose original reconstructed FeatureId equals 2205; true means extract."
+    },
+    {
+      "filter": "ExtractVertexGeometryFilter",
+      "uuid": "621a71ca-124b-4471-ad1a-02f05ffba099",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 3,
+      "purpose": "Extract measured-derived voxel centers and COPY three scalar arrays. These 170 points are distinct from the 256 grain surface vertices."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 4,
+      "purpose": "Copy ReferenceCloud_Raw coordinates into independent ReferenceCloud with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 5,
+      "purpose": "Deep-copy all retained scalar metadata into ReferenceCloud; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 6,
+      "purpose": "Delete only temporary ReferenceCloud_Raw after coordinates and scalar arrays have been copied into ReferenceCloud."
+    },
+    {
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 7,
+      "purpose": "Create TileA as a complementary spatial tile with 89 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 8,
+      "purpose": "Copy TileA_Raw coordinates into independent TileA with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 9,
+      "purpose": "Deep-copy all retained scalar metadata into TileA; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 10,
+      "purpose": "Delete only temporary TileA_Raw after coordinates and scalar arrays have been copied into TileA."
+    },
+    {
+      "filter": "CropVertexGeometryFilter",
+      "uuid": "8b16452f-f75e-4918-9460-d3914fdc0d08",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 11,
+      "purpose": "Create TileB as a complementary spatial tile with 81 points from the same measured-derived reference. The split at X=25.25 micrometers lies between voxel centers; this is not an independent acquisition."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 12,
+      "purpose": "Copy TileB_Raw coordinates into independent TileB with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 13,
+      "purpose": "Deep-copy all retained scalar metadata into TileB; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 14,
+      "purpose": "Delete only temporary TileB_Raw after coordinates and scalar arrays have been copied into TileB."
+    },
+    {
+      "filter": "CombineNodeBasedGeometriesFilter",
+      "uuid": "15669036-b417-4450-a937-d5bb2f59124c",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 15,
+      "purpose": "Reassemble the complementary spatial tiles and matching scalar metadata: 89 plus 81 equals 170 unique source-cell centers. No deduplication is performed."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 16,
+      "purpose": "Copy CombinedTiles_Raw coordinates into independent CombinedTiles with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 17,
+      "purpose": "Deep-copy all retained scalar metadata into CombinedTiles; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 18,
+      "purpose": "Delete only temporary CombinedTiles_Raw after coordinates and scalar arrays have been copied into CombinedTiles."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 19,
+      "purpose": "Copy CombinedTiles coordinates into independent MovingChallenge with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 20,
+      "purpose": "Deep-copy all retained scalar metadata into MovingChallenge; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 21,
+      "purpose": "Copy CombinedTiles into a separate Micrometer vertex geometry for a sequential-versus-composed transform comparison; the original clouds remain independent."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 22,
+      "purpose": "Retain source-cell identity and scalar metadata on the sequential comparison cloud."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 23,
+      "purpose": "Apply this part of the existing challenge to SequentialChallenge and save KnownRotationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 24,
+      "purpose": "Apply this part of the existing challenge to SequentialChallenge and save KnownTranslationMatrix in the native sixteen-scalar row-major format. Rotation acts first, then the micrometer translation."
+    },
+    {
+      "filter": "CombineTransformationMatricesFilter",
+      "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 25,
+      "purpose": "Compose the intended motion: first listed rotation acts first, then translation, so the stored matrix is T times R. Apply the resulting matrix once."
+    },
+    {
+      "filter": "CombineTransformationMatricesFilter",
+      "uuid": "d279a254-ced7-4541-95c1-bd3e59c5b697",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 26,
+      "purpose": "Retain the alternate order R times T for inspection only. It describes a different motion and is not applied to the registration challenge."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 27,
+      "purpose": "Apply the computed T times R matrix once to MovingChallenge. Preserve the existing KnownTransform snapshot and original two-degree rotation followed by [1,-0.75,0.5] micrometer translation; no origin-centering option is enabled."
+    },
+    {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 28,
+      "purpose": "Compare corresponding sequential and composed point coordinates in micrometers. Both describe the same intended motion, but sequential Float32 storage can introduce small rounding differences; this is not an acquisition-accuracy estimate."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 29,
+      "purpose": "Copy MovingChallenge coordinates into independent MovingCoarse with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 30,
+      "purpose": "Deep-copy all retained scalar metadata into MovingCoarse; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "AlignGeometriesFilter",
+      "uuid": "87fa9e07-6c66-45b0-80a0-cf80cc0def5d",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 31,
+      "purpose": "Translate MovingCoarse so its coordinate-wise minimum matches ReferenceCloud (Origin alignment), providing a close starting pose for local ICP."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 32,
+      "purpose": "Copy MovingCoarse coordinates into independent MovingRegistered with explicit Micrometer units; fresh geometry actions and whole-geometry copies do not preserve the input unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 33,
+      "purpose": "Deep-copy all retained scalar metadata into MovingRegistered; keep source-cell identity and inherited image quality unchanged."
+    },
+    {
+      "filter": "IterativeClosestPointFilter",
+      "uuid": "3a206668-fa44-418d-b78e-9fd803b8fb98",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 34,
+      "purpose": "Run 10 rigid closest-point iterations from the close origin-aligned pose and apply the residual transform to MovingRegistered. The saved matrix excludes the earlier coarse translation."
+    },
+    {
+      "filter": "PointSampleTriangleGeometryFilter",
+      "uuid": "ee34ef95-aa04-4ad3-8232-5783a880d279",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 35,
+      "purpose": "Draw 5000 points from the repaired measured-derived grain shell, selecting triangles in proportion to area. Fixed seed 2205 supports repeatable runs in the same implementation. Transfer no face arrays because of issue 1799; this is derived sampling, not new acquisition data."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 36,
+      "purpose": "Publish SurfaceSamples as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 37,
+      "purpose": "Remove only temporary SurfaceSamples_Raw after its calibrated geometry and required arrays are retained."
+    },
+    {
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 38,
+      "purpose": "Check that generated SurfaceSamples lie on Grain2205, retaining signed micrometer distances and nearest triangle row IDs. This is a geometric association after sampling; tied boundary triangles need not equal the original random choice."
+    },
+    {
+      "filter": "ApproximatePointCloudHullFilter",
+      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 39,
+      "purpose": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.25 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 40,
+      "purpose": "Publish Hull025um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 41,
+      "purpose": "Remove only temporary Hull025um_Raw after its calibrated geometry and required arrays are retained."
+    },
+    {
+      "filter": "ApproximatePointCloudHullFilter",
+      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 42,
+      "purpose": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.5 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 43,
+      "purpose": "Publish Hull05um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 44,
+      "purpose": "Remove only temporary Hull05um_Raw after its calibrated geometry and required arrays are retained."
+    },
+    {
+      "filter": "PartitionGeometryFilter",
+      "uuid": "aad29ebc-bf1c-5dd3-ad25-0f7f8907a02d",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 45,
+      "purpose": "Partition source image cells on an explicit 0.5 micrometer grid with bounds [24,25,14] to [26.5,28,17]. SpatialPartitionIds 1..180 describe bins, not grains; zero marks source cells outside this grid. Preserve original FeatureIds. Vertex-mode preflight remains deferred for issue 1798."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
+      "step": 46,
+      "purpose": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms."
     }
   ]
 }
