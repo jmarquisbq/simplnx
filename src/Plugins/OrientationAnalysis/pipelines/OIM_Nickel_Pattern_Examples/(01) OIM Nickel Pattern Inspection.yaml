@@ -1,0 +1,446 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+  "markdown_file": "(01) OIM Nickel Pattern Inspection.md",
+  "title": "OIM Nickel Pattern Inspection",
+  "summary": "Inspect and export two measured nickel EBSD detector patterns across a sharp Confidence Index change, while retaining source identity and full acquisition-map context.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy"
+  ],
+  "use_cases": [
+    "Inspect detector patterns behind neighboring EBSD indexing metrics",
+    "Export a small detector-pattern subset with an explicit raw binary contract"
+  ],
+  "keywords": [
+    "EBSD",
+    "EDAX",
+    "OIM",
+    "nickel",
+    "detector pattern",
+    "Confidence Index",
+    "Image Quality",
+    "acquisition grid",
+    "raw binary",
+    "uint8",
+    "source identity"
+  ],
+  "inputs": [
+    {
+      "path": "Data/OrientationAnalysis/EdaxOIMData.h5",
+      "role": "Official measured OIM sample, Scan 1; source data must already be available locally."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/OIM_Nickel_PatternInspection.dream3d",
+      "role": "Full scalar acquisition-map context and two selected detector patterns with array metadata; unpopulated reader X/Y arrays removed.",
+      "sha256": "3882d45fc64b0cd0a8bac12c67153504e7c40fbeaf4d41037ef524c3aaa9575c"
+    },
+    {
+      "path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/Pattern.bin",
+      "role": "Headerless 7200-byte uint8 stream: pattern, detector row, detector column; shape (2,60,60).",
+      "sha256": "3bb5537eda525095b25f26df9f55377b71eef94b2aa13b01f64be4d44cedd783"
+    },
+    {
+      "path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/SelectedPatternManifest.csv",
+      "role": "Two rows of source tuple index/CI/IQ/Fit, in raw-pattern order.",
+      "sha256": "8f6f734cd327bf525b9a8cff4450f9410afe302ad789ff29db241eee3960a06f"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "public-measured-example",
+    "asset_keys": [
+      "EdaxOIMData.h5"
+    ],
+    "paper_doi": "",
+    "paper_url": "",
+    "source_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+    "source_sha512": "68cf620d28a515d04040d66c4f8fa9d8d46707c65138b366b47f40d1d56a36c40e2e2cd0c9d35168b68c2cb5b2ce95650fa2a0d4e6ffce980d0dd0654908f40d",
+    "reference_visual": "Full saved native Confidence Index map with selected acquisition cells marked, and both saved detector patterns displayed at identical 0..255 grayscale limits without interpolation.",
+    "target_traits": [
+      "One measured 186 by 151 acquisition map, 1.5 micrometer XY spacing",
+      "28086 uint8 detector patterns with 60 by 60 components",
+      "Adjacent map cells (67,10) and (68,10), source tuples 1927 and 1928",
+      "Different CI values without a claimed cause or validity threshold",
+      "No orientation analysis or reindexing; no detector intensity transformation"
+    ],
+    "known_differences": "Illustrative measured-data inspection/export workflow using the official sample; no paper-specific process or numerical result is reproduced. The two points are selected to make a sharp CI contrast inspectable, not as representative data or a validated good/bad classification.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "oim-nickel-pattern-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Inspect an EBSD pattern at a named scan point",
+      "Export detector patterns with their source scan identity and indexing metrics"
+    ],
+    "questions_to_ask": [
+      "Which acquisition scan and zero-based grid cells should be inspected?",
+      "What are the detector dimensions, byte type, and axis order?",
+      "Does the next step require confirmed specimen/crystal reference frames or an independently justified indexing mask?"
+    ],
+    "constraints": [
+      "Keep detector row/column coordinates separate from specimen map X/Y micrometers.",
+      "Preserve acquisition order and SourceScanIndex when selecting/exporting.",
+      "Pattern.bin has no header, metadata, calibration, phase, or scan identity; retain the manifest and companion contract. It is not UP1.",
+      "No reshape is needed: cropped tuple shape [1,1,2], component shape [60,60].",
+      "CI is an indexing metric, not proof of correctness, noise, deformation, or a grain boundary.",
+      "Source Phase and Valid are all zero; the reader maps nonpositive phase IDs to 1 and does not import Valid. Phases > 0 is not a valid indexing mask for this file.",
+      "Orientations remain as imported. Confirm acquisition conventions before applying any frame rotations or using IPF/specimen directions.",
+      "One slice and z_spacing=1 do not supply measured thickness.",
+      "After cropping, delete full-map Pattern and both geometries' unpopulated X Position/Y Position arrays. Import still reads the full pattern array.",
+      "The .d3dpipeline is executable authority.",
+      "The reader creates X Position/Y Position arrays but leaves them zero for this input. This pipeline removes these misleading placeholders from both geometries. Recover zero-based acquisition-grid x=SourceScanIndex%186, y=SourceScanIndex//186. The original HDF5 X Position/Y Position values are separate source metadata, not CSV columns or detector coordinates."
+    ],
+    "related_pipelines": [
+      "../EBSD_File_Processing/ImportEdaxOIMData.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "DREAM.3D/simplnx official example data: 6_6_ImportH5Data",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2023,
+      "journal": "Official Data_Archive release",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/tag/Data_Archive",
+      "scope": "pipeline_workflow",
+      "role": "Public source of the measured EdaxOIMData.h5 scan used for this illustrative inspection/export workflow; not a scientific paper.",
+      "dataset": {
+        "availability": "Official public archive; existing build rules copy this file to runtime Data/OrientationAnalysis, but do not install it in the normal application package.",
+        "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+        "doi": "",
+        "license": "Distributed publicly in the official DREAM.3D/simplnx example-data archive; no separate dataset license or additional redistribution permission was found. No raw input is added to this category or to package installation by this example.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "No publication result is reproduced. The example selects two adjacent measured patterns and preserves their original values and source identity."
+      },
+      "date_note": "Public repository asset uploaded 2023-03-24; acquisition date not established; accessed 2026-10-13."
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "OIM import, inclusive geometry crop, sequential IDs, raw array export and CSV semantics.",
+      "date_note": "2026 is the access year for the live source and documentation, not a publication date."
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release preflight and execution passed on 2026-10-13 (CTest 1/1). Forty-two independent checks passed against the source HDF5: all 28086 scalar/Euler tuples, source-index sequence, selected tuple identity, crop geometry and phase metadata, absence of unpopulated X/Y placeholders, both CSV rows, and all 7200 selected pattern bytes. The figure was generated only from the saved native arrays and visually inspected. This verifies import, association, and export content, not indexing correctness or materials interpretation. Native GUI, OOC, generated Python, external reindexing/import, full application installation, and cross-platform behavior remain unverified.",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadH5OimDataFilter",
+      "uuid": "4ad3d47c-b1e1-4429-bc65-5e021be62ba0",
+      "role": "Read measured Scan 1 with detector patterns in acquisition order. Retain imported orientations without frame corrections because this example inspects detector data and indexing metrics, not specimen-direction orientations. Z spacing 1 is a single-slice placeholder.",
+      "input_paths": [
+        "Data/OrientationAnalysis/EdaxOIMData.h5"
+      ],
+      "output_paths": [
+        "OIM Nickel"
+      ],
+      "key_parameters": {
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_ensemble_attribute_matrix_name": "Cell Ensemble Data",
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "output_image_geometry_path": "OIM Nickel",
+        "read_pattern_data": true,
+        "selected_scan_names": {
+          "input_file_path": "Data/OrientationAnalysis/EdaxOIMData.h5",
+          "scan_names": [
+            "Scan 1"
+          ],
+          "stacking_order": 0
+        },
+        "z_spacing": 1.0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Record zero-based acquisition tuple identity 0..28085 as uint32 before cropping. X varies fastest, so SourceScanIndex = y * 186 + x for this scan.",
+      "input_paths": [
+        "OIM Nickel/Cell Data"
+      ],
+      "output_paths": [
+        "OIM Nickel/Cell Data/SourceScanIndex"
+      ],
+      "key_parameters": {
+        "output_array_path": "OIM Nickel/Cell Data/SourceScanIndex",
+        "numeric_type_index": 5,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy the adjacent acquisition-grid cells (67,10) and (68,10), inclusive, with every cell array and pattern kept in the same order. Preserve the full scalar map for context; no resampling, feature renumbering, or detector-pixel crop.",
+      "input_paths": [
+        "OIM Nickel"
+      ],
+      "output_paths": [
+        "Selected Patterns"
+      ],
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          67,
+          10,
+          0
+        ],
+        "max_voxel": [
+          68,
+          10,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "OIM Nickel",
+        "renumber_features": false,
+        "feature_ids_path": "",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "Selected Patterns"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "After copying the selected patterns, remove the full-map Pattern array (101109600 bytes) and both geometries' unpopulated X Position/Y Position arrays. This reader creates those coordinate arrays but leaves zeros for this input, so retain source scan IDs and geometry origin/spacing instead. Original HDF5 and import peak memory are unchanged.",
+      "input_paths": [
+        "OIM Nickel/Cell Data/Pattern",
+        "OIM Nickel/Cell Data/X Position",
+        "OIM Nickel/Cell Data/Y Position",
+        "Selected Patterns/Cell Data/X Position",
+        "Selected Patterns/Cell Data/Y Position"
+      ],
+      "output_paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "OIM Nickel/Cell Data/Pattern",
+          "OIM Nickel/Cell Data/X Position",
+          "OIM Nickel/Cell Data/Y Position",
+          "Selected Patterns/Cell Data/X Position",
+          "Selected Patterns/Cell Data/Y Position"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "WriteBinaryDataFilter",
+      "uuid": "06912cbc-9745-4098-8d44-c674974d2ca8",
+      "role": "Write Pattern.bin: two consecutive 60 by 60 uint8 detector images, pattern then row then column, 7200 bytes with no header. Endianness has no effect on one-byte uint8. This is not an EDAX UP1 file.",
+      "input_paths": [
+        "Selected Patterns/Cell Data/Pattern"
+      ],
+      "output_paths": [
+        "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/Pattern.bin"
+      ],
+      "key_parameters": {
+        "endian_index": 0,
+        "output_path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection",
+        "file_extension": ".bin",
+        "input_data_array_paths": [
+          "Selected Patterns/Cell Data/Pattern"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Export both selected rows, including tuple zero, in the same order as Pattern.bin: source tuple index, Confidence Index, Image Quality, and Fit. Recover acquisition-grid x=index%186 and y=index//186; these are grid indices, not detector-pixel or physical coordinates. These metrics do not establish indexing validity.",
+      "input_paths": [
+        "Selected Patterns/Cell Data/SourceScanIndex",
+        "Selected Patterns/Cell Data/Confidence Index",
+        "Selected Patterns/Cell Data/Image Quality",
+        "Selected Patterns/Cell Data/Fit"
+      ],
+      "output_paths": [
+        "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/SelectedPatternManifest.csv"
+      ],
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/SelectedPatternManifest.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "Selected Patterns/Cell Data/SourceScanIndex",
+          "Selected Patterns/Cell Data/Confidence Index",
+          "Selected Patterns/Cell Data/Image Quality",
+          "Selected Patterns/Cell Data/Fit"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the full scalar acquisition map, original imported Euler/phase context, and selected two-pattern geometry. Use this metadata-bearing file alongside the raw binary and two-row manifest.",
+      "input_paths": [
+        "OIM Nickel",
+        "Selected Patterns"
+      ],
+      "output_paths": [
+        "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/OIM_Nickel_PatternInspection.dream3d"
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/OIM_Nickel_PatternInspection.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "raw_binary_contract": {
+    "filename": "Pattern.bin",
+    "dtype": "uint8",
+    "byte_count": 7200,
+    "tuple_shape": [
+      1,
+      1,
+      2
+    ],
+    "component_shape": [
+      60,
+      60
+    ],
+    "external_shape": [
+      2,
+      60,
+      60
+    ],
+    "axis_order": [
+      "pattern",
+      "detector_row",
+      "detector_column"
+    ],
+    "header_bytes": 0,
+    "endianness": "little selected; irrelevant to uint8",
+    "source_scan_indices": [
+      1927,
+      1928
+    ],
+    "sha256": "3bb5537eda525095b25f26df9f55377b71eef94b2aa13b01f64be4d44cedd783"
+  },
+  "figures": [
+    {
+      "file": "OIMNickelPatterns.png",
+      "sha256": "e86d0160f2322045c0439c5ce19f5d209eaf31bd0f6aea7cc664ae15bf3fca8b",
+      "source_native_file": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/OIM_Nickel_PatternInspection.dream3d",
+      "source_native_sha256": "3882d45fc64b0cd0a8bac12c67153504e7c40fbeaf4d41037ef524c3aaa9575c",
+      "source_arrays": [
+        "DataStructure/OIM Nickel/Cell Data/Confidence Index",
+        "DataStructure/Selected Patterns/Cell Data/Pattern",
+        "DataStructure/Selected Patterns/Cell Data/SourceScanIndex",
+        "DataStructure/Selected Patterns/Cell Data/Confidence Index"
+      ],
+      "display": "Reshape according to saved tuple/component dimensions, shared grayscale 0..255, nearest-neighbor display. No intensity filtering, normalization, rotation, indexing, or scientific metric computation.",
+      "map_color_map": "viridis",
+      "map_limits": [
+        0,
+        1
+      ],
+      "pattern_color_map": "gray",
+      "pattern_limits": [
+        0,
+        255
+      ],
+      "source_scan_indices": [
+        1927,
+        1928
+      ],
+      "interpretation": "Measured intensity display and CI context only; no intensity processing, reindexing, or good/bad classification."
+    }
+  ],
+  "verified_results": {
+    "native_test": "PIPELINE::OrientationAnalysis::OIM_Nickel_Pattern_Examples",
+    "configuration": "Windows in-memory Release",
+    "independent_check_count": 42,
+    "full_map_cells": 28086,
+    "selected_pattern_bytes": 7200,
+    "source_scan_indices": [
+      1927,
+      1928
+    ],
+    "manifest_rows": [
+      [
+        1927.0,
+        0.012000000104308128,
+        4128.94921875,
+        1.753000020980835
+      ],
+      [
+        1928.0,
+        0.9049999713897705,
+        4468.7431640625,
+        0.8180000185966492
+      ]
+    ],
+    "source_sha256": "872324dc38a75329a5766b2aa424a23c2ce5c4a485610b0a27ad467426c0f7d0"
+  }
+}

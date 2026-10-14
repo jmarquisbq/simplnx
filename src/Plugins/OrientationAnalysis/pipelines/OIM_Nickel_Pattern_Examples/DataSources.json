@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "relative_directory": "Data/OrientationAnalysis",
+  "dataset_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+  "dataset_doi": "",
+  "license": "Distributed publicly in the official DREAM.3D/simplnx example-data archive; no separate dataset license or additional redistribution permission was found. No raw input is added to this category or to package installation by this example.",
+  "attribution": "Official DREAM.3D/simplnx EdaxOIMData.h5 sample; scan header identifies nickel. No associated workflow paper is asserted.",
+  "provenance": "Measured EBSD map and detector patterns; no generated input or intensity transformation.",
+  "archive": {
+    "filename": "6_6_ImportH5Data.tar.gz",
+    "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/6_6_ImportH5Data.tar.gz",
+    "sha512": "68cf620d28a515d04040d66c4f8fa9d8d46707c65138b366b47f40d1d56a36c40e2e2cd0c9d35168b68c2cb5b2ce95650fa2a0d4e6ffce980d0dd0654908f40d"
+  },
+  "files": [
+    {
+      "filename": "EdaxOIMData.h5",
+      "archive_path": "6_6_ImportH5Data/EdaxOIMData.h5",
+      "sha256": "872324dc38a75329a5766b2aa424a23c2ce5c4a485610b0a27ad467426c0f7d0",
+      "sha512": "3d29b47859f99d75c0a91dfdc4d17198c28f516be5042aef1c0c0d99f60e151ab5346f6a33f6a17880fcc7d052b8ae3f5dc5500a7ba59eeca5091f66b13064b7",
+      "bytes": 103597425,
+      "scan": "Scan 1",
+      "map_dimensions_xyz": [
+        186,
+        151,
+        1
+      ],
+      "spacing_xyz": [
+        1.5,
+        1.5,
+        1.0
+      ],
+      "spacing_note": "XY micrometers from scan header; Z=1 single-slice placeholder.",
+      "pattern_shape": [
+        28086,
+        60,
+        60
+      ],
+      "pattern_dtype": "uint8",
+      "consuming_pipelines": [
+        "(01) OIM Nickel Pattern Inspection.d3dpipeline"
+      ]
+    }
+  ],
+  "packaging_status": "Existing runtime copy only. Data installation/redistribution decision remains in the project packaging backlog; this change does not install or upload input data."
+}

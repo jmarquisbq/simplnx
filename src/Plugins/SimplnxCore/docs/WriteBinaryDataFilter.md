@@ -37,6 +37,10 @@ The arrays to export are user-selected **Data Arrays** from anywhere in the **Da
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `OIM_Nickel_Pattern_Examples/(01) OIM Nickel Pattern Inspection.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

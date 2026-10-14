@@ -1,0 +1,353 @@
+{
+  "isDisabled": false,
+  "name": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+  "pinnedParams": [],
+  "pipeline": [
+    {
+      "args": {
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "cell_ensemble_attribute_matrix_name": {
+          "value": "Cell Ensemble Data",
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "OIM Nickel",
+          "version": 1
+        },
+        "parameters_version": 1,
+        "read_pattern_data": {
+          "value": true,
+          "version": 1
+        },
+        "selected_scan_names": {
+          "value": {
+            "input_file_path": "Data/OrientationAnalysis/EdaxOIMData.h5",
+            "scan_names": [
+              "Scan 1"
+            ],
+            "stacking_order": 0
+          },
+          "version": 1
+        },
+        "z_spacing": {
+          "value": 1.0,
+          "version": 1
+        }
+      },
+      "comments": "Read measured Scan 1 with detector patterns in acquisition order. Retain imported orientations without frame corrections because this example inspects detector data and indexing metrics, not specimen-direction orientations. Z spacing 1 is a single-slice placeholder.",
+      "filter": {
+        "name": "nx::core::ReadH5OimDataFilter",
+        "uuid": "4ad3d47c-b1e1-4429-bc65-5e021be62ba0"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_array_path": {
+          "value": "OIM Nickel/Cell Data/SourceScanIndex",
+          "version": 1
+        },
+        "numeric_type_index": {
+          "value": 5,
+          "version": 1
+        },
+        "data_format": {
+          "value": "",
+          "version": 1
+        },
+        "set_tuple_dimensions": {
+          "value": false,
+          "version": 1
+        },
+        "tuple_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "component_dimensions": {
+          "value": [
+            [
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "init_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "init_value": {
+          "value": "0",
+          "version": 1
+        },
+        "starting_fill_value": {
+          "value": "0",
+          "version": 1
+        },
+        "step_operation_index": {
+          "value": 0,
+          "version": 1
+        },
+        "step_value": {
+          "value": "1",
+          "version": 1
+        },
+        "use_seed": {
+          "value": false,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 5489,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "InitializeDataFilter SeedValue",
+          "version": 1
+        },
+        "standardize_seed": {
+          "value": false,
+          "version": 1
+        },
+        "init_start_range": {
+          "value": "0",
+          "version": 1
+        },
+        "init_end_range": {
+          "value": "1",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Record zero-based acquisition tuple identity 0..28085 as uint32 before cropping. X varies fastest, so SourceScanIndex = y * 186 + x for this scan.",
+      "filter": {
+        "name": "nx::core::CreateDataArrayAdvancedFilter",
+        "uuid": "f23464df-abcc-40cf-bf99-f71463df633c"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_physical_bounds": {
+          "value": false,
+          "version": 1
+        },
+        "crop_x_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_y_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_z_dim": {
+          "value": true,
+          "version": 1
+        },
+        "min_voxel": {
+          "value": [
+            67,
+            10,
+            0
+          ],
+          "version": 1
+        },
+        "max_voxel": {
+          "value": [
+            68,
+            10,
+            0
+          ],
+          "version": 1
+        },
+        "min_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "max_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "remove_original_geometry": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "OIM Nickel",
+          "version": 1
+        },
+        "renumber_features": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "Selected Patterns",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the adjacent acquisition-grid cells (67,10) and (68,10), inclusive, with every cell array and pattern kept in the same order. Preserve the full scalar map for context; no resampling, feature renumbering, or detector-pixel crop.",
+      "filter": {
+        "name": "nx::core::CropImageGeometryFilter",
+        "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "OIM Nickel/Cell Data/Pattern",
+            "OIM Nickel/Cell Data/X Position",
+            "OIM Nickel/Cell Data/Y Position",
+            "Selected Patterns/Cell Data/X Position",
+            "Selected Patterns/Cell Data/Y Position"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "After copying the selected patterns, remove the full-map Pattern array (101109600 bytes) and both geometries' unpopulated X Position/Y Position arrays. This reader creates those coordinate arrays but leaves zeros for this input, so retain source scan IDs and geometry origin/spacing instead. Original HDF5 and import peak memory are unchanged.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "endian_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_path": {
+          "value": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection",
+          "version": 1
+        },
+        "file_extension": {
+          "value": ".bin",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "Selected Patterns/Cell Data/Pattern"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Write Pattern.bin: two consecutive 60 by 60 uint8 detector images, pattern then row then column, 7200 bytes with no header. Endianness has no effect on one-byte uint8. This is not an EDAX UP1 file.",
+      "filter": {
+        "name": "nx::core::WriteBinaryDataFilter",
+        "uuid": "06912cbc-9745-4098-8d44-c674974d2ca8"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_style_index": {
+          "value": 1,
+          "version": 1
+        },
+        "output_path": {
+          "value": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/SelectedPatternManifest.csv",
+          "version": 1
+        },
+        "output_dir": {
+          "value": "",
+          "version": 1
+        },
+        "file_extension": {
+          "value": ".csv",
+          "version": 1
+        },
+        "max_val_per_line": {
+          "value": 1,
+          "version": 1
+        },
+        "delimiter_index": {
+          "value": 2,
+          "version": 1
+        },
+        "header_option_index": {
+          "value": 1,
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [
+            "Selected Patterns/Cell Data/SourceScanIndex",
+            "Selected Patterns/Cell Data/Confidence Index",
+            "Selected Patterns/Cell Data/Image Quality",
+            "Selected Patterns/Cell Data/Fit"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export both selected rows, including tuple zero, in the same order as Pattern.bin: source tuple index, Confidence Index, Image Quality, and Fit. Recover acquisition-grid x=index%186 and y=index//186; these are grid indices, not detector-pixel or physical coordinates. These metrics do not establish indexing validity.",
+      "filter": {
+        "name": "nx::core::WriteASCIIDataFilter",
+        "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "export_file_path": {
+          "value": "Data/Output/OIM_Nickel_Pattern_Examples/Inspection/OIM_Nickel_PatternInspection.dream3d",
+          "version": 1
+        },
+        "write_xdmf_file": {
+          "value": false,
+          "version": 1
+        },
+        "use_compression": {
+          "value": true,
+          "version": 1
+        },
+        "compression_level": {
+          "value": 5,
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Save the full scalar acquisition map, original imported Euler/phase context, and selected two-pattern geometry. Use this metadata-bearing file alongside the raw binary and two-row manifest.",
+      "filter": {
+        "name": "nx::core::WriteDREAM3DFilter",
+        "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"
+      },
+      "isDisabled": false
+    }
+  ],
+  "version": 1,
+  "workflowParams": []
+}

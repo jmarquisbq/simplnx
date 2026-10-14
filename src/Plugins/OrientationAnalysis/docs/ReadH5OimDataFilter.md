@@ -33,7 +33,9 @@ the user should **CHECK** the option **ON** for "Perform Slice By Slice Transfor
 
 ## Algorithm
 
-Each selected scan is appended in selection order along the **Image Geometry** Z direction. Phase values are clamped and Euler components are interleaved into their output array; scalar measurements, including X and Y positions, are copied at that scan's tuple offset. Pattern data uses the same tuple offset multiplied by its pattern component count. Output arrays are written in bounded bulk transfers, which supports out-of-core output storage.
+Each selected scan is appended in selection order along the **Image Geometry** Z direction. Phase values are clamped and Euler components are interleaved into their output array; CI, IQ, Fit and SEM Signal are copied at that scan's tuple offset. Pattern data uses the same tuple offset multiplied by its pattern component count. Output arrays are written in bounded bulk transfers, which supports out-of-core output storage.
+
+**Known coordinate limitation:** the current implementation creates X Position and Y Position arrays but leaves them at zero instead of copying the source values. Do not use those arrays as measured coordinates; see [simplnx #1789](https://github.com/BlueQuartzSoftware/simplnx/issues/1789). The pattern-inspection example removes these placeholders and preserves source scan indices.
 
 ## Thresholding out Unindexed Scan Points
 
@@ -48,6 +50,12 @@ Once the reference frames are correct, the imported Euler angles are typically c
 None — this filter reads directly from a `.h5` file on disk.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `OIM_Nickel_Pattern_Examples/(01) OIM Nickel Pattern Inspection.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

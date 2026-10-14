@@ -545,3 +545,14 @@ add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Boundary_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100BoundaryExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Boundary_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1800 LABELS "ExamplePipeline;Small_IN100_Boundary_Examples")
+
+# Measured OIM detector patterns, source identity, and bounded raw export.
+add_test(NAME PIPELINE::OrientationAnalysis::OIM_Nickel_Pattern_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/OIM_Nickel_Pattern_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/OIM_Nickel_Pattern_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/OIMNickelPatternExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::OIM_Nickel_Pattern_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;OIM_Nickel_Pattern_Examples")

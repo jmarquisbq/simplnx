@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "scope": "All seven steps of the measured OIM nickel detector-pattern inspection example; zero-based indices.",
+  "filters": [
+    {
+      "filter": "ReadH5OimDataFilter",
+      "uuid": "4ad3d47c-b1e1-4429-bc65-5e021be62ba0",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 0,
+      "purpose": "Read measured Scan 1 with detector patterns in acquisition order. Retain imported orientations without frame corrections because this example inspects detector data and indexing metrics, not specimen-direction orientations. Z spacing 1 is a single-slice placeholder."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 1,
+      "purpose": "Record zero-based acquisition tuple identity 0..28085 as uint32 before cropping. X varies fastest, so SourceScanIndex = y * 186 + x for this scan."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 2,
+      "purpose": "Copy the adjacent acquisition-grid cells (67,10) and (68,10), inclusive, with every cell array and pattern kept in the same order. Preserve the full scalar map for context; no resampling, feature renumbering, or detector-pixel crop."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 3,
+      "purpose": "After copying the selected patterns, remove the full-map Pattern array (101109600 bytes) and both geometries' unpopulated X Position/Y Position arrays. This reader creates those coordinate arrays but leaves zeros for this input, so retain source scan IDs and geometry origin/spacing instead. Original HDF5 and import peak memory are unchanged."
+    },
+    {
+      "filter": "WriteBinaryDataFilter",
+      "uuid": "06912cbc-9745-4098-8d44-c674974d2ca8",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 4,
+      "purpose": "Write Pattern.bin: two consecutive 60 by 60 uint8 detector images, pattern then row then column, 7200 bytes with no header. Endianness has no effect on one-byte uint8. This is not an EDAX UP1 file."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 5,
+      "purpose": "Export both selected rows, including tuple zero, in the same order as Pattern.bin: source tuple index, Confidence Index, Image Quality, and Fit. Recover acquisition-grid x=index%186 and y=index//186; these are grid indices, not detector-pixel or physical coordinates. These metrics do not establish indexing validity."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) OIM Nickel Pattern Inspection.d3dpipeline",
+      "step": 6,
+      "purpose": "Save the full scalar acquisition map, original imported Euler/phase context, and selected two-pattern geometry. Use this metadata-bearing file alongside the raw binary and two-row manifest."
+    }
+  ]
+}
