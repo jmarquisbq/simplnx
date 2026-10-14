@@ -6,16 +6,16 @@ Processing (Cleanup)
 
 ## Description
 
-This **Filter** smooths the interface between *good* and *bad* cells (or, more generally, between any two adjacent feature regions) by removing cells whose neighborhood is mostly the opposite class. It targets isolated voxels and small protrusions that are surrounded by cells of a different feature, then fills them in with their neighbors' data via isotropic coarsening.
+This **Filter** changes interfaces between cells with **Feature Id 0** and cells with a **positive Feature Id**. It can fill missing cells or remove isolated positive cells. It does not treat two different positive IDs as opposite classes, so it is not a general grain-boundary smoothing filter.
 
-The *coordination number* is the count of a cell's face-sharing neighbors that belong to a different class. With 6 face neighbors, the coordination number ranges from **0 to 6**:
+The *coordination number* counts face-sharing neighbors with opposite zero-versus-positive status. Only neighbors inside the **Image Geometry** count: the maximum is **6 in 3D**, **4 in a single XY slice**, and fewer at its edges.
 
-- **CN = 0** -- all 6 neighbors agree with the cell. Solidly inside a region.
-- **CN = 1-2** -- on a flat or gently curved feature boundary.
-- **CN = 4-5** -- a thin protrusion or finger of one feature sticking into another.
-- **CN = 6** -- a single isolated cell completely surrounded by another feature.
-
-![Fig. 1: A cell's coordination number is the count of its six face-neighbors belonging to a different feature; cells whose coordination number meets the threshold are absorbed into a neighboring feature.](Images/ErodeDilateCoordinationNumber_CoordinationNumber.png)
+| Center and neighbor | Adds to coordination number? |
+| --- | --- |
+| 0 and a positive ID | Yes |
+| Positive ID and 0 | Yes |
+| Two positive IDs, equal or different | No |
+| Two zeros | No |
 
 | Before Filter                                        | After Filter                                        |
 |------------------------------------------------------|-----------------------------------------------------|
@@ -23,17 +23,17 @@ The *coordination number* is the count of a cell's face-sharing neighbors that b
 
 ### How This Filter Works
 
-The user specifies a *coordination number* threshold. Any cell whose coordination number is **greater than or equal to** this threshold (and greater than 0) is removed. After the offending cells are identified, neighboring features grow outward (isotropic coarsening) to fill the resulting gaps. See [Remove Minimum Size Features](RequireMinimumSizeFeaturesFilter.md) for the shared definition of isotropic coarsening.
+When the count is positive and meets the selected threshold, the cell receives a selected opposite-status neighbor's tuple. The feature ID and all non-ignored sibling cell arrays follow that donor. Preserve a separate reference; a copied orientation or quality value is an estimate at the target location.
 
-For example, a threshold of *4* removes any cell with 4, 5, or 6 differing neighbors (i.e., isolated voxels and thin protrusions). A threshold of *2* is much more aggressive and will erase any cell with 2 or more differing neighbors.
+Updates occur in scan order and can affect decisions later in the same pass. This is not a simultaneous morphological operation. Threshold *4* in a single slice targets cells surrounded on all four faces by the opposite status; a threshold above *4* cannot select a cell there. Lower thresholds can change more interfaces.
 
 ### Loop Until Gone
 
-By default the filter performs **one** pass. After one pass, the coarsening can leave new cells whose coordination number now exceeds the threshold (because their neighbors changed). Enabling *Loop Until Gone* repeats the algorithm until no remaining cell exceeds the original criterion. Use this for full smoothing; use the single-pass mode when you want a controlled, gentle cleanup.
+By default the filter performs **one** pass. *Loop Until Gone* repeats the scan while qualifying cells remain. Inspect a single pass first: even one pass can erase originally valid pixels as well as fill missing pixels. Repeated execution is not evidence of a physically correct boundary.
 
 ### When to Use This Filter
 
-This is the right tool for "salt-and-pepper" cleanup -- isolated single-voxel grains, thin two-cell protrusions, and other small geometric anomalies that segmentation produced but are likely noise. It is more morphologically aware than the size-based filters because it considers neighborhood shape, not just cell count.
+Use this filter to inspect local zero-versus-positive cleanup. An isolated positive grain surrounded by other positive grains will not be removed by this rule. For a feature-size rule, consider [Remove Minimum Size Features](RequireMinimumSizeFeaturesFilter.md); for a scalar-driven donor choice, consider [Replace Element Attributes with Neighbor (Threshold)](ReplaceElementAttributesWithNeighborValuesFilter.md). Neither alternative establishes whether a small feature or missing region is an acquisition artifact.
 
 ### Required Input Sources
 
@@ -42,6 +42,8 @@ This is the right tool for "salt-and-pepper" cleanup -- isolated single-voxel gr
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
++ `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

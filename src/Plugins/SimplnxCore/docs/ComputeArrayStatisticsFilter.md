@@ -63,6 +63,10 @@ For any range selection other than *None*, the filter also creates a *Feature Id
 
 ## Example Pipelines
 
+For grouped counts of a Boolean or UInt8 mask, use **Length** with that mask rather than summing narrow integer values in a custom range. The current padded custom-range path can accumulate the sum in the input integer type: for example, 3,659 UInt8 ones can produce 75 instead of 3,659, also corrupting mean and standard deviation ([#1477](https://github.com/BlueQuartzSoftware/simplnx/issues/1477)). The default range passed that control. Convert to a suitable wider type if sums are required, and check the selected range path. The T12 cleanup example uses UInt64 lengths and separate validity-masked counts.
+
++ `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)

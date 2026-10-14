@@ -1,0 +1,1519 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+  "markdown_file": "(01) T12 Missing Data Cleanup Comparison.md",
+  "title": "T12 Missing Data Cleanup Comparison",
+  "summary": "Compare coordination and threshold neighbor-copy repair after deliberate faults in a measured EBSD crop, preserving original unknown pixels and donor provenance so filling is not confused with reference-label agreement.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Metallurgy"
+  ],
+  "use_cases": [
+    "Inspect missing-data repair before changing measured EBSD maps",
+    "Compare one pass with repeated filling on the same damage",
+    "Trace inferred tuples and quantify reference-label disagreement"
+  ],
+  "keywords": [
+    "T12",
+    "EBSD",
+    "controlled damage",
+    "missing data",
+    "coordination number",
+    "threshold replacement",
+    "donor provenance",
+    "2D",
+    "validity mask"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+      "role": "Corrected preparation checkpoint from(01) T12 Orientation Case Study; same working directory"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/T12_Cleanup_Examples/T12CleanupComparison.dream3d",
+      "role": "Frozen reference, damaged input, three repaired variants, donor provenance, native outcome classes and counts",
+      "sha256": "3ac393060c516d46487d756df5a2e8cd9d725bc713984c6ba70c8ef36effe4bb"
+    },
+    {
+      "path": "Data/Output/T12_Cleanup_Examples/Damaged_Summary.csv",
+      "role": "Four outcome rows including originally unknown class0; ClassId,PixelCount,FilledPixels,ClassHasData",
+      "sha256": "681dce96d74e07c818398c2f53a9c71b4d3e85fa979f763d4a558dc33ed5e60e"
+    },
+    {
+      "path": "Data/Output/T12_Cleanup_Examples/Coordination4_Summary.csv",
+      "role": "Four outcome rows including originally unknown class0; ClassId,PixelCount,FilledPixels,ClassHasData",
+      "sha256": "f443273e2c977c344c5d1d411474a179215f9a1258590b2554b44fcba9b41483"
+    },
+    {
+      "path": "Data/Output/T12_Cleanup_Examples/ThresholdOnePass_Summary.csv",
+      "role": "Four outcome rows including originally unknown class0; ClassId,PixelCount,FilledPixels,ClassHasData",
+      "sha256": "92beb3789c13fcbd1acc08a13270415235057bc4c3df7243d56a6498e6a70f6f"
+    },
+    {
+      "path": "Data/Output/T12_Cleanup_Examples/ThresholdUntilFilled_Summary.csv",
+      "role": "Four outcome rows including originally unknown class0; ClassId,PixelCount,FilledPixels,ClassHasData",
+      "sha256": "310761e238fa1ddd811beea915b7a19a2545bdcc8d2c5836584a45c52df7c59a"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-data-controlled-perturbation",
+    "asset_keys": [
+      "T12-MAI-2010.tar.gz"
+    ],
+    "paper_doi": "10.1016/j.msea.2012.03.068",
+    "paper_url": "https://doi.org/10.1016/j.msea.2012.03.068",
+    "source_url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+    "source_sha512": "e33f224d19ad774604aa28a3263a00221a3a5909040685a3d14b6cba78e36d174b045223c28b462ab3eaea0fbc1c9f0657b1bd791a947799b9f088b13d777568",
+    "reference_visual": "Native copied IPFColors and native comparison classes from one controlled missing-data experiment.",
+    "target_traits": [
+      "64 x 64 x 1 crop at 0.5 micrometer XY spacing",
+      "3937 originally indexed pixels and 159 unknown pixels",
+      "Identical simulated damage for three repair variants",
+      "Whole-tuple donor provenance and separate unknown-pixel counts"
+    ],
+    "known_differences": "Artificial missing tuples and an 8 x 8 patch are added to a crop of the corrected public T12 map. The paper noise-reduction and deformation methods are not reproduced; probabilities, patch and donor rules are illustrative.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "t12-cleanup-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare missing-pixel cleanup methods on measured source data",
+      "Distinguish complete filling from preserved grain boundaries"
+    ],
+    "questions_to_ask": [
+      "Which original pixels are valid?",
+      "Can missing regions reach a passing donor?",
+      "Which cell fields may follow a donor, and which must be recomputed?"
+    ],
+    "constraints": [
+      "Controlled faults are simulated, not observations. Original segmentation is a conditional comparison reference, not ground truth.",
+      "Keep 3937 known pixels separate from 159 unknown pixels. Filled unknown pixels are unscored estimates.",
+      "Coordination counts 0-versus-positive status; single Z slice has at most 4 face neighbors. Ordered updates may remove passing pixels.",
+      "Float32 RepairScore=Valid*(1+BC); threshold 0.5 separates missing and passing values, BC only ranks donors. It is not calibrated confidence.",
+      "Threshold neighbor copying has no phase/grain barrier; loop mode can make no progress indefinitely without passing donors(#1806).",
+      "Preserve DonorIndex, add reference comparison fields after destructive filters, and recalculate orientation/feature statistics after repair.",
+      "Full-extent Crop preserves geometry units(#1784); masked UInt64 lengths avoid narrow-integer custom-range sums(#1477).",
+      "Native IPF colors follow copied orientations. Label agreement does not prove recovery of local Euler values, KAM, GOS or strain."
+    ]
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the accepted corrected preparation from T12 Orientation Case Study. This separate controlled-fault experiment does not change the original measured-data workflow or implement the paper cleanup method.",
+      "key_parameters": {
+        "import_data_object": {
+          "data_paths": [],
+          "file_path": "Data/Output/T12_Orientation_Examples/Preparation/T12_Orientations.dream3d",
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Select a fixed 64 by 64 single-slice measured region, 32 by 32 micrometers, with 13 positive reference grains and 3937 indexed pixels. Inclusive bounds preserve original grain IDs and corrected geometry coordinates. This small ROI is for method inspection, not population statistics.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          520,
+          300,
+          0
+        ],
+        "max_voxel": [
+          583,
+          363,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "T12",
+        "renumber_features": false,
+        "feature_ids_path": "T12/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "T12/Cell Feature Data",
+        "output_image_geometry_path": "Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Discard the full imported geometry and unneeded coordinate/derived fields from this comparison. Keep only tuple fields whose neighbor-copy meaning is explicit; no stale per-feature statistics are carried into damaged branches.",
+      "key_parameters": {
+        "removed_data_path": [
+          "T12",
+          "Reference/Cell Feature Data",
+          "Reference/Cell Data/BS",
+          "Reference/Cell Data/Bands",
+          "Reference/Cell Data/Error",
+          "Reference/Cell Data/MAD",
+          "Reference/Cell Data/Quats",
+          "Reference/Cell Data/X",
+          "Reference/Cell Data/Y"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "role": "Convert the original indexing mask to UInt 8 0/1. It marks which reference labels are known; zero is not a measured void phase.",
+      "key_parameters": {
+        "scalar_type_index": 1,
+        "array_to_convert_path": "Reference/Cell Data/IndexedPixels",
+        "delete_original_array": false,
+        "converted_array_name": "Valid"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the original Boolean mask after creating the named UInt 8 Valid array; avoid two competing validity fields in the repair branches.",
+      "key_parameters": {
+        "removed_data_path": [
+          "Reference/Cell Data/IndexedPixels"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Assign local reference tuple indices 0..4095. Neighbor replacement copies this provenance field with the other attributes, showing which original pixel supplied an inferred tuple; it is not a spatial coordinate.",
+      "key_parameters": {
+        "output_array_path": "Reference/Cell Data/DonorIndex",
+        "numeric_type_index": 4,
+        "data_format": "",
+        "set_tuple_dimensions": false,
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "component_dimensions": [
+          [
+            1
+          ]
+        ],
+        "init_type_index": 1,
+        "init_value": "0",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": true,
+        "seed_value": 5489,
+        "seed_array_name": "DonorIndexSeed",
+        "standardize_seed": false,
+        "init_start_range": "0",
+        "init_end_range": "1"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Build Float32 RepairScore=Valid*(1+BC). Missing/reference-invalid pixels score 0; valid pixels score at least 1. Threshold 0.5 separates validity, while higher BC ranks donors. BC is a contrast heuristic, not calibrated orientation confidence; Float32 avoids integer threshold truncation.",
+      "key_parameters": {
+        "calculated_array_path": "Reference/Cell Data/RepairScore",
+        "calculator_parameter": {
+          "equation": "Valid*(1+BC)",
+          "selected_group": "Reference/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 8
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 7,
+      "filter": "ComputeEuclideanDistMapFilter",
+      "uuid": "ba9ae8f6-443e-41d3-bb45-a08a139325c1",
+      "role": "Compute Int32 Manhattan boundary steps directly for Add Bad Data eligibility. This avoids casting physical Euclidean distances into integers; only distance<1 is used by the injector.",
+      "key_parameters": {
+        "calc_manhattan_dist": true,
+        "do_boundaries": true,
+        "do_quad_points": false,
+        "do_triple_lines": false,
+        "feature_ids_path": "Reference/Cell Data/FeatureIds",
+        "g_bdistances_array_name": "BoundarySteps",
+        "input_image_geometry_path": "Reference",
+        "q_pdistances_array_name": "UnusedQuadSteps",
+        "t_jdistances_array_name": "UnusedTripleSteps"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy the full 64 by 64 extent of Reference into independent Damaged, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          0
+        ],
+        "max_voxel": [
+          63,
+          63,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "Reference",
+        "renumber_features": false,
+        "feature_ids_path": "Reference/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "Damaged"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "AddBadDataFilter",
+      "uuid": "f44c66d1-a095-4e33-871c-c7699d89a011",
+      "role": "Add explicitly simulated missing tuples:3%global per-cell opportunities and 10%boundary-eligible opportunities, with overlap and fixed seed 20261014. Every sibling tuple is zeroed when selected. These fractions are teaching choices, not measured T12 noise estimates.",
+      "key_parameters": {
+        "poisson_noise": true,
+        "poisson_vol_fraction": 0.03,
+        "boundary_noise": true,
+        "boundary_vol_fraction": 0.1,
+        "gb_euclidean_distances_array_path": "Damaged/Cell Data/BoundarySteps",
+        "input_image_geometry_path": "Damaged",
+        "use_seed": true,
+        "seed_value": 20261014,
+        "seed_array_name": "MissingDataSeed"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "InitializeImageGeomCellDataFilter",
+      "uuid": "447b8909-661f-446a-8c1f-72e0cb568fcf",
+      "role": "Zero a controlled 8 by 8 patch at inclusive indices[28, 36, 0]..[35, 43, 0], 64 cells across the existing 1139/1152 grain boundary. This creates a contiguous missing region that a one-pass repair cannot fully fill. All selected tuple components, including validity/score, are zeroed; no physical defect is claimed.",
+      "key_parameters": {
+        "cell_arrays": [
+          "Damaged/Cell Data/BC",
+          "Damaged/Cell Data/EulerAngles",
+          "Damaged/Cell Data/FeatureIds",
+          "Damaged/Cell Data/IPFColors",
+          "Damaged/Cell Data/Phases",
+          "Damaged/Cell Data/Valid",
+          "Damaged/Cell Data/DonorIndex",
+          "Damaged/Cell Data/RepairScore",
+          "Damaged/Cell Data/BoundarySteps"
+        ],
+        "input_image_geometry_path": "Damaged",
+        "min_point": [
+          28,
+          36,
+          0
+        ],
+        "max_point": [
+          35,
+          43,
+          0
+        ],
+        "init_type_index": 0,
+        "init_value": 0.0,
+        "init_range": [
+          0.0,
+          1.0
+        ],
+        "use_seed": true,
+        "seed_value": 5489,
+        "seed_array_name": "PatchSeed"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the now-stale injection distance map before cleanup. Reference retains its valid pre-injection map; a copied donor distance would not describe a repaired target location.",
+      "key_parameters": {
+        "removed_data_path": [
+          "Damaged/Cell Data/BoundarySteps"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy the full 64 by 64 extent of Damaged into independent Coordination 4, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          0
+        ],
+        "max_voxel": [
+          63,
+          63,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "Damaged",
+        "renumber_features": false,
+        "feature_ids_path": "Damaged/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "Coordination4"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "ErodeDilateCoordinationNumberFilter",
+      "uuid": "e4553e82-ab82-49d7-993c-8b55b15c7724",
+      "role": "Apply one ordered coordination 4 pass to the same damaged input. A single Z slice has only 4 face neighbors; count opposite 0-versus-positive status, not boundaries between two positive grain IDs. Whole tuples follow the selected neighbor, including DonorIndex.",
+      "key_parameters": {
+        "coordination_number": 4,
+        "loop": false,
+        "feature_ids_path": "Coordination4/Cell Data/FeatureIds",
+        "ignored_data_array_paths": [],
+        "input_image_geometry_path": "Coordination4"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy the full 64 by 64 extent of Damaged into independent ThresholdOnePass, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          0
+        ],
+        "max_voxel": [
+          63,
+          63,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "Damaged",
+        "renumber_features": false,
+        "feature_ids_path": "Damaged/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "ThresholdOnePass"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "ReplaceElementAttributesWithNeighborValuesFilter",
+      "uuid": "65128c53-d3be-4a69-a559-32a48d603884",
+      "role": "Replace score<0.5 cells using the passing face neighbor with highest score. Copy every cell tuple field coherently. Use exactly one pass so algorithm choice can be compared separately from iteration. This does not enforce grain/phase barriers or recover the original measured orientation.",
+      "key_parameters": {
+        "comparison_data_path": "ThresholdOnePass/Cell Data/RepairScore",
+        "comparison_index": 0,
+        "input_image_geometry_path": "ThresholdOnePass",
+        "loop": false,
+        "min_confidence": 0.5
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy the full 64 by 64 extent of Damaged into independent ThresholdUntilFilled, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          0
+        ],
+        "max_voxel": [
+          63,
+          63,
+          0
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "Damaged",
+        "renumber_features": false,
+        "feature_ids_path": "Damaged/Cell Data/FeatureIds",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "ThresholdUntilFilled"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "ReplaceElementAttributesWithNeighborValuesFilter",
+      "uuid": "65128c53-d3be-4a69-a559-32a48d603884",
+      "role": "Replace score<0.5 cells using the passing face neighbor with highest score. Copy every cell tuple field coherently. Repeat on this verified donor-connected fixture until filled; loop mode has no no-progress limit if no passing donors exist. This does not enforce grain/phase barriers or recover the original measured orientation.",
+      "key_parameters": {
+        "comparison_data_path": "ThresholdUntilFilled/Cell Data/RepairScore",
+        "comparison_index": 0,
+        "input_image_geometry_path": "ThresholdUntilFilled",
+        "loop": true,
+        "min_confidence": 0.5
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count positive validity values over all 4096 pixels. Filled pixels include inferred replacements at originally unknown locations; this is not an accuracy measure.",
+      "key_parameters": {
+        "selected_array_path": "Reference/Cell Data/Valid",
+        "destination_attribute_matrix_path": "Reference/OccupancySummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "FeatureHasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "FeatureIdsIndexing",
+        "find_length": true,
+        "length_array_name": "TotalPixels",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": true,
+        "mean_array_name": "FilledFraction",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "FilledPixels",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 19,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Reference/Cell Data/FeatureIds",
+          "Reference/Cell Data/Valid"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "Damaged/Cell Data",
+        "new_path_suffix": "_Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Evaluate abs(FeatureIds-FeatureIds_Reference) in Damaged/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs.",
+      "key_parameters": {
+        "calculated_array_path": "Damaged/Cell Data/LabelDifferenceForEquality",
+        "calculator_parameter": {
+          "equation": "abs(FeatureIds-FeatureIds_Reference)",
+          "selected_group": "Damaged/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 21,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "Damaged/Cell Data/Valid_Reference",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "Damaged/Cell Data/LabelDifferenceForEquality",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "KnownLabelMismatch"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs.",
+      "key_parameters": {
+        "calculated_array_path": "Damaged/Cell Data/ComparisonClass",
+        "calculator_parameter": {
+          "equation": "Valid_Reference*(1+KnownLabelMismatch*(1+Valid))",
+          "selected_group": "Damaged/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 23,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row.",
+      "key_parameters": {
+        "selected_array_path": "Damaged/Cell Data/Valid",
+        "destination_attribute_matrix_path": "Damaged/ComparisonSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": true,
+        "feature_ids_path": "Damaged/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "PixelCount",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 24,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences.",
+      "key_parameters": {
+        "selected_array_path": "Damaged/Cell Data/Valid",
+        "destination_attribute_matrix_path": "Damaged/FilledComparisonSummary",
+        "use_mask": true,
+        "mask_array_path": "Damaged/Cell Data/Valid",
+        "compute_by_index": true,
+        "feature_ids_path": "Damaged/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "FilledPixels",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 25,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/T12_Cleanup_Examples/Damaged_Summary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "Damaged/ComparisonSummary/ClassId",
+          "Damaged/ComparisonSummary/PixelCount",
+          "Damaged/FilledComparisonSummary/FilledPixels",
+          "Damaged/ComparisonSummary/ClassHasData"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Reference/Cell Data/FeatureIds",
+          "Reference/Cell Data/Valid"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "Coordination4/Cell Data",
+        "new_path_suffix": "_Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Evaluate abs(FeatureIds-FeatureIds_Reference) in Coordination 4/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs.",
+      "key_parameters": {
+        "calculated_array_path": "Coordination4/Cell Data/LabelDifferenceForEquality",
+        "calculator_parameter": {
+          "equation": "abs(FeatureIds-FeatureIds_Reference)",
+          "selected_group": "Coordination4/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 28,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "Coordination4/Cell Data/Valid_Reference",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "Coordination4/Cell Data/LabelDifferenceForEquality",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "KnownLabelMismatch"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs.",
+      "key_parameters": {
+        "calculated_array_path": "Coordination4/Cell Data/ComparisonClass",
+        "calculator_parameter": {
+          "equation": "Valid_Reference*(1+KnownLabelMismatch*(1+Valid))",
+          "selected_group": "Coordination4/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 30,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row.",
+      "key_parameters": {
+        "selected_array_path": "Coordination4/Cell Data/Valid",
+        "destination_attribute_matrix_path": "Coordination4/ComparisonSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": true,
+        "feature_ids_path": "Coordination4/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "PixelCount",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 31,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences.",
+      "key_parameters": {
+        "selected_array_path": "Coordination4/Cell Data/Valid",
+        "destination_attribute_matrix_path": "Coordination4/FilledComparisonSummary",
+        "use_mask": true,
+        "mask_array_path": "Coordination4/Cell Data/Valid",
+        "compute_by_index": true,
+        "feature_ids_path": "Coordination4/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "FilledPixels",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 32,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/T12_Cleanup_Examples/Coordination4_Summary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "Coordination4/ComparisonSummary/ClassId",
+          "Coordination4/ComparisonSummary/PixelCount",
+          "Coordination4/FilledComparisonSummary/FilledPixels",
+          "Coordination4/ComparisonSummary/ClassHasData"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 33,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Reference/Cell Data/FeatureIds",
+          "Reference/Cell Data/Valid"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "ThresholdOnePass/Cell Data",
+        "new_path_suffix": "_Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 34,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Evaluate abs(FeatureIds-FeatureIds_Reference) in ThresholdOnePass/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs.",
+      "key_parameters": {
+        "calculated_array_path": "ThresholdOnePass/Cell Data/LabelDifferenceForEquality",
+        "calculator_parameter": {
+          "equation": "abs(FeatureIds-FeatureIds_Reference)",
+          "selected_group": "ThresholdOnePass/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 35,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "ThresholdOnePass/Cell Data/Valid_Reference",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "ThresholdOnePass/Cell Data/LabelDifferenceForEquality",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "KnownLabelMismatch"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 36,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs.",
+      "key_parameters": {
+        "calculated_array_path": "ThresholdOnePass/Cell Data/ComparisonClass",
+        "calculator_parameter": {
+          "equation": "Valid_Reference*(1+KnownLabelMismatch*(1+Valid))",
+          "selected_group": "ThresholdOnePass/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 37,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row.",
+      "key_parameters": {
+        "selected_array_path": "ThresholdOnePass/Cell Data/Valid",
+        "destination_attribute_matrix_path": "ThresholdOnePass/ComparisonSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": true,
+        "feature_ids_path": "ThresholdOnePass/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "PixelCount",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 38,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences.",
+      "key_parameters": {
+        "selected_array_path": "ThresholdOnePass/Cell Data/Valid",
+        "destination_attribute_matrix_path": "ThresholdOnePass/FilledComparisonSummary",
+        "use_mask": true,
+        "mask_array_path": "ThresholdOnePass/Cell Data/Valid",
+        "compute_by_index": true,
+        "feature_ids_path": "ThresholdOnePass/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "FilledPixels",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 39,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/T12_Cleanup_Examples/ThresholdOnePass_Summary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "ThresholdOnePass/ComparisonSummary/ClassId",
+          "ThresholdOnePass/ComparisonSummary/PixelCount",
+          "ThresholdOnePass/FilledComparisonSummary/FilledPixels",
+          "ThresholdOnePass/ComparisonSummary/ClassHasData"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 40,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters.",
+      "key_parameters": {
+        "existing_data_path": [
+          "Reference/Cell Data/FeatureIds",
+          "Reference/Cell Data/Valid"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "ThresholdUntilFilled/Cell Data",
+        "new_path_suffix": "_Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 41,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Evaluate abs(FeatureIds-FeatureIds_Reference) in ThresholdUntilFilled/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs.",
+      "key_parameters": {
+        "calculated_array_path": "ThresholdUntilFilled/Cell Data/LabelDifferenceForEquality",
+        "calculator_parameter": {
+          "equation": "abs(FeatureIds-FeatureIds_Reference)",
+          "selected_group": "ThresholdUntilFilled/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 42,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "ThresholdUntilFilled/Cell Data/Valid_Reference",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            },
+            {
+              "array_path": "ThresholdUntilFilled/Cell Data/LabelDifferenceForEquality",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "use_custom_true_value": false,
+        "custom_true_value": 1.0,
+        "use_custom_false_value": false,
+        "custom_false_value": 0.0,
+        "output_data_array_name": "KnownLabelMismatch"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 43,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs.",
+      "key_parameters": {
+        "calculated_array_path": "ThresholdUntilFilled/Cell Data/ComparisonClass",
+        "calculator_parameter": {
+          "equation": "Valid_Reference*(1+KnownLabelMismatch*(1+Valid))",
+          "selected_group": "ThresholdUntilFilled/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 44,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row.",
+      "key_parameters": {
+        "selected_array_path": "ThresholdUntilFilled/Cell Data/Valid",
+        "destination_attribute_matrix_path": "ThresholdUntilFilled/ComparisonSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": true,
+        "feature_ids_path": "ThresholdUntilFilled/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "PixelCount",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 45,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences.",
+      "key_parameters": {
+        "selected_array_path": "ThresholdUntilFilled/Cell Data/Valid",
+        "destination_attribute_matrix_path": "ThresholdUntilFilled/FilledComparisonSummary",
+        "use_mask": true,
+        "mask_array_path": "ThresholdUntilFilled/Cell Data/Valid",
+        "compute_by_index": true,
+        "feature_ids_path": "ThresholdUntilFilled/Cell Data/ComparisonClass",
+        "feature_has_data_array_name": "ClassHasData",
+        "range_type_index": 3,
+        "range": [
+          0,
+          3
+        ],
+        "feature_ids_indexing_name": "ClassId",
+        "find_length": true,
+        "length_array_name": "FilledPixels",
+        "find_min": false,
+        "minimum_array_name": "MinimumIntensity",
+        "find_max": false,
+        "maximum_array_name": "MaximumIntensity",
+        "find_mean": false,
+        "mean_array_name": "MeanIntensity",
+        "find_median": false,
+        "median_array_name": "Median",
+        "find_mode": false,
+        "mode_array_name": "Mode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "StandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "standardize_data": false,
+        "standardized_array_name": "Standardized",
+        "find_unique_values": false,
+        "number_unique_values_name": "NumUniqueValues"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 46,
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "role": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct.",
+      "key_parameters": {
+        "output_style_index": 1,
+        "output_path": "Data/Output/T12_Cleanup_Examples/ThresholdUntilFilled_Summary.csv",
+        "output_dir": "",
+        "file_extension": ".csv",
+        "max_val_per_line": 1,
+        "delimiter_index": 2,
+        "header_option_index": 1,
+        "input_data_array_paths": [
+          "ThresholdUntilFilled/ComparisonSummary/ClassId",
+          "ThresholdUntilFilled/ComparisonSummary/PixelCount",
+          "ThresholdUntilFilled/FilledComparisonSummary/FilledPixels",
+          "ThresholdUntilFilled/ComparisonSummary/ClassHasData"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 47,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the frozen reference, identical damaged source and three repair variants with donor provenance and native comparison masks/statistics. All changed values are deliberate synthetic faults or inferred copies, not new measurements.",
+      "key_parameters": {
+        "export_file_path": "Data/Output/T12_Cleanup_Examples/T12CleanupComparison.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "A study of the heterogeneity of plastic deformation in IF steel by EBSD",
+      "authors": [
+        "Nathalie Allain-Bonasso",
+        "Francis Wagner",
+        "Stephane Berbenni",
+        "David P. Field"
+      ],
+      "year": 2012,
+      "journal": "Materials Science and Engineering A",
+      "doi": "10.1016/j.msea.2012.03.068",
+      "url": "https://doi.org/10.1016/j.msea.2012.03.068",
+      "scope": "pipeline_workflow",
+      "role": "Measured T12 source context only; controlled missing-data injection and repair choices are not paper methods.",
+      "dataset": {
+        "availability": "Public paper-linked T12-MAI-2010 archive; archive release notice names the article and permits DREAM.3D distribution.",
+        "url": "https://www.dream3d.io/Data_Archive/T12-MAI-2010.tar.gz",
+        "doi": "",
+        "license": "Archive notice attributes public release to Francis Wagner and expressly permits distribution in DREAM.3D downloads; no standard SPDX license is named.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Artificial missing tuples and an8x8patch are added to a crop of the corrected public T12 map. The paper noise-reduction and deformation methods are not reproduced; probabilities,patch and donor rules are illustrative."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Measured T12 source context only; controlled missing-data injection and repair choices are not paper methods."
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Windows Release in-core native execution and 141 independent numerical checks passed. OOC, generated Python, GUI and materials interpretation remain unverified.",
+  "reference_results": {
+    "shape_xyz": [
+      64,
+      64,
+      1
+    ],
+    "origin_um": [
+      -367.5,
+      150,
+      -1
+    ],
+    "spacing_um": [
+      0.5,
+      0.5,
+      1
+    ],
+    "known_pixels": 3937,
+    "unknown_pixels": 159,
+    "class_order": [
+      "originally unknown",
+      "known label agrees",
+      "known but missing",
+      "known and filled with different label"
+    ],
+    "counts": {
+      "Damaged": [
+        159,
+        3659,
+        278,
+        0
+      ],
+      "Coordination4": [
+        159,
+        3754,
+        181,
+        2
+      ],
+      "ThresholdOnePass": [
+        159,
+        3889,
+        38,
+        10
+      ],
+      "ThresholdUntilFilled": [
+        159,
+        3912,
+        0,
+        25
+      ]
+    },
+    "originally_unknown_filled": [
+      0,
+      37,
+      143,
+      159
+    ],
+    "total_filled": [
+      3659,
+      3793,
+      4042,
+      4096
+    ],
+    "coordination_initially_passing_pixels_erased": 2
+  },
+  "figure": {
+    "file": "T12CleanupComparison.png",
+    "sha256": "344d9078a60d6ae81e22cdeda76458c7b7ccfe00b29e266d1e39afe5be702448",
+    "native_source_sha256": "3ac393060c516d46487d756df5a2e8cd9d725bc713984c6ba70c8ef36effe4bb",
+    "method": "Top panels display native IPFColors copied with each donor tuple. Bottom panels display native ComparisonClass arrays; Reference uses its native Valid mask. Plotter computes no orientations,cleanup decisions or outcome classifications. Titles read native UInt64 counts.",
+    "arrays": [
+      "Reference/Cell Data/Valid",
+      "*/Cell Data/IPFColors",
+      "*/Cell Data/ComparisonClass",
+      "*/ComparisonSummary/PixelCount"
+    ],
+    "extent_micrometers": [
+      -367.5,
+      -335.5,
+      150,
+      182
+    ],
+    "injected_patch_bounds_xyz": [
+      [
+        28,
+        36,
+        0
+      ],
+      [
+        35,
+        43,
+        0
+      ]
+    ],
+    "comparison_colors": {
+      "0": "#cccccc",
+      "1": "#4daf4a",
+      "2": "#151515",
+      "3": "#e41a1c"
+    }
+  },
+  "native_chain": {
+    "ctest": "PIPELINE::OrientationAnalysis::T12_Cleanup_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS: required orientation case study and48-step cleanup pipeline;141/141 independent checks,105 native datasets repeat exactly."
+  }
+}

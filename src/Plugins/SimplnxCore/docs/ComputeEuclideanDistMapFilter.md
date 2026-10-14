@@ -42,6 +42,8 @@ Resident scratch is proportional to one XY slice, not the volume. Euclidean mode
 
 ## Example Pipelines
 
++ `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 - (01) SmallIN100 Morphological Statistics

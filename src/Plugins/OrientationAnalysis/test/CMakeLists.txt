@@ -582,3 +582,15 @@ add_test(NAME PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples
 set_tests_properties(PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;ExternalData;Gille_Aluminum_LabDCT_Examples"
     SKIP_REGULAR_EXPRESSION "SKIP_SOURCE_DATA:")
+
+# Controlled missing-data comparison on the normally packaged T12 map.
+add_test(NAME PIPELINE::OrientationAnalysis::T12_Cleanup_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DRAW_DATA_FILE=$<TARGET_FILE_DIR:nxrunner>/Data/T12-MAI-2010/fw-ar-IF1-aptr12-corr.ctf"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/T12_Cleanup_Examples"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/T12_Cleanup_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/T12CleanupExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::T12_Cleanup_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;T12_Cleanup_Examples")

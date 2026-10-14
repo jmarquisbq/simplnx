@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "plugin": "OrientationAnalysis",
+  "suite": "T12_Cleanup_Examples",
+  "filters": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the accepted corrected preparation from T12 Orientation Case Study. This separate controlled-fault experiment does not change the original measured-data workflow or implement the paper cleanup method."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Select a fixed 64 by 64 single-slice measured region, 32 by 32 micrometers, with 13 positive reference grains and 3937 indexed pixels. Inclusive bounds preserve original grain IDs and corrected geometry coordinates. This small ROI is for method inspection, not population statistics."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 2,
+      "purpose": "Discard the full imported geometry and unneeded coordinate/derived fields from this comparison. Keep only tuple fields whose neighbor-copy meaning is explicit; no stale per-feature statistics are carried into damaged branches."
+    },
+    {
+      "filter": "ConvertDataFilter",
+      "uuid": "6dc586cc-59fb-4ee8-90ff-2d3587da12f5",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 3,
+      "purpose": "Convert the original indexing mask to UInt 8 0/1. It marks which reference labels are known; zero is not a measured void phase."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 4,
+      "purpose": "Remove the original Boolean mask after creating the named UInt 8 Valid array; avoid two competing validity fields in the repair branches."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 5,
+      "purpose": "Assign local reference tuple indices 0..4095. Neighbor replacement copies this provenance field with the other attributes, showing which original pixel supplied an inferred tuple; it is not a spatial coordinate."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 6,
+      "purpose": "Build Float32 RepairScore=Valid*(1+BC). Missing/reference-invalid pixels score 0; valid pixels score at least 1. Threshold 0.5 separates validity, while higher BC ranks donors. BC is a contrast heuristic, not calibrated orientation confidence; Float32 avoids integer threshold truncation."
+    },
+    {
+      "filter": "ComputeEuclideanDistMapFilter",
+      "uuid": "ba9ae8f6-443e-41d3-bb45-a08a139325c1",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 7,
+      "purpose": "Compute Int32 Manhattan boundary steps directly for Add Bad Data eligibility. This avoids casting physical Euclidean distances into integers; only distance<1 is used by the injector."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 8,
+      "purpose": "Copy the full 64 by 64 extent of Reference into independent Damaged, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made."
+    },
+    {
+      "filter": "AddBadDataFilter",
+      "uuid": "f44c66d1-a095-4e33-871c-c7699d89a011",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 9,
+      "purpose": "Add explicitly simulated missing tuples:3%global per-cell opportunities and 10%boundary-eligible opportunities, with overlap and fixed seed 20261014. Every sibling tuple is zeroed when selected. These fractions are teaching choices, not measured T12 noise estimates."
+    },
+    {
+      "filter": "InitializeImageGeomCellDataFilter",
+      "uuid": "447b8909-661f-446a-8c1f-72e0cb568fcf",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 10,
+      "purpose": "Zero a controlled 8 by 8 patch at inclusive indices[28, 36, 0]..[35, 43, 0], 64 cells across the existing 1139/1152 grain boundary. This creates a contiguous missing region that a one-pass repair cannot fully fill. All selected tuple components, including validity/score, are zeroed; no physical defect is claimed."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 11,
+      "purpose": "Remove the now-stale injection distance map before cleanup. Reference retains its valid pre-injection map; a copied donor distance would not describe a repaired target location."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 12,
+      "purpose": "Copy the full 64 by 64 extent of Damaged into independent Coordination 4, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made."
+    },
+    {
+      "filter": "ErodeDilateCoordinationNumberFilter",
+      "uuid": "e4553e82-ab82-49d7-993c-8b55b15c7724",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 13,
+      "purpose": "Apply one ordered coordination 4 pass to the same damaged input. A single Z slice has only 4 face neighbors; count opposite 0-versus-positive status, not boundaries between two positive grain IDs. Whole tuples follow the selected neighbor, including DonorIndex."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 14,
+      "purpose": "Copy the full 64 by 64 extent of Damaged into independent ThresholdOnePass, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made."
+    },
+    {
+      "filter": "ReplaceElementAttributesWithNeighborValuesFilter",
+      "uuid": "65128c53-d3be-4a69-a559-32a48d603884",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 15,
+      "purpose": "Replace score<0.5 cells using the passing face neighbor with highest score. Copy every cell tuple field coherently. Use exactly one pass so algorithm choice can be compared separately from iteration. This does not enforce grain/phase barriers or recover the original measured orientation."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 16,
+      "purpose": "Copy the full 64 by 64 extent of Damaged into independent ThresholdUntilFilled, preserving source coordinates, Micrometer units and grain IDs. Full-extent Crop avoids the ImageGeom deep-copy unit-loss defect tracked in #1784; no additional spatial crop is made."
+    },
+    {
+      "filter": "ReplaceElementAttributesWithNeighborValuesFilter",
+      "uuid": "65128c53-d3be-4a69-a559-32a48d603884",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 17,
+      "purpose": "Replace score<0.5 cells using the passing face neighbor with highest score. Copy every cell tuple field coherently. Repeat on this verified donor-connected fixture until filled; loop mode has no no-progress limit if no passing donors exist. This does not enforce grain/phase barriers or recover the original measured orientation."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 18,
+      "purpose": "Count positive validity values over all 4096 pixels. Filled pixels include inferred replacements at originally unknown locations; this is not an accuracy measure."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 19,
+      "purpose": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 20,
+      "purpose": "Evaluate abs(FeatureIds-FeatureIds_Reference) in Damaged/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 21,
+      "purpose": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 22,
+      "purpose": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 23,
+      "purpose": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 24,
+      "purpose": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 25,
+      "purpose": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 26,
+      "purpose": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 27,
+      "purpose": "Evaluate abs(FeatureIds-FeatureIds_Reference) in Coordination 4/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 28,
+      "purpose": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 29,
+      "purpose": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 30,
+      "purpose": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 31,
+      "purpose": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 32,
+      "purpose": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 33,
+      "purpose": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 34,
+      "purpose": "Evaluate abs(FeatureIds-FeatureIds_Reference) in ThresholdOnePass/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 35,
+      "purpose": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 36,
+      "purpose": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 37,
+      "purpose": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 38,
+      "purpose": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 39,
+      "purpose": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 40,
+      "purpose": "Add frozen reference labels and validity only after destructive processing, so comparison data cannot be overwritten by the repair filters."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 41,
+      "purpose": "Evaluate abs(FeatureIds-FeatureIds_Reference) in ThresholdUntilFilled/Cell Data; the numeric label difference is used only to test equality, not as a distance between grain IDs."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 42,
+      "purpose": "Mark disagreement only where the original reference was indexed. Originally unindexed pixels have no reference label to score; a filled output there remains inferred."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 43,
+      "purpose": "Classify outcomes:0=originally unknown, 1=known label agrees, 2=known but still missing, 3=known and filled with a different grain label. These are comparison classes, not grain or material IDs."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 44,
+      "purpose": "Count all four comparison classes as UInt64 lengths. Padded inclusive range[0, 3] keeps absent classes as zero rows; class 0 is meaningful originally-unknown data, not a reserved background row."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 45,
+      "purpose": "Count passing validity pixels within the same four padded classes using the mask and UInt64 length. This avoids narrow-integer summation overflow in the current custom-range path (#1477). Class 0 filled pixels remain unscored inferences."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 46,
+      "purpose": "Write four outcome rows including class 0. Separate known missing, known wrong-filled, and originally unknown populations; do not score filled unknown pixels as correct."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) T12 Missing Data Cleanup Comparison.d3dpipeline",
+      "step": 47,
+      "purpose": "Save the frozen reference, identical damaged source and three repair variants with donor provenance and native comparison masks/statistics. All changed values are deliberate synthetic faults or inferred copies, not new measurements."
+    }
+  ]
+}

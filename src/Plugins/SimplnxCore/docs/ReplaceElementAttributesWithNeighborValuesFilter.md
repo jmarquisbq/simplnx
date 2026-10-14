@@ -19,14 +19,18 @@ This filter is most often used to clean up EBSD data using a confidence-related 
 
 If a flagged cell has only flagged neighbors (i.e., none of its neighbors pass the threshold), it is left unchanged in this pass.
 
+A single XY slice has at most **four** face neighbors. The filter does not enforce grain or phase boundaries. Remove coordinate arrays and other fields that must not follow a donor before execution, retain an untouched reference, and recompute derived feature/orientation statistics afterward. Use a floating-point comparison array when a fractional threshold must remain fractional; the typed comparison can truncate that threshold for integer inputs.
+
 ### Comparison Operator
 
-- **< [Less Than] [0]**: Targets cells whose scalar is **less than** the threshold. Replacement neighbor is the one with the **highest** scalar value among neighbors that exceed the threshold. Use this for measures where higher = better (Confidence Index, Image Quality).
-- **> [Greater Than] [1]**: Targets cells whose scalar is **greater than** the threshold. Replacement neighbor is the one with the **lowest** scalar value among neighbors that fall below the threshold. Use this for measures where lower = better (Mean Angular Deviation, scan error metrics).
+- **< [Less Than] [0]**: Targets cells whose scalar is **less than** the threshold. The donor has the **highest** scalar among neighbors at or above the threshold. Use this for measures where higher = better (Confidence Index, Image Quality).
+- **> [Greater Than] [1]**: Targets cells whose scalar is **greater than** the threshold. The donor has the **lowest** scalar among neighbors at or below the threshold. Use this for measures where lower = better (Mean Angular Deviation, scan error metrics).
 
 ### Loop Until Gone
 
 By default, the filter runs a **single pass**. If a flagged cell's neighbors are all flagged in that pass, the cell is left alone. Enabling *Loop Until Gone* repeats the algorithm until every flagged cell has been replaced (typically because flag-replacements propagate inward across multiple passes).
+
+**Current limitation:** the loop has no no-progress termination. If no cell supplies a passing donor, it can repeat indefinitely; use a single pass until donor availability is established. This is tracked in [#1806](https://github.com/BlueQuartzSoftware/simplnx/issues/1806). A fully filled result may still have incorrect grain labels and imputed local orientations.
 
 ### Caution: Flood Fill Behavior
 
@@ -102,13 +106,15 @@ This algorithm is optimized for both in-memory and out-of-core (OOC) data stores
 
 - **Sequential Z-slice processing**: The volume is scanned one Z-slice at a time, aligning with typical chunk boundaries.
 - **3-slice rolling window**: Three adjacent Z-slices of the comparison array are held in typed memory buffers, allowing face-neighbor value lookups without per-voxel store access.
-- **Immediate per-slice transfer**: Because replacement marks always point to face neighbors (within one Z-slice), each slice can be committed immediately after its scan completes, keeping writes sequential.
+- **Immediate per-slice transfer**: Each slice is committed after its scan completes. Face neighbors can lie in the adjacent Z slices; in a one-slice image only the four in-plane neighbors are available.
 - **O(sliceSize) memory**: A single per-slice mark array replaces a full-volume neighbor array, keeping peak memory proportional to one Z-slice.
 - **Type-dispatched inner loop**: The comparison and transfer logic is templated on the input array's element type, avoiding virtual dispatch overhead in the tight inner loop.
 
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
++ `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
 
 The example pipeline (pipelines/Examples/ReplaceElementAttributesWithNeighbor.d3dpipeline) will give output similar to the following images.
 

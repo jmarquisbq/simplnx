@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "t12-cleanup-python-generation-v1",
+  "title": "T12 controlled cleanup temporary Python generation",
+  "source_authority": ".d3dpipeline",
+  "converter_api": "simplnx_utilities.generate_python_pipeline",
+  "required_modules": [
+    "simplnx",
+    "orientationanalysis",
+    "imageprocessing",
+    "simplnx_utilities"
+  ],
+  "working_directory": "Writable folder containing the T12 preparation checkpoint under Data/Output/T12_Orientation_Examples/Preparation",
+  "output_lifetime": "temporary",
+  "verification_status": "NOT VERIFIED: generated Python has not been executed.",
+  "failure_behavior": "Report a missing module, load error, generation error, or execution error. Do not silently substitute handwritten Python.",
+  "regeneration_rule": "Regenerate temporary Python from the authoritative .d3dpipeline after any filter, argument, comment, or path change.",
+  "path_rules": {
+    "pipeline_reference_base": "pipeline_suite_root",
+    "runtime_data_base": "chosen_cli_working_directory",
+    "input_paths": "Retain the declared T12 preparation checkpoint. Run the orientation case-study predecessor first.",
+    "output_paths": "Retain Data/Output/T12_Cleanup_Examples outputs."
+  },
+  "generation": {
+    "language": "Python",
+    "steps": [
+      "Use the matching application Python environment and import the required modules.",
+      "Load the authoritative JSON and call simplnx_utilities.generate_python_pipeline.",
+      "Compile and write generated code to a temporary file. Do not replace native filters with handwritten algorithms.",
+      "Run the prerequisite orientation case study and then this cleanup pipeline in the same working directory.",
+      "Verify native masks, donor tuples, comparison classes and all four CSVs; discard temporary Python after validation."
+    ],
+    "reference_code": [
+      "import simplnx as nx",
+      "import orientationanalysis",
+      "import imageprocessing",
+      "import simplnx_utilities",
+      "pipeline = nx.Pipeline.from_file(pipeline_path)",
+      "code = simplnx_utilities.generate_python_pipeline(pipeline)",
+      "compile(code, str(pipeline_path), 'exec')"
+    ]
+  },
+  "validation": {
+    "syntax": "Compile generated text.",
+    "structure": "Match all 48 enabled steps and parameters to JSON.",
+    "paths": "Resolve the declared predecessor and output paths.",
+    "execution": "Verify 3937 known/159 unknown pixels, 278 newly missing known pixels, all class counts and donor tuple coherence. Repeated filling leaves 25 known-label differences. Generated Python remains unverified.",
+    "storage": "Validate OOC separately."
+  },
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "pipeline_files": [
+    "(01) T12 Missing Data Cleanup Comparison.d3dpipeline"
+  ],
+  "execution_order": [
+    "(01) T12 Missing Data Cleanup Comparison.d3dpipeline"
+  ]
+}

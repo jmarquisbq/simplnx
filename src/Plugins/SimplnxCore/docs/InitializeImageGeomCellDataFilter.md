@@ -43,6 +43,8 @@ For boolean arrays in random modes, each cell is set to a uniformly-chosen true/
 
 ## Example Pipelines
 
++ `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**
