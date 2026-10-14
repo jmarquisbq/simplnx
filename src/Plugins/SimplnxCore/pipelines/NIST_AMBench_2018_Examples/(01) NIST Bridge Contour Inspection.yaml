@@ -3,7 +3,7 @@
   "pipeline_file": "(01) NIST Bridge Contour Inspection.d3dpipeline",
   "markdown_file": "(01) NIST Bridge Contour Inspection.md",
   "title": "NIST Bridge Contour Inspection",
-  "summary": "Extract, crop, select and sample nominal design contours for a local inspection reference.",
+  "summary": "Extract, crop, select and sample nominal design contours; compare signed nearest-CAD distances under a controlled offset and reversed winding.",
   "primary_industries": [
     "Additive manufacturing"
   ],
@@ -50,7 +50,7 @@
       "75 by 5 by 12.5 mm coordinate bounds",
       "Original binary STL, 376 triangles"
     ],
-    "known_differences": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795.",
+    "known_differences": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795. A +0.1 mm Y point translation and globally reversed mesh copy demonstrate distance conventions; neither is measured deformation or a mesh-orientation repair.",
     "archive_provenance_file": "DataSources.json"
   },
   "python_generation": {
@@ -74,7 +74,7 @@
         "license": "NIST open non-SRD data terms: reuse and redistribution with acknowledgement and identification of changes; see https://www.nist.gov/open/license.",
         "included": false,
         "reproduction_status": "illustrative",
-        "reproduction_notes": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795."
+        "reproduction_notes": "Original nominal CAD, not measured material data. Diagnostic planes at 0.25 through 12.25 mm with 1 mm spacing, X-prefix crop and 0.25 mm edge sampling are illustrative inspection choices. No reproduction of NIST build layers, laser controls, scan timing, thermal history or deformation. Hatch generation is deferred for issue 1795. A +0.1 mm Y point translation and globally reversed mesh copy demonstrate distance conventions; neither is measured deformation or a mesh-orientation repair."
       }
     }
   ],
@@ -87,8 +87,8 @@
   "outputs": [
     {
       "path": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
-      "role": "Calibrated CAD, full and cropped contours, selected section and inspection samples.",
-      "sha256": "65b66b2f3d2bd6d9531becf02b5c364dba7fcf8b5810b6b22709f25bf364b6e0"
+      "role": "Calibrated CAD, full and cropped contours, selected section and inspection samples. Includes ShiftedInspectionSamples and ReversedWindingCAD with signed-distance diagnostics.",
+      "sha256": "36335d1c75e5536c09b4f539b7a8b7d26030f2ef539c9ad5bcd8cceaf7ee8b22"
     }
   ],
   "prerequisites": [],
@@ -671,6 +671,266 @@
     },
     {
       "index": 22,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy nominal samples into a separate Millimeter point geometry for a controlled registration-error demonstration; this is not an independently measured scan.",
+      "paths": [
+        "ShiftedInspectionSamples",
+        "InspectionSamples/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 7,
+        "output_geometry_path": "ShiftedInspectionSamples",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "InspectionSamples/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Keep each shifted point associated with the same selected contour edge and diagnostic section.",
+      "paths": [
+        "ShiftedInspectionSamples/Vertex Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "InspectionSamples/Vertex Data/SourceEdgeIds",
+          "InspectionSamples/Vertex Data/SliceIds",
+          "InspectionSamples/Vertex Data/RegionIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "ShiftedInspectionSamples/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Translate only the copied points by +0.1 mm along global Y. This controlled offset tests coordinate alignment and signed-distance interpretation, not manufacturing deviation.",
+      "paths": [
+        "ShiftedInspectionSamples",
+        "UnusedTransform"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "ShiftedInspectionSamples",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.1
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": false,
+        "output_transform_matrix_path": "UnusedTransform"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 25,
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "role": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment.",
+      "paths": [
+        "InspectionSamples",
+        "NominalCAD",
+        "NominalCAD/Face Data/Face Normals"
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "InspectionSamples",
+        "input_triangle_geometry_path": "NominalCAD",
+        "triangle_normals_array_path": "NominalCAD/Face Data/Face Normals",
+        "distances_array_name": "NominalCADDistanceMM",
+        "closest_triangle_id_array_name": "ClosestNominalTriangleIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "role": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment.",
+      "paths": [
+        "ShiftedInspectionSamples",
+        "NominalCAD",
+        "NominalCAD/Face Data/Face Normals"
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "ShiftedInspectionSamples",
+        "input_triangle_geometry_path": "NominalCAD",
+        "triangle_normals_array_path": "NominalCAD/Face Data/Face Normals",
+        "distances_array_name": "NominalCADDistanceMM",
+        "closest_triangle_id_array_name": "ClosestNominalTriangleIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy nominal CAD coordinates and connectivity with Millimeter units; do not copy the stored normals, because this branch will reverse winding.",
+      "paths": [
+        "ReversedWindingCAD",
+        "NominalCAD/Shared Vertex List",
+        "NominalCAD/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "ReversedWindingCAD",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "NominalCAD/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "NominalCAD/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 28,
+      "filter": "ReverseTriangleWindingFilter",
+      "uuid": "f11a45e9-c169-4227-85b0-0fb0108e47de",
+      "role": "Reverse every triangle in this comparison copy. This demonstrates a global convention change; it does not detect or repair inconsistent orientation in an arbitrary mesh.",
+      "paths": [
+        "ReversedWindingCAD"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "ReversedWindingCAD"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Recompute normals from reversed vertex ordering. Reversing connectivity alone does not update an existing normal array.",
+      "paths": [
+        "ReversedWindingCAD"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "ReversedWindingCAD",
+        "output_normals_array_name": "ReversedNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 30,
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "role": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment.",
+      "paths": [
+        "ShiftedInspectionSamples",
+        "ReversedWindingCAD",
+        "ReversedWindingCAD/Face Data/ReversedNormals"
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "ShiftedInspectionSamples",
+        "input_triangle_geometry_path": "ReversedWindingCAD",
+        "triangle_normals_array_path": "ReversedWindingCAD/Face Data/ReversedNormals",
+        "distances_array_name": "ReversedCADDistanceMM",
+        "closest_triangle_id_array_name": "ClosestReversedTriangleIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 31,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save nominal CAD, all contours, cropped contours, one selected section and its inspection samples together. No hatch path, machine motion, measurement, or physical prediction is produced.",
@@ -711,7 +971,7 @@
     },
     "section_max_error_mm": 3.051757815342171e-06,
     "sample_max_error_mm": 1.9073486328125e-06,
-    "pipeline_sha256": "6c325d200c2ad4797edef8767dad68ae891921e1ddd000b5afd9208adcd558cb",
+    "pipeline_sha256": "fba0a8dfdaf8ed4670596a97eda38ad2e5a66bf7012e30906cd38479de42b1eb",
     "unverified": [
       "native GUI",
       "OOC",
@@ -724,15 +984,37 @@
     "pipeline_chain": {
       "test": "PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples",
       "passed": true,
-      "elapsed_seconds": 1.04,
-      "pipelines": 1
+      "pipelines": 1,
+      "configuration": "Release, serial"
+    },
+    "distance_comparison_checks": {
+      "passed": 32,
+      "total": 32,
+      "preserved_prior_datasets": 27,
+      "scope": "Nearest finite triangle distances and local-normal signs on nominal and controlled-shift points; no manufacturing or global solid-containment validation.",
+      "expected_results": {
+        "InspectionSamples": {
+          "max_magnitude_mm": 1.9073486328125e-06,
+          "oracle_max_error_mm": 1.9073486328125e-06,
+          "negative": 0,
+          "near_zero": 522,
+          "positive": 0
+        },
+        "ShiftedInspectionSamples": {
+          "max_magnitude_mm": 0.10000000149011612,
+          "oracle_max_error_mm": 9.53790731728077e-07,
+          "negative": 122,
+          "near_zero": 268,
+          "positive": 132
+        }
+      }
     }
   },
   "result_visual": {
     "image": "ContourInspection.png",
     "sha256": "d50aeaa308abd140339a51586db2a3c394df77fe06dbbcf8955a257a6251b24d",
     "native_output": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
-    "native_output_sha256": "65b66b2f3d2bd6d9531becf02b5c364dba7fcf8b5810b6b22709f25bf364b6e0",
+    "native_output_sha256": "36335d1c75e5536c09b4f539b7a8b7d26030f2ef539c9ad5bcd8cceaf7ee8b22",
     "arrays": [
       "NominalCAD/Shared Vertex List",
       "NominalCAD/Shared Faces List",
@@ -744,7 +1026,8 @@
       "InspectionSamples/Shared Vertex List"
     ],
     "rendering": "Matplotlib renders native filter outputs directly. No paper figure copied; no slicing, cropping or sampling algorithm reimplemented for the figure. Independent arithmetic exists only in the validation script.",
-    "coordinate_units": "millimeters"
+    "coordinate_units": "millimeters",
+    "preservation_note": "All 27 prior datasets are bitwise unchanged in the extended output."
   },
   "known_limitations": [
     {
@@ -759,5 +1042,19 @@
       "issue": "https://github.com/BlueQuartzSoftware/simplnx/issues/1797",
       "handling": "Optional cumulative sample distance disabled."
     }
-  ]
+  ],
+  "distance_visual": {
+    "image": "DistanceConvention.png",
+    "sha256": "8ee2a1a2e17b1e8643bd85e225577564fd5ddaae89afbcf6cb669d9f8482f20b",
+    "native_output": "Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d",
+    "native_output_sha256": "36335d1c75e5536c09b4f539b7a8b7d26030f2ef539c9ad5bcd8cceaf7ee8b22",
+    "arrays": [
+      "ShiftedInspectionSamples/Shared Vertex List",
+      "ShiftedInspectionSamples/Vertex Data/NominalCADDistanceMM",
+      "ShiftedInspectionSamples/Vertex Data/ReversedCADDistanceMM",
+      "SelectedContours/Shared Vertex List",
+      "SelectedContours/Shared Edge List"
+    ],
+    "rendering": "Native DREAM3D-NX distance arrays plotted directly with Matplotlib coolwarm, fixed range [-0.1,0.1] mm. Gray lines show the nominal selected contour. No distance algorithm is used to generate the figure."
+  }
 }

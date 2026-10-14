@@ -49,5 +49,6 @@
     "storage": "Validate OOC separately before claiming OOC support."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
-  "geometry_contract": "Retain explicit Millimeter copies, SliceIds != 6 removal mask, per-edge sample placement, SourceEdgeIds association, and disabled cumulative distance. No hatch generation."
+  "geometry_contract": "Retain explicit Millimeter copies, SliceIds != 6 removal mask, per-edge sample placement, SourceEdgeIds association, and disabled cumulative distance. No hatch generation.",
+  "distance_contract": "Regenerate all 32 steps. Keep the nominal points, explicit +0.1 mm global-Y challenge, original CAD and separate reversed-winding copy; recompute its normals before signed distances. Never describe the challenge as measured data."
 }

@@ -12,6 +12,8 @@ The computed distance is reported in the same length unit as the coordinates of 
 
 The sign of each distance depends on the **Triangle Normals**. For the sign to be correct, the normals must be present and consistently oriented across the mesh (all pointing to the same "outside"). Inconsistent or flipped normals will produce sign errors even when the distance magnitude is correct.
 
+This sign describes the side of the selected nearest face. It is not a general solid-containment test for an open, non-manifold or inconsistently oriented mesh. After [Reverse Triangle Winding](ReverseTriangleWindingFilter.md), recompute normals before repeating the distance calculation. Closest-triangle IDs are row indices in the selected target mesh; edge or vertex ties may admit more than one nearest triangle.
+
 ### Required Input Sources
 
 - **Vertex Geometry** -- the point cloud whose distances are measured.
@@ -19,6 +21,12 @@ The sign of each distance depends on the **Triangle Normals**. For the sign to b
 - **Triangle Normals** -- per-face normals on the **Triangle Geometry**, produced by [Compute Triangle Normals](TriangleNormalFilter.md); required for correct distance signs.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `NIST_AMBench_2018_Examples/(01) NIST Bridge Contour Inspection.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

@@ -10,7 +10,7 @@ Executable pipeline: `(01) NIST Bridge Contour Inspection.d3dpipeline`
 | --- | --- |
 | Question | How can I extract and sample a local cross-section of a real manufacturing specimen? |
 | Input | Original NIST `AMB2018_01_Part.STL`; setup is in the [README](README.md) |
-| Workflow | Read CAD -> slice -> crop -> select one section -> sample its edges |
+| Workflow | Read CAD -> slice -> crop -> select -> sample -> check distance and winding conventions |
 | Coordinates | Millimeters; selected section Z = 6.25, retained X <= 32.5 |
 | Output | `Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d` |
 
@@ -28,7 +28,10 @@ An inspection engineer may need points along selected design contours to compare
 | Crop Edge Geometry | Retain X in [-1, 32.5] and interpolate an outside endpoint onto the upper boundary. The lower bound includes the original X = 0 face. This prefix region exercises clipping while avoiding segments whose two endpoints are outside opposite bounds. Cropping inserts no closing edges, so the result can be open. |
 | Multi Threshold Objects; Remove Flagged Edges | Mark `SliceIds != 6` as true, then remove those edges. Zero-based slice 6 is Z = 6.25 mm, through the overhangs. Keep the full and cropped geometries so the selection can be checked. Edge and vertex indices are compacted. |
 | Point Sample Edge Geometry | Request 0.25 mm spacing on the retained contour segments. Samples sit inside each edge, excluding endpoints; spacing restarts at each tessellation edge. This prepares discrete inspection locations, not a continuous traversal order. |
-| Write DREAM3D | Retain CAD, all sections, cropped sections, the selected section and samples in one result. There is no need to run separate examples. |
+| Controlled point copy; Apply Transformation | Translate a separate copy by +0.1 mm along global Y. This deliberately introduced alignment error provides nonzero distances; it is not a measured scan or observed deformation. |
+| Compute Vertex to Triangle Distances | Compare both nominal and shifted samples with the original CAD. Save signed distances in mm and the nearest triangle row IDs. This measures distance to a finite triangle, not its infinite supporting plane. |
+| Reverse Triangle Winding; Triangle Normals | Reverse a separate CAD copy and recompute its normals before repeating the shifted-point comparison. Magnitudes should stay the same while significant signs reverse. Reversal alone does not update a stored normal array or repair inconsistent winding. |
+| Write DREAM3D | Retain baseline geometry and the two comparison copies with their diagnostics. There is no need to run separate examples. |
 
 For edge length L and requested spacing s, the sampler uses `n = floor(L/s) + 1` points at fractions `(j + 0.5)/n`. Thus actual spacing is L/n, not necessarily s. Retessellating the same curve can change the sample distribution. `SourceEdgeIds` refers to `SelectedContours/Shared Edge List`, not original STL triangle IDs. Slice and region labels are copied to each sample.
 
@@ -45,10 +48,20 @@ Open the result and inspect these geometries:
 | `CroppedContours` | 671 edges, all X <= 32.5. Twenty-four crossing edges are shortened; open ends at the cut are expected. |
 | `SelectedContours` | 63 edges, all at Z = 6.25, with `SliceIds = 6` and `RegionIds = 1`. |
 | `InspectionSamples` | 522 points lying on those edges. Inspect `Vertex Data/SourceEdgeIds`, `SliceIds` and `RegionIds`. |
+| `ShiftedInspectionSamples` | The same points shifted +0.1 mm in Y, with distances to original and reversed CAD. |
+| `ReversedWindingCAD` | The same coordinates and triangles with reversed ordering and fresh `Face Data/ReversedNormals`. |
 
 ![Native nominal CAD, selected contours and sample points](ContourInspection.png)
 
 The figure renders native DREAM3D-NX output arrays. The independent check matches section intersections and sample positions within 0.0001 mm. That tolerance checks numerical geometry; it is not a manufacturing acceptance tolerance. The original STL is not certified watertight, and cropped open contours cannot be interpreted as a closed area or volume.
+
+### Distance and normal convention
+
+`InspectionSamples/Vertex Data/NominalCADDistanceMM` is within 0.000002 mm of zero. For the shifted copy, `NominalCADDistanceMM` contains **122 negative, 268 near-zero and 132 positive** values using 0.0001 mm as a numerical zero threshold; maximum magnitude is approximately 0.1 mm. Some points move along a face and remain on it. Others move toward a nearer side face, so translation magnitude alone does not determine surface distance.
+
+![Native signed distances using original and reversed face normals](DistanceConvention.png)
+
+Compare `ReversedCADDistanceMM` on the same shifted points: nonzero signs reverse within numerical tolerance. A positive value means the point is on the selected nearest triangle's normal side. It is not a reliable global inside/outside test for this uncertified mesh. `ClosestNominalTriangleIds` and `ClosestReversedTriangleIds` address their corresponding mesh rows; ties on shared edges need not select the same triangle. For measured points, first establish units and coordinate alignment, then investigate normals before treating sign as a physical deviation direction.
 
 ## Scientific basis and reuse
 

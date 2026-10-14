@@ -13,6 +13,6 @@ nxrunner --preflight "<pipeline-folder>/(01) NIST Bridge Contour Inspection.d3dp
 nxrunner --execute "<pipeline-folder>/(01) NIST Bridge Contour Inspection.d3dpipeline"
 ```
 
-The result is `Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d`. It contains the original CAD, all sections, cropped sections, selected contour and sample points. Native Windows in-memory execution is checked; materials interpretation remains subject to expert review.
+The result is `Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d`. It contains the original CAD, all sections, cropped sections, selected contour and sample points, plus a controlled point-offset and reversed-winding comparison of signed distances. Native Windows in-memory execution is checked; materials interpretation remains subject to expert review.
 
 The CTest example stages the original input from the application cache or downloads it with checksum verification. That test download does not add the dataset to the installer. Keep [NIST attribution and reuse terms](SourceDataLicense.md) with shared data and derived results.

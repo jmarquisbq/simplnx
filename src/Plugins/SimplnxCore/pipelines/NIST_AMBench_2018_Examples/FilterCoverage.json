@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Enabled occurrences in the combined NIST contour inspection example; not full filter validation.",
+  "scope": "Enabled occurrences in the combined NIST contour and distance inspection example; not full filter validation.",
   "filters": [
     {
       "filter": "ReadStlFileFilter",
@@ -157,10 +157,73 @@
       "purpose": "Remove the temporary Samples_Raw after retaining its calibrated geometry and required arrays."
     },
     {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 22,
+      "purpose": "Copy nominal samples into a separate Millimeter point geometry for a controlled registration-error demonstration; this is not an independently measured scan."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 23,
+      "purpose": "Keep each shifted point associated with the same selected contour edge and diagnostic section."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 24,
+      "purpose": "Translate only the copied points by +0.1 mm along global Y. This controlled offset tests coordinate alignment and signed-distance interpretation, not manufacturing deviation."
+    },
+    {
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 25,
+      "purpose": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment."
+    },
+    {
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 26,
+      "purpose": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 27,
+      "purpose": "Copy nominal CAD coordinates and connectivity with Millimeter units; do not copy the stored normals, because this branch will reverse winding."
+    },
+    {
+      "filter": "ReverseTriangleWindingFilter",
+      "uuid": "f11a45e9-c169-4227-85b0-0fb0108e47de",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 28,
+      "purpose": "Reverse every triangle in this comparison copy. This demonstrates a global convention change; it does not detect or repair inconsistent orientation in an arbitrary mesh."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 29,
+      "purpose": "Recompute normals from reversed vertex ordering. Reversing connectivity alone does not update an existing normal array."
+    },
+    {
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
+      "step": 30,
+      "purpose": "Measure signed nearest-triangle distance in millimeters and retain the matching triangle row ID. Sign refers to the selected face normal, not guaranteed global solid containment."
+    },
+    {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
-      "step": 22,
+      "step": 31,
       "purpose": "Save nominal CAD, all contours, cropped contours, one selected section and its inspection samples together. No hatch path, machine motion, measurement, or physical prediction is produced."
     }
   ]
