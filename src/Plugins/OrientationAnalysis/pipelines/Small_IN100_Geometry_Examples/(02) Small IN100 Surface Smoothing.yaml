@@ -622,7 +622,7 @@
       "sha256": "c38d9b18344eeebc9fde7abef89ac8a6a75d50ba76f7725d52b4e202908cf386",
       "source_outputs": [
         {
-          "path": "C:\\Users\\jmarquis\\workspace1\\build\\DREAM3DNX-Claude\\Remaining\\OA\\Small_IN100_Geometry_Examples\\Release\\Data\\Output\\Small_IN100_Geometry_Examples\\Smoothing\\SmallIN100_SurfaceSmoothing.dream3d",
+          "path": "Data/Output/Small_IN100_Geometry_Examples/Smoothing/SmallIN100_SurfaceSmoothing.dream3d",
           "sha256": "7e05258b64359ff8c6162607180a26cde51e85194710442a4a37d38bd7f6dd48"
         }
       ],
