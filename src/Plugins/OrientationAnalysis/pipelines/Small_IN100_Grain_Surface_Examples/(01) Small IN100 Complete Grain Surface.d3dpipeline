@@ -483,6 +483,53 @@
     },
     {
       "args": {
+        "selected_geometry_path": {
+          "value": "Grain2205",
+          "version": 1
+        },
+        "write_node_file": {
+          "value": true,
+          "version": 1
+        },
+        "number_nodes": {
+          "value": true,
+          "version": 1
+        },
+        "include_node_file_header": {
+          "value": true,
+          "version": 1
+        },
+        "node_file_path": {
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Nodes.txt",
+          "version": 1
+        },
+        "write_element_file": {
+          "value": true,
+          "version": 1
+        },
+        "number_elements": {
+          "value": true,
+          "version": 1
+        },
+        "include_element_file_header": {
+          "value": true,
+          "version": 1
+        },
+        "element_file_path": {
+          "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Triangles.txt",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Export the repaired compact grain shell as zero-based numbered node and triangle tables. Coordinates use micrometer numbers rounded to four decimal places. These space-delimited files omit units, ownership arrays and solver definitions; retain the native checkpoint.",
+      "filter": {
+        "name": "nx::core::WriteNodesAndElementsFilesFilter",
+        "uuid": "8c563174-0183-45fe-8ef8-756104f215d5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
           "version": 1

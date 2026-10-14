@@ -2,13 +2,13 @@
 
 Executable pipeline: `(01) Small IN100 Complete Grain Surface.d3dpipeline`
 
-> **Before adapting:** **Validation warning:** Do not treat this example as a validated acceptance procedure. Adapt and validate it for the scanner, material, resolution, and quality requirement.
+> **Before adapting:** Verify the target grain is complete, closed and correctly calibrated. Preserve its original identity; exported text numbering and coordinate precision need their own checks.
 
 ## At a glance
 
 - **Input:** The unsmoothed multi-label `SmallIN100_SurfaceMesh.dream3d` checkpoint from the [geometry example](../Small_IN100_Geometry_Examples/%2801%29%20Small%20IN100%20Surface%20Mesh.md).
 - **Question:** Which triangles form the complete boundary of original reconstructed grain `FeatureId` 2205, including faces shared with any neighbor?
-- **Output:** A calibrated, compacted, consistently outward-wound `Grain2205` shell with original ownership labels and local component IDs.
+- **Output:** A calibrated `Grain2205` shell with original ownership/local component IDs, plus numbered node and triangle text tables.
 - **Run order:** Archive → Feature Preparation → Surface Mesh → this pipeline → [measurements](%2802%29%20Small%20IN100%20Grain%20Surface%20Measurements.md). See [README](README.md) for paths and commands.
 
 ## Purpose and real-world setting
@@ -25,6 +25,8 @@ The existing 24 × 24 × 24 voxel crop contains all 170 voxels of feature 2205. 
 
 `LabelTriangleGeometry` writes `SurfaceRegionIds`. One occupied positive region means one connected surface here; the filter's feature matrix can have an extra empty row, so use the actual positive face IDs and `NumTriangles`, not matrix row count, to assess that claim. `VerifyTriangleWinding` uses this **single-component local region ID**, never the old multi-grain `OriginalFaceLabels`. It repairs the source's inconsistent triangle directions and orients the closed shell outward. `ComputeTriangleAreas` and `TriangleNormal` then recalculate measurements from the final winding. The original mesh is removed from this checkpoint; the cropped image remains for source context, and the predecessor checkpoint still contains the full mesh.
 
+`WriteNodesAndElementsFiles` exports the final compact geometry for external mesh tools. Numbering and headers are enabled to make the coordinate/connectivity association explicit. The native checkpoint retains information the text format omits: units, ownership labels, component IDs and measurements.
+
 ## Outputs and interpretation
 
 `Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d` contains `Grain2205`, its `Face Data/{OriginalFaceLabels,OriginalLabel0,OriginalLabel1,SurfaceRegionIds,FaceAreas,FaceNormals}`, and the cropped source image. All coordinates remain in the source specimen frame in micrometers. `OriginalFaceLabels` pairs original `FeatureId` 2205 with six neighboring positive IDs; they are not local shell labels. The local region is `1`, distinct from original `FeatureId` 2205.
@@ -32,6 +34,22 @@ The existing 24 × 24 × 24 voxel crop contains all 170 voxels of feature 2205. 
 ![Complete extracted Small IN100 grain surface](SmallIN100GrainSurface.png)
 
 For this checkpoint the expected shell has 508 faces, 256 used vertices, 762 unique edges, and 15.875 µm² area. Each edge should meet exactly two faces, the vertex graph should be connected, and the Euler characteristic should be 2. These checks establish a closed, connected genus-zero triangulation for this saved mesh; they do not establish a general self-intersection-free or simulation-ready surface.
+
+### Node and triangle tables
+
+The same `Extraction` directory contains `SmallIN100_Grain2205_Nodes.txt` and `SmallIN100_Grain2205_Triangles.txt`. Both start with a version comment and a header, then use **space-delimited** records:
+
+```text
+NODE_NUM X Y Z
+0 24.7500 25.5000 14.5000
+
+ELEMENT_NUM NUM_VERTS_IN_ELEMENT V0_Index V1_Index V2_Index
+0 3 0 3 4
+```
+
+There are **256 node rows** numbered 0-255 and **508 triangle rows** numbered 0-507. Each triangle's three indices exactly match `Grain2205/Shared Faces List` and refer to the compact node rows. Node/element 0 is a valid entity; these numbers are unrelated to background feature row 0 or original acquisition IDs.
+
+Coordinates use micrometer numbers, but the text does not declare units. The writer fixes coordinates to four decimal places; the largest difference here is about **0.00000382 micrometers**. Check that precision against another dataset's scale before reuse. Keep the `.dream3d` file for original precision and ownership arrays. These are generic surface-mesh tables, not a complete solver input or volume-element mesh.
 
 ## Adapting and checking the workflow
 

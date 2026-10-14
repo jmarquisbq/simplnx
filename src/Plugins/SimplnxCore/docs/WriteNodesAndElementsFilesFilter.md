@@ -13,6 +13,12 @@ This **Filter** exports node based geometries into structured text files.  It al
 
 The filter gives the user the option to export a node file, element file, or both.  It also allows the user to decide whether or not to number the nodes and elements and whether or not to include headers for the node and element files.
 
+### Format and precision
+
+Records are space-delimited even when a `.csv` extension is chosen. Numbered rows and connectivity use zero-based indices. A version comment is always written; the header options control the column-name line. Floating-point coordinates use **four decimal places in the input coordinate unit**, so small features can lose precision or collapse when that scale is inappropriate.
+
+The files contain geometry coordinates and connectivity, without a length-unit declaration, grain ownership, normals, other attribute arrays or solver settings. Retain the native DREAM3D checkpoint and document the unit/index convention when sharing these tables. Triangle elements describe a surface; they are not tetrahedral or hexahedral volume elements.
+
 ## Example Node File
 
 In this example output, the following filter parameter options have been selected:
@@ -78,6 +84,12 @@ ELEMENT_NUM NUM_VERTS_IN_ELEMENT V0_Index V1_Index V2_Index
 - **Node-based Geometry** -- any node-based geometry (**Vertex**, **Edge**, **Triangle**, **Quadrilateral**, **Tetrahedral**, or **Hexahedral Geometry**), produced by a surface-meshing filter such as [Create Surface Mesh (QuickMesh)](QuickSurfaceMeshFilter.md) or a geometry-creation filter such as [Create Geometry](CreateGeometryFilter.md).
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(01) Small IN100 Complete Grain Surface.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

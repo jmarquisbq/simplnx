@@ -59,3 +59,6 @@ Stage 02 now samples the complete shell back onto the source grid and exactly re
 
 
 Stage 03 now saves the individual challenge rotation and translation, combines them as T*R, and applies the composite once. A separate sequential cloud verifies the same intended motion; the reverse-order R*T matrix is retained for inspection and changes the translation by about 0.043631 micrometers. Original challenge, registration, sampling and scalar data remain unchanged. The companion describes the sixteen-scalar matrix layout and multiplication order.
+
+
+Stage 01 also writes `SmallIN100_Grain2205_Nodes.txt` and `SmallIN100_Grain2205_Triangles.txt` beside its native checkpoint. The numbered space-delimited files contain 256 compact nodes and 508 triangles with zero-based IDs. Coordinates use micrometer numbers rounded to four decimal places; retain the native file for full precision, units and original ownership arrays. The text tables are not a complete solver model.

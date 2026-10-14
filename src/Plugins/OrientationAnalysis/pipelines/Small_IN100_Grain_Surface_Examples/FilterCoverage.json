@@ -3,130 +3,116 @@
   "scope": "Four illustrative measured-derived Small IN100 grain-surface, point-cloud, numeric interchange, and point-to-grid pipelines; occurrences are not independent filter verification. Stages 03 and 04 use complementary tiles and do not claim duplicate-removal coverage.",
   "filters": [
     {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the measured-derived, unsmoothed ROI24 mesh; original positive FeatureIds and both FaceLabels components are preserved."
+    },
+    {
       "filter": "ExtractComponentAsArrayFilter",
       "uuid": "fcc1c1cc-c37a-40fc-97fa-ce40201d34e3",
       "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 1,
-      "purpose": "Expose each original FaceLabels component without changing source ownership."
+      "purpose": "Expose original FaceLabels component 0; keep the two-component source array intact."
     },
     {
       "filter": "ExtractComponentAsArrayFilter",
       "uuid": "fcc1c1cc-c37a-40fc-97fa-ce40201d34e3",
       "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 2,
-      "purpose": "Expose each original FaceLabels component without changing source ownership."
+      "purpose": "Expose original FaceLabels component 1; keep the two-component source array intact."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 3,
+      "purpose": "Mark faces where neither original label equals 2205; true means remove, and either label slot can establish ownership."
     },
     {
       "filter": "RemoveFlaggedTrianglesFilter",
       "uuid": "38155c61-2709-4731-be95-43745bb3f8d8",
       "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 4,
-      "purpose": "Retain all grain-2205 faces selected through either original label component and compact vertices."
+      "purpose": "Keep all faces touching grain 2205, compact vertices, and carry original ownership arrays without stale normals or network NodeTypes."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 5,
+      "purpose": "Copy selected vertices and triangles into a calibrated micrometer Triangle Geometry; extraction does not propagate the unit."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 6,
+      "purpose": "Copy the original two-sided FaceLabels and scalar components to the calibrated geometry."
+    },
+    {
+      "filter": "RenameDataObjectFilter",
+      "uuid": "911a3aa9-d3c2-4f66-9451-8861c4b726d5",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 7,
+      "purpose": "Name copied source labels OriginalFaceLabels; they record ownership and are not used as local orientation labels."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 8,
+      "purpose": "Drop the temporary uncalibrated selected mesh."
     },
     {
       "filter": "LabelTriangleGeometryFilter",
       "uuid": "7a7a2c6f-3b03-444d-8b8c-5976b0e5c82e",
       "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 9,
-      "purpose": "Label the connected extracted shell in a separate local region namespace."
+      "purpose": "Assign connected surface components in a local namespace; region 1 must contain the complete 508-face shell."
     },
     {
       "filter": "VerifyTriangleWindingFilter",
       "uuid": "7a63783e-2449-414c-ae73-58058ae8da7e",
       "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 10,
-      "purpose": "Repair the observed inconsistent winding of the single extracted shell."
+      "purpose": "Repair inconsistent triangle winding using the single local surface RegionIds, then orient the closed shell outward."
     },
     {
-      "filter": "ReadHDF5DatasetFilter",
-      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 2,
-      "purpose": "Read four numeric datasets from TileA: 89 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 11,
+      "purpose": "Recompute per-face area on the repaired shell in square micrometers."
     },
     {
-      "filter": "ReadHDF5DatasetFilter",
-      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 3,
-      "purpose": "Read four numeric datasets from TileB: 81 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 12,
+      "purpose": "Compute unit normals from the final outward-oriented triangle winding."
     },
     {
-      "filter": "ConcatenateDataArraysFilter",
-      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 5,
-      "purpose": "Append TileA then TileB rows for Coordinates_um: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
-    },
-    {
-      "filter": "ConcatenateDataArraysFilter",
-      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 6,
-      "purpose": "Append TileA then TileB rows for SourceROICellIndex: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
-    },
-    {
-      "filter": "ConcatenateDataArraysFilter",
-      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 7,
-      "purpose": "Append TileA then TileB rows for FeatureIds: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
-    },
-    {
-      "filter": "ConcatenateDataArraysFilter",
-      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 8,
-      "purpose": "Append TileA then TileB rows for Image Quality: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
-    },
-    {
-      "filter": "SplitDataArrayByComponentFilter",
-      "uuid": "55da791f-4d1c-4413-8673-742f27d2b22b",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 9,
-      "purpose": "Split all three XYZ coordinate components into scalar columns while retaining Coordinates_um as an inspection checkpoint."
-    },
-    {
-      "filter": "CombineAttributeArraysFilter",
-      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 13,
-      "purpose": "Combine X_um, Y_um, Z_um columns in that exact order into 170 three-component vertices. Keep physical coordinates unchanged: normalization and source removal are disabled."
+      "purpose": "Keep the cropped source image for context but omit the full multi-grain mesh from the selected-grain checkpoint."
     },
     {
-      "filter": "MoveDataFilter",
-      "uuid": "651e5894-ab7c-4176-b7f0-ea466c521753",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "filter": "WriteNodesAndElementsFilesFilter",
+      "uuid": "8c563174-0183-45fe-8ef8-756104f215d5",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
+      "step": 14,
+      "purpose": "Export the repaired compact grain shell as zero-based numbered node and triangle tables. Coordinates use micrometer numbers rounded to four decimal places. These space-delimited files omit units, ownership arrays and solver definitions; retain the native checkpoint."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
       "step": 15,
-      "purpose": "Move six scalar columns into ReassembledCloud/Vertex Data so each row describes the corresponding vertex. Leave imported tiles and both assembled coordinate arrays as inspection checkpoints."
-    },
-    {
-      "filter": "WriteASCIIDataFilter",
-      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 16,
-      "purpose": "Export all point tuples, including valid row zero, in an explicit six-column CSV with headers."
-    },
-    {
-      "filter": "MapPointCloudToRegularGridFilter",
-      "uuid": "af53ac60-092f-4e4a-9e13-57f0034ce2c7",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 20,
-      "purpose": "Record each source point's containing cell and fail on any out-of-bounds point. GridCellIndex is an ownership/inspection result; Interpolate Point Cloud v4 independently computes its own indices from coordinates."
-    },
-    {
-      "filter": "InterpolatePointCloudToRegularGridFilter",
-      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 21,
-      "purpose": "Average ImageQuality64 only within each containing cell: Uniform kernel size 0.25 micrometers is below 0.5 micrometer spacing, so the integer radius is zero. Contribution counts distinguish observed cells from zero-filled empty cells."
-    },
-    {
-      "filter": "InterpolatePointCloudToRegularGridFilter",
-      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
-      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
-      "step": 22,
-      "purpose": "Spread ImageQuality64 into a 3 by 3 by 3 grid-cell neighborhood using Gaussian sigma 1 in each axis (one cell offset, or 0.5 micrometers here). Kernel weights use integer cell offsets, not exact point-to-center distances. Positive counts outside observed cells are estimates, not new measurements."
+      "purpose": "Save the complete original-identity grain shell as the measurement-stage checkpoint."
     },
     {
       "filter": "ReadDREAM3DFilter",
@@ -652,6 +638,97 @@
       "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
       "step": 46,
       "purpose": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms."
+    },
+    {
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 2,
+      "purpose": "Read four numeric datasets from TileA: 89 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+    },
+    {
+      "filter": "ReadHDF5DatasetFilter",
+      "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 3,
+      "purpose": "Read four numeric datasets from TileB: 81 XYZ tuples and matching scalar metadata. Declare tuple/component shapes explicitly; no transpose, geometry, units, or NX structure is imported."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 5,
+      "purpose": "Append TileA then TileB rows for Coordinates_um: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 6,
+      "purpose": "Append TileA then TileB rows for SourceROICellIndex: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 7,
+      "purpose": "Append TileA then TileB rows for FeatureIds: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "ConcatenateDataArraysFilter",
+      "uuid": "e547e382-4928-4ec6-a311-d26c16e9f675",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 8,
+      "purpose": "Append TileA then TileB rows for Image Quality: 89 + 81 = 170 tuples. Use the same order for coordinates and every scalar; preserve the input numeric type and component shape."
+    },
+    {
+      "filter": "SplitDataArrayByComponentFilter",
+      "uuid": "55da791f-4d1c-4413-8673-742f27d2b22b",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 9,
+      "purpose": "Split all three XYZ coordinate components into scalar columns while retaining Coordinates_um as an inspection checkpoint."
+    },
+    {
+      "filter": "CombineAttributeArraysFilter",
+      "uuid": "2436b614-e96d-47f0-9f6f-41d6fe97acd4",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 13,
+      "purpose": "Combine X_um, Y_um, Z_um columns in that exact order into 170 three-component vertices. Keep physical coordinates unchanged: normalization and source removal are disabled."
+    },
+    {
+      "filter": "MoveDataFilter",
+      "uuid": "651e5894-ab7c-4176-b7f0-ea466c521753",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 15,
+      "purpose": "Move six scalar columns into ReassembledCloud/Vertex Data so each row describes the corresponding vertex. Leave imported tiles and both assembled coordinate arrays as inspection checkpoints."
+    },
+    {
+      "filter": "WriteASCIIDataFilter",
+      "uuid": "06c8bfe8-2b42-4956-aca3-580bc0620716",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 16,
+      "purpose": "Export all point tuples, including valid row zero, in an explicit six-column CSV with headers."
+    },
+    {
+      "filter": "MapPointCloudToRegularGridFilter",
+      "uuid": "af53ac60-092f-4e4a-9e13-57f0034ce2c7",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 20,
+      "purpose": "Record each source point's containing cell and fail on any out-of-bounds point. GridCellIndex is an ownership/inspection result; Interpolate Point Cloud v4 independently computes its own indices from coordinates."
+    },
+    {
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 21,
+      "purpose": "Average ImageQuality64 only within each containing cell: Uniform kernel size 0.25 micrometers is below 0.5 micrometer spacing, so the integer radius is zero. Contribution counts distinguish observed cells from zero-filled empty cells."
+    },
+    {
+      "filter": "InterpolatePointCloudToRegularGridFilter",
+      "uuid": "996c4464-08f0-4268-a8a6-f9796c88cf58",
+      "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
+      "step": 22,
+      "purpose": "Spread ImageQuality64 into a 3 by 3 by 3 grid-cell neighborhood using Gaussian sigma 1 in each axis (one cell offset, or 0.5 micrometers here). Kernel weights use integer cell offsets, not exact point-to-center distances. Positive counts outside observed cells are estimates, not new measurements."
     }
   ]
 }

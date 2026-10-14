@@ -3,7 +3,7 @@
   "pipeline_file": "(01) Small IN100 Complete Grain Surface.d3dpipeline",
   "markdown_file": "(01) Small IN100 Complete Grain Surface.md",
   "title": "Small IN100 Complete Grain Surface",
-  "summary": "Extract the complete boundary of original measured-derived Small IN100 grain 2205 from a multi-label mesh and repair its standalone winding.",
+  "summary": "Extract and repair a complete measured-derived grain shell, preserve ownership and calibration, and export transparent zero-based node/triangle tables.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -32,7 +32,20 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Surface.dream3d",
-      "role": "Compacted and winding-repaired micrometer grain 2205 shell, source context, original ownership, and local component IDs."
+      "role": "Compacted and winding-repaired micrometer grain 2205 shell, source context, original ownership, and local component IDs.",
+      "sha256": "8e0297f2a62bc9ca5fdf82b3a1429a707e714a78c268505a0015b2f5fc1e39b3"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Nodes.txt",
+      "role": "Numbered XYZ node table; micrometer coordinate numbers with four decimal places; no unit declaration or attributes.",
+      "sha256": "a12b036811362830617e93046bd417275b55868216a3acea92146bc76847d27c",
+      "bytes": 7373
+    },
+    {
+      "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Triangles.txt",
+      "role": "Numbered three-node triangle connectivity; zero-based compact vertex indices and original winding.",
+      "sha256": "63830bbb915a4ceb6f8a6c1177436ff0d657ae7b624b080c78959ed67c40ab04",
+      "bytes": 8994
     }
   ],
   "input_data_strategy": {
@@ -477,6 +490,27 @@
     },
     {
       "index": 14,
+      "filter": "WriteNodesAndElementsFilesFilter",
+      "uuid": "8c563174-0183-45fe-8ef8-756104f215d5",
+      "role": "Export the repaired compact grain shell as zero-based numbered node and triangle tables. Coordinates use micrometer numbers rounded to four decimal places. These space-delimited files omit units, ownership arrays and solver definitions; retain the native checkpoint.",
+      "paths": [
+        "Grain2205"
+      ],
+      "key_parameters": {
+        "selected_geometry_path": "Grain2205",
+        "write_node_file": true,
+        "number_nodes": true,
+        "include_node_file_header": true,
+        "node_file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Nodes.txt",
+        "write_element_file": true,
+        "number_elements": true,
+        "include_element_file_header": true,
+        "element_file_path": "Data/Output/Small_IN100_Grain_Surface_Examples/Extraction/SmallIN100_Grain2205_Triangles.txt"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the complete original-identity grain shell as the measurement-stage checkpoint.",
@@ -519,7 +553,7 @@
       }
     }
   ],
-  "last_verified": "2026-10-12",
+  "last_verified": "2026-10-14",
   "verification_status": "Windows in-memory Release: registered two-pipeline CTest chain passed 1/1 in 19.91 s; independent saved-output audit passed 76/76 checks. Enclosed native volume 2.6562402248 cubic micrometers differs from independent 2.65625 by 9.7752e-6 cubic micrometers. OOC, generated Python, GUI, and installed-app execution are unverified.",
   "mcp": {
     "user_intents": [
@@ -546,5 +580,23 @@
   "result_visual": {
     "path": "SmallIN100GrainSurface.png",
     "role": "Preview rendered from saved native output; numerical checks are recorded separately."
+  },
+  "text_export_validation": {
+    "passed": 19,
+    "total": 19,
+    "preserved_prior_datasets": 45,
+    "nodes": 256,
+    "triangles": 508,
+    "coordinate_max_error_um": 3.814697265625e-06,
+    "surface_area_um2": 15.875,
+    "signed_volume_um3": 2.65625,
+    "scope": "Generic space-delimited geometry tables with zero-based compact IDs and four-decimal coordinates; not a complete solver format or an attribute/units-preserving archive.",
+    "pipeline_sha256": "771f3d2204d6b734d630258527f1bc17cdf4242da585c5a5443fface6f7ca200",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples",
+      "passed": true,
+      "configuration": "Release, serial",
+      "pipelines": 4
+    }
   }
 }
