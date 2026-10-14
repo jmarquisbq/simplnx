@@ -24,6 +24,8 @@ The point placement is **random**: both the distribution of samples across trian
 
 The user may opt to use a **mask** (a boolean per-face flag) to prevent certain triangles from being sampled; where the mask is *false*, the triangle is not sampled. Additionally, the user may choose any number of **Face Attribute Arrays** to transfer to the created **Vertex Geometry**. Each vertex in the new geometry inherits the values of the face from which it was sampled.
 
+The current face-array transfer has an indexing defect that can return wrong values or crash when the output has more points than source faces ([issue #1799](https://github.com/BlueQuartzSoftware/simplnx/issues/1799)). Leave the transfer list empty until corrected. Geometry-only sampling can be followed by [Compute Vertex to Triangle Distances](ComputeVertexToTriangleDistancesFilter.md) for a nearest-face association; boundary ties need not identify the originally drawn face. The generated geometry also loses source length-unit metadata ([issue #1796](https://github.com/BlueQuartzSoftware/simplnx/issues/1796)); explicitly restore units without rescaling coordinates.
+
 ### Required Input Sources
 
 - **Triangle Geometry to Sample** -- a **Triangle Geometry** (surface mesh), typically produced by [Create Surface Mesh (QuickMesh)](QuickSurfaceMeshFilter.md).
@@ -31,6 +33,12 @@ The user may opt to use a **mask** (a boolean per-face flag) to prevent certain 
 - **Mask** (optional) -- a boolean per-face array, typically produced by a thresholding filter such as [Multi-Threshold Objects](MultiThresholdObjectsFilter.md).
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -24,11 +24,19 @@ The above algorithm is significantly faster than other geometric approaches for 
 
 Note that the resulting hull geometry does not inherit any **Attribute Arrays** from the original point cloud.
 
+The result is an unconnected set of representative points, not a closed triangle surface or a volume. Grid cells are aligned to coordinate zero, so a translation can change cell membership and the resulting averages. Generated geometry currently does not retain the source length-unit metadata ([issue #1796](https://github.com/BlueQuartzSoftware/simplnx/issues/1796)); restore that metadata without rescaling the output coordinates.
+
 ### Required Input Sources
 
 - **Vertex Geometry** -- the input 3D point cloud, typically created by an import step or by a filter that produces a **Vertex Geometry**.
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -1513,6 +1513,629 @@
     },
     {
       "args": {
+        "number_of_samples": {
+          "value": 5000,
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "use_seed": {
+          "value": true,
+          "version": 1
+        },
+        "seed_value": {
+          "value": 2205,
+          "version": 1
+        },
+        "seed_array_name": {
+          "value": "SurfaceSamplingSeed",
+          "version": 1
+        },
+        "input_triangle_geometry_path": {
+          "value": "Grain2205",
+          "version": 1
+        },
+        "triangle_areas_array_path": {
+          "value": "Grain2205/Face Data/FaceAreas",
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "SurfaceSamples_Raw",
+          "version": 1
+        },
+        "vertex_data_group_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Draw 5000 points from the repaired measured-derived grain shell, selecting triangles in proportion to area. Fixed seed 2205 supports repeatable runs in the same implementation. Transfer no face arrays because of issue 1799; this is derived sampling, not new acquisition data.",
+      "filter": {
+        "name": "nx::core::PointSampleTriangleGeometryFilter",
+        "uuid": "ee34ef95-aa04-4ad3-8232-5783a880d279"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "SurfaceSamples",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "SurfaceSamples_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Publish SurfaceSamples as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "SurfaceSamples_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only temporary SurfaceSamples_Raw after its calibrated geometry and required arrays are retained.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_vertex_geometry_path": {
+          "value": "SurfaceSamples",
+          "version": 1
+        },
+        "input_triangle_geometry_path": {
+          "value": "Grain2205",
+          "version": 1
+        },
+        "triangle_normals_array_path": {
+          "value": "Grain2205/Face Data/FaceNormals",
+          "version": 1
+        },
+        "distances_array_name": {
+          "value": "DistanceToSurfaceUm",
+          "version": 1
+        },
+        "closest_triangle_id_array_name": {
+          "value": "NearestTriangleIds",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Check that generated SurfaceSamples lie on Grain2205, retaining signed micrometer distances and nearest triangle row IDs. This is a geometric association after sampling; tied boundary triangles need not equal the original random choice.",
+      "filter": {
+        "name": "nx::core::ComputeVertexToTriangleDistancesFilter",
+        "uuid": "af60518e-5fdb-45f2-9028-cd7787016830"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "grid_resolution": {
+          "value": [
+            0.25,
+            0.25,
+            0.25
+          ],
+          "version": 1
+        },
+        "min_empty_neighbors": {
+          "value": 0,
+          "version": 1
+        },
+        "input_vertex_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "Hull025um_Raw",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.25 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
+      "filter": {
+        "name": "nx::core::ApproximatePointCloudHullFilter",
+        "uuid": "c19203b7-2217-4e52-bff4-7f611695421a"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "Hull025um",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "Hull025um_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Publish Hull025um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "Hull025um_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only temporary Hull025um_Raw after its calibrated geometry and required arrays are retained.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "grid_resolution": {
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "version": 1
+        },
+        "min_empty_neighbors": {
+          "value": 0,
+          "version": 1
+        },
+        "input_vertex_geometry_path": {
+          "value": "ReferenceCloud",
+          "version": 1
+        },
+        "output_vertex_geometry_path": {
+          "value": "Hull05um_Raw",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.5 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
+      "filter": {
+        "name": "nx::core::ApproximatePointCloudHullFilter",
+        "uuid": "c19203b7-2217-4e52-bff4-7f611695421a"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "Hull05um",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "Hull05um_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Publish Hull05um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "Hull05um_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only temporary Hull05um_Raw after its calibrated geometry and required arrays are retained.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "partitioning_mode_index": {
+          "value": 2,
+          "version": 1
+        },
+        "starting_partition_id": {
+          "value": 1,
+          "version": 1
+        },
+        "out_of_bounds_value": {
+          "value": 0,
+          "version": 1
+        },
+        "number_of_partitions_per_axis": {
+          "value": [
+            5,
+            6,
+            6
+          ],
+          "version": 1
+        },
+        "partitioning_scheme_origin": {
+          "value": [
+            24.0,
+            25.0,
+            14.0
+          ],
+          "version": 1
+        },
+        "length_per_partition": {
+          "value": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "version": 1
+        },
+        "lower_left_coord": {
+          "value": [
+            24.0,
+            25.0,
+            14.0
+          ],
+          "version": 1
+        },
+        "upper_right_coord": {
+          "value": [
+            26.5,
+            28.0,
+            17.0
+          ],
+          "version": 1
+        },
+        "input_geometry_attribute_matrix_path": {
+          "value": "DataContainer/Cell Data",
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "PointPartitionGrid",
+          "version": 1
+        },
+        "created_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "created_feature_ids_name": {
+          "value": "SpatialPartitionIds",
+          "version": 1
+        },
+        "input_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "existing_partitioning_scheme_path": {
+          "value": "",
+          "version": 1
+        },
+        "use_vertex_mask": {
+          "value": false,
+          "version": 1
+        },
+        "vertex_mask_path": {
+          "value": "",
+          "version": 1
+        },
+        "feature_attr_matrix_name": {
+          "value": "Partition Data",
+          "version": 1
+        },
+        "partition_ids_array_name": {
+          "value": "SpatialPartitionIds",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Partition source image cells on an explicit 0.5 micrometer grid with bounds [24,25,14] to [26.5,28,17]. SpatialPartitionIds 1..180 describe bins, not grains; zero marks source cells outside this grid. Preserve original FeatureIds. Vertex-mode preflight remains deferred for issue 1798.",
+      "filter": {
+        "name": "nx::core::PartitionGeometryFilter",
+        "uuid": "aad29ebc-bf1c-5dd3-ad25-0f7f8907a02d"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
           "version": 1

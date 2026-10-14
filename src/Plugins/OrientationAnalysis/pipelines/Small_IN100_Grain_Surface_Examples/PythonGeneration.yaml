@@ -49,5 +49,6 @@
     "storage": "Validate OOC separately.",
     "grid_contract": "Stage 04 must preserve both explicit Micrometer image geometries, the float64 interpolation copy, map error handling, both kernel/sigma settings, and contribution counts. Keep all source-point arrays and CSV columns unchanged."
   },
-  "gui_note": "GUI working folders vary; use absolute file parameters when relative paths do not resolve."
+  "gui_note": "GUI working folders vary; use absolute file parameters when relative paths do not resolve.",
+  "sampling_contract": "Regenerate all 40 steps of stage 03: sample geometry only (no face attribute transfer), recompute nearest-triangle association, retain fixed seed 2205 and explicit Micrometer copies, compare hull pitches 0.25/0.5, and partition DataContainer image cells rather than the vertex geometry. Preserve source grain IDs."
 }

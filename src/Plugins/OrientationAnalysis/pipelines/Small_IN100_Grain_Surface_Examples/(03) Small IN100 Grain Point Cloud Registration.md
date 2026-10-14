@@ -8,11 +8,11 @@ Executable pipeline: `(03) Small IN100 Grain Point Cloud Registration.d3dpipelin
 
 | Item | This example |
 |---|---|
-| Task | Reassemble complementary point-cloud tiles and recover a known rigid displacement. |
+| Task | Reassemble and register point-cloud tiles; compare volume points, surface samples, hull resolution and spatial bins. |
 | Input | Stage 01's cropped Small IN100 image and complete grain-2205 surface checkpoint. |
 | Points | 170 voxel centers from original reconstructed `FeatureId` 2205; 0.25 µm source spacing. |
 | Challenge | Tiles with 89 and 81 points, then a 2° Z rotation and `[1, -0.75, 0.5]` µm translation. |
-| Result | Reference, tiles, reassembled cloud, three moving checkpoints, and two transform matrices in one DREAM3D file. |
+| Result | Registration checkpoints plus 5,000 surface samples, two approximate hulls and a source-image partition grid in one file. |
 | Dependency | Run stage 01 first. Stage 02 measurements are optional. |
 
 ## Purpose and real-world setting
@@ -31,7 +31,7 @@ The checkpoint contains a 24 × 24 × 24 **Image Geometry** named `DataContainer
 
 ## Data flow and parameter rationale
 
-The executable contains 29 steps. Repeated copy and unit-preservation helpers are grouped here by purpose.
+The executable contains 40 steps. Repeated copy and unit-preservation helpers are grouped here by purpose.
 
 | Operation and filters | Choice and reason |
 |---|---|
@@ -43,6 +43,10 @@ The executable contains 29 steps. Repeated copy and unit-preservation helpers ar
 | Apply Transformation to Geometry | Create `MovingChallenge` from `CombinedTiles` and apply the stated rotation about global Z followed by translation. Save its 4 × 4 `KnownTransform`. No translation to a local origin is enabled. |
 | Align Geometries | Preserve the challenge. Origin alignment translates `MovingCoarse` until its coordinate-wise minimum equals the reference minimum. This is a bounding-box alignment, not a centroid fit. |
 | Iterative Closest Point, Write DREAM3D | Preserve the coarse checkpoint, run 10 rigid iterations on `MovingRegistered`, apply the result, and save `ICPResidualTransform` plus all retained data. |
+| Point Sample Triangle Geometry | Generate 5,000 locations on the repaired 508-triangle shell, weighted by face area, with fixed seed 2205. This illustrates surface sampling; it does not create new observations or evenly spaced points. |
+| Compute Vertex to Triangle Distances | Check the sampled points against the original shell and retain nearest-triangle IDs. This association is calculated after sampling; ties may identify a different face from the original random selection. |
+| Approximate Point Cloud Hull, twice | On the 170 voxel-center points, compare 0.25 and 0.5 micrometer grid cells. With Minimum Empty Neighbors = 0, retain occupied cells having at least one empty neighbor among the 26 surrounding cells. Output their point means, not triangles. |
+| Partition Geometry | Bin the source image on a 0.5 micrometer grid spanning [24,25,14] to [26.5,28,17]. Keep spatial IDs separate from original grain labels; this makes local regions addressable without another segmentation. |
 
 Explicit units address the [length-unit propagation defect](https://github.com/BlueQuartzSoftware/simplnx/issues/1784) in these fresh geometry outputs and whole-geometry copies. Independent coordinate arrays keep later transforms from moving the reference or earlier checkpoints.
 
@@ -52,9 +56,23 @@ The output is `Data/Output/Small_IN100_Grain_Surface_Examples/Registration/Small
 
 ![Native reference, displaced challenge, coarse pose, and registered voxel-center clouds on matching axes](SmallIN100PointCloudRegistration.png)
 
-The preview uses native coordinates, common axis limits, and equal scale. Match points by `SourceROICellIndex` rather than tuple position. The measured paired root-mean-square (RMS) displacement falls from 0.51654 µm to 0.029778 µm after origin alignment and 0.00000648 µm after ICP. The registered three-pipeline Windows in-memory Release CTest passed 1/1; the independent saved-output audit passed 67/67 checks. Python, OOC, GUI, and installed-app execution remain unverified.
+The preview uses native coordinates, common axis limits, and equal scale. Match points by `SourceROICellIndex` rather than tuple position. The measured paired root-mean-square (RMS) displacement falls from 0.51654 µm to 0.029778 µm after origin alignment and 0.00000648 µm after ICP.
 
 `ICPResidualTransform` maps the coarse pose to the registered pose. It does not include the earlier origin translation. With homogeneous column vectors, verify `ICPResidualTransform × CoarseTranslation × KnownTransform` against identity. Derive `CoarseTranslation` from the saved challenge and coarse clouds.
+
+### Sampling and spatial interpretation
+
+![Native volume points, surface samples and two grid-based hull approximations](SmallIN100SurfaceSampling.png)
+
+| Result to inspect | Meaning and expected result |
+| --- | --- |
+| `SurfaceSamples` | 5,000 derived locations on the mesh; `DistanceToSurfaceUm` is within 0.000004 micrometers of zero. `NearestTriangleIds` addresses `Grain2205/Shared Faces List`. These are surface points, unlike the 170 volume-cell centers. |
+| `Hull025um`, `Hull05um` | 156 and 43 representative points. Coarser cells average more input points and can move representatives away from original locations. Neither output has connectivity, inherited point attributes, area or enclosed volume. |
+| `DataContainer/Cell Data/SpatialPartitionIds` | 180 spatial bins contain eight source cells each; 12,384 source cells are outside and have ID 0. All 170 grain-2205 cells lie in 44 nonzero bins. `PointPartitionGrid` gives the corresponding grid geometry. These labels do not replace `FeatureIds`. |
+
+The 0.25 micrometer hull pitch matches the voxel-center spacing; 0.5 micrometers illustrates coarsening. The grid is aligned to coordinate zero, so translating a cloud can change its cell membership. Increasing Minimum Empty Neighbors makes selection more restrictive. A finer grid or more surface samples does not improve the underlying EBSD spatial resolution.
+
+Surface sampling transfers no face attributes because the current transfer path has an indexing defect ([#1799](https://github.com/BlueQuartzSoftware/simplnx/issues/1799)). Nearest-triangle association is therefore computed separately. The fixed seed repeats this implementation's point set; do not assume identical draws across software versions or platforms. Explicit Micrometer copies address sampling/hull unit loss ([#1796](https://github.com/BlueQuartzSoftware/simplnx/issues/1796)). Partitioning uses the source image because node-geometry preflight currently reads unavailable coordinates ([#1798](https://github.com/BlueQuartzSoftware/simplnx/issues/1798)).
 
 ## Adaptation and quality checks
 

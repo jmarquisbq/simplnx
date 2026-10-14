@@ -10,6 +10,8 @@ This **Filter** overlays a coarse **partition grid** onto an existing geometry a
 
 If the **Filter** determines that any voxel/node of the original geometry is out-of-bounds compared to the generated partition grid, the **Out-Of-Bounds Cell ID** will be used as the partition ID in the output partition IDs array.
 
+Partition IDs describe spatial bins and should remain separate from material feature or phase IDs. Current node-geometry preflight reads coordinate values before they are available in a whole-pipeline preflight ([issue #1798](https://github.com/BlueQuartzSoftware/simplnx/issues/1798)). The Small IN100 companion example uses image-cell partitioning; it does not establish working vertex/mesh partitioning in that pipeline context.
+
 ### Partitioning Mode
 
 The *Partitioning Mode* parameter provides the following choices:
@@ -124,6 +126,10 @@ On all partitioning modes, a vertex mask can be used with a vertex-based input g
 ## Example Pipelines
 
 None
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Grain_Surface_Examples/(03) Small IN100 Grain Point Cloud Registration.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

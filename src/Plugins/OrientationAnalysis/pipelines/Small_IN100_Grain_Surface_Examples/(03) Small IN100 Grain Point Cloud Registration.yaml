@@ -3,7 +3,7 @@
   "pipeline_file": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
   "markdown_file": "(03) Small IN100 Grain Point Cloud Registration.md",
   "title": "Small IN100 Grain Point Cloud Registration",
-  "summary": "Reassemble two complementary tiles of measured-derived grain voxel centers and recover a known rigid displacement while preserving source-cell identity.",
+  "summary": "Reassemble voxel-center tiles and recover a controlled rigid pose; compare area-weighted surface samples, point-cloud hull resolution and spatial partitions of the source image.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -13,7 +13,10 @@
   ],
   "use_cases": [
     "Reassemble complementary spatial tiles with their scalar metadata.",
-    "Demonstrate coarse translation and local rigid point-cloud registration on a known derived challenge."
+    "Demonstrate coarse translation and local rigid point-cloud registration on a known derived challenge.",
+    "Prepare a reproducible surface point cloud from a measured-derived grain mesh",
+    "Compare coarse hull representatives with original volume points",
+    "Keep spatial-bin labels separate from reconstructed grain identity"
   ],
   "keywords": [
     "Small IN100",
@@ -35,7 +38,8 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
-      "role": "Source image and grain mesh, reference cloud, complementary tiles, reassembled cloud, three moving checkpoints, KnownTransform, and ICPResidualTransform."
+      "role": "Source image and grain mesh, reference cloud, complementary tiles, reassembled cloud, three moving checkpoints, KnownTransform, and ICPResidualTransform. Adds SurfaceSamples, Hull025um, Hull05um, SurfaceSamplingSeed and source-image SpatialPartitionIds with PointPartitionGrid.",
+      "sha256": "ffb13f3d61fa5b2cfc49ea89a8cfe55a7709ccd1d9c1edb3aa322efe19050aa3"
     }
   ],
   "input_data_strategy": {
@@ -55,7 +59,7 @@
       "Complementary 89-point and 81-point tiles with a 170-point union and no overlap",
       "Known 2 degree global-Z rotation followed by [1,-0.75,0.5] micrometer translation"
     ],
-    "known_differences": "The selected ROI and grain use the current reconstruction. Both tiles and the transformed moving cloud are deliberately derived copies of the same measured-derived coordinates, not independent acquisitions. No exact paper result or instrument-registration accuracy is reproduced.",
+    "known_differences": "The selected ROI and grain use the current reconstruction. Both tiles and the transformed moving cloud are deliberately derived copies of the same measured-derived coordinates, not independent acquisitions. No exact paper result or instrument-registration accuracy is reproduced. Surface point locations are simulated area-weighted samples from the same reconstructed mesh. Hull representatives average points in exposed occupied grid cells; no new measurement, closed surface, volume or smooth-boundary accuracy is inferred. Source-image partition labels are spatial IDs, not grains.",
     "archive_provenance_file": "README.md"
   },
   "prerequisites": [
@@ -1104,6 +1108,321 @@
     },
     {
       "index": 28,
+      "filter": "PointSampleTriangleGeometryFilter",
+      "uuid": "ee34ef95-aa04-4ad3-8232-5783a880d279",
+      "role": "Draw 5000 points from the repaired measured-derived grain shell, selecting triangles in proportion to area. Fixed seed 2205 supports repeatable runs in the same implementation. Transfer no face arrays because of issue 1799; this is derived sampling, not new acquisition data.",
+      "paths": [
+        "Grain2205",
+        "Grain2205/Face Data/FaceAreas",
+        "SurfaceSamples_Raw"
+      ],
+      "key_parameters": {
+        "number_of_samples": 5000,
+        "use_mask": false,
+        "use_seed": true,
+        "seed_value": 2205,
+        "seed_array_name": "SurfaceSamplingSeed",
+        "input_triangle_geometry_path": "Grain2205",
+        "triangle_areas_array_path": "Grain2205/Face Data/FaceAreas",
+        "mask_array_path": "",
+        "input_data_array_paths": [],
+        "output_vertex_geometry_path": "SurfaceSamples_Raw",
+        "vertex_data_group_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish SurfaceSamples as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "paths": [
+        "SurfaceSamples",
+        "SurfaceSamples_Raw/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "SurfaceSamples",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SurfaceSamples_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 30,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only temporary SurfaceSamples_Raw after its calibrated geometry and required arrays are retained.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "SurfaceSamples_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 31,
+      "filter": "ComputeVertexToTriangleDistancesFilter",
+      "uuid": "af60518e-5fdb-45f2-9028-cd7787016830",
+      "role": "Check that generated SurfaceSamples lie on Grain2205, retaining signed micrometer distances and nearest triangle row IDs. This is a geometric association after sampling; tied boundary triangles need not equal the original random choice.",
+      "paths": [
+        "SurfaceSamples",
+        "Grain2205",
+        "Grain2205/Face Data/FaceNormals"
+      ],
+      "key_parameters": {
+        "input_vertex_geometry_path": "SurfaceSamples",
+        "input_triangle_geometry_path": "Grain2205",
+        "triangle_normals_array_path": "Grain2205/Face Data/FaceNormals",
+        "distances_array_name": "DistanceToSurfaceUm",
+        "closest_triangle_id_array_name": "NearestTriangleIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 32,
+      "filter": "ApproximatePointCloudHullFilter",
+      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
+      "role": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.25 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
+      "paths": [
+        "ReferenceCloud",
+        "Hull025um_Raw"
+      ],
+      "key_parameters": {
+        "grid_resolution": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "min_empty_neighbors": 0,
+        "input_vertex_geometry_path": "ReferenceCloud",
+        "output_vertex_geometry_path": "Hull025um_Raw"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 33,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish Hull025um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "paths": [
+        "Hull025um",
+        "Hull025um_Raw/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "Hull025um",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Hull025um_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 34,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only temporary Hull025um_Raw after its calibrated geometry and required arrays are retained.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Hull025um_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 35,
+      "filter": "ApproximatePointCloudHullFilter",
+      "uuid": "c19203b7-2217-4e52-bff4-7f611695421a",
+      "role": "Approximate the boundary of the 170 measured-derived voxel-center points on a 0.5 micrometer grid. Keep occupied cells with at least one empty 26-neighbor cell and output their point means. This creates unconnected representative points, not a closed mesh.",
+      "paths": [
+        "ReferenceCloud",
+        "Hull05um_Raw"
+      ],
+      "key_parameters": {
+        "grid_resolution": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "min_empty_neighbors": 0,
+        "input_vertex_geometry_path": "ReferenceCloud",
+        "output_vertex_geometry_path": "Hull05um_Raw"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 36,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish Hull05um as explicit Micrometer coordinates without rescaling; retain the source geometry calibration when the generating filter defaults its unit metadata.",
+      "paths": [
+        "Hull05um",
+        "Hull05um_Raw/Shared Vertex List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 2,
+        "length_unit_index": 6,
+        "output_geometry_path": "Hull05um",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Hull05um_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 37,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only temporary Hull05um_Raw after its calibrated geometry and required arrays are retained.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Hull05um_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 38,
+      "filter": "PartitionGeometryFilter",
+      "uuid": "aad29ebc-bf1c-5dd3-ad25-0f7f8907a02d",
+      "role": "Partition source image cells on an explicit 0.5 micrometer grid with bounds [24,25,14] to [26.5,28,17]. SpatialPartitionIds 1..180 describe bins, not grains; zero marks source cells outside this grid. Preserve original FeatureIds. Vertex-mode preflight remains deferred for issue 1798.",
+      "paths": [
+        "DataContainer/Cell Data",
+        "PointPartitionGrid",
+        "DataContainer"
+      ],
+      "key_parameters": {
+        "partitioning_mode_index": 2,
+        "starting_partition_id": 1,
+        "out_of_bounds_value": 0,
+        "number_of_partitions_per_axis": [
+          5,
+          6,
+          6
+        ],
+        "partitioning_scheme_origin": [
+          24.0,
+          25.0,
+          14.0
+        ],
+        "length_per_partition": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "lower_left_coord": [
+          24.0,
+          25.0,
+          14.0
+        ],
+        "upper_right_coord": [
+          26.5,
+          28.0,
+          17.0
+        ],
+        "input_geometry_attribute_matrix_path": "DataContainer/Cell Data",
+        "output_image_geometry_path": "PointPartitionGrid",
+        "created_attribute_matrix_name": "Cell Data",
+        "created_feature_ids_name": "SpatialPartitionIds",
+        "input_geometry_path": "DataContainer",
+        "existing_partitioning_scheme_path": "",
+        "use_vertex_mask": false,
+        "vertex_mask_path": "",
+        "feature_attr_matrix_name": "Partition Data",
+        "partition_ids_array_name": "SpatialPartitionIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 39,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms.",
@@ -1159,8 +1478,8 @@
       "role": "Closest-point rigid registration and local convergence; this example uses the current simplnx implementation rather than reproducing the paper experiments."
     }
   ],
-  "last_verified": "2026-10-13",
-  "verification_status": "Windows in-memory Release: registered three-pipeline CTest chain passed 1/1 in 23.30 s; independent native saved-output audit passed 67/67 checks, including all 28 original datasets preserved and all seven clouds in Micrometer units. Paired RMS displacement: challenge 0.5165395801, coarse 0.0297782960, registered 6.4759869e-6 micrometers. Maximum registered point error 9.5843083e-6 micrometers; transform composition maximum identity error 5.34044e-5; residual rotation determinant 0.999999774. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows in-memory Release checks; expert interpretation pending. OOC, generated Python, GUI and complete installation remain separate checks.",
   "mcp": {
     "user_intents": [
       "Reassemble two complementary tiles of measured-derived grain voxel centers and recover a known rigid displacement while preserving source-cell identity."
@@ -1190,5 +1509,78 @@
   "result_visual": {
     "path": "SmallIN100PointCloudRegistration.png",
     "role": "Reference, displaced challenge, coarse pose, and registered pose rendered from native saved coordinates on equal micrometer axes."
+  },
+  "sampling_visual": {
+    "image": "SmallIN100SurfaceSampling.png",
+    "sha256": "406f1aed72e8c64e78f567298f8a59cd23f865894464baf277a3118db73437ed",
+    "native_output": "Data/Output/Small_IN100_Grain_Surface_Examples/Registration/SmallIN100_Grain2205_PointCloudRegistration.dream3d",
+    "native_output_sha256": "ffb13f3d61fa5b2cfc49ea89a8cfe55a7709ccd1d9c1edb3aa322efe19050aa3",
+    "arrays": [
+      "ReferenceCloud/Shared Vertex List",
+      "SurfaceSamples/Shared Vertex List",
+      "Hull025um/Shared Vertex List",
+      "Hull05um/Shared Vertex List"
+    ],
+    "rendering": "Matplotlib scatters all native point coordinates with identical physical limits, aspect and camera. No sampling or hull algorithm is used to make this figure. Surface points use smaller translucent markers solely for visibility."
+  },
+  "sampling_validation": {
+    "independent_checks": {
+      "passed": 27,
+      "total": 27,
+      "preserved_prior_datasets": 84
+    },
+    "surface": {
+      "points": 5000,
+      "triangles": 508,
+      "maximum_distance_um": 3.814697265625e-06,
+      "barycentric_mean": [
+        0.3332631614685059,
+        0.3353544792175293,
+        0.33138235931396487
+      ],
+      "area_weighted_mean_error_um": [
+        0.01624740449500095,
+        0.011177186437290487,
+        0.011344748973094454
+      ],
+      "face_occupancy_chi_square": 564.0224
+    },
+    "hulls": {
+      "Hull025um": {
+        "points": 156,
+        "occupied_cells": 170,
+        "max_error_um": 0.0,
+        "pitch_um": 0.25
+      },
+      "Hull05um": {
+        "points": 43,
+        "occupied_cells": 44,
+        "max_error_um": 1.9073486328125e-06,
+        "pitch_um": 0.5
+      }
+    },
+    "partitions": {
+      "grid_cells": 180,
+      "source_cells_inside": 1440,
+      "source_cells_outside": 12384,
+      "grain_cells": 170,
+      "occupied_grain_partitions": 44
+    },
+    "scope": "One fixed-seed statistical sanity check, not RNG certification. Nearest triangle IDs are a post-sampling geometric association; tied boundary faces may differ from the randomly selected face. Hulls have no topology or volume.",
+    "fixed_seed_repeat": "Two native runs produced bitwise identical 5000-point coordinates. No cross-platform RNG identity claim.",
+    "pipeline_sha256": "69b8dd1d59f5b2683ad943bd2fc292f160e50b92db5aeaf3514f4e6cced0ad87",
+    "issues": {
+      "face_transfer_disabled": "https://github.com/BlueQuartzSoftware/simplnx/issues/1799",
+      "vertex_partition_deferred": "https://github.com/BlueQuartzSoftware/simplnx/issues/1798",
+      "units_restored": "https://github.com/BlueQuartzSoftware/simplnx/issues/1796"
+    },
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples",
+      "passed": true,
+      "pipelines": 4,
+      "elapsed_seconds": 26.33,
+      "configuration": "Release, serial"
+    },
+    "downstream_prior_datasets_exact": 24
   }
 }
