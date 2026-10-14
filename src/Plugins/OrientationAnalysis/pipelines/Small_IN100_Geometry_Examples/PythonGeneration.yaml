@@ -50,5 +50,6 @@
     "boundary_contract": "Stage 01 computes feature phases and Rodrigues-average orientations before cropping; preserve scalar degree misorientation, two RGB sides, two directed strength components, and uint8 Sigma3 with coherence disabled."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
-  "mesh_comparison_contract": "Regenerate the 30-step surface pipeline. Keep the original 16 filter configurations, add separate M3C and explicitly legacy QuickMesh geometry branches with Micrometer reconstruction, and never copy original face crystallography onto new triangle indices."
+  "mesh_comparison_contract": "Regenerate the 30-step surface pipeline. Keep the original 16 filter configurations, add separate M3C and explicitly legacy QuickMesh geometry branches with Micrometer reconstruction, and never copy original face crystallography onto new triangle indices.",
+  "smoothing_comparison_contract": "Stage02 has18 steps. Preserve all9 prior filter configurations and the independent original-mesh Laplacian branch with zero junction/outer lambdas. Generate native TriangleCentroid calls; do not replace them with plotting calculations."
 }

@@ -43,7 +43,7 @@ If you instead need a smoothing method that strictly preserves the mesh topology
 
 ### Algorithm Usage and Memory Requirements
 
-Currently, if you lock the *Default Lambda* value to zero (0), the **triple lines** (edges where three features meet) and quadruple points will not be able to move because none of their neighbors can move. The user may want to consider allowing a small value of &lambda; for the default nodes, which will allow some movement of the triple lines and/or quadruple points.
+Each node's own type-specific lambda controls its movement. A zero *Default Lambda* fixes ordinary internal nodes; it does not automatically fix triple lines or quadruple points whose separate lambdas are nonzero. Fixed neighbors still contribute their positions to a moving node's neighbor average. Set every junction and outer-node lambda to zero when those nodes must remain fixed.
 
 The *Iteration Steps* parameter is a dimensionless count of smoothing passes; more steps produce more smoothing.
 
@@ -93,6 +93,10 @@ For more information on surface meshing, visit the tutorial.
 [2] Field, D. A. (1988). *Laplacian smoothing and Delaunay triangulations*. Communications in Applied Numerical Methods, 4(6): 709-712. doi:10.1002/cnm.1630040603
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Geometry_Examples/(02) Small IN100 Surface Smoothing.d3dpipeline` (OrientationAnalysis)
 
 - (02) SmallIN100 Smooth Mesh
 

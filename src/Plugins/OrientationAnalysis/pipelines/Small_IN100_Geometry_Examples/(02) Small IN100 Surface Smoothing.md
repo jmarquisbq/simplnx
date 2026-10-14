@@ -2,7 +2,7 @@
 
 Executable pipeline: `(02) Small IN100 Surface Smoothing.d3dpipeline`
 
-> **Before adapting:** Do not treat this example as a validated acceptance procedure. Adapt and validate it for the scanner, material, resolution, and quality requirement. Check crop bounds, coordinate scale, and the intended geometric tolerance. The smoothing limit is componentwise in cell coordinates, and a smoother Small IN100 surface is not proof of greater physical accuracy.
+> **Before adapting:** Check mesh units, node roles, and which boundaries must stay fixed. Smoothing changes reconstructed geometry; a smoother view is not evidence of a more accurate interface.
 
 ## At a glance
 
@@ -11,8 +11,10 @@ Executable pipeline: `(02) Small IN100 Surface Smoothing.d3dpipeline`
 | Prerequisite | `(01) Small IN100 Surface Mesh.d3dpipeline` |
 | Input | `Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d` |
 | Baseline retained | `SurfaceMesh` with its original measurements |
-| New mesh | `SmoothedSurfaceMesh` with `SmoothedFaceAreas` and `SmoothedFaceNormals` |
+| Alternatives | Built-in SurfaceNets: `SmoothedSurfaceMesh`; independent constrained Laplacian: `LaplacianSurfaceMesh` |
 | Relaxation | 10 iterations, factor 0.5, maximum local coordinate displacement 0.5 |
+| Laplacian control | 10 passes, lambda 0.1 for ordinary internal nodes; junction and outer nodes fixed |
+| Face locations | Native `FaceCentroids` on the original, built-in-smoothed, and Laplacian meshes |
 | Output | `Data/Output/Small_IN100_Geometry_Examples/Smoothing/SmallIN100_SurfaceSmoothing.dream3d` |
 
 ## Purpose and real-world setting
@@ -27,7 +29,7 @@ The numerical spacing is isotropic 0.25 micrometers. The final smoothed geometry
 
 ## Data flow and filter choices
 
-Read baseline and crop → regenerate a temporary smoothed SurfaceNets mesh → construct the micrometer mesh and copy ownership arrays → remove temporary mesh → compute fresh areas and normals → save both meshes.
+Read baseline and crop -> independent built-in relaxation and Laplacian branches -> fresh areas, normals and face centroids -> save the original and both alternatives.
 
 | Filter and choice | Why it is here | Alternatives and pitfalls |
 | --- | --- | --- |
@@ -38,9 +40,17 @@ Read baseline and crop → regenerate a temporary smoothed SurfaceNets mesh → 
 | Skin index 0, winding repair enabled | Keep the same boundary and winding choices as the baseline | Changing skin settings would confound the comparison |
 | `CreateGeometryFilter` and ownership copies | Reconstruct the published triangle geometry with Micrometer units and unchanged arrays | SurfaceNets otherwise leaves default Meter metadata. Copy current vertices, triangles, FaceLabels, and NodeTypes, then delete the temporary mesh |
 | Areas and normals | Measure the new vertices under distinct names | Reusing copied baseline normals or face IPF colors would attach directions to the wrong surface |
-| `WriteDREAM3DFilter` | Preserve the image, unsmoothed baseline, and new mesh together | Exporting only the smoothed geometry removes the reference needed for comparison |
+| `WriteDREAM3DFilter` | Preserve the image, unsmoothed baseline, and alternative meshes together | Exporting only a smoothed geometry removes the reference needed for comparison |
 
-The current implementation averages face-connected neighbors and treats junction vertices using junction-face neighbors. It then clamps each local coordinate to `0.5 +/- max_distance_from_voxel`. With the chosen value, the local interval is `[0,1]`. After multiplication by spacing, the bound is 0.125 micrometers per coordinate relative to the unsmoothed position. The corresponding three-dimensional displacement can reach the square root of three times that bound, about 0.217 micrometers. This bound follows from the settings; the observed displacements are reported below. It is not an accuracy estimate against the unknown physical boundary.
+The built-in SurfaceNets implementation averages face-connected neighbors and treats junction vertices using junction-face neighbors. It then clamps each local coordinate to `0.5 +/- max_distance_from_voxel`. With the chosen value, the local interval is `[0,1]`. After multiplication by spacing, the bound is 0.125 micrometers per coordinate relative to the unsmoothed position. The corresponding three-dimensional displacement can reach the square root of three times that bound, about 0.217 micrometers. This bound follows from the settings; the observed displacements are reported below. It is not an accuracy estimate against the unknown physical boundary.
+
+### Independent Laplacian branch and face locations
+
+The added branch copies the **original unsmoothed** vertices, triangles, labels and node types into an explicit Micrometer geometry. It does not smooth the already relaxed mesh or copy its stale measurements. `LaplacianSmoothingFilter` moves each allowed node toward the equally weighted mean of its edge-connected neighbors. Ten passes with lambda 0.1 are illustrative, modest choices; they are not equivalent to ten SurfaceNets passes.
+
+Only ordinary internal nodes (type 2) have nonzero lambda. Types 3/4 (junctions) and 12/13/14 (outer nodes) remain fixed. This answers a practical question: how can an analyst smooth interface interiors while retaining the reconstructed junctions and artificial crop walls? Increasing the other lambdas would relax that constraint. Taubin smoothing is off to keep the comparison to one positive averaging step per pass; this branch makes no volume-preservation claim.
+
+Areas and normals are computed after movement. `TriangleCentroidFilter` also saves `Face Data/FaceCentroids` for the original reference and both smoothing results. Each tuple locates one triangle by the mean of its three vertices; it is not a grain or enclosed-volume centroid. Triangle row 0 is real data. Float64 storage does not imply double-precision calculation: these centroids and areas include float32 arithmetic rounding, so use numerical tolerances when checking them independently.
 
 ## Outputs and interpretation
 
@@ -49,6 +59,12 @@ The current implementation averages face-connected neighbors and treats junction
 The figure compares the same 533/1719 interface under the same camera; its histogram uses all 6,479 mesh vertices. Every vertex moves: mean displacement is 0.0865 µm, maximum magnitude is 0.2165 µm, and maximum movement on each axis is 0.125 µm. All 14,052 triangles, face labels, and node types are retained. The cropped image and baseline remain unchanged.
 
 Total interface-plus-cap area falls from 439.125 to 346.630 µm², a 21.06% reduction. The smallest triangle falls from 0.03125 to approximately 0.00000534 µm²: inspect very small faces before further modeling. Reduced area and smoother appearance do not establish greater physical accuracy or better element quality. Separate internal interfaces from artificial caps when interpreting area. Boundary node flags do not mean those vertices remain fixed.
+
+The Laplacian control moves 2,593 of 6,479 vertices, with mean displacement 0.02780 and maximum 0.15790 micrometers. All 3,881 junction/outer nodes remain exactly fixed. Total area becomes 392.50005 square micrometers, while artificial cap area remains 216.0; built-in SurfaceNets relaxation changes cap area to approximately 200.30587. These differences demonstrate the selected constraints, not a ranking of physical accuracy. M3C and legacy QuickMesh results inherited from stage 01 remain unchanged and are outside this smoothing comparison.
+
+![Independent smoothing policies and native triangle-centroid locations](SmoothingAlternatives.png)
+
+The maroon markers use saved `FaceCentroids` to locate the ten smallest-area faces on the displayed Laplacian interface. They are inspection aids, not a calibrated quality cutoff. The cumulative curves include all vertices, including fixed nodes at zero displacement. Meshes and centroids come from DREAM3D-NX; plotting derives displacement from corresponding saved vertex coordinates.
 
 ## Adaptation and quality checks
 

@@ -315,6 +315,321 @@
     },
     {
       "args": {
+        "input_triangle_geometry_path": {
+          "value": "SurfaceMesh",
+          "version": 1
+        },
+        "centroids_array_name": {
+          "value": "FaceCentroids",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid.",
+      "filter": {
+        "name": "nx::core::TriangleCentroidFilter",
+        "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "SmoothedSurfaceMesh",
+          "version": 1
+        },
+        "centroids_array_name": {
+          "value": "FaceCentroids",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid.",
+      "filter": {
+        "name": "nx::core::TriangleCentroidFilter",
+        "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "LaplacianSurfaceMesh",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "SurfaceMesh/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "SurfaceMesh/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the original unsmoothed vertices/connectivity into a separate Micrometer mesh; do not copy stale geometry fields or crystallography.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SurfaceMesh/Face Data/FaceLabels"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "LaplacianSurfaceMesh/Face Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep source grain ownership and triangle order on the independent smoothing branch.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "SurfaceMesh/Vertex Data/NodeTypes"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "LaplacianSurfaceMesh/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Keep source node roles so junction and outer-node policies are explicit.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "iteration_steps": {
+          "value": 10,
+          "version": 1
+        },
+        "lambda_value": {
+          "value": 0.1,
+          "version": 1
+        },
+        "use_taubin_smoothing": {
+          "value": false,
+          "version": 1
+        },
+        "mu_factor": {
+          "value": 0.2,
+          "version": 1
+        },
+        "triple_line_lambda": {
+          "value": 0.0,
+          "version": 1
+        },
+        "quad_point_lambda": {
+          "value": 0.0,
+          "version": 1
+        },
+        "surface_point_lambda": {
+          "value": 0.0,
+          "version": 1
+        },
+        "surface_triple_line_lambda": {
+          "value": 0.0,
+          "version": 1
+        },
+        "surface_quad_point_lambda": {
+          "value": 0.0,
+          "version": 1
+        },
+        "input_triangle_geometry_path": {
+          "value": "LaplacianSurfaceMesh",
+          "version": 1
+        },
+        "surface_mesh_node_type_array_path": {
+          "value": "LaplacianSurfaceMesh/Vertex Data/NodeTypes",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Ten uniform-edge Laplacian passes move only node type 2 with lambda 0.1. All junction and outer nodes are fixed; no Taubin pass or volume-preservation claim.",
+      "filter": {
+        "name": "nx::core::LaplacianSmoothingFilter",
+        "uuid": "0dd0916e-9305-4a7b-98cf-a6cfb97cb501"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LaplacianSurfaceMesh",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "FaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Measure each current triangle after smoothing, retaining square-micrometer interpretation.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LaplacianSurfaceMesh",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "FaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Recompute unit normals from the new vertex positions; winding is not a global outward-direction guarantee.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LaplacianSurfaceMesh",
+          "version": 1
+        },
+        "centroids_array_name": {
+          "value": "FaceCentroids",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid.",
+      "filter": {
+        "name": "nx::core::TriangleCentroidFilter",
+        "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Small_IN100_Geometry_Examples/Smoothing/SmallIN100_SurfaceSmoothing.dream3d",
           "version": 1

@@ -18,6 +18,8 @@ Note: this filter produces one centroid **per triangle**. To instead compute one
 
 Centroid coordinates are reported in the **geometry length units** of the **Triangle Geometry** vertices (for example, micrometers if the mesh coordinates are stored in micrometers).
 
+The result is stored as float64, but the current implementation averages float32 vertex coordinates using float32 arithmetic before assignment. Account for that rounding in numerical comparisons; storage type alone does not establish double-precision calculation.
+
 ### Required Input Sources
 
 - **Triangle Geometry** -- a surface mesh, typically produced by a surface-meshing filter such as [Create Surface Mesh (Surface Nets)](SurfaceNetsFilter.md) or [Create Surface Mesh (QuickMesh)](QuickSurfaceMeshFilter.md).
@@ -25,6 +27,10 @@ Centroid coordinates are reported in the **geometry length units** of the **Tria
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Geometry_Examples/(02) Small IN100 Surface Smoothing.d3dpipeline` (OrientationAnalysis)
 
 + Triangle_Face_Data_Demo.d3dpipeline
 

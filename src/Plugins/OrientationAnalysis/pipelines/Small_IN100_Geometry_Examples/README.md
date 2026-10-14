@@ -9,7 +9,7 @@ These three examples turn a bounded, measured-derived EBSD label volume into a t
 | Example | Purpose | Required predecessor |
 | --- | --- | --- |
 | `(01) Small IN100 Surface Mesh` | Crop to 24 cubed cells; connect unsmoothed interfaces to full-grain orientations, two-sided IPF colors, assumed-load slip metrics, and Sigma3 candidates; compare M3C and legacy QuickMesh geometry | Feature Preparation from `Small_IN100_Examples` |
-| `(02) Small IN100 Surface Smoothing` | Create a second mesh from the same cropped labels with constrained relaxation | Geometry example 01 |
+| `(02) Small IN100 Surface Smoothing` | Compare built-in relaxation with independent Laplacian smoothing that fixes junction/outer nodes; locate faces with triangle centroids | Geometry example 01 |
 | `(03) Small IN100 Surface Transform and Export` | Copy the baseline, rotate and translate it, then export STL | Geometry example 01 |
 
 Examples 02 and 03 are separate branches from 01. Transform/export does not use the smoothed mesh. After changing the preparation or crop, rerun 01 and regenerate both branches; after changing only smoothing, rerun 02. Each pipeline saves to its own output directory.
@@ -55,7 +55,7 @@ All paths below begin with `Data/Output/Small_IN100_Geometry_Examples/`.
 | File | Contents |
 | --- | --- |
 | `Surface/SmallIN100_SurfaceMesh.dream3d` | Cropped `DataContainer`, full-grain orientation/phase table, and `SurfaceMesh` with geometry and boundary crystallography, plus geometry-only M3C and legacy QuickMesh alternatives |
-| `Smoothing/SmallIN100_SurfaceSmoothing.dream3d` | Same crop and baseline plus `SmoothedSurfaceMesh` with fresh measurements |
+| `Smoothing/SmallIN100_SurfaceSmoothing.dream3d` | Same crop and baseline plus `SmoothedSurfaceMesh`, `LaplacianSurfaceMesh`, and fresh triangle measurements/centroids |
 | `Transform/SmallIN100_SurfaceTransform.dream3d` | Same crop and baseline plus `SurfaceMesh_Transformed` and `SurfaceTransformMatrix` |
 | `Transform/SmallIN100_SurfaceTransformed.stl` | One binary STL of all transformed triangles; no label arrays or explicit unit declaration |
 
@@ -70,6 +70,8 @@ Stage 01 adds scalar boundary misorientation in degrees, TSL face-normal IPF col
 Stage 01 also saves `M3CSurfaceMesh` and `LegacyQuickMesh` from the same unchanged crop. They retain caps, explicitly use Micrometer units, and have fresh areas/normals. QuickMesh is included for legacy comparison, with input-label correction disabled; SurfaceNets remains the default recommendation. Triangle counts and areas describe different tessellations, not a physical-accuracy ranking.
 
 The added crystallography belongs to the original `SurfaceMesh`. Examples 02 and 03 preserve that baseline but do not copy its boundary arrays onto their new meshes. Geometry-dependent interpretation must be recomputed for a new surface and coordinate frame.
+
+Stage 02's Laplacian branch starts from the original unsmoothed mesh. Ten passes with lambda 0.1 move only ordinary internal nodes; junction and outer-node lambdas are zero. Its 3,881 constrained nodes stay fixed, unlike the built-in SurfaceNets comparison's different boundary policy. Areas/normals are recomputed and native per-triangle centroids locate faces.
 
 The transform is `x_new=10-y`, `y_new=x`, `z_new=z`, without centering. The newly constructed geometry has no copied areas or normals; after transforming, the pipeline creates `TransformedFaceAreas` and `TransformedFaceNormals`. No cell labels or crystallographic orientations are rotated.
 
@@ -95,14 +97,15 @@ The `.d3dpipeline` is executable authority. Markdown explains interpretation and
 
 `PythonGeneration.yaml` specifies temporary generation through `simplnx_utilities.generate_python_pipeline`. Regenerate from the pipeline after any change. Use the matching application's Python environment and the same data working folder. Report missing imports or conversion failures; do not silently hand-translate unsupported arguments. No persistent Python sidecar is installed.
 
-The extended Geometry chain passed Windows in-memory Release CTest on October 13, 2026 (22.53 seconds), followed by the dependent grain-surface chain (24.92 seconds). All 58 mesh checks passed, including exact preservation of the prior Surface/Smoothing/Transform datasets. QuickMesh matches an independent voxel-face ownership oracle; M3C has checked triangle arithmetic and label/plane invariants, without independent case-table reproduction. Existing boundary crystallography remains on the unchanged original mesh. Native GUI, OOC, generated Python, physical accuracy, global manifoldness and downstream suitability remain separate checks.
+The extended Geometry chain passed Windows in-memory Release CTest on October 13, 2026 (22.53 seconds), followed by the dependent grain-surface chain (24.92 seconds). All 58 mesh checks passed, including exact preservation of the prior Surface/Smoothing/Transform datasets. QuickMesh matches an independent voxel-face ownership oracle; M3C has checked triangle arithmetic and label/plane invariants, without independent case-table reproduction. Existing boundary crystallography remains on the unchanged original mesh. The stage02 Laplacian/centroid extension also passed the full Geometry CTest (22.53 seconds) and 34 independent checks, including graph-averaging agreement and exact prior-data preservation. Native GUI, OOC, generated Python, physical accuracy, global manifoldness and downstream suitability remain separate checks.
 
 | Result | Checked values for the supplied crop |
 | --- | --- |
 | Baseline | 23 original positive regions; 6,479 vertices; 14,052 triangles; area 439.125 µm² |
 | Smoothing | Same triangles and labels; mean displacement 0.0865 µm; maximum 0.2165 µm; area 346.630 µm² |
+| Laplacian control | Same triangles and labels; 2,593 moved vertices; 3,881 constrained nodes fixed; area 392.500 square micrometers |
 | Transform/export | Exact prescribed coordinate mapping; unchanged area; STL 14,052 facets and 702,684 bytes |
 | Mesher alternatives | M3C: 7,931 vertices, 17,090 triangles, area 389.8829; legacy QuickMesh: 6,479 vertices, 14,052 triangles, area 439.125 (all areas in square micrometers) |
 | Boundary crystallography | 72 internal pairs; 6 Sigma3 candidate pairs occupying 2,602 faces and 81.3125 square micrometers; coherence disabled |
 
-Area totals include internal interfaces and artificial caps. The smoothing result includes very small triangles, so smoother appearance is not a mesh-quality guarantee. All three published mesh variants explicitly record Micrometer units. The mesh views display only the original-ID pair 533/1719 (1,138 triangles) for clarity; exported files retain the full mesh. The boundary figure also summarizes all internal faces and pairs. The source-image preview uses crop slice 12, centered at z = 14.625 µm. PNGs are data-derived scientific views, not screenshots of DREAM3D-NX or paper figures. Their source-output and image hashes are recorded in the YAML companions.
+Area totals include internal interfaces and artificial caps. The smoothing result includes very small triangles, so smoother appearance is not a mesh-quality guarantee. All published mesh variants explicitly record Micrometer units. The mesh views display only the original-ID pair 533/1719 (1,138 triangles) for clarity; exported files retain the full mesh. The boundary figure also summarizes all internal faces and pairs. The source-image preview uses crop slice 12, centered at z = 14.625 µm. PNGs are data-derived scientific views, not screenshots of DREAM3D-NX or paper figures. Their source-output and image hashes are recorded in the YAML companions.

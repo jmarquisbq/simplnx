@@ -3,6 +3,13 @@
   "scope": "Selected geometry and boundary-crystallography examples only; occurrence coverage is not scientific validation or a complete filter inventory.",
   "filters": [
     {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder."
+    },
+    {
       "filter": "ComputeFeaturePhasesFilter",
       "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
@@ -199,6 +206,20 @@
       "purpose": "Compute fresh unit normals from LegacyQuickMesh triangle winding. This does not establish a universally outward orientation or a closed-manifold network."
     },
     {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 29,
+      "purpose": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder."
+    },
+    {
       "filter": "SurfaceNetsFilter",
       "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
       "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
@@ -248,6 +269,83 @@
       "purpose": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network."
     },
     {
+      "filter": "TriangleCentroidFilter",
+      "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 8,
+      "purpose": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid."
+    },
+    {
+      "filter": "TriangleCentroidFilter",
+      "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 9,
+      "purpose": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 10,
+      "purpose": "Copy the original unsmoothed vertices/connectivity into a separate Micrometer mesh; do not copy stale geometry fields or crystallography."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 11,
+      "purpose": "Keep source grain ownership and triangle order on the independent smoothing branch."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 12,
+      "purpose": "Keep source node roles so junction and outer-node policies are explicit."
+    },
+    {
+      "filter": "LaplacianSmoothingFilter",
+      "uuid": "0dd0916e-9305-4a7b-98cf-a6cfb97cb501",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 13,
+      "purpose": "Ten uniform-edge Laplacian passes move only node type 2 with lambda 0.1. All junction and outer nodes are fixed; no Taubin pass or volume-preservation claim."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 14,
+      "purpose": "Measure each current triangle after smoothing, retaining square-micrometer interpretation."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 15,
+      "purpose": "Recompute unit normals from the new vertex positions; winding is not a global outward-direction guarantee."
+    },
+    {
+      "filter": "TriangleCentroidFilter",
+      "uuid": "5d7156ae-3e0a-4db0-a792-552f492e8911",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 16,
+      "purpose": "Locate each triangle by the mean of its three current vertices in micrometers; this is not a grain or volume centroid."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) Small IN100 Surface Smoothing.d3dpipeline",
+      "step": 17,
+      "purpose": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the documented predecessor checkpoint; relative paths resolve from the chosen writable working folder."
+    },
+    {
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
@@ -295,6 +393,13 @@
       "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
       "step": 7,
       "purpose": "Export all transformed triangles to one binary STL, including internal interfaces and crop caps. STL does not preserve FeatureIds or declare length units."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) Small IN100 Surface Transform and Export.d3dpipeline",
+      "step": 8,
+      "purpose": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint."
     }
   ]
 }
