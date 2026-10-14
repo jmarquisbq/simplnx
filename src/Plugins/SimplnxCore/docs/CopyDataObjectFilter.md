@@ -46,6 +46,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `Ti64_Segmentation_Examples/(03) Ti64 Minimum Size Cleanup.d3dpipeline` (ImageProcessing)
 
++ `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` (OrientationAnalysis)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

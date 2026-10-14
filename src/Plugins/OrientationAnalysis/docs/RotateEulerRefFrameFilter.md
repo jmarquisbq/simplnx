@@ -37,6 +37,10 @@ The per-element rotation (Euler to matrix, matrix multiply, matrix to Euler) is 
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` (OrientationAnalysis)
+
 + EBSD_File_Processing/Read_EDAX_Ang_File
 + EBSD_File_Processing/Edax_IPF_Colors
 + EBSD_File_Processing/CI_Histogram

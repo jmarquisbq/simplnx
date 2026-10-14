@@ -78,6 +78,10 @@ Once all the inputs are correct the user can click the **Go** button to start th
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` (OrientationAnalysis)
+
 + (01) SmallIN100 Archive
 + 01_Import Data
 

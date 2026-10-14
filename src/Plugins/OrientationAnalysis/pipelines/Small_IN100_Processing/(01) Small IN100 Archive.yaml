@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Small IN100 Archive.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Archive.md",
+  "title": "Small IN100 scan inspection and archive",
+  "summary": "Inspect one measured ANG scan with explicit EDAX reference-frame correction and quality masking, then preserve the existing 117-section raw H5EBSD archive.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Aerospace",
+    "Metallurgy"
+  ],
+  "use_cases": [
+    "Check a raw EBSD scan before reconstructing a serial-section volume",
+    "Keep acquisition and analysis orientation conventions traceable",
+    "Archive raw serial sections with explicit section pitch and frame metadata"
+  ],
+  "keywords": [
+    "SmallIN100",
+    "ANG",
+    "EDAX",
+    "TSL",
+    "EBSD",
+    "H5EBSD",
+    "reference frame",
+    "Euler angles",
+    "image quality",
+    "confidence index",
+    "serial sections",
+    "IPF"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Small_IN100/Slice_1.ang",
+      "role": "Measured first scan for direct inspection; also part of the archive."
+    },
+    {
+      "path": "Data/Small_IN100/Slice_1.ang through Slice_117.ang",
+      "role": "All 117 measured raw scans required by the unchanged archive operation."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d",
+      "role": "Single-scan corrected-grid inspection with acquisition and corrected Euler values, imported quality arrays, acceptance mask and native IPF colors."
+    },
+    {
+      "path": "Data/Output/Reconstruction/Small_IN100.h5ebsd",
+      "role": "Unchanged archive destination containing raw 117-section data and transformation metadata for later Read H5EBSD use."
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "measured-public-example",
+    "asset_keys": [
+      "Small_IN100.tar.gz"
+    ],
+    "paper_doi": "10.1186/2193-9772-3-5",
+    "paper_url": "https://doi.org/10.1186/2193-9772-3-5",
+    "source_url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+    "source_sha512": "79e9f6948d4e8e06187e11216a67596fa786ffd2700e51f594ad014090383eb8bcc003e14de2e88082aa9ae512cc4fc9cee22c80066fc54f38c3ebc75267eb5b",
+    "reference_visual": "Three maps from the native saved inspection checkpoint: Image Quality, the IQ/CI admission mask, and masked IPF colors for corrected sample Z.",
+    "target_traits": [
+      "One measured 189 by 201 square-grid ANG scan, 37989 pixels",
+      "0.25 micrometer XY spacing; one Z layer with reader placeholder spacing 1 micrometer",
+      "Acquisition Euler radians retained alongside corrected Euler radians; all cell arrays share the corrected grid",
+      "IQ > 120 AND CI > 0.1 acceptance mask; expected 24570 accepted pixels",
+      "All 117 original ANG files archived without changing the existing filename, ordering, reference-frame metadata, or 0.25 micrometer section pitch"
+    ],
+    "known_differences": "Illustrative raw-import and archival inspection extension to the existing SmallIN100 workflow. It performs no reconstruction or paper-result reproduction. The direct scan has a placeholder Z thickness; the full archive stores measured 0.25 micrometer section pitch. One scan does not establish quality for all 117 sections. Direct inspection and archive readback agree in orientation and cell-array values but have different geometry origins and material-name formatting; this is not a spatial-overlay equivalence claim.",
+    "archive_provenance_file": "README.md"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-archive-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Inspect SmallIN100 raw ANG quality and frame correction",
+      "Prepare the existing SmallIN100 H5EBSD stack for reconstruction"
+    ],
+    "questions_to_ask": [
+      "What acquisition/export reference-frame settings were used, and were any corrections already applied?",
+      "Does the scan use a square grid and radians, and which quality criteria fit the new acquisition?",
+      "What are the measured section pitch and low-to-high or high-to-low physical order?",
+      "Are all required raw sections present?"
+    ],
+    "constraints": [
+      "The .d3dpipeline is executable authority. Run it from a writable folder containing Data/Small_IN100 and Data/Output.",
+      "This is an extension of the existing archive executable, not a second competing archive example. All eight later legacy pipelines remain unchanged.",
+      "ReadAngData remaps phase values below 1 to 1; do not use Phases > 0 as a validity mask. The IQ/CI thresholds are inherited SmallIN100 choices, not universal calibrated quality criteria.",
+      "EulerAngles_Acquisition retains source orientation values but is spatially reordered by the sample rotation with every other cell array. It is not an unrotated raster.",
+      "Rotate Euler Reference Frame modifies orientation values in place; Rotate Sample Reference Frame rearranges cell arrays and geometry. The 90 degree Z and 180 degree Y corrections match the existing EDAX preset for this dataset, not every ANG export.",
+      "Imported X Position and Y Position are acquisition-coordinate attributes, not recomputed corrected geometry coordinates.",
+      "The inspection has one layer with 1 micrometer placeholder Z spacing. Use it as a 2D map, not for volume, grain-size or thickness measurements. The archive independently records the established 0.25 micrometer section pitch.",
+      "The archive reads the raw files again and stores rotation metadata; it does not archive the corrected in-memory inspection arrays. Read H5EBSD with recommended transforms applies those corrections later. Do not apply them a second time.",
+      "The archive keeps reference_frame_index=0, stacking_order_index=1, z_spacing=0.25, and the original 1 through 117 generated file list. Verify all of these before adapting.",
+      "One acceptable scan does not establish quality, alignment or completeness of all 117 scans. This pipeline does not pause for inspection before archiving.",
+      "The completed H5EBSD is read by a later pipeline. Do not add a read of the generated file inside this pipeline: a fresh preflight needs that file before execution can create it.",
+      "IPF color is a crystal-direction code for corrected sample Z, not a scalar misorientation, strain, grain or phase map. Black denotes the rejected mask.",
+      "Direct ANG inspection and completed-archive readback agree in orientation matrices and reflected cell-array values, not geometry origins. The checked direct origin is [-47.25,0,-1] micrometers with Z spacing 1; readback origin is approximately [0,0,-0.00000413] micrometers with Z spacing 0.25. Inspect or explicitly align coordinates before overlaying; do not silently reset the origin to claim spatial equivalence.",
+      "Physical phase 1 and crystal symmetry agree between readers. MaterialName formatting differs: direct import trims Nickel, while archive readback retains a trailing space; reserved phase-zero names also differ. Use phase IDs and symmetry with appropriate string trimming rather than strict raw name equality."
+    ],
+    "related_pipelines": [
+      "(02) Small IN100 Full Reconstruction.d3dpipeline",
+      "../Small_IN100_Examples/(01) Small IN100 Feature Preparation.d3dpipeline"
+    ]
+  },
+  "citations": [
+    {
+      "title": "DREAM.3D: A Digital Representation Environment for the Analysis of Microstructure in 3D",
+      "authors": [
+        "Michael Groeber",
+        "Michael Jackson"
+      ],
+      "year": 2014,
+      "journal": "Integrating Materials and Manufacturing Innovation",
+      "doi": "10.1186/2193-9772-3-5",
+      "url": "https://doi.org/10.1186/2193-9772-3-5",
+      "scope": "pipeline_workflow",
+      "role": "Scientific context for serial-section EBSD and the existing SmallIN100 reconstruction workflow; this example inspects import conventions and preserves its archive input.",
+      "dataset": {
+        "availability": "The public Small_IN100 archive contains 117 measured ANG sections. The publisher supplements contain processed outputs; raw-source identity with the archive is not proven.",
+        "url": "https://www.dream3d.io/Data_Archive/Small_IN100.tar.gz",
+        "doi": "",
+        "license": "The article is CC BY 2.0; separate archive redistribution terms were not established. This bundle includes no raw or processed volume files; its preview PNG is derived from the checked output.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Public measured SmallIN100 source data; an illustrative import and archive inspection, not a recreation of paper figures or numerical results. The existing archive operation and downstream reconstruction remain unchanged."
+      }
+    },
+    {
+      "title": "DREAM3D-NX and simplnx filter implementations",
+      "authors": [
+        "BlueQuartz Software"
+      ],
+      "year": 2026,
+      "journal": "Source code in this repository",
+      "doi": "",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx",
+      "scope": "filter_algorithm",
+      "role": "Current registered UUIDs, parameter keys, and measurement implementations."
+    }
+  ],
+  "last_verified": "2026-10-13",
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadAngDataFilter",
+      "uuid": "5b062816-79ac-47ce-93cb-e7966896bcbd",
+      "role": "Inspect measured Slice_1.ang directly before archiving all 117 raw sections. The imported 189 by 201 grid has 0.25 micrometer XY spacing; the reader gives its single Z layer a 1 micrometer placeholder spacing.",
+      "paths": [
+        {
+          "parameter": "input_file",
+          "value": "Data/Small_IN100/Slice_1.ang"
+        },
+        {
+          "parameter": "output_image_geometry_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_ensemble_attribute_matrix_name": "Cell Ensemble Data",
+        "input_file": "Data/Small_IN100/Slice_1.ang",
+        "output_image_geometry_path": "DataContainer"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Preserve acquisition-frame Euler radians before the in-place frame rotation. The subsequent sample rotation reorders this copy with every other cell array; values retain their acquisition-frame meaning.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "DataContainer/Cell Data/EulerAngles"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "DataContainer/Cell Data/EulerAngles"
+        ],
+        "use_new_parent": false,
+        "new_data_path": "",
+        "new_path_suffix": "_Acquisition"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "RotateEulerRefFrameFilter",
+      "uuid": "0458edcd-3655-4465-adc8-b036d76138b5",
+      "role": "Apply the established SmallIN100 EDAX/TSL Euler reference-frame correction: 90 degrees about Z. EulerAngles are radians and are modified in place; this does not rearrange image cells.",
+      "paths": [
+        {
+          "parameter": "euler_angles_array_path",
+          "value": "DataContainer/Cell Data/EulerAngles"
+        }
+      ],
+      "key_parameters": {
+        "euler_angles_array_path": "DataContainer/Cell Data/EulerAngles",
+        "rotation_axis_angle": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "role": "Apply the established 180 degree Y sample reference-frame correction slice by slice. Corrected orientation values and cell ordering agree with Read H5EBSD using recommended transforms, but geometry origins differ. Retain this inspection's transform-derived origin; do not overlay it on archive readback without checking alignment. Imported X/Y Position remain acquisition-coordinate attributes. Confirmed automatic-reader origin issue: https://github.com/BlueQuartzSoftware/simplnx/issues/1788.",
+      "paths": [
+        {
+          "parameter": "input_image_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "output_image_geometry_path",
+          "value": "DataContainer"
+        }
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "DataContainer",
+        "keep_input_geometry_origin": false,
+        "output_image_geometry_path": "DataContainer",
+        "remove_original_geometry": true,
+        "rotate_slice_by_slice": true,
+        "rotation_axis_angle": [
+          0.0,
+          1.0,
+          0.0,
+          180.0
+        ],
+        "rotation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation_representation_index": 0
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Use the existing SmallIN100 admission rule: Image Quality > 120 AND Confidence Index > 0.1. Read ANG remaps phase zero to one, so Phases > 0 would wrongly accept failed indexing. Keep rejected cells but exclude them from colors.",
+      "paths": [],
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "DataContainer/Cell Data/Image Quality",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 120.0
+            },
+            {
+              "array_path": "DataContainer/Cell Data/Confidence Index",
+              "comparison": 0,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.1
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 10,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "AcceptedPixels",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ComputeIPFColorsFilter",
+      "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
+      "role": "Color accepted measurements by crystal direction parallel to corrected sample Z using the native IPF color key. Black marks rejected cells, not a second phase; color differences are not a scalar misorientation measure.",
+      "paths": [
+        {
+          "parameter": "cell_euler_angles_array_path",
+          "value": "DataContainer/Cell Data/EulerAngles"
+        },
+        {
+          "parameter": "cell_phases_array_path",
+          "value": "DataContainer/Cell Data/Phases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        },
+        {
+          "parameter": "mask_array_path",
+          "value": "DataContainer/Cell Data/AcceptedPixels"
+        }
+      ],
+      "key_parameters": {
+        "cell_euler_angles_array_path": "DataContainer/Cell Data/EulerAngles",
+        "cell_ipf_colors_array_name": "IPFColors",
+        "cell_phases_array_path": "DataContainer/Cell Data/Phases",
+        "color_key_index": 0,
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "mask_array_path": "DataContainer/Cell Data/AcceptedPixels",
+        "reference_dir": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "use_mask": true
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 6,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the single-scan inspection checkpoint separately from the raw stack archive. This is a 2D map with placeholder Z thickness, not a reconstructed 3D volume.",
+      "paths": [
+        {
+          "parameter": "export_file_path",
+          "value": "Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d"
+        }
+      ],
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 7,
+      "filter": "EbsdToH5EbsdFilter",
+      "uuid": "2d05ca72-0a1b-4aec-b9b0-bc470845c448",
+      "role": "Archive all 117 original ANG sections using the unchanged EDAX preset, high-to-low stack order and 0.25 micrometer section pitch; raw data and frame metadata are written independently of the inspection arrays.",
+      "paths": [
+        {
+          "parameter": "output_file_path",
+          "value": "Data/Output/Reconstruction/Small_IN100.h5ebsd"
+        }
+      ],
+      "key_parameters": {
+        "input_file_list_object": {
+          "end_index": 117,
+          "file_extension": ".ang",
+          "file_prefix": "Slice_",
+          "file_suffix": "",
+          "increment_index": 1,
+          "input_path": "Data/Small_IN100",
+          "ordering": 0,
+          "padding_digits": 0,
+          "start_index": 1
+        },
+        "output_file_path": "Data/Output/Reconstruction/Small_IN100.h5ebsd",
+        "reference_frame_index": 0,
+        "stacking_order_index": 1,
+        "z_spacing": 0.25
+      },
+      "parameters_version": 1
+    }
+  ],
+  "validation": {
+    "date": "2026-10-13",
+    "configuration": "Windows native in-memory Release",
+    "status": "Passed native full SmallIN100 CTest after the inactive matrix was updated to the current 4x4 identity schema. Inspection and archive checks passed.",
+    "ctest": {
+      "name": "PIPELINE::OrientationAnalysis::Small_IN100_Examples",
+      "result": "1/1 passed",
+      "seconds": 19.93
+    },
+    "inspection_checks": {
+      "passed": 37,
+      "failed": 0,
+      "scope": "Windows native in-memory arrays; raw ANG parser, explicit spatial permutation, independent elementary rotation-matrix composition; completed native archive-reader parity. IPF values are native display output, not independently reimplemented. Historical EDAX frame convention is not new experimental calibration."
+    },
+    "accepted_pixels": 24570,
+    "cells": 37989,
+    "max_orientation_matrix_error_all": 6.039831963913139e-07,
+    "max_orientation_matrix_error_accepted": 2.372743255624199e-07,
+    "max_completed_archive_orientation_matrix_difference": 0.0,
+    "raw_slice1_sha256": "215285d5a6c7fdee347a4dd0c0f97e38a12bf014a209162194a30fb7deb7d074",
+    "inspection_output_sha256": "f8cc04eac126544f25edbc4820cb3ef405b497514cf8986e1cb03eaee9066eb5",
+    "archive_preservation": {
+      "section_groups": 117,
+      "identical_datasets": 4343,
+      "all_compared_attributes_identical": true,
+      "reference": "Fresh output from the unchanged original archive filter; all 117 raw sections preserved."
+    },
+    "coordinate_difference": {
+      "direct_origin": [
+        -47.25,
+        0.0,
+        -1.0
+      ],
+      "archive_reader_origin": [
+        0.0,
+        0.0,
+        -4.130726210860303e-06
+      ],
+      "direct_spacing": [
+        0.25,
+        0.25,
+        1.0
+      ],
+      "archive_reader_spacing": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "limitation": "Tuple/orientation parity does not assert spatial coordinate parity; reference-frame origins must be checked before overlay."
+    },
+    "material_name_difference": {
+      "direct": [
+        "Invalid Phase",
+        "Nickel"
+      ],
+      "archive": [
+        "",
+        "Nickel "
+      ]
+    },
+    "unverified": [
+      "GUI",
+      "OOC",
+      "generated Python",
+      "materials interpretation review",
+      "experimental reference-frame calibration"
+    ]
+  },
+  "figure_provenance": {
+    "file": "SmallIN100ScanInspection.png",
+    "sha256": "b66ed29599add2227006548904ff91a8a0060158584f565d0cafb328b8a3abeb",
+    "source_output": "Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d",
+    "source_sha256": "f8cc04eac126544f25edbc4820cb3ef405b497514cf8986e1cb03eaee9066eb5",
+    "arrays": [
+      "DataStructure/DataContainer/Cell Data/Image Quality",
+      "DataStructure/DataContainer/Cell Data/AcceptedPixels",
+      "DataStructure/DataContainer/Cell Data/IPFColors"
+    ],
+    "operation": "Display saved native arrays on corrected XY extent; no orientation algorithm or IPF color recalculation."
+  }
+}

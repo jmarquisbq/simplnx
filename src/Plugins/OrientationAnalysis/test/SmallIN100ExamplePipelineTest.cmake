@@ -24,6 +24,8 @@ endforeach()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/ValidatePipelineCompanion.cmake")
 
+validate_companion("${ARCHIVE_PIPELINE}")
+
 validate_companion("${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(02) Small IN100 Feature Measurements.d3dpipeline")
 validate_companion("${EXAMPLE_DIR}/(03) Small IN100 Surface Selection Comparison.d3dpipeline")
@@ -74,6 +76,7 @@ endforeach()
 # Remove only the known products after checking the resolved parent directories.
 # Each checked output must therefore come from this test invocation.
 set(known_outputs
+    "Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d"
     "Data/Output/Reconstruction/Small_IN100.h5ebsd"
     "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d"
     "Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.xdmf"
@@ -143,6 +146,7 @@ endfunction()
 
 run_pipeline("archive" "${ARCHIVE_PIPELINE}")
 require_output("Data/Output/Reconstruction/Small_IN100.h5ebsd")
+require_output("Data/Output/Small_IN100_Processing/Inspection/SmallIN100_Slice1Inspection.dream3d")
 
 run_pipeline("preparation" "${EXAMPLE_DIR}/(01) Small IN100 Feature Preparation.d3dpipeline")
 require_output("Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d")

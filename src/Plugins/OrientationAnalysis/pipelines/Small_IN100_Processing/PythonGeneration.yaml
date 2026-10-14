@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "smallin100-archive-python-generation-v1",
+  "title": "SmallIN100 archive companion to Python generation",
+  "source_authority": ".d3dpipeline",
+  "converter_api": "simplnx_utilities.generate_python_pipeline",
+  "required_modules": [
+    "simplnx",
+    "orientationanalysis",
+    "imageprocessing",
+    "simplnx_utilities"
+  ],
+  "working_directory": "Chosen writable CLI working folder containing Data/Small_IN100/Slice_1.ang through Slice_117.ang and Data/Output",
+  "output_lifetime": "temporary",
+  "verification_status": "NOT VERIFIED: Python generation, imports, syntax, structure and execution have not been tested.",
+  "failure_behavior": "Report a missing module, load error, generation error, or execution error. Do not silently substitute handwritten Python.",
+  "regeneration_rule": "Regenerate temporary Python from the authoritative .d3dpipeline after any filter, argument, comment, or path change.",
+  "path_rules": {
+    "pipeline_reference_base": "pipeline_suite_root",
+    "runtime_data_base": "chosen_cli_working_directory",
+    "input_paths": "Preserve all Data/Small_IN100 raw ANG paths and the generated file list spanning sections 1 through 117.",
+    "output_paths": "Preserve the separate inspection checkpoint under Data/Output/Small_IN100_Processing/Inspection and the established archive Data/Output/Reconstruction/Small_IN100.h5ebsd."
+  },
+  "generation": {
+    "language": "Python",
+    "steps": [
+      "Use the Python environment supplied with the matching DREAM3D-NX application.",
+      "Import simplnx, orientationanalysis, imageprocessing, and simplnx_utilities before loading the pipeline. The current converter imports imageprocessing even when these pipelines use no ImageProcessing filters.",
+      "Load the authoritative .d3dpipeline with simplnx.Pipeline.from_file(pipeline_path).",
+      "Call simplnx_utilities.generate_python_pipeline(pipeline).",
+      "Compile the returned program and write it to a temporary .py file.",
+      "Generate and execute only (01) Small IN100 Archive from the writable working folder with all 117 raw ANG files. Check both outputs. The eight later legacy pipelines are outside this companion generation specification. Discard temporary Python after validation."
+    ],
+    "reference_code": [
+      "import simplnx as nx",
+      "import orientationanalysis",
+      "import imageprocessing",
+      "import simplnx_utilities",
+      "pipeline = nx.Pipeline.from_file(pipeline_path)",
+      "code = simplnx_utilities.generate_python_pipeline(pipeline)",
+      "compile(code, str(pipeline_path), 'exec')"
+    ]
+  },
+  "validation": {
+    "syntax": "Compile the generated text with Python compile().",
+    "structure": "Match generated filter calls and order to enabled pipeline steps.",
+    "paths": "Check every relative input and output path against the source pipeline.",
+    "execution": "Run the generated archive pipeline from all 117 raw sections; inspect the saved single-scan mask, corrected/acquisition Euler arrays and IPF colors, then verify the raw H5EBSD sections and rotation metadata. NOT VERIFIED.",
+    "storage": "Validate OOC separately before claiming OOC support."
+  },
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "pipeline_files": [
+    "(01) Small IN100 Archive.d3dpipeline"
+  ],
+  "execution_order": [
+    "(01) Small IN100 Archive.d3dpipeline"
+  ]
+}

@@ -75,6 +75,10 @@ Fit of Solution
 
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Processing/(01) Small IN100 Archive.d3dpipeline` (OrientationAnalysis)
+
 + Read_EDAX_Ang_File
 + Edax_IPF_Colors
 + CI_Histogram

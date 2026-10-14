@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "scope": "Every step of the companion-backed (01) archive and scan inspection. The eight unchanged legacy pipelines in this category do not yet have companions and are outside this manifest. Step indices are zero-based.",
+  "filters": [
+    {
+      "filter": "ReadAngDataFilter",
+      "uuid": "5b062816-79ac-47ce-93cb-e7966896bcbd",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 0,
+      "purpose": "Inspect measured Slice_1.ang directly before archiving all 117 raw sections. The imported 189 by 201 grid has 0.25 micrometer XY spacing; the reader gives its single Z layer a 1 micrometer placeholder spacing."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 1,
+      "purpose": "Preserve acquisition-frame Euler radians before the in-place frame rotation. The subsequent sample rotation reorders this copy with every other cell array; values retain their acquisition-frame meaning."
+    },
+    {
+      "filter": "RotateEulerRefFrameFilter",
+      "uuid": "0458edcd-3655-4465-adc8-b036d76138b5",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 2,
+      "purpose": "Apply the established SmallIN100 EDAX/TSL Euler reference-frame correction: 90 degrees about Z. EulerAngles are radians and are modified in place; this does not rearrange image cells."
+    },
+    {
+      "filter": "RotateSampleRefFrameFilter",
+      "uuid": "d2451dc1-a5a1-4ac2-a64d-7991669dcffc",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 3,
+      "purpose": "Apply the established 180 degree Y sample reference-frame correction slice by slice. Corrected orientation values and cell ordering agree with Read H5EBSD using recommended transforms, but geometry origins differ. Retain this inspection's transform-derived origin; do not overlay it on archive readback without checking alignment. Imported X/Y Position remain acquisition-coordinate attributes."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 4,
+      "purpose": "Use the existing SmallIN100 admission rule: Image Quality > 120 AND Confidence Index > 0.1. Read ANG remaps phase zero to one, so Phases > 0 would wrongly accept failed indexing. Keep rejected cells but exclude them from colors."
+    },
+    {
+      "filter": "ComputeIPFColorsFilter",
+      "uuid": "64cb4f27-6e5e-4dd2-8a03-0c448cb8f5e6",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 5,
+      "purpose": "Color accepted measurements by crystal direction parallel to corrected sample Z using the native IPF color key. Black marks rejected cells, not a second phase; color differences are not a scalar misorientation measure."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 6,
+      "purpose": "Save the single-scan inspection checkpoint separately from the raw stack archive. This is a 2D map with placeholder Z thickness, not a reconstructed 3D volume."
+    },
+    {
+      "filter": "EbsdToH5EbsdFilter",
+      "uuid": "2d05ca72-0a1b-4aec-b9b0-bc470845c448",
+      "pipeline": "(01) Small IN100 Archive.d3dpipeline",
+      "step": 7,
+      "purpose": "Archive all 117 original ANG sections using the unchanged EDAX preset, high-to-low stack order and 0.25 micrometer section pitch; raw data and frame metadata are written independently of the inspection arrays."
+    }
+  ]
+}
