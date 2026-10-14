@@ -557,6 +557,60 @@
       "isDisabled": false
     },
     {
+      "filter": {
+        "name": "nx::core::WriteLosAlamosFFTFilter",
+        "uuid": "9d5ffeba-4339-49d2-a519-5743fbd5e7a9"
+      },
+      "args": {
+        "input_image_geometry_path": {
+          "value": "AluminumLabDCT",
+          "version": 1
+        },
+        "cell_euler_angles_array_path": {
+          "value": "AluminumLabDCT/Cell Data/EulerAngles_NX_Radians",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "AluminumLabDCT/Cell Data/PhaseId",
+          "version": 1
+        },
+        "output_file": {
+          "value": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_FFT.txt",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "isDisabled": false,
+      "comments": "Export all measured crop voxels in X-fastest order: three Euler degrees, one-based X/Y/Z indices, original GrainId and PhaseId. Feed original NX radians: the writer converts internally and rounds to three decimal places. Spacing, physical origin, material laws, loading and boundary conditions are not included; this is microstructure data, not a validated FFT simulation."
+    },
+    {
+      "filter": {
+        "name": "nx::core::WriteSPParksSitesFilter",
+        "uuid": "ff5ffedd-4339-49d2-a519-aa43fbd3e710"
+      },
+      "args": {
+        "input_image_geometry_path": {
+          "value": "AluminumLabDCT",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "AluminumLabDCT/Cell Data/GrainId",
+          "version": 1
+        },
+        "output_file": {
+          "value": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_SPPARKS.txt",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "isDisabled": false,
+      "comments": "Export original grain IDs as one integer value per one-based site, preserving X-fastest ordering. The Values-only file requires an already defined compatible box, sites and neighbors; its header does not construct a lattice. It carries no orientations, phases or physical scale. Potts-state use is a separate modeling choice, not the paper CP-FE workflow; cropped faces are not proven periodic."
+    },
+    {
       "args": {
         "export_file_path": {
           "value": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
@@ -576,7 +630,7 @@
         },
         "parameters_version": 2
       },
-      "comments": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed.",
+      "comments": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed. Preserve the native arrays beside the two independent simulation-interchange text products.",
       "filter": {
         "name": "nx::core::WriteDREAM3DFilter",
         "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003"

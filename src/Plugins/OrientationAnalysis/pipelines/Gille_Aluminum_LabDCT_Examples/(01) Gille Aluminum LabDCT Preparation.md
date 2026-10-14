@@ -12,7 +12,7 @@ Executable pipeline: `(01) Gille Aluminum LabDCT Preparation.d3dpipeline`
 | Data | Public AA6016 T4 aluminium crop linked to Gille et al.; [README setup](README.md) |
 | Grid | **110 × 60 × 250**, spacing **0.004 mm** = 4 µm; 1,650,000 voxels |
 | Population | **1,666** source grains; **931** touch crop faces and **735** are interior |
-| Results | `GilleAluminum.dream3d` and `GilleAluminum_Grains.csv` under `Data/Output/Gille_Aluminum_LabDCT_Examples/` |
+| Results | Native preparation, grain CSV, and separate FFT/SPPARKS microstructure text exports under `Data/Output/Gille_Aluminum_LabDCT_Examples/` |
 | Main choices | Keep original labels; convert orientation convention once; recompute NX IPF colours; flag crop truncation instead of deleting grains |
 
 ## Purpose and real-world setting
@@ -30,6 +30,7 @@ Executable pipeline: `(01) Gille Aluminum LabDCT Preparation.d3dpipeline`
 | Statistics by GrainId | Create a grain table using the original IDs and summarize supplied completeness. No completeness threshold or segmentation is added. Completeness is a reconstruction-quality field, not strain or a probability. |
 | Feature sizes, crop-boundary flags and phases | Count retained voxels and measure their observed volumes and equal-volume sphere diameters. Flag grains touching any crop face before interpreting those sizes as whole-grain measurements. |
 | Below-27 flag; feature CSV; native save | Audit the published 27-voxel statement without deleting or reassigning data. Export all positive grain IDs; reserved row 0 is omitted from the feature CSV. |
+| Los Alamos FFT and SPPARKS writers | Reuse the same prepared crop for two distinct interchange contracts. FFT preserves voxel orientations, grain IDs and phases; SPPARKS carries grain IDs as categorical site values. Neither export runs a solver or replaces the paper's Neper/CP-FE procedure. |
 
 The validity mask controls colours and completeness statistics; the size filter counts all retained `GrainId` labels. Every cell is valid here. With another source, resolve invalid labels and mixed-phase grains explicitly before treating the sizes as valid measurements.
 
@@ -53,6 +54,19 @@ Display `AluminumLabDCT` using `NX_IPF001_RGB`, or inspect the same native array
 The [catalogue](https://acdc.alcf.anl.gov/mdf/detail/0989ee07-e015-494d-8805-8e2703e76763-1.0/) and tutorial state a 27-voxel minimum, but the actual download contains the 23-voxel boundary grain above. Cropping can truncate grains; this file alone does not establish why the discrepancy occurred. We preserve and flag it rather than silently forcing the stated minimum. A 27-voxel criterion also represents a different physical size when voxel spacing changes.
 
 The dense grain map contains no void labels. That does **not** mean the real alloy contains no pores or intermetallic particles: this is a prepared grain reconstruction, not a porosity measurement. Neither an equivalent sphere diameter nor reconstruction completeness predicts mechanical response.
+
+### Interchange text files
+
+The 14-step pipeline also writes these products without changing the native arrays:
+
+| File | Contents and checks |
+| --- | --- |
+| `GilleAluminum_FFT.txt` | **1,650,000 headerless rows**, each `Phi1_deg Phi_deg Phi2_deg X Y Z GrainId PhaseId`. Grid indices run from [1,1,1] to [110,60,250], X fastest. The writer consumes `EulerAngles_NX_Radians` and converts internally; do **not** supply a degree copy. Output angles have three decimal places. |
+| `GilleAluminum_SPPARKS.txt` | Header: 3 dimensions, 1,650,000 sites, index-space extents [0,110], [0,60], [0,250], and `26 max neighbors`. Its **Values-only** body pairs site IDs 1–1,650,000 with original grain IDs 1–1,666. It contains neither orientations nor a site/neighbour list. |
+
+The FFT file needs separate geometry scale, phase/material models, loading and boundary conditions. For SPPARKS, [create a compatible box and sites first](https://spparks.github.io/doc/read_sites.html); existing site numbering must match the exported order. Grain IDs can initialize a [Potts model](https://spparks.github.io/doc/app_potts.html) with enough states, but that is a different modeling task from the paper's deformation study. The header does not establish adjacency, periodicity or physical kinetics. In either case, cropping does not prove opposite faces are physically compatible periodic boundaries. Retain the native checkpoint and source attribution; external solver execution remains unverified.
+
+To recover a voxel centre from the FFT indices, use **origin + (index − 0.5) × spacing** on each axis, with this geometry's millimetre values. SPPARKS site ID minus one is the corresponding zero-based linear voxel index. Both writers export every voxel; this fixture's validity mask is entirely true, so another source needs an explicit invalid-cell policy.
 
 ## Relationship to the paper and extensions
 

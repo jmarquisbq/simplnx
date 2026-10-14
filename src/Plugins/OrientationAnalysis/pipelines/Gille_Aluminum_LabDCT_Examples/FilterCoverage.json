@@ -81,11 +81,25 @@
       "purpose": "Export all 1,666 occupied grain rows with their original Feature_ID, completeness, observed sizes, phase and crop/small-fragment flags. The feature writer omits reserved row 0; it does not renumber the grains."
     },
     {
+      "filter": "WriteLosAlamosFFTFilter",
+      "uuid": "9d5ffeba-4339-49d2-a519-5743fbd5e7a9",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 11,
+      "purpose": "Export all measured crop voxels in X-fastest order: three Euler degrees, one-based X/Y/Z indices, original GrainId and PhaseId. Feed original NX radians: the writer converts internally and rounds to three decimal places. Spacing, physical origin, material laws, loading and boundary conditions are not included; this is microstructure data, not a validated FFT simulation."
+    },
+    {
+      "filter": "WriteSPParksSitesFilter",
+      "uuid": "ff5ffedd-4339-49d2-a519-aa43fbd3e710",
+      "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
+      "step": 12,
+      "purpose": "Export original grain IDs as one integer value per one-based site, preserving X-fastest ordering. The Values-only file requires an already defined compatible box, sites and neighbors; its header does not construct a lattice. It carries no orientations, phases or physical scale. Potts-state use is a separate modeling choice, not the paper CP-FE workflow; cropped faces are not proven periodic."
+    },
+    {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
-      "step": 11,
-      "purpose": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed."
+      "step": 13,
+      "purpose": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed. Preserve the native arrays beside the two independent simulation-interchange text products."
     }
   ]
 }

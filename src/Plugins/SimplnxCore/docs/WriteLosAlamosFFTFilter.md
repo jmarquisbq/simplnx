@@ -16,12 +16,14 @@ The format of the file is an ASCII text file with the following space-delimited 
 
     Phi1   Phi   Phi2  X  Y   Z  Feature_ID   Phase_ID
 
-The Euler angles are in degrees. X, Y, Z are integer indices into the **Image** geometry. Feature ID & Phase ID are the integer values for the feature and phase **Starting at One (1)**.
+The **input Euler array must be in radians**. The writer converts to degrees internally and writes three decimal places; supplying degrees would convert twice. X, Y and Z are **one-based integer grid indices**, with X varying fastest. Feature ID and Phase ID are copied unchanged, so validate any positivity/indexing requirements of the receiving code rather than expecting the writer to renumber them.
+
+The file has no header and does not carry physical origin, spacing, coordinate units, a material model, loading or boundary conditions. Retain the native geometry and its provenance when preparing the solver inputs. Exporting a cropped map does not establish that its opposite faces are suitable periodic boundaries.
 
 ### Required Input Sources
 
 - **Image Geometry** -- the voxel grid to export.
-- **Cell Euler Angles** -- a 3-component, per-cell orientation array (Bunge Z-X-Z, in degrees), typically read from EBSD data via [Read EDAX EBSD Data (.ang)](../OrientationAnalysis/ReadAngDataFilter.md), [Read Oxford Instr. EBSD Data (.ctf)](../OrientationAnalysis/ReadCtfDataFilter.md), or [Read H5EBSD File](../OrientationAnalysis/ReadH5EbsdFilter.md).
+- **Cell Euler Angles** -- a 3-component Float32 per-cell orientation array (Bunge Z-X-Z, in **radians**), typically read from EBSD data via [Read EDAX EBSD Data (.ang)](../OrientationAnalysis/ReadAngDataFilter.md), [Read Oxford Instr. EBSD Data (.ctf)](../OrientationAnalysis/ReadCtfDataFilter.md), or [Read H5EBSD File](../OrientationAnalysis/ReadH5EbsdFilter.md).
 - **Cell Feature Ids** -- produced by a segmentation filter such as [Segment Features (Scalar)](ScalarSegmentFeaturesFilter.md).
 - **Cell Phases** -- a per-cell phase index, read alongside the Euler angles from the EBSD readers above.
 
@@ -38,6 +40,13 @@ The output file (columns: Phi1, Phi, Phi2, X, Y, Z, Feature_ID, Phase_ID):
        ..
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
+
 
 ## References
 

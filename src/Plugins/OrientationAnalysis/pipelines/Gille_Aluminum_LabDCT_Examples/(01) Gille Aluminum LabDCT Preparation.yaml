@@ -3,7 +3,7 @@
   "pipeline_file": "(01) Gille Aluminum LabDCT Preparation.d3dpipeline",
   "markdown_file": "(01) Gille Aluminum LabDCT Preparation.md",
   "title": "Gille Aluminum LabDCT Preparation",
-  "summary": "Import a measured AA6016 T4 grain-map crop with explicit units and orientation compatibility, compare vendor and native IPF displays, and prepare per-grain observed-size/completeness reports that retain crop-boundary and small-fragment flags.",
+  "summary": "Import a measured AA6016 T4 grain-map crop with explicit units and orientation compatibility, compare vendor and native IPF displays, and prepare per-grain observed-size/completeness reports that retain crop-boundary and small-fragment flags. Export the same prepared microstructure in distinct FFT and SPPARKS text contracts without running either solver.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -36,12 +36,22 @@
     {
       "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
       "role": "Native source-preserving preparation",
-      "sha256": "e5421897e7dabb1610869174c1acb5df65445efeb8c3c82f5e413dd300c07cbb"
+      "sha256": "78e2b74ff5f55cf0d2ff6f54f931679fbae7eb1b13016325df3fa275ed9b9e1b"
     },
     {
       "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_Grains.csv",
       "role": "1666 original grain IDs with observed sizes, completeness, phase and crop/small-fragment flags",
       "sha256": "a744b5b8bd6800c44662abb63b4cf97669961f54ee73fe98dbc7144ba3cbd2b0"
+    },
+    {
+      "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_FFT.txt",
+      "role": "Headerless eight-column per-voxel orientations/degrees, one-based grid indices, original grain and phase IDs; 1.65M records.",
+      "sha256": "9c0449b671d76460e4f569335e97b7cc063aca1b0ffbb6ac260a0aa02f69b097"
+    },
+    {
+      "path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_SPPARKS.txt",
+      "role": "Values-only site/state file; 1.65M one-based site IDs and original grain IDs. Compatible box/sites/neighbors must already exist.",
+      "sha256": "9c44d15a7801015e8fa3084f0b799787f6b845ad92a9bc24e16273fef06147f0"
     }
   ],
   "input_data_strategy": {
@@ -72,7 +82,9 @@
     "user_intents": [
       "Read a measured GrainMapper3D result into an interpretable NX data structure",
       "Recompute IPF colors with a specified NX legend",
-      "Inspect observed grain sizes while identifying crop truncation"
+      "Inspect observed grain sizes while identifying crop truncation",
+      "Transfer voxel orientations and IDs to a Los Alamos FFT data file",
+      "Transfer measured grain labels as categorical SPPARKS site values"
     ],
     "questions_to_ask": [
       "Which GrainMapper3D orientation representations and IPF arrays are present?",
@@ -92,7 +104,15 @@
       "Completeness is a supplied reconstruction-quality field, not strain or a probability. Grouped means use Float32 accumulation; the independent Float64 comparison differed by at most 2.08e-6 in this run.",
       "No Laguerre tessellation, quadratic tetrahedral meshing, projection-DIC, Z-set model calibration, loading boundary conditions or CP-FE/fracture prediction is implemented. Follow the cited external workflow and obtain the necessary additional data to reproduce those steps.",
       "The public crop has dense grain labels and no void labels; it does not establish absence of pores or intermetallic particles in the real alloy. Source dataset licensing is CC BY 4.0; raw packaging remains subject to project approval.",
-      "ValidGrainVoxels controls IPF colors and completeness statistics; ComputeFeatureSizes and feature-phase assignment use all retained GrainId labels. All source voxels pass here. Resolve invalid labels and mixed-phase grains explicitly when adapting; do not assume the mask applies to every downstream filter."
+      "ValidGrainVoxels controls IPF colors and completeness statistics; ComputeFeatureSizes and feature-phase assignment use all retained GrainId labels. All source voxels pass here. Resolve invalid labels and mixed-phase grains explicitly when adapting; do not assume the mask applies to every downstream filter.",
+      "WriteLosAlamosFFTFilter consumes Float32 Euler radians and converts to degree text internally, rounding to three decimal places. Supplying degrees would convert twice. The eight fields are Phi1_deg,Phi_deg,Phi2_deg,X,Y,Z,GrainId,PhaseId,with no header.",
+      "FFT grid indices are one-based and X-fastest; physical origin,0.004mm spacing,unit metadata and model/boundary/loading parameters are not in the file. Original grain and phase IDs are copied unchanged.",
+      "WriteSPParksSites emits a Values-only file with no Sites or Neighbors section. Use it only with an already defined compatible box/site lattice and matching one-based X-fastest site IDs. The fixed 26-max-neighbors header does not generate or verify adjacency.",
+      "SPPARKS site values are original grain IDs,not phase labels or measured orientations. For a Potts application they must fit 1..Q; this fixture uses 1..1666. Model parameters,physics,physical scale,kinetics and boundary conditions must be supplied/validated separately.",
+      "Both writers export every voxel and do not use ValidGrainVoxels. All source voxels pass here; establish an explicit invalid-cell policy before adapting to another dataset.",
+      "The two export formats serve different modeling tasks. Neither replaces the paper Neper mesh or validates CP-FE/FFT/Potts predictions. Cropped opposite faces are not proven periodic.",
+      "Original native arrays and grain CSV remain unchanged. The existing figure retains its original native-source hash because the plotted arrays are bitwise preserved; new artifacts have separate hashes.",
+      "FFT one-based grid indices map to native voxel centers by origin + (index - 0.5) * spacing in millimeters. SPPARKS site ID minus one is the zero-based X-fastest linear voxel index; verify target site identity before importing values."
     ]
   },
   "citations": [
@@ -163,10 +183,30 @@
         "reproduction_status": "illustrative",
         "reproduction_notes": "Preparation of a released undeformed crop only. No Neper tessellation/meshing, multimodal registration, projection-DIC, constitutive calibration, CP-FE simulation or fracture result is reproduced."
       }
+    },
+    {
+      "title": "SPPARKS read_sites command",
+      "authors": [
+        "SPPARKS developers"
+      ],
+      "year": 2026,
+      "url": "https://spparks.github.io/doc/read_sites.html",
+      "scope": "filter_algorithm",
+      "role": "Values-only files require previously defined compatible sites; header and record layout.2026 is access year."
+    },
+    {
+      "title": "SPPARKS Potts applications",
+      "authors": [
+        "SPPARKS developers"
+      ],
+      "year": 2026,
+      "url": "https://spparks.github.io/doc/app_potts.html",
+      "scope": "filter_algorithm",
+      "role": "Spin-state domain 1..Q and the separate kinetic-model setup. 2026 is access year; no application execution is claimed."
     }
   ],
   "last_verified": "2026-10-14",
-  "verification_status": "Native Windows Release in-core preflight/execution passed; 40/40 independent checks passed against source HDF5 and analytical orientation/geometry expectations. Materials interpretation, GUI, OOC, generated Python and external simulation remain unverified.",
+  "verification_status": "Windows Release in-core extended preflight/execution passed. All 17 independent export checks passed across 1.65M records in each file; 24 prior native datasets and original grain CSV are exact. Previous 40 preparation checks remain supported by source/data preservation. Actual external solver import/execution,GUI, OOC, generated Python and materials interpretation remain unverified.",
   "steps": [
     {
       "index": 0,
@@ -428,9 +468,35 @@
     },
     {
       "index": 11,
+      "filter": "WriteLosAlamosFFTFilter",
+      "uuid": "9d5ffeba-4339-49d2-a519-5743fbd5e7a9",
+      "role": "Export all measured crop voxels in X-fastest order: three Euler degrees, one-based X/Y/Z indices, original GrainId and PhaseId. Feed original NX radians: the writer converts internally and rounds to three decimal places. Spacing, physical origin, material laws, loading and boundary conditions are not included; this is microstructure data, not a validated FFT simulation.",
+      "key_parameters": {
+        "input_image_geometry_path": "AluminumLabDCT",
+        "cell_euler_angles_array_path": "AluminumLabDCT/Cell Data/EulerAngles_NX_Radians",
+        "feature_ids_array_path": "AluminumLabDCT/Cell Data/GrainId",
+        "cell_phases_array_path": "AluminumLabDCT/Cell Data/PhaseId",
+        "output_file": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_FFT.txt"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "WriteSPParksSitesFilter",
+      "uuid": "ff5ffedd-4339-49d2-a519-aa43fbd3e710",
+      "role": "Export original grain IDs as one integer value per one-based site, preserving X-fastest ordering. The Values-only file requires an already defined compatible box, sites and neighbors; its header does not construct a lattice. It carries no orientations, phases or physical scale. Potts-state use is a separate modeling choice, not the paper CP-FE workflow; cropped faces are not proven periodic.",
+      "key_parameters": {
+        "input_image_geometry_path": "AluminumLabDCT",
+        "feature_ids_array_path": "AluminumLabDCT/Cell Data/GrainId",
+        "output_file": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum_SPPARKS.txt"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "role": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed.",
+      "role": "Save the unchanged reconstruction labels and scalar fields, explicit orientation/color conversions, source phase metadata and grain preparation table. No segmentation, small-grain removal, Neper meshing, DIC or CP-FE simulation is performed. Preserve the native arrays beside the two independent simulation-interchange text products.",
       "key_parameters": {
         "export_file_path": "Data/Output/Gille_Aluminum_LabDCT_Examples/GilleAluminum.dream3d",
         "write_xdmf_file": false,
@@ -473,7 +539,50 @@
       0.004,
       0.004,
       0.004
-    ]
+    ],
+    "simulation_interchange": {
+      "previous_datasets_exact": 24,
+      "fft": {
+        "records": 1650000,
+        "max_degree_error_vs_float64": 0.0005275976584471209,
+        "columns": [
+          "Phi1_deg",
+          "Phi_deg",
+          "Phi2_deg",
+          "X_index_1based",
+          "Y_index_1based",
+          "Z_index_1based",
+          "GrainId",
+          "PhaseId"
+        ],
+        "first_and_last": [
+          "333.455 21.706 354.776 1 1 1 28 1",
+          "119.542 4.388 227.645 110 60 250 1650 1"
+        ]
+      },
+      "spparks": {
+        "records": 1650000,
+        "header": [
+          "-",
+          "3 dimension",
+          "1650000 sites",
+          "26 max neighbors",
+          "0 110 xlo xhi",
+          "0 60 ylo yhi",
+          "0 250 zlo zhi",
+          "",
+          "Values",
+          ""
+        ],
+        "state_min": 1,
+        "state_max": 1666,
+        "first_and_last": [
+          "1 28",
+          "1650000 1650"
+        ],
+        "scope": "Values-only format verified; actual SPPARKS box/site setup, execution, neighborhood and modeling not validated."
+      }
+    }
   },
   "figure": {
     "file": "GilleAluminumLabDCT.png",
@@ -493,6 +602,6 @@
   "native_chain": {
     "ctest": "PIPELINE::OrientationAnalysis::Gille_Aluminum_LabDCT_Examples",
     "configuration": "Windows Release in-core",
-    "result": "PASS, 3.54 seconds,original source explicitly supplied; unconfigured-source skip and configured-missing/hash guards separately verified."
+    "result": "PASS: extended 14-step pipeline,4.59seconds; original source explicitly supplied."
   }
 }

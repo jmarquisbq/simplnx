@@ -13,7 +13,7 @@ nxrunner --preflight "<pipeline-folder>/(01) Gille Aluminum LabDCT Preparation.d
 nxrunner --execute "<pipeline-folder>/(01) Gille Aluminum LabDCT Preparation.d3dpipeline"
 ```
 
-For GUI use, set absolute file paths if relative `Data/...` paths do not resolve. Outputs are `GilleAluminum.dream3d` and `GilleAluminum_Grains.csv`. Read the companion before interpreting colour keys, millimetre units, crop-boundary sizes or the source's 27-voxel discrepancy.
+For GUI use, set absolute file paths if relative `Data/...` paths do not resolve. The 14-step pipeline writes `GilleAluminum.dream3d`, `GilleAluminum_Grains.csv`, `GilleAluminum_FFT.txt` and `GilleAluminum_SPPARKS.txt`. Read the companion before interpreting colour keys, millimetre units, crop-boundary sizes, source preprocessing or the two distinct export contracts. The text files are microstructure data, not complete or validated solver setups.
 
 The `.d3dpipeline` is executable authority. YAML records constraints and verified reference values; `PythonGeneration.yaml` describes temporary generation. Native Windows in-memory execution and independent numeric checks are verified. GUI, OOC, generated Python and scientific interpretation remain unverified.
 

@@ -45,7 +45,7 @@
     "syntax": "Compile the generated text with Python compile().",
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check every relative input and output path against the source pipeline.",
-    "execution": "Check all1666 original grain IDs,1650000voxels,931boundary grains,grain 1049with 23 voxels,mm units,source fields and native orientation/color/quality/size outputs. Generated Python is NOT VERIFIED.",
+    "execution": "Check all1666 original grain IDs,1650000voxels,931boundary grains,grain 1049with 23 voxels,mm units,source fields and native orientation/color/quality/size outputs. Generated Python is NOT VERIFIED. Verify both 1.65M-row exports: FFT radians-to-degree conversion/rounding and one-based X-fastest voxel IDs; SPPARKS Values-only header/site-state contract. External solvers are not validated.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",

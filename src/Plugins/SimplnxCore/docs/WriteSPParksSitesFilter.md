@@ -12,14 +12,16 @@ SPPARKS represents the microstructure as a set of **sites**. In this export each
 
 The header lines describe the lattice the sites live on:
 
-- **LINE 1** is intentionally left blank (a separator).
+- **LINE 1** contains `-`; SPPARKS ignores this first descriptive line.
 - **LINE 2** records the spatial dimension (always `3 dimension` for a 3D **Image Geometry**).
 - **LINE 3** is the total number of **Cells** (sites).
-- **LINE 4** is the maximum number of neighbors per site. For a 3D cubic lattice this is `26 max neighbors` (the 26 surrounding cells), and SPPARKS expects exactly this value for this lattice type.
+- **LINE 4** is the fixed `26 max neighbors` header. It does not create or validate a neighborhood graph.
 - **LINES 5, 6, and 7** give the box extents along x, y, and z. These pairs (for example `0 200`) are **cell-index** extents — dimensionless counts of cells along each axis — not physical lengths in microns.
 - **LINE 8** is a blank separator before the `Values` keyword.
 
-More information can be found in the SPPARKS documentation for [read_sites](http://spparks.sandia.gov/doc/read_sites.html) and [dump](http://spparks.sandia.gov/doc/dump.html).
+This writer emits **Values only**, with no `Sites` or `Neighbors` sections. Therefore, define a compatible box, sites and neighbors before reading the file, and verify that their site IDs match the export's one-based, X-fastest order. A new simulation cannot obtain its site geometry from this file alone. See the official [read_sites contract](https://spparks.github.io/doc/read_sites.html).
+
+For a [Potts application](https://spparks.github.io/doc/app_potts.html), values must be valid spin states from 1 through Q. Grain IDs can serve as those categorical states, but this file contains no orientations, phase properties, physical scale, kinetic parameters or boundary-condition choice. A cropped measured map is not automatically periodic or a calibrated grain-growth model.
 
 ### Required Input Sources
 
@@ -29,7 +31,7 @@ More information can be found in the SPPARKS documentation for [read_sites](http
 ### Example Output
 
 ```text
-[LINE 1]
+[LINE 1] -
 [LINE 2] 3 dimension
 [LINE 3] 8000000 sites
 [LINE 4] 26 max neighbors
@@ -50,6 +52,13 @@ More information can be found in the SPPARKS documentation for [read_sites](http
 ```
 
 % Auto generated parameter table will be inserted here
+
+## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Gille_Aluminum_LabDCT_Examples/(01) Gille Aluminum LabDCT Preparation.d3dpipeline` (OrientationAnalysis)
+
 
 ## License & Copyright
 
