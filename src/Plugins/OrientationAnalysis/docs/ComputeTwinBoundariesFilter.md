@@ -16,11 +16,11 @@ Twins are grains that share a highly symmetric orientation relationship. The mos
 
 1. For each **Triangle** on the grain boundary mesh, the filter computes the misorientation between the two **Features** on either side using their average orientations.
 2. If the misorientation axis and angle match the &Sigma;3 twin relationship within the user-defined tolerances, the **Triangle** is flagged as a twin boundary.
-3. If **Compute Coherence** is enabled, the filter additionally measures the *incoherence* -- the angle (in degrees) between the boundary plane normal and the misorientation axis, both expressed in the crystal reference frame. A perfectly coherent twin has an incoherence of 0 degrees, meaning the boundary plane is exactly the twin plane. Higher incoherence values indicate a boundary that has the correct misorientation but is not on the ideal twin plane.
+3. If **Find Coherence** is enabled, the filter additionally measures the *incoherence* -- the angle (in degrees) between the boundary plane normal and the misorientation axis, both expressed in the crystal reference frame. A perfectly coherent twin has an incoherence of 0 degrees, meaning the boundary plane is exactly the twin plane. Higher incoherence values indicate a boundary that has the correct misorientation but is not on the ideal twin plane.
 
 ### Note
 
-Only boundaries between **Features** of the same phase are evaluated.
+Only boundaries between positive **Features** of the same phase with cubic-low or cubic-high symmetry are evaluated. A flag tests the orientation relationship within the selected **angle and axis tolerances, both in degrees**. With *Find Coherence* disabled, it does not establish a coherent twin plane. Even with coherence enabled, interpretation depends on reliable boundary normals; raw voxel facets can reflect grid directions rather than the physical plane. Exterior faces are false, not confirmed non-twin material boundaries.
 
 ### Output Type for Twin Boundaries Array
 
@@ -60,6 +60,10 @@ Pre-caching all arrays into contiguous local vectors enables safe parallel execu
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

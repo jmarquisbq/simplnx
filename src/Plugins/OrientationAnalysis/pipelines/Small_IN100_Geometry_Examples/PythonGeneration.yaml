@@ -46,7 +46,8 @@
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check every relative input and output path against the source pipeline.",
     "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
-    "storage": "Validate OOC separately before claiming OOC support."
+    "storage": "Validate OOC separately before claiming OOC support.",
+    "boundary_contract": "Stage 01 computes feature phases and Rodrigues-average orientations before cropping; preserve scalar degree misorientation, two RGB sides, two directed strength components, and uint8 Sigma3 with coherence disabled."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
 }

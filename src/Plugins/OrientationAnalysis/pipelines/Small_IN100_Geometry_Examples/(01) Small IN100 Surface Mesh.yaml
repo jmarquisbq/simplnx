@@ -3,7 +3,7 @@
   "pipeline_file": "(01) Small IN100 Surface Mesh.d3dpipeline",
   "markdown_file": "(01) Small IN100 Surface Mesh.md",
   "title": "Small IN100 Surface Mesh",
-  "summary": "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals.",
+  "summary": "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -12,7 +12,7 @@
     "Computational geometry"
   ],
   "use_cases": [
-    "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals."
+    "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates."
   ],
   "keywords": [
     "Small IN100",
@@ -21,7 +21,12 @@
     "SurfaceNets",
     "FaceLabels",
     "bounded crop",
-    "geometry"
+    "geometry",
+    "boundary crystallography",
+    "Sigma3",
+    "IPF",
+    "slip transmission",
+    "full-grain orientation"
   ],
   "inputs": [
     {
@@ -32,8 +37,8 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
-      "role": "Full labeled checkpoint retaining the bounded image and baseline mesh.",
-      "sha256": "3082c47a9eaf8c2ed80e8db1b7c674b1d87a6cbfe88a33e1fa9fc444788d44c8"
+      "role": "Cropped image and calibrated original mesh; full-cleaned-grain orientation/phase table and per-face crystallographic descriptors.",
+      "sha256": "30af0e81ace1f26679d6bc3c585d2e640da7da658ecc54c557eb0eb7328b4f4d"
     }
   ],
   "input_data_strategy": {
@@ -52,7 +57,7 @@
       "Original positive feature labels retained",
       "Shared internal interfaces and artificial crop caps"
     ],
-    "known_differences": "Interior crop, modern SurfaceNets, selected smoothing parameters, and optional rigid transform differ from the 2014 case. No exact input identity with the publisher supplement or named paper mesh result is established. No synthetic or medical input from the 2022 paper is used.",
+    "known_differences": "Interior crop, modern SurfaceNets, selected smoothing parameters, and optional rigid transform differ from the 2014 case. No exact input identity with the publisher supplement or named paper mesh result is established. No synthetic or medical input from the 2022 paper is used. Boundary analysis retains a raw cropped mesh, does not reproduce the 2013 QSLIM simplification or boundary distributions, and uses separate 2-degree angle and 3-degree axis Sigma3 thresholds rather than the paper's 2-degree distance from Sigma3.",
     "archive_provenance_file": "README.md"
   },
   "prerequisites": [
@@ -84,9 +89,83 @@
     },
     {
       "index": 1,
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "role": "Recompute phases for the full cleaned FeatureIds before cropping. Rows remain keyed by original child FeatureIds, not twin ParentIds.",
+      "paths": [
+        {
+          "parameter": "cell_features_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        },
+        {
+          "parameter": "cell_phases_array_path",
+          "value": "DataContainer/Cell Data/Phases"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        }
+      ],
+      "key_parameters": {
+        "cell_features_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "cell_phases_array_path": "DataContainer/Cell Data/Phases",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "feature_phases_array_name": "BoundaryFeaturePhases"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "ComputeAvgOrientationsFilter",
+      "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e",
+      "role": "Compute symmetry-aware Rodrigues average orientations from the complete cleaned grains before cropping. These full-grain orientation representatives intentionally remain distinct from cropped geometric measurements.",
+      "paths": [
+        {
+          "parameter": "cell_feature_ids_array_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "cell_phases_array_path",
+          "value": "DataContainer/Cell Data/Phases"
+        },
+        {
+          "parameter": "cell_quats_array_path",
+          "value": "DataContainer/Cell Data/Quats"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        },
+        {
+          "parameter": "cell_feature_attribute_matrix_path",
+          "value": "DataContainer/Cell Feature Data"
+        }
+      ],
+      "key_parameters": {
+        "use_rodrigues_average": true,
+        "use_vmf_average": false,
+        "use_watson_average": false,
+        "cell_feature_ids_array_path": "DataContainer/Cell Data/FeatureIds",
+        "cell_phases_array_path": "DataContainer/Cell Data/Phases",
+        "cell_quats_array_path": "DataContainer/Cell Data/Quats",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "cell_feature_attribute_matrix_path": "DataContainer/Cell Feature Data",
+        "avg_quats_array_name": "BoundaryAvgQuats",
+        "avg_euler_angles_array_name": "BoundaryAvgEulerAngles",
+        "vmf_quat_array_name": "Unused vMF Quats",
+        "vmf_euler_array_name": "Unused vMF Eulers",
+        "vmf_kappa_array_name": "Unused vMF Kappas",
+        "watson_quat_array_name": "Unused Watson Quats",
+        "watson_euler_array_name": "Unused Watson Eulers",
+        "watson_kappa_array_name": "Unused Watson Kappas"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 3,
       "filter": "CropImageGeometryFilter",
       "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
-      "role": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds, crop every cell array, and start from the preparation checkpoint without whole-volume feature measurements.",
+      "role": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds and the freshly computed full-grain orientation rows; crop every cell array. No full-volume shape measurements are imported.",
       "paths": [
         {
           "parameter": "input_image_geometry_path",
@@ -140,7 +219,7 @@
       "parameters_version": 1
     },
     {
-      "index": 2,
+      "index": 4,
       "filter": "SurfaceNetsFilter",
       "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
       "role": "Create the unsmoothed multi-label baseline. Keep artificial crop caps, original positive FeatureIds, exterior FaceLabels -1, and NodeTypes; no cell or feature attribute transfer. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication.",
@@ -186,7 +265,7 @@
       "parameters_version": 2
     },
     {
-      "index": 3,
+      "index": 5,
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "role": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays.",
@@ -270,7 +349,7 @@
       "parameters_version": 1
     },
     {
-      "index": 4,
+      "index": 6,
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "role": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry.",
@@ -301,7 +380,7 @@
       "parameters_version": 1
     },
     {
-      "index": 5,
+      "index": 7,
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "role": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry.",
@@ -332,7 +411,7 @@
       "parameters_version": 1
     },
     {
-      "index": 6,
+      "index": 8,
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "role": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved.",
@@ -352,7 +431,7 @@
       "parameters_version": 1
     },
     {
-      "index": 7,
+      "index": 9,
       "filter": "ComputeTriangleAreasFilter",
       "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
       "role": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps.",
@@ -369,7 +448,7 @@
       "parameters_version": 1
     },
     {
-      "index": 8,
+      "index": 10,
       "filter": "TriangleNormalFilter",
       "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
       "role": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network.",
@@ -386,7 +465,160 @@
       "parameters_version": 1
     },
     {
-      "index": 9,
+      "index": 11,
+      "filter": "ComputeFeatureFaceMisorientationFilter",
+      "uuid": "f3473af9-db77-43db-bd25-60df7230ea73",
+      "role": "Attach the symmetry-reduced angle in degrees to each internal face. Version 2 produces one scalar component, not an axis-angle or RGB array; exterior faces remain NaN.",
+      "paths": [
+        {
+          "parameter": "surface_mesh_face_labels_array_path",
+          "value": "SurfaceMesh/Face Data/FaceLabels"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "surface_mesh_face_labels_array_path": "SurfaceMesh/Face Data/FaceLabels",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "misorientation_array_name": "BoundaryMisorientationDegrees"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 12,
+      "filter": "ComputeFaceIPFColoringFilter",
+      "uuid": "30759600-7c02-4650-b5ca-e7036d6b568e",
+      "role": "Use the TSL IPF key for the face normal in each adjoining grain, with separate RGB arrays for FaceLabels components 0 and 1. Exterior sides are black. Raw voxel normals do not establish a physical boundary plane.",
+      "paths": [
+        {
+          "parameter": "surface_mesh_face_labels_array_path",
+          "value": "SurfaceMesh/Face Data/FaceLabels"
+        },
+        {
+          "parameter": "surface_mesh_face_normals_array_path",
+          "value": "SurfaceMesh/Face Data/FaceNormals"
+        },
+        {
+          "parameter": "feature_euler_angles_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgEulerAngles"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "color_key_index": 0,
+        "surface_mesh_face_labels_array_path": "SurfaceMesh/Face Data/FaceLabels",
+        "surface_mesh_face_normals_array_path": "SurfaceMesh/Face Data/FaceNormals",
+        "feature_euler_angles_array_path": "DataContainer/Cell Feature Data/BoundaryAvgEulerAngles",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "first_face_ipf_colors_array_name": "BoundaryIPFLabel0",
+        "second_face_ipf_colors_array_name": "BoundaryIPFLabel1"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 13,
+      "filter": "ComputeBoundaryStrengthsFilter",
+      "uuid": "f39707f9-0411-4736-a591-1bfbd099bb71",
+      "role": "Compute dimensionless FCC slip-system compatibility for an assumed sample-Z load. Components 0 and 1 follow FaceLabels[0] to [1] and the reverse. These geometric descriptors are not measured strength; F1spt uses slip-plane normals, not boundary traces.",
+      "paths": [
+        {
+          "parameter": "surface_mesh_face_labels_array_path",
+          "value": "SurfaceMesh/Face Data/FaceLabels"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "loading": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "surface_mesh_face_labels_array_path": "SurfaceMesh/Face Data/FaceLabels",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "surface_mesh_f1s_array_name": "BoundaryF1_Z",
+        "surface_mesh_f1spts_array_name": "BoundaryF1spt_Z",
+        "surface_mesh_f7s_array_name": "BoundaryF7_Z",
+        "surface_meshm_primes_array_name": "BoundaryMPrime_Z"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "ComputeTwinBoundariesFilter",
+      "uuid": "66156e04-0e62-4478-baf8-88d34ac694c1",
+      "role": "Flag cubic Sigma3 orientation candidates: within 2 degrees of 60 degrees and 3 degrees of a <111> axis. Do not infer coherent twins from raw voxel-facet normals; coherence is disabled.",
+      "paths": [
+        {
+          "parameter": "face_labels_array_path",
+          "value": "SurfaceMesh/Face Data/FaceLabels"
+        },
+        {
+          "parameter": "face_normals_array_path",
+          "value": "SurfaceMesh/Face Data/FaceNormals"
+        },
+        {
+          "parameter": "avg_quats_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats"
+        },
+        {
+          "parameter": "feature_phases_array_path",
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases"
+        },
+        {
+          "parameter": "crystal_structures_array_path",
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures"
+        }
+      ],
+      "key_parameters": {
+        "find_coherence": false,
+        "angle_tolerance": 2.0,
+        "axis_tolerance": 3.0,
+        "boundaries_array_type_index": 1,
+        "face_labels_array_path": "SurfaceMesh/Face Data/FaceLabels",
+        "face_normals_array_path": "SurfaceMesh/Face Data/FaceNormals",
+        "avg_quats_array_path": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+        "feature_phases_array_path": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+        "crystal_structures_array_path": "DataContainer/Cell Ensemble Data/CrystalStructures",
+        "twin_boundaries_name": "Sigma3Candidate",
+        "twin_boundaries_incoherence_name": "UnusedTwinIncoherence"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
@@ -443,27 +675,52 @@
       "scope": "filter_algorithm",
       "role": "Sections 3 and 4 explain shared multi-label interfaces, bounded relaxation, and the distinct minimum-area triangulation step. Figure 9 illustrates the smoothing tradeoff; the current implementation does not establish the section 4.4 diagonal-minimization claim.",
       "verification_sha256": "18b8f5ffe095855fa99d2f31df5491c24ef3040bdf7410376b9f1801285ab2e4"
+    },
+    {
+      "title": "On \"macroscopic\" characterization of mixed grain boundaries",
+      "authors": [
+        "Adam Morawiec",
+        "Krzysztof Glowinski"
+      ],
+      "year": 2013,
+      "journal": "Acta Materialia",
+      "doi": "10.1016/j.actamat.2013.06.019",
+      "url": "https://doi.org/10.1016/j.actamat.2013.06.019",
+      "author_manuscript_url": "https://imim.pl/personal/adam.morawiec/A_Morawiec_Web_Page/Publications/2013_Acta_Mater_revised.pdf",
+      "scope": "filter_algorithm",
+      "role": "Section 6 motivates inspecting Small IN100 boundary misorientations and separating Sigma3 candidates. The paper also uses boundary-plane geometry and all symmetry equivalents; this pipeline does not implement its mixed-boundary classification or distributions.",
+      "verification_sha256": "2357274acfa3217bd3ec7f95697b5cbb7f5bc86ab61106a5d7e8f7003c0cf977"
     }
   ],
-  "last_verified": "2026-10-08",
-  "verification_status": "Windows in-memory Release: all three pipelines passed the sequential CTest chain; 108/108 independent full-array and STL checks passed. Saved output figures were generated and visually inspected. No native GUI, OOC, generated-Python, downstream solver, or exact paper-reproduction claim.",
+  "last_verified": "2026-10-13",
+  "verification_status": "Windows in-memory Release: the three-pipeline Geometry CTest chain passed; 46 saved-output checks passed, including original-data preservation, independent cubic-symmetry and FCC metric calculations, native neighbor parity, twin candidates, and RGB indexing/invariants. No independent RGB color-key or orientation-average oracle; no OOC, generated-Python, GUI, or scientific suitability claim.",
   "mcp": {
     "user_intents": [
-      "Turn a bounded measured-derived label volume into an unsmoothed multi-material triangle mesh with traceable face labels, node types, areas, and normals."
+      "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates."
     ],
     "questions_to_ask": [
       "Which label array represents the intended features?",
       "Is the crop and its artificial exterior acceptable?",
-      "What length scale and coordinate frame does the consumer require?"
+      "What length scale and coordinate frame does the consumer require?",
+      "Is the intended orientation representative a full cleaned grain or only the crop fragment?",
+      "Is FCC nickel slip geometry appropriate, and what specimen-frame loading direction should be assumed?",
+      "What independent boundary-plane evidence supports a coherence claim?"
     ],
     "constraints": [
       "Use FeatureIds, not twin ParentIds.",
-      "Preserve original labels; no feature renumbering and no whole-volume measurement checkpoint.",
+      "Preserve original FeatureIds without renumbering; compute BoundaryFeaturePhases and BoundaryAvgQuats/BoundaryAvgEulerAngles on the full cleaned volume before cropping. No full-volume shape statistics are imported.",
       "Do not call the combined interface network a closed manifold or solver-ready volume mesh.",
       "Smoothing distance is a per-coordinate cell-space bound, not a physical or radial distance.",
       "Published meshes explicitly use Micrometer units (index 6), matching the source ImageGeom; when adapting input units, change CreateGeometryFilter length_unit_index consistently without silently rescaling coordinates.",
       "STL loses labels, NodeTypes, and explicit unit semantics.",
-      "Do not claim exact 2014 reproduction or minimum-area diagonal selection in the current SurfaceNets implementation."
+      "Do not claim exact 2014 reproduction or minimum-area diagonal selection in the current SurfaceNets implementation.",
+      "Boundary orientation arrays describe full cleaned child features. ParentIds are a separate twin-grouping namespace.",
+      "Require both FaceLabels components > 0 for internal-interface summaries. Caps give NaN misorientation, zero strength metrics, false Sigma3 flags, and a black exterior IPF side.",
+      "Face IPF arrays correspond to label components 0/1; cubic centrosymmetry makes positive and negative normal directions equivalent. Normals are dimensionless and do not prove physical boundary-plane accuracy.",
+      "Loading [0,0,1] is an illustrative specimen-Z direction. FCC {111}<110> geometric descriptors are not measured strength and are not generic BCC slip metrics.",
+      "Strength components correspond to label0 to label1 and label1 to label0; F1spt uses slip-plane-normal alignment rather than physical boundary traces.",
+      "Sigma3Candidate uses angle tolerance 2 degrees and axis tolerance 3 degrees. Find Coherence is false; no twin-plane or coherent-twin conclusion.",
+      "New crystallography belongs only to original SurfaceMesh. Smoothing and transformation variants do not inherit it; recompute any geometry-dependent interpretation in a consistent frame."
     ],
     "related_pipelines": [
       "(02) Small IN100 Surface Smoothing.d3dpipeline",
@@ -471,22 +728,27 @@
     ]
   },
   "result_visual": {
-    "path": "SurfaceMesh.png",
-    "role": "Categorical image section at z=14.625 micrometers and the 1,138-triangle internal interface between original feature IDs 533 and 1719. Other interfaces and crop caps are hidden in the 3D panel; all counts in the footer describe the full mesh.",
-    "sha256": "d48553b43560079f6bc5784f942f79783cf4932437f0f1d18e50c90decb30564",
+    "path": "BoundaryCrystallography.png",
+    "sha256": "c9f613ed050276fa64f964950499401f63c4136aa807cb30a548b8fdb729f04b",
     "source_outputs": [
       {
         "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
-        "sha256": "3082c47a9eaf8c2ed80e8db1b7c674b1d87a6cbfe88a33e1fa9fc444788d44c8"
+        "sha256": "30af0e81ace1f26679d6bc3c585d2e640da7da658ecc54c557eb0eb7328b4f4d"
       }
     ],
-    "method": "Matplotlib rendering of saved image/mesh arrays; face-pair selection is for display only. No remeshing, rescaling, or external reference data.",
+    "method": "Matplotlib reads saved native RGB, misorientation, F1, areas, and Sigma3 arrays. No crystallographic algorithms reimplemented. Area-weighted histograms and pair selection are display summaries only. No relighting of stored RGB.",
     "selected_face_labels": [
       533,
       1719
     ],
     "selected_triangle_count": 1138,
-    "visual_review": "2026-10-08: labels, units, matched views, captions, margins, and numeric annotations inspected."
+    "internal_triangles": 7140,
+    "internal_pairs": 72,
+    "candidate_faces": 2602,
+    "candidate_pairs": 6,
+    "candidate_area_square_micrometers": 81.3125,
+    "visual_review": "2026-10-13: inspected matched cameras, native RGB colors, facet selection, units, legends, histogram area weighting, directional scatter, numeric annotations, and margins.",
+    "role": "Two saved native face-IPF RGB views of interface 533/1719, an area-weighted internal misorientation histogram split by Sigma3 flags, and the two saved F1 directions for all 72 internal grain pairs."
   },
   "dimensional_scope": "A 24-cubed interior crop from the 117-section measured reconstruction; cropped fragments do not establish whole-grain shapes.",
   "cli_usage": {
@@ -503,105 +765,168 @@
     "method": "SurfaceNets temporary mesh -> CreateGeometryFilter Triangle/Copy/Micrometer -> copy FaceLabels and NodeTypes -> delete temporary mesh. Example 03 separately constructs its transformed geometry with explicit Triangle/Copy/Micrometer settings.",
     "reason": "Current SurfaceNets output retains the default Meter metadata rather than the input ImageGeom units."
   },
+  "boundary_contract": {
+    "feature_scope": "Full cleaned FeatureIds before crop; not ParentIds or cropped-fragment averages",
+    "feature_arrays": [
+      "BoundaryFeaturePhases",
+      "BoundaryAvgQuats",
+      "BoundaryAvgEulerAngles"
+    ],
+    "face_arrays": [
+      "BoundaryMisorientationDegrees",
+      "BoundaryIPFLabel0",
+      "BoundaryIPFLabel1",
+      "BoundaryF1_Z",
+      "BoundaryF1spt_Z",
+      "BoundaryF7_Z",
+      "BoundaryMPrime_Z",
+      "Sigma3Candidate"
+    ],
+    "angle_units": "degrees",
+    "euler_units": "radians",
+    "length_units": "micrometers",
+    "area_units": "square micrometers",
+    "normal_units": "dimensionless unit vectors",
+    "strength_units": "dimensionless",
+    "internal_selection": "FaceLabels[:,0] > 0 and FaceLabels[:,1] > 0",
+    "face_ipf_key": "TSL (index 0)",
+    "strength_component_order": [
+      "FaceLabels[0] to FaceLabels[1]",
+      "FaceLabels[1] to FaceLabels[0]"
+    ],
+    "loading_direction_xyz": [
+      0,
+      0,
+      1
+    ],
+    "twin_angle_tolerance_degrees": 2,
+    "twin_axis_tolerance_degrees": 3,
+    "find_coherence": false
+  },
+  "additional_visuals": [
+    {
+      "path": "SurfaceMesh.png",
+      "role": "Categorical image section at z=14.625 micrometers and the 1,138-triangle internal interface between original feature IDs 533 and 1719. Other interfaces and crop caps are hidden in the 3D panel; all counts in the footer describe the full mesh.",
+      "sha256": "d48553b43560079f6bc5784f942f79783cf4932437f0f1d18e50c90decb30564",
+      "source_outputs": [
+        {
+          "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+          "sha256": "3082c47a9eaf8c2ed80e8db1b7c674b1d87a6cbfe88a33e1fa9fc444788d44c8"
+        }
+      ],
+      "method": "Matplotlib rendering of saved image/mesh arrays; face-pair selection is for display only. No remeshing, rescaling, or external reference data.",
+      "selected_face_labels": [
+        533,
+        1719
+      ],
+      "selected_triangle_count": 1138,
+      "visual_review": "2026-10-08: labels, units, matched views, captions, margins, and numeric annotations inspected."
+    }
+  ],
   "validation": {
-    "date": "2026-10-08",
+    "date": "2026-10-13",
     "configuration": "Windows in-memory Release",
     "pipeline_chain": {
       "test": "PIPELINE::OrientationAnalysis::Small_IN100_Geometry_Examples",
       "passed": true,
-      "elapsed_seconds": 20.38,
+      "elapsed_seconds": 21.97,
       "pipelines": 3
     },
     "independent_checks": {
-      "passed": 108,
-      "total": 108,
-      "scope": "Independent full-array crop, mesh measurement, topology consistency, rigid transform, unit metadata, and binary STL checks. Surface Nets is not independently reimplemented. No manifold or solver-readiness proof."
+      "passed": 46,
+      "total": 46,
+      "scope": "Windows Release native in-memory. Orientation averages are conditioned inputs, not independently estimated. RGB checks establish indexing and invariants, not an independent color-key oracle."
     },
-    "pipeline_sha256": "ad52666ecfa8befbf789853532bdb5e6a071c15a6fe79c28e74264ce6371054d",
+    "preservation": {
+      "Surface": {
+        "passed": true,
+        "datasets": 25,
+        "failed_paths": []
+      },
+      "Smoothing": {
+        "passed": true,
+        "datasets": 32,
+        "failed_paths": []
+      },
+      "Transform": {
+        "passed": true,
+        "datasets": 33,
+        "failed_paths": []
+      }
+    },
+    "pipeline_sha256": "4e3dc91c84fea603fbfa45c35af4d6d268cff1685032651aa3640acd341702ea",
     "expected_current_fixture": {
       "units": 6,
       "vertices": 6479,
       "triangles": 14052,
-      "area_total": 439.125,
-      "area_min": 0.03125,
-      "area_max": 0.03125,
-      "area_max_abs_error": 0.0,
-      "normal_max_abs_error": 0.0,
-      "bbox_min_xyz": [
-        20.500003814697266,
-        22.0,
-        11.499996185302734
+      "internal_triangles": 7140,
+      "cap_triangles": 6912,
+      "internal_pairs": 72,
+      "crop_positive_feature_ids": 23,
+      "candidate_pairs": [
+        {
+          "labels": [
+            460,
+            1137
+          ],
+          "triangles": 20,
+          "area_um2": 0.625
+        },
+        {
+          "labels": [
+            533,
+            1719
+          ],
+          "triangles": 1138,
+          "area_um2": 35.5625
+        },
+        {
+          "labels": [
+            533,
+            2173
+          ],
+          "triangles": 236,
+          "area_um2": 7.375
+        },
+        {
+          "labels": [
+            938,
+            998
+          ],
+          "triangles": 594,
+          "area_um2": 18.5625
+        },
+        {
+          "labels": [
+            938,
+            1137
+          ],
+          "triangles": 30,
+          "area_um2": 0.9375
+        },
+        {
+          "labels": [
+            998,
+            1992
+          ],
+          "triangles": 584,
+          "area_um2": 18.25
+        }
       ],
-      "bbox_max_xyz": [
-        26.500003814697266,
-        28.0,
-        17.499996185302734
-      ],
-      "label_pair_count": 94,
-      "outside_triangles": 6912,
-      "node_type_counts": {
-        "2": 2598,
-        "3": 383,
-        "4": 40,
-        "12": 2825,
-        "13": 590,
-        "14": 43
-      },
-      "saved_area_total": 439.125,
-      "area_tolerance_formula": "8 * float32_epsilon * 0.5 * norm(edge1) * norm(edge2)",
-      "area_max_error_fraction_of_tolerance": 0.0
+      "candidate_triangles": 2602,
+      "candidate_area_square_micrometers": 81.3125,
+      "coherence_calculated": false
     },
     "unverified": [
+      "Independent reconstruction of grain-average orientations",
+      "Independent IPF color-key numerical oracle",
       "OOC",
       "generated Python execution",
       "native GUI",
       "downstream solver or printing",
       "manifoldness and self-intersection freedom",
+      "physical twin-plane coherence",
       "exact paper-result reproduction"
-    ],
-    "crop": {
-      "dimensions_xyz": [
-        24,
-        24,
-        24
-      ],
-      "origin_xyz": [
-        20.500003814697266,
-        22.0,
-        11.499996185302734
-      ],
-      "spacing_xyz": [
-        0.25,
-        0.25,
-        0.25
-      ],
-      "source_feature_ids": [
-        153,
-        460,
-        533,
-        938,
-        962,
-        998,
-        1033,
-        1126,
-        1137,
-        1220,
-        1295,
-        1440,
-        1460,
-        1719,
-        1802,
-        1814,
-        1913,
-        1992,
-        2015,
-        2103,
-        2173,
-        2205,
-        2276
-      ],
-      "source_region_count": 23,
-      "padded_volume_label_pair_count": 94
-    }
+    ]
   }
 }

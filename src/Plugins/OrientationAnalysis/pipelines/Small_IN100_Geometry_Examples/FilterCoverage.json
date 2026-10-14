@@ -1,62 +1,104 @@
 {
   "version": 1,
-  "scope": "Selected geometry examples only; occurrence coverage is not scientific validation or a complete SimplnxCore inventory.",
+  "scope": "Selected geometry and boundary-crystallography examples only; occurrence coverage is not scientific validation or a complete filter inventory.",
   "filters": [
+    {
+      "filter": "ComputeFeaturePhasesFilter",
+      "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 1,
+      "purpose": "Recompute phases for the full cleaned FeatureIds before cropping. Rows remain keyed by original child FeatureIds, not twin ParentIds."
+    },
+    {
+      "filter": "ComputeAvgOrientationsFilter",
+      "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 2,
+      "purpose": "Compute symmetry-aware Rodrigues average orientations from the complete cleaned grains before cropping. These full-grain orientation representatives intentionally remain distinct from cropped geometric measurements."
+    },
     {
       "filter": "CropImageGeometryFilter",
       "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 1,
-      "purpose": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds, crop every cell array, and start from the preparation checkpoint without whole-volume feature measurements."
+      "step": 3,
+      "purpose": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds and the freshly computed full-grain orientation rows; crop every cell array. No full-volume shape measurements are imported."
     },
     {
       "filter": "SurfaceNetsFilter",
       "uuid": "13ddf0bd-af49-4e0f-95fb-3267952fd6e5",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 2,
+      "step": 4,
       "purpose": "Create the unsmoothed multi-label baseline. Keep artificial crop caps, original positive FeatureIds, exterior FaceLabels -1, and NodeTypes; no cell or feature attribute transfer. Write a temporary mesh; the following construction explicitly sets the known input micrometer units before publication."
     },
     {
       "filter": "CreateGeometryFilter",
       "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 3,
+      "step": 5,
       "purpose": "Create the published Triangle Geometry by copying the temporary mesh vertices and triangles with explicit Micrometer length units (index 6). This corrects the unpropagated metadata without rescaling or changing topology; tuple sizes come from the current arrays."
     },
     {
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 4,
+      "step": 6,
       "purpose": "Copy FaceLabels without changing values into the corresponding attribute matrix of the micrometer geometry."
     },
     {
       "filter": "CopyDataObjectFilter",
       "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 5,
+      "step": 7,
       "purpose": "Copy NodeTypes without changing values into the corresponding attribute matrix of the micrometer geometry."
     },
     {
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 6,
+      "step": 8,
       "purpose": "Remove the temporary SurfaceNets geometry after copying its coordinates, connectivity, FaceLabels, and NodeTypes; only explicitly calibrated mesh geometry is saved."
     },
     {
       "filter": "ComputeTriangleAreasFilter",
       "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 7,
+      "step": 9,
       "purpose": "Calculate per-triangle areas from the current vertices; these include internal interfaces and artificial crop caps."
     },
     {
       "filter": "TriangleNormalFilter",
       "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
       "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
-      "step": 8,
+      "step": 10,
       "purpose": "Calculate unit face normals from the current triangle winding; do not infer a universal outward direction across the multi-material network."
+    },
+    {
+      "filter": "ComputeFeatureFaceMisorientationFilter",
+      "uuid": "f3473af9-db77-43db-bd25-60df7230ea73",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 11,
+      "purpose": "Attach the symmetry-reduced angle in degrees to each internal face. Version 2 produces one scalar component, not an axis-angle or RGB array; exterior faces remain NaN."
+    },
+    {
+      "filter": "ComputeFaceIPFColoringFilter",
+      "uuid": "30759600-7c02-4650-b5ca-e7036d6b568e",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 12,
+      "purpose": "Use the TSL IPF key for the face normal in each adjoining grain, with separate RGB arrays for FaceLabels components 0 and 1. Exterior sides are black. Raw voxel normals do not establish a physical boundary plane."
+    },
+    {
+      "filter": "ComputeBoundaryStrengthsFilter",
+      "uuid": "f39707f9-0411-4736-a591-1bfbd099bb71",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 13,
+      "purpose": "Compute dimensionless FCC slip-system compatibility for an assumed sample-Z load. Components 0 and 1 follow FaceLabels[0] to [1] and the reverse. These geometric descriptors are not measured strength; F1spt uses slip-plane normals, not boundary traces."
+    },
+    {
+      "filter": "ComputeTwinBoundariesFilter",
+      "uuid": "66156e04-0e62-4478-baf8-88d34ac694c1",
+      "pipeline": "(01) Small IN100 Surface Mesh.d3dpipeline",
+      "step": 14,
+      "purpose": "Flag cubic Sigma3 orientation candidates: within 2 degrees of 60 degrees and 3 degrees of a <111> axis. Do not infer coherent twins from raw voxel-facet normals; coherence is disabled."
     },
     {
       "filter": "SurfaceNetsFilter",

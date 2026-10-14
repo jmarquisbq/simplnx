@@ -6,15 +6,17 @@ Statistics (Crystallography)
 
 ## Description
 
-This **Filter** computes slip transmission metrics for each **Face** (triangle) on a grain boundary mesh. These metrics quantify how easily plastic deformation can transfer across a grain boundary, based on the geometric alignment of slip systems in the two grains on either side.
+This **Filter** computes slip transmission metrics for each **Face** (triangle) on a grain boundary mesh. These dimensionless metrics describe slip-system geometry under an assumed loading direction. They do not measure boundary strength, transmitted slip, or crack initiation.
 
 This filter computes the same metrics as the [Compute Neighbor Slip Transmission Metrics](ComputeSlipTransmissionMetricsFilter.md) filter, but stores results per boundary **Face** rather than per **Feature**. This makes it suitable for visualization and analysis on a **Triangle Geometry** surface mesh.
 
 For a detailed explanation of the slip transmission concept and the individual metrics, see the [Compute Neighbor Slip Transmission Metrics](ComputeSlipTransmissionMetricsFilter.md) documentation.
 
-### Cubic Materials Only
+### Material and loading scope
 
-This filter only works on **cubic m-3m Laue classes**.
+The cubic m-3m implementation uses the twelve FCC `{111}<110>` slip systems. Cubic symmetry alone does not make these metrics suitable for BCC slip. Supply a nonzero loading direction in the same sample reference frame as the average orientations; its magnitude is not a stress value.
+
+Each result has two components: **Face Labels** component 0 toward component 1, and the reverse. Exterior faces receive zeros; exclude them before interpreting the metrics. All faces of a grain pair share these values because the filter uses average orientations and loading, not triangle normals.
 
 ### How This Filter Works
 
@@ -29,7 +31,7 @@ The Luster-Morris parameter measures geometric compatibility between slip system
 
 ### Fracture Initiation Parameters (F1, F1spt, F7)
 
-Three fracture initiation parameter values are computed per **Face**, as defined in [2] (see page 021012-4):
+The historical F1, F1spt, and F7 formulations are discussed in [2] (page 021012-4). The current implementation selects the incoming maximum-Schmid-factor slip system. Its F1spt term uses slip-plane-normal alignment; it does not receive the boundary normal and cannot evaluate actual boundary-plane slip traces. Interpret the results as implementation-specific geometric descriptors, not calibrated fracture predictions:
 
 ![Fracture Initiation Parameter F1](Images/ComputeNeighborSlipTransmission_F1.png)
 
@@ -55,6 +57,10 @@ This filter operates on a grain-boundary surface mesh and requires the following
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

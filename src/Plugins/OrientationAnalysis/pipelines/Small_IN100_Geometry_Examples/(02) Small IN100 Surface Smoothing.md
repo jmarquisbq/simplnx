@@ -21,7 +21,7 @@ Surface relaxation can make a voxel-derived grain-boundary representation easier
 
 ## Input data and assumptions
 
-The input must contain the baseline mesh and its 24 by 24 by 24 image crop. Labels remain the original preparation `FeatureIds`; the pipeline neither renumbers them nor uses twin `ParentIds`. All source cell arrays have already been cropped. The predecessor's empty feature-measurement matrix avoids confusing a cropped fragment with the complete reconstructed grain.
+The input must contain the baseline mesh and its 24 by 24 by 24 image crop. Labels remain the original preparation `FeatureIds`; the pipeline neither renumbers them nor uses twin `ParentIds`. All source cell arrays have already been cropped. The predecessor retains fresh full-cleaned-grain phases and average orientations under the `Boundary` prefix. These describe the full grains before cropping, not the surviving fragments; no full-grain shape measurements are imported. The new `SmoothedSurfaceMesh` receives labels and node types, but no copied crystallography. The original `SurfaceMesh` and its boundary arrays remain the reference.
 
 The numerical spacing is isotropic 0.25 micrometers. The final smoothed geometry explicitly records Micrometer units, matching the baseline and image. The relaxation setting described below is dimensionless in the implementation, so it must not be read directly as 0.5 micrometers. This distinction matters even when a help-page description uses physical-length wording.
 
@@ -37,7 +37,7 @@ Read baseline and crop → regenerate a temporary smoothed SurfaceNets mesh → 
 | Maximum distance 0.5 | Bound each local coordinate around its original cell center | This is neither a physical-distance parameter nor a Euclidean-radius bound |
 | Skin index 0, winding repair enabled | Keep the same boundary and winding choices as the baseline | Changing skin settings would confound the comparison |
 | `CreateGeometryFilter` and ownership copies | Reconstruct the published triangle geometry with Micrometer units and unchanged arrays | SurfaceNets otherwise leaves default Meter metadata. Copy current vertices, triangles, FaceLabels, and NodeTypes, then delete the temporary mesh |
-| Areas and normals | Measure the new vertices under distinct names | Reusing copied baseline normals would attach directions to the wrong surface |
+| Areas and normals | Measure the new vertices under distinct names | Reusing copied baseline normals or face IPF colors would attach directions to the wrong surface |
 | `WriteDREAM3DFilter` | Preserve the image, unsmoothed baseline, and new mesh together | Exporting only the smoothed geometry removes the reference needed for comparison |
 
 The current implementation averages face-connected neighbors and treats junction vertices using junction-face neighbors. It then clamps each local coordinate to `0.5 +/- max_distance_from_voxel`. With the chosen value, the local interval is `[0,1]`. After multiplication by spacing, the bound is 0.125 micrometers per coordinate relative to the unsmoothed position. The corresponding three-dimensional displacement can reach the square root of three times that bound, about 0.217 micrometers. This bound follows from the settings; the observed displacements are reported below. It is not an accuracy estimate against the unknown physical boundary.

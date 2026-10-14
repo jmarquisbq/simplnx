@@ -24,6 +24,108 @@
     },
     {
       "args": {
+        "cell_features_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "DataContainer/Cell Data/Phases",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "feature_phases_array_name": {
+          "value": "BoundaryFeaturePhases",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Recompute phases for the full cleaned FeatureIds before cropping. Rows remain keyed by original child FeatureIds, not twin ParentIds.",
+      "filter": {
+        "name": "nx::core::ComputeFeaturePhasesFilter",
+        "uuid": "da5bb20e-4a8e-49d9-9434-fbab7bc434fc"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_rodrigues_average": {
+          "value": true,
+          "version": 1
+        },
+        "use_vmf_average": {
+          "value": false,
+          "version": 1
+        },
+        "use_watson_average": {
+          "value": false,
+          "version": 1
+        },
+        "cell_feature_ids_array_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "cell_phases_array_path": {
+          "value": "DataContainer/Cell Data/Phases",
+          "version": 1
+        },
+        "cell_quats_array_path": {
+          "value": "DataContainer/Cell Data/Quats",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "DataContainer/Cell Feature Data",
+          "version": 1
+        },
+        "avg_quats_array_name": {
+          "value": "BoundaryAvgQuats",
+          "version": 1
+        },
+        "avg_euler_angles_array_name": {
+          "value": "BoundaryAvgEulerAngles",
+          "version": 1
+        },
+        "vmf_quat_array_name": {
+          "value": "Unused vMF Quats",
+          "version": 1
+        },
+        "vmf_euler_array_name": {
+          "value": "Unused vMF Eulers",
+          "version": 1
+        },
+        "vmf_kappa_array_name": {
+          "value": "Unused vMF Kappas",
+          "version": 1
+        },
+        "watson_quat_array_name": {
+          "value": "Unused Watson Quats",
+          "version": 1
+        },
+        "watson_euler_array_name": {
+          "value": "Unused Watson Eulers",
+          "version": 1
+        },
+        "watson_kappa_array_name": {
+          "value": "Unused Watson Kappas",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Compute symmetry-aware Rodrigues average orientations from the complete cleaned grains before cropping. These full-grain orientation representatives intentionally remain distinct from cropped geometric measurements.",
+      "filter": {
+        "name": "nx::core::ComputeAvgOrientationsFilter",
+        "uuid": "086ddb9a-928f-46ab-bad6-b1498270d71e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "use_physical_bounds": {
           "value": false,
           "version": 1
@@ -98,7 +200,7 @@
         },
         "parameters_version": 1
       },
-      "comments": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds, crop every cell array, and start from the preparation checkpoint without whole-volume feature measurements.",
+      "comments": "Crop in place to inclusive XYZ [82,88,46]..[105,111,69] (24 cubed cells). Preserve original FeatureIds and the freshly computed full-grain orientation rows; crop every cell array. No full-volume shape measurements are imported.",
       "filter": {
         "name": "nx::core::CropImageGeometryFilter",
         "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2"
@@ -393,6 +495,186 @@
       "filter": {
         "name": "nx::core::TriangleNormalFilter",
         "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "surface_mesh_face_labels_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceLabels",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "misorientation_array_name": {
+          "value": "BoundaryMisorientationDegrees",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Attach the symmetry-reduced angle in degrees to each internal face. Version 2 produces one scalar component, not an axis-angle or RGB array; exterior faces remain NaN.",
+      "filter": {
+        "name": "nx::core::ComputeFeatureFaceMisorientationFilter",
+        "uuid": "f3473af9-db77-43db-bd25-60df7230ea73"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "color_key_index": {
+          "value": 0,
+          "version": 1
+        },
+        "surface_mesh_face_labels_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceLabels",
+          "version": 1
+        },
+        "surface_mesh_face_normals_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceNormals",
+          "version": 1
+        },
+        "feature_euler_angles_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgEulerAngles",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "first_face_ipf_colors_array_name": {
+          "value": "BoundaryIPFLabel0",
+          "version": 1
+        },
+        "second_face_ipf_colors_array_name": {
+          "value": "BoundaryIPFLabel1",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Use the TSL IPF key for the face normal in each adjoining grain, with separate RGB arrays for FaceLabels components 0 and 1. Exterior sides are black. Raw voxel normals do not establish a physical boundary plane.",
+      "filter": {
+        "name": "nx::core::ComputeFaceIPFColoringFilter",
+        "uuid": "30759600-7c02-4650-b5ca-e7036d6b568e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "loading": {
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "surface_mesh_face_labels_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceLabels",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "surface_mesh_f1s_array_name": {
+          "value": "BoundaryF1_Z",
+          "version": 1
+        },
+        "surface_mesh_f1spts_array_name": {
+          "value": "BoundaryF1spt_Z",
+          "version": 1
+        },
+        "surface_mesh_f7s_array_name": {
+          "value": "BoundaryF7_Z",
+          "version": 1
+        },
+        "surface_meshm_primes_array_name": {
+          "value": "BoundaryMPrime_Z",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute dimensionless FCC slip-system compatibility for an assumed sample-Z load. Components 0 and 1 follow FaceLabels[0] to [1] and the reverse. These geometric descriptors are not measured strength; F1spt uses slip-plane normals, not boundary traces.",
+      "filter": {
+        "name": "nx::core::ComputeBoundaryStrengthsFilter",
+        "uuid": "f39707f9-0411-4736-a591-1bfbd099bb71"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "find_coherence": {
+          "value": false,
+          "version": 1
+        },
+        "angle_tolerance": {
+          "value": 2.0,
+          "version": 1
+        },
+        "axis_tolerance": {
+          "value": 3.0,
+          "version": 1
+        },
+        "boundaries_array_type_index": {
+          "value": 1,
+          "version": 1
+        },
+        "face_labels_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceLabels",
+          "version": 1
+        },
+        "face_normals_array_path": {
+          "value": "SurfaceMesh/Face Data/FaceNormals",
+          "version": 1
+        },
+        "avg_quats_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryAvgQuats",
+          "version": 1
+        },
+        "feature_phases_array_path": {
+          "value": "DataContainer/Cell Feature Data/BoundaryFeaturePhases",
+          "version": 1
+        },
+        "crystal_structures_array_path": {
+          "value": "DataContainer/Cell Ensemble Data/CrystalStructures",
+          "version": 1
+        },
+        "twin_boundaries_name": {
+          "value": "Sigma3Candidate",
+          "version": 1
+        },
+        "twin_boundaries_incoherence_name": {
+          "value": "UnusedTwinIncoherence",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Flag cubic Sigma3 orientation candidates: within 2 degrees of 60 degrees and 3 degrees of a <111> axis. Do not infer coherent twins from raw voxel-facet normals; coherence is disabled.",
+      "filter": {
+        "name": "nx::core::ComputeTwinBoundariesFilter",
+        "uuid": "66156e04-0e62-4478-baf8-88d34ac694c1"
       },
       "isDisabled": false
     },
