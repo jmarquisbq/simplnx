@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "Enabled occurrences in the combined NIST contour and distance inspection example; not full filter validation.",
+  "scope": "Enabled occurrences in NIST contour inspection and STL part-interchange examples; not full filter validation.",
   "filters": [
     {
       "filter": "ReadStlFileFilter",
@@ -225,6 +225,174 @@
       "pipeline": "(01) NIST Bridge Contour Inspection.d3dpipeline",
       "step": 31,
       "purpose": "Save nominal CAD, all contours, cropped contours, one selected section and its inspection samples together. No hatch path, machine motion, measurement, or physical prediction is produced."
+    },
+    {
+      "filter": "ReadStlFileFilter",
+      "uuid": "2f64bd45-9d28-4254-9e07-6aa7c6d3d015",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the unchanged public NIST single-part nominal CAD. This branch prepares file interchange; the contour-inspection example is not a prerequisite."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 1,
+      "purpose": "Copy coordinates/connectivity into Part01 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed."
+    },
+    {
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 2,
+      "purpose": "Write one binary STL for Part01 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 3,
+      "purpose": "Copy coordinates/connectivity into Part02 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 4,
+      "purpose": "Place Part02 at local translation [-0.5, 20.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates."
+    },
+    {
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 5,
+      "purpose": "Write one binary STL for Part02 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 6,
+      "purpose": "Copy coordinates/connectivity into Part03 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 7,
+      "purpose": "Place Part03 at local translation [-1.0, 40.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates."
+    },
+    {
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 8,
+      "purpose": "Write one binary STL for Part03 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 9,
+      "purpose": "Copy coordinates/connectivity into Part04 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 10,
+      "purpose": "Place Part04 at local translation [-1.5, 60.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates."
+    },
+    {
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 11,
+      "purpose": "Write one binary STL for Part04 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 12,
+      "purpose": "Remove only the temporary uncalibrated source after all four Millimeter copies and their files are created."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "step": 13,
+      "purpose": "Keep the four positioned native parts as the export reference; the next pipeline independently reads their STL files."
+    },
+    {
+      "filter": "CombineStlFilesFilter",
+      "uuid": "76b56f80-fcbe-4d48-a34d-a73d0fc6e5ae",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 0,
+      "purpose": "Read exactly the four predecessor STL files from an isolated folder. File paths are sorted; positive file IDs label faces and vertices, with row 0 reserved. This aggregates meshes without aligning, welding or Boolean-union repair."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 1,
+      "purpose": "Copy coordinates/connectivity into CombinedParts with explicit Millimeter units; no numeric unit conversion or geometry healing is performed."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 2,
+      "purpose": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 3,
+      "purpose": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 4,
+      "purpose": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 5,
+      "purpose": "Delete the temporary default-unit aggregate after retaining all needed geometry and provenance arrays."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 6,
+      "purpose": "Recompute normals from combined triangle coordinates so stored STL normals can be checked against geometry."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 7,
+      "purpose": "Measure each imported triangle in square millimeters; no enclosed-volume or watertightness claim is made."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 8,
+      "purpose": "Group triangle counts and area sums by input-file PartIds. Join summary rows to PartData/FileList, excluding unused row 0; these IDs do not identify grains, materials or connected components."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(03) NIST Bridge STL Assembly.d3dpipeline",
+      "step": 9,
+      "purpose": "Save the calibrated aggregate, file lookup, vertex/face IDs, imported and recomputed normals, and per-file area summary."
     }
   ]
 }

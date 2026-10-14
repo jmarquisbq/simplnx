@@ -92,6 +92,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `NIST_AMBench_2018_Examples/(01) NIST Bridge Contour Inspection.d3dpipeline` (SimplnxCore)
 
++ `NIST_AMBench_2018_Examples/(02) NIST Bridge Part Export.d3dpipeline` (SimplnxCore)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

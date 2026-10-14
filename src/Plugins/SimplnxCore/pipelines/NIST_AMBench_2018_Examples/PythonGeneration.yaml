@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "nist-ambench-2018-python-generation-v1",
-  "title": "NIST bridge contour pipeline to Python generation",
+  "title": "NIST geometry examples to Python generation",
   "source_authority": ".d3dpipeline",
   "converter_api": "simplnx_utilities.generate_python_pipeline",
   "required_modules": [
@@ -18,8 +18,8 @@
   "path_rules": {
     "pipeline_reference_base": "pipeline_suite_root",
     "runtime_data_base": "chosen_cli_working_directory",
-    "input_paths": "Preserve the original AMB2018_01_Part.STL input.",
-    "output_paths": "Preserve Data/Output/NIST_AMBench_2018_Examples/BridgeContourInspection.dream3d."
+    "input_paths": "Preserve the original CAD input and all four generated part-file paths; source example 01 is independent of 02-03.",
+    "output_paths": "Preserve contour, Parts and Assembly output paths. Complete 02 before preflighting 03."
   },
   "generation": {
     "language": "Python",
@@ -50,5 +50,6 @@
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
   "geometry_contract": "Retain explicit Millimeter copies, SliceIds != 6 removal mask, per-edge sample placement, SourceEdgeIds association, and disabled cumulative distance. No hatch generation.",
-  "distance_contract": "Regenerate all 32 steps. Keep the nominal points, explicit +0.1 mm global-Y challenge, original CAD and separate reversed-winding copy; recompute its normals before signed distances. Never describe the challenge as measured data."
+  "distance_contract": "Regenerate all 32 steps. Keep the nominal points, explicit +0.1 mm global-Y challenge, original CAD and separate reversed-winding copy; recompute its normals before signed distances. Never describe the challenge as measured data.",
+  "assembly_contract": "Generate the 14-step part exporter and 10-step aggregate importer from their native pipelines. Complete 02 before preflighting 03; the input folder must contain exactly the four generated STL files. Preserve explicit Millimeter units, file-list joins and pose conventions. Example 01 is independent."
 }

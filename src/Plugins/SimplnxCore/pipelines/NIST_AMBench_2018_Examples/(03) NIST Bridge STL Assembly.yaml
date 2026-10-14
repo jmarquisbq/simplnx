@@ -1,0 +1,514 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(03) NIST Bridge STL Assembly.d3dpipeline",
+  "markdown_file": "(03) NIST Bridge STL Assembly.md",
+  "title": "NIST Bridge STL Assembly",
+  "summary": "Aggregate the posed STL files, restore units and retain per-file identity with geometry checks.",
+  "primary_industries": [
+    "Additive manufacturing"
+  ],
+  "secondary_industries": [
+    "Dimensional inspection",
+    "CAD processing"
+  ],
+  "use_cases": [
+    "Prepare a small multi-part geometry batch for interchange",
+    "Check placement, file identity and retained triangle geometry across STL export/import"
+  ],
+  "keywords": [
+    "NIST",
+    "AM-Bench2018",
+    "nominal CAD",
+    "binary STL",
+    "multi-part assembly",
+    "file identity",
+    "millimeters"
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "AMB2018_01_Part.STL"
+    ],
+    "source_url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+    "source_sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+    "source_assets": [
+      {
+        "filename": "AMB2018_01_Part.STL",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "bytes": 18884,
+        "sha256": "2ceda46b2b840b39c7c41bc91436087e412ac43b52b0a5d106bbb50060a7c631",
+        "sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+        "data_type": "Binary STL; 376 original nominal CAD triangles",
+        "units": "Millimeter, established by official dimensions; STL has no unit field",
+        "processing": "None: original released bytes retained."
+      }
+    ],
+    "reference_visual": "Official NIST Figure 3 and section 2.1.3 motivate the relative spacing; the companion figure renders native combined output only.",
+    "target_traits": [
+      "Complete nominal bridge CAD with varied legs, overhangs and top ridges",
+      "75 by 5 by 12.5 mm coordinate bounds",
+      "Original binary STL, 376 triangles"
+    ],
+    "known_differences": "Illustrative local coordinates and repeated nominal CAD; no build plate, machine coordinates, scan order, material assignment, measured distortion or benchmark reproduction. The local poses use the reported offset magnitudes but do not recreate the complete build-plate coordinate system. This is a geometry-interchange exercise.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "nist-ambench-2018-python-generation-v1"
+  },
+  "citations": [
+    {
+      "title": "2018 AM-Bench Test Descriptions for AMB2018-01",
+      "authors": [
+        "National Institute of Standards and Technology (NIST)"
+      ],
+      "year": 2018,
+      "url": "https://www.nist.gov/ambench/amb2018-01-description",
+      "scope": "pipeline_workflow",
+      "role": "Original nominal CAD and multi-part build context. No manufacturing or paper-result reproduction.",
+      "dataset": {
+        "availability": "Original single-part binary STL publicly downloadable from the NIST-linked S3 asset.",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "license": "NIST open non-SRD data terms: reuse and redistribution with acknowledgement and identification of changes; see https://www.nist.gov/open/license.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative local coordinates and repeated nominal CAD; no build plate, machine coordinates, scan order, material assignment, measured distortion or benchmark reproduction. The local poses use the reported offset magnitudes but do not recreate the complete build-plate coordinate system. This is a geometry-interchange exercise."
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl",
+      "role": "Generated part from completed export stage; all four must exist before preflight."
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl",
+      "role": "Generated part from completed export stage; all four must exist before preflight."
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl",
+      "role": "Generated part from completed export stage; all four must exist before preflight."
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl",
+      "role": "Generated part from completed export stage; all four must exist before preflight."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_STLAssembly.dream3d",
+      "role": "Calibrated aggregate with file identity, normals, areas and per-file summaries.",
+      "sha256": "6947e56c50c9a8b8a982c5b6f44e37d567124ed03b669e87619bd4e17522fbd5"
+    }
+  ],
+  "prerequisites": [
+    {
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "produces": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl"
+    },
+    {
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "produces": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl"
+    },
+    {
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "produces": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl"
+    },
+    {
+      "pipeline": "(02) NIST Bridge Part Export.d3dpipeline",
+      "produces": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl"
+    }
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "CombineStlFilesFilter",
+      "uuid": "76b56f80-fcbe-4d48-a34d-a73d0fc6e5ae",
+      "role": "Read exactly the four predecessor STL files from an isolated folder. File paths are sorted; positive file IDs label faces and vertices, with row 0 reserved. This aggregates meshes without aligning, welding or Boolean-union repair.",
+      "paths": [
+        "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "Combined_Raw"
+      ],
+      "key_parameters": {
+        "stl_files_path": "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "create_part_numbers": true,
+        "create_face_labels": true,
+        "label_vertices": true,
+        "output_triangle_geometry_path": "Combined_Raw",
+        "face_attribute_matrix_name": "Face Data",
+        "face_normals_array_name": "FileNormals",
+        "part_numbers_name": "PartIds",
+        "face_labels_name": "FaceLabels",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "vertex_label_name": "PartIds",
+        "cell_feature_attribute_matrix_name": "PartData",
+        "active_array_name": "Active",
+        "output_file_list_name": "FileList"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy coordinates/connectivity into CombinedParts with explicit Millimeter units; no numeric unit conversion or geometry healing is performed.",
+      "paths": [
+        "CombinedParts",
+        "Combined_Raw/Shared Vertex List",
+        "Combined_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "CombinedParts",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "Combined_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "Combined_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs.",
+      "paths": [
+        "CombinedParts/Face Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Combined_Raw/Face Data/FileNormals",
+          "Combined_Raw/Face Data/PartIds",
+          "Combined_Raw/Face Data/FaceLabels"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "CombinedParts/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs.",
+      "paths": [
+        "CombinedParts/Vertex Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Combined_Raw/Vertex Data/PartIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "CombinedParts/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain file identity and imported normals on the corresponding calibrated geometry tuples; the file list maps positive part IDs to inputs.",
+      "paths": [
+        "CombinedParts"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Combined_Raw/PartData"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "CombinedParts",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Delete the temporary default-unit aggregate after retaining all needed geometry and provenance arrays.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Combined_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Recompute normals from combined triangle coordinates so stored STL normals can be checked against geometry.",
+      "paths": [
+        "CombinedParts"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "CombinedParts",
+        "output_normals_array_name": "GeometryNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Measure each imported triangle in square millimeters; no enclosed-volume or watertightness claim is made.",
+      "paths": [
+        "CombinedParts"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "CombinedParts",
+        "triangle_areas_array_name": "FaceAreas_mm2"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Group triangle counts and area sums by input-file PartIds. Join summary rows to PartData/FileList, excluding unused row 0; these IDs do not identify grains, materials or connected components.",
+      "paths": [
+        "CombinedParts/Face Data/FaceAreas_mm2",
+        "CombinedParts/PartAreaSummary",
+        "CombinedParts/Face Data/PartIds"
+      ],
+      "key_parameters": {
+        "selected_array_path": "CombinedParts/Face Data/FaceAreas_mm2",
+        "destination_attribute_matrix_path": "CombinedParts/PartAreaSummary",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": true,
+        "feature_ids_path": "CombinedParts/Face Data/PartIds",
+        "feature_has_data_array_name": "HasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "UnusedFeatureIndices",
+        "standardize_data": false,
+        "standardized_array_name": "UnusedStandardized",
+        "find_length": true,
+        "length_array_name": "TriangleCount",
+        "find_min": false,
+        "minimum_array_name": "Minimum",
+        "find_max": false,
+        "maximum_array_name": "Maximum",
+        "find_mean": false,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "UnusedMedian",
+        "find_mode": false,
+        "mode_array_name": "UnusedMode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "UnusedStandardDeviation",
+        "find_summation": true,
+        "summation_array_name": "SurfaceArea_mm2",
+        "find_unique_values": false,
+        "number_unique_values_name": "UnusedUniqueCount"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 9,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save the calibrated aggregate, file lookup, vertex/face IDs, imported and recomputed normals, and per-file area summary.",
+      "paths": [
+        "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_STLAssembly.dream3d"
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_STLAssembly.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows in-memory Release and independent binary/geometry/identity checks. Expert interpretation, OOC, generated Python, GUI and complete installation remain separate checks.",
+  "geometry_units": {
+    "length": "Millimeter",
+    "source": "NIST dimensions; explicit geometry metadata. STL files do not declare units."
+  },
+  "validation": {
+    "passed": 68,
+    "total": 68,
+    "scope": "Exact triangle-coordinate/file-identity interchange after declared Float32 poses. Vertex rows may compact; no cross-file welding, solid Boolean union, watertightness or build-process validation.",
+    "parts": [
+      {
+        "part_id": 1,
+        "file": "Part01.stl",
+        "translation_mm": [
+          -0.0,
+          0.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 194,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "df4e5cc1994d667ab2f3f820876ae7742a293f5b4346205e5327d844b42211f4"
+      },
+      {
+        "part_id": 2,
+        "file": "Part02.stl",
+        "translation_mm": [
+          -0.5,
+          20.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "5a7429bf97a2554d7d37db760391b2af5fc7f2e8aa27e21b867de295de2f5791"
+      },
+      {
+        "part_id": 3,
+        "file": "Part03.stl",
+        "translation_mm": [
+          -1.0,
+          40.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "b343377233871daf22de79e6bc7fc4640b2467d9ae01e182fd1ab956f898ffeb"
+      },
+      {
+        "part_id": 4,
+        "file": "Part04.stl",
+        "translation_mm": [
+          -1.5,
+          60.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "bd17da6350147f4e173a4373dbcc987a81f91af0df2525855ecba4fcb6953375"
+      }
+    ],
+    "combined_vertices": 764,
+    "combined_triangles": 1504,
+    "connected_components": 4,
+    "bounds_mm": [
+      [
+        -1.5,
+        0.0,
+        0.0
+      ],
+      [
+        75.0,
+        65.0,
+        12.5
+      ]
+    ],
+    "summary_area_dtype": "float32",
+    "pipeline_sha256": "60a6086178fa3f9771890f2a3219f825b1df58ac367fda135af48f7d7571c301",
+    "dependency_check": "Empty input directory preflight returns-9370; export must complete before import.",
+    "native_chain": {
+      "ctest": "PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples",
+      "configuration": "Windows Release in-core",
+      "result": "PASS: all three pipelines preflight and execute; 2.21 s",
+      "dependency_guards": "Empty input directory rejected during consumer preflight; unexpected uppercase .STL rejected by the chain harness before consumer execution; clean chain then passed."
+    }
+  },
+  "result_visual": {
+    "image": "STLAssembly.png",
+    "sha256": "ddd4328d580a18aa4f7a522ebcfad1423925de78cb39e5be9c3b14c6a08d9528",
+    "native_output": "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_STLAssembly.dream3d",
+    "native_output_sha256": "6947e56c50c9a8b8a982c5b6f44e37d567124ed03b669e87619bd4e17522fbd5",
+    "arrays": [
+      "CombinedParts/Shared Vertex List",
+      "CombinedParts/Shared Faces List",
+      "CombinedParts/Face Data/PartIds"
+    ],
+    "rendering": "Matplotlib renders native combined triangles without geometric reconstruction. Categorical tab10 colors identify input files; they are presentation colors, not material measurements. No NIST figure copied."
+  },
+  "poses": [
+    {
+      "name": "Part01",
+      "translation_mm": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl"
+    },
+    {
+      "name": "Part02",
+      "translation_mm": [
+        -0.5,
+        20.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl"
+    },
+    {
+      "name": "Part03",
+      "translation_mm": [
+        -1.0,
+        40.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl"
+    },
+    {
+      "name": "Part04",
+      "translation_mm": [
+        -1.5,
+        60.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl"
+    }
+  ]
+}

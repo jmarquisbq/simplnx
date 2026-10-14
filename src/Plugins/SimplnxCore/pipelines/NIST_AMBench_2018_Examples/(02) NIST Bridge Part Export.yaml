@@ -1,0 +1,771 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(02) NIST Bridge Part Export.d3dpipeline",
+  "markdown_file": "(02) NIST Bridge Part Export.md",
+  "title": "NIST Bridge Part Export",
+  "summary": "Export four posed nominal CAD parts as individual binary STL files.",
+  "primary_industries": [
+    "Additive manufacturing"
+  ],
+  "secondary_industries": [
+    "Dimensional inspection",
+    "CAD processing"
+  ],
+  "use_cases": [
+    "Prepare a small multi-part geometry batch for interchange",
+    "Check placement, file identity and retained triangle geometry across STL export/import"
+  ],
+  "keywords": [
+    "NIST",
+    "AM-Bench2018",
+    "nominal CAD",
+    "binary STL",
+    "multi-part assembly",
+    "file identity",
+    "millimeters"
+  ],
+  "input_data_strategy": {
+    "strategy": "original-paper-linked",
+    "asset_keys": [
+      "AMB2018_01_Part.STL"
+    ],
+    "source_url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+    "source_sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+    "source_assets": [
+      {
+        "filename": "AMB2018_01_Part.STL",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "bytes": 18884,
+        "sha256": "2ceda46b2b840b39c7c41bc91436087e412ac43b52b0a5d106bbb50060a7c631",
+        "sha512": "43a18268d30af47bdad26f7f95ba8852c0e7b42c2da46f31e813d0729668b958829b4798afac8fdf14859eede53db65978b11689adf90469b8f58fc826fc9628",
+        "data_type": "Binary STL; 376 original nominal CAD triangles",
+        "units": "Millimeter, established by official dimensions; STL has no unit field",
+        "processing": "None: original released bytes retained."
+      }
+    ],
+    "reference_visual": "Official NIST Figure 3 and section 2.1.3 motivate the relative spacing; the companion figure renders native combined output only.",
+    "target_traits": [
+      "Complete nominal bridge CAD with varied legs, overhangs and top ridges",
+      "75 by 5 by 12.5 mm coordinate bounds",
+      "Original binary STL, 376 triangles"
+    ],
+    "known_differences": "Illustrative local coordinates and repeated nominal CAD; no build plate, machine coordinates, scan order, material assignment, measured distortion or benchmark reproduction. The local poses use the reported offset magnitudes but do not recreate the complete build-plate coordinate system. This is a geometry-interchange exercise.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "nist-ambench-2018-python-generation-v1"
+  },
+  "citations": [
+    {
+      "title": "2018 AM-Bench Test Descriptions for AMB2018-01",
+      "authors": [
+        "National Institute of Standards and Technology (NIST)"
+      ],
+      "year": 2018,
+      "url": "https://www.nist.gov/ambench/amb2018-01-description",
+      "scope": "pipeline_workflow",
+      "role": "Original nominal CAD and multi-part build context. No manufacturing or paper-result reproduction.",
+      "dataset": {
+        "availability": "Original single-part binary STL publicly downloadable from the NIST-linked S3 asset.",
+        "url": "https://s3.amazonaws.com/nist-midas/1889/AMB2018_01_Part.STL",
+        "license": "NIST open non-SRD data terms: reuse and redistribution with acknowledgement and identification of changes; see https://www.nist.gov/open/license.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Illustrative local coordinates and repeated nominal CAD; no build plate, machine coordinates, scan order, material assignment, measured distortion or benchmark reproduction. The local poses use the reported offset magnitudes but do not recreate the complete build-plate coordinate system. This is a geometry-interchange exercise."
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "path": "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL",
+      "role": "Original single-part binary CAD; same source asset as the independent contour example."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl",
+      "role": "Generated positioned binary STL; no unit or array metadata.",
+      "sha256": "df4e5cc1994d667ab2f3f820876ae7742a293f5b4346205e5327d844b42211f4",
+      "bytes": 18884
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl",
+      "role": "Generated positioned binary STL; no unit or array metadata.",
+      "sha256": "5a7429bf97a2554d7d37db760391b2af5fc7f2e8aa27e21b867de295de2f5791",
+      "bytes": 18884
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl",
+      "role": "Generated positioned binary STL; no unit or array metadata.",
+      "sha256": "b343377233871daf22de79e6bc7fc4640b2467d9ae01e182fd1ab956f898ffeb",
+      "bytes": 18884
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl",
+      "role": "Generated positioned binary STL; no unit or array metadata.",
+      "sha256": "bd17da6350147f4e173a4373dbcc987a81f91af0df2525855ecba4fcb6953375",
+      "bytes": 18884
+    },
+    {
+      "path": "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_PartLayout.dream3d",
+      "role": "Four positioned native parts retained as the export reference.",
+      "sha256": "95af26e440265e2162c880b4f2d658cff7370acae72934655f528ead4d93e5b8"
+    }
+  ],
+  "prerequisites": [],
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadStlFileFilter",
+      "uuid": "2f64bd45-9d28-4254-9e07-6aa7c6d3d015",
+      "role": "Read the unchanged public NIST single-part nominal CAD. This branch prepares file interchange; the contour-inspection example is not a prerequisite.",
+      "paths": [
+        "SourceCAD_Raw",
+        "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL"
+      ],
+      "key_parameters": {
+        "create_face_labels": false,
+        "face_attribute_matrix_name": "Face Data",
+        "face_labels_name": "Face Labels",
+        "face_normals_name": "Face Normals",
+        "output_triangle_geometry_path": "SourceCAD_Raw",
+        "scale_factor": 1.0,
+        "scale_output": false,
+        "stl_file_path": "Data/NIST_AMBench_2018_Examples/AMB2018_01_Part.STL",
+        "vertex_attribute_matrix_name": "Vertex Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy coordinates/connectivity into Part01 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed.",
+      "paths": [
+        "Part01",
+        "SourceCAD_Raw/Shared Vertex List",
+        "SourceCAD_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "Part01",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SourceCAD_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SourceCAD_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "role": "Write one binary STL for Part01 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history.",
+      "paths": [
+        "Part01"
+      ],
+      "key_parameters": {
+        "grouping_type_index": 2,
+        "output_stl_file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl",
+        "output_stl_directory": "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "output_stl_prefix": "Part01",
+        "input_triangle_geometry_path": "Part01",
+        "feature_ids_path": "",
+        "feature_phases_path": "",
+        "part_number_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy coordinates/connectivity into Part02 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed.",
+      "paths": [
+        "Part02",
+        "SourceCAD_Raw/Shared Vertex List",
+        "SourceCAD_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "Part02",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SourceCAD_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SourceCAD_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Place Part02 at local translation [-0.5, 20.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates.",
+      "paths": [
+        "Part02",
+        "UnusedPose"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "Part02",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -0.5
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            20.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": false,
+        "output_transform_matrix_path": "UnusedPose"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 5,
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "role": "Write one binary STL for Part02 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history.",
+      "paths": [
+        "Part02"
+      ],
+      "key_parameters": {
+        "grouping_type_index": 2,
+        "output_stl_file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl",
+        "output_stl_directory": "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "output_stl_prefix": "Part02",
+        "input_triangle_geometry_path": "Part02",
+        "feature_ids_path": "",
+        "feature_phases_path": "",
+        "part_number_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy coordinates/connectivity into Part03 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed.",
+      "paths": [
+        "Part03",
+        "SourceCAD_Raw/Shared Vertex List",
+        "SourceCAD_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "Part03",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SourceCAD_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SourceCAD_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Place Part03 at local translation [-1.0, 40.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates.",
+      "paths": [
+        "Part03",
+        "UnusedPose"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "Part03",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -1.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            40.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": false,
+        "output_transform_matrix_path": "UnusedPose"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 8,
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "role": "Write one binary STL for Part03 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history.",
+      "paths": [
+        "Part03"
+      ],
+      "key_parameters": {
+        "grouping_type_index": 2,
+        "output_stl_file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl",
+        "output_stl_directory": "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "output_stl_prefix": "Part03",
+        "input_triangle_geometry_path": "Part03",
+        "feature_ids_path": "",
+        "feature_phases_path": "",
+        "part_number_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy coordinates/connectivity into Part04 with explicit Millimeter units; no numeric unit conversion or geometry healing is performed.",
+      "paths": [
+        "Part04",
+        "SourceCAD_Raw/Shared Vertex List",
+        "SourceCAD_Raw/Shared Faces List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 7,
+        "output_geometry_path": "Part04",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "SourceCAD_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "SourceCAD_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Place Part04 at local translation [-1.5, 60.0, 0.0] mm. NIST reports 20 mm Y spacing and 0.5 mm X staggering; the chosen local origin/order omit the build plate and machine coordinates.",
+      "paths": [
+        "Part04",
+        "UnusedPose"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "Part04",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            -1.5
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            60.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": false,
+        "output_transform_matrix_path": "UnusedPose"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 11,
+      "filter": "WriteStlFileFilter",
+      "uuid": "54a293f4-1366-46ca-b284-fe5965545dd2",
+      "role": "Write one binary STL for Part04 after positioning. STL retains triangle coordinates/winding and normals, but not length units, NX arrays or this pose history.",
+      "paths": [
+        "Part04"
+      ],
+      "key_parameters": {
+        "grouping_type_index": 2,
+        "output_stl_file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl",
+        "output_stl_directory": "Data/Output/NIST_AMBench_2018_Examples/Parts",
+        "output_stl_prefix": "Part04",
+        "input_triangle_geometry_path": "Part04",
+        "feature_ids_path": "",
+        "feature_phases_path": "",
+        "part_number_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary uncalibrated source after all four Millimeter copies and their files are created.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "SourceCAD_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Keep the four positioned native parts as the export reference; the next pipeline independently reads their STL files.",
+      "paths": [
+        "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_PartLayout.dream3d"
+      ],
+      "key_parameters": {
+        "export_file_path": "Data/Output/NIST_AMBench_2018_Examples/Assembly/NISTBridge_PartLayout.dream3d",
+        "write_xdmf_file": false,
+        "use_compression": true,
+        "compression_level": 5
+      },
+      "parameters_version": 2
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows in-memory Release and independent binary/geometry/identity checks. Expert interpretation, OOC, generated Python, GUI and complete installation remain separate checks.",
+  "geometry_units": {
+    "length": "Millimeter",
+    "source": "NIST dimensions; explicit geometry metadata. STL files do not declare units."
+  },
+  "validation": {
+    "passed": 68,
+    "total": 68,
+    "scope": "Exact triangle-coordinate/file-identity interchange after declared Float32 poses. Vertex rows may compact; no cross-file welding, solid Boolean union, watertightness or build-process validation.",
+    "parts": [
+      {
+        "part_id": 1,
+        "file": "Part01.stl",
+        "translation_mm": [
+          -0.0,
+          0.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 194,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "df4e5cc1994d667ab2f3f820876ae7742a293f5b4346205e5327d844b42211f4"
+      },
+      {
+        "part_id": 2,
+        "file": "Part02.stl",
+        "translation_mm": [
+          -0.5,
+          20.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "5a7429bf97a2554d7d37db760391b2af5fc7f2e8aa27e21b867de295de2f5791"
+      },
+      {
+        "part_id": 3,
+        "file": "Part03.stl",
+        "translation_mm": [
+          -1.0,
+          40.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "b343377233871daf22de79e6bc7fc4640b2467d9ae01e182fd1ab956f898ffeb"
+      },
+      {
+        "part_id": 4,
+        "file": "Part04.stl",
+        "translation_mm": [
+          -1.5,
+          60.0,
+          0.0
+        ],
+        "native_producer_vertices": 194,
+        "imported_unique_vertices": 190,
+        "triangles": 376,
+        "independent_area_mm2": 3170.058441227157,
+        "native_summary_area_mm2": 3170.0576171875,
+        "normal_max_error": 0.0,
+        "bytes": 18884,
+        "sha256": "bd17da6350147f4e173a4373dbcc987a81f91af0df2525855ecba4fcb6953375"
+      }
+    ],
+    "combined_vertices": 764,
+    "combined_triangles": 1504,
+    "connected_components": 4,
+    "bounds_mm": [
+      [
+        -1.5,
+        0.0,
+        0.0
+      ],
+      [
+        75.0,
+        65.0,
+        12.5
+      ]
+    ],
+    "summary_area_dtype": "float32",
+    "pipeline_sha256": "e577cc81bbcc23f102595979892bb9e585e041d2808afe844b8891bf05a9916e",
+    "dependency_check": "Empty input directory preflight returns-9370; export must complete before import.",
+    "native_chain": {
+      "ctest": "PIPELINE::SimplnxCore::NIST_AMBench_2018_Examples",
+      "configuration": "Windows Release in-core",
+      "result": "PASS: all three pipelines preflight and execute; 2.21 s",
+      "dependency_guards": "Empty input directory rejected during consumer preflight; unexpected uppercase .STL rejected by the chain harness before consumer execution; clean chain then passed."
+    }
+  },
+  "poses": [
+    {
+      "name": "Part01",
+      "translation_mm": [
+        -0.0,
+        0.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part01.stl"
+    },
+    {
+      "name": "Part02",
+      "translation_mm": [
+        -0.5,
+        20.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part02.stl"
+    },
+    {
+      "name": "Part03",
+      "translation_mm": [
+        -1.0,
+        40.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part03.stl"
+    },
+    {
+      "name": "Part04",
+      "translation_mm": [
+        -1.5,
+        60.0,
+        0.0
+      ],
+      "file": "Data/Output/NIST_AMBench_2018_Examples/Parts/Part04.stl"
+    }
+  ]
+}

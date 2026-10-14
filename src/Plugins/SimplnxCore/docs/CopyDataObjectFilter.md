@@ -55,6 +55,8 @@ Companion pipeline paths are relative to the named plugin's `pipelines/` directo
 
 + `Small_IN100_Grain_Surface_Examples/(02) Small IN100 Grain Surface Measurements.d3dpipeline` (OrientationAnalysis)
 
++ `NIST_AMBench_2018_Examples/(03) NIST Bridge STL Assembly.d3dpipeline` (SimplnxCore)
+
 ## License & Copyright
 
 Please see the description file distributed with this **Plugin**

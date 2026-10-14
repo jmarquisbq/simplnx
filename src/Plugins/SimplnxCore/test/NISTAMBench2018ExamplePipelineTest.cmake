@@ -1,6 +1,10 @@
 include("${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/RunExamplePipelineChain.cmake")
 set(OUTPUT_CATEGORY "NIST_AMBench_2018_Examples")
-set(pipeline_stems "(01) NIST Bridge Contour Inspection")
+set(pipeline_stems
+  "(01) NIST Bridge Contour Inspection"
+  "(02) NIST Bridge Part Export"
+  "(03) NIST Bridge STL Assembly"
+)
 foreach(stem IN LISTS pipeline_stems)
   validate_companion("${EXAMPLE_DIR}/${stem}.d3dpipeline")
 endforeach()
@@ -51,4 +55,25 @@ else()
     EXPECTED_HASH "SHA512=${expected_hash}" TLS_VERIFY ON TIMEOUT 120)
   file(RENAME "${download_path}" "${input_path}")
 endif()
+set(pipeline_stems "(01) NIST Bridge Contour Inspection" "(02) NIST Bridge Part Export")
+run_example_pipeline_chain()
+
+# The directory reader imports every STL, so reject unrelated files before it runs.
+set(parts_directory "${work_root}/Data/Output/${OUTPUT_CATEGORY}/Parts")
+file(GLOB part_entries LIST_DIRECTORIES FALSE "${parts_directory}/*")
+set(actual_part_names "")
+foreach(entry IN LISTS part_entries)
+  get_filename_component(extension "${entry}" EXT)
+  string(TOLOWER "${extension}" extension)
+  if(extension STREQUAL ".stl")
+    get_filename_component(filename "${entry}" NAME)
+    list(APPEND actual_part_names "${filename}")
+  endif()
+endforeach()
+list(SORT actual_part_names)
+set(expected_part_names "Part01.stl;Part02.stl;Part03.stl;Part04.stl")
+if(NOT "${actual_part_names}" STREQUAL "${expected_part_names}")
+  message(FATAL_ERROR "Expected only the four generated NIST part files in ${parts_directory}; found: ${actual_part_names}")
+endif()
+set(pipeline_stems "(03) NIST Bridge STL Assembly")
 run_example_pipeline_chain()

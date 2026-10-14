@@ -8,16 +8,25 @@ Reader/Input
 
 This **Filter** combines all of the STL files from a given directory into a single triangle geometry. STL (STereoLithography) is a common 3D surface-mesh file format that describes a geometry as an unstructured collection of triangular facets. This filter will make use of the [Read STL File](ReadStlFileFilter.md) filter to read in each STL file in the given directory and then will proceed to combine each of the imported files into a single triangle geometry.
 
-There is an option to label the faces and vertices with a "Part Number" that represents the index into the list of files that was used as the input. This would be based on the lexographical index and starts from 1. This allows for the immediate "segmentation" of the resulting triangle geometry or just as a convenience to "color by" in the visualization widget. This can
-also be used in the [Write STL Files from Triangle Geometry](WriteStlFileFilter.md) filter if the selection for
-the "File Grouping Type" is set to "Part Index" in the UI. Then use the "Part Number" array
-that is created in this filter for the "Part Index". 
+### File identity, coordinates and geometry limits
+
+The input folder must already contain STL files at preflight. The filter sorts input paths and assigns positive file IDs starting at 1; row 0 of the file lookup is unused. Use the saved file-list array to interpret optional face/vertex part numbers. These IDs identify input files, not necessarily materials, grains or connected components.
+
+Each file is read through [Read STL File](ReadStlFileFilter.md), which compacts duplicate coordinates within that file. Vertex counts and row indices can therefore change across a file round trip even when triangle coordinates are retained. The combiner appends geometries with adjusted connectivity; it does not align frames, weld across files, remove overlaps or perform a solid Boolean union.
+
+STL does not declare coordinate units or carry arbitrary NX attributes. Establish common units and placement before aggregation, then set the native geometry's units explicitly from that provenance. Recompute normals or other derived fields when checking another source rather than assuming imported values certify a valid closed surface.
+
+The generated part-number array can also drive [Write STL Files](WriteStlFileFilter.md) with File Grouping Type set to Part Index.
 
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
 
 CombineStlFiles
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `NIST_AMBench_2018_Examples/(03) NIST Bridge STL Assembly.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 
