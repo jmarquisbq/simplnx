@@ -77,6 +77,8 @@ All bounded, independent of mesh size — the whole mesh is never materialized a
 
 ## Example Pipelines
 
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 + (07) Small IN100 Mesh Statistics

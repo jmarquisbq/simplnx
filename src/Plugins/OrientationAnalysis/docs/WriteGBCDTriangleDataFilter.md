@@ -43,9 +43,16 @@ The file format was originally defined by Prof. Gregory S. Rohrer (Carnegie Mell
 
 Phase and orientation data for the grains ultimately come from an EBSD reader such as [Read H5EBSD File](ReadH5EbsdFilter.md), [Read EDAX EBSD Data (.ang)](ReadAngDataFilter.md), or [Read Oxford Instr. EBSD Data (.ctf)](ReadCtfDataFilter.md).
 
+### Interpretation and transfer limits
+
+The text writes ten fields per retained triangle: the two grain Euler triples in **radians**, three dimensionless normal components, and area in **geometry-coordinate units squared**. The current writer formats all fields to four decimal places. Small positive areas can round to zero; keep a native DREAM3D checkpoint when lossless area weights or orientation precision are needed. The writer excludes negative labels but does not automatically reject feature 0 or select a particular phase; prepare and validate the intended population before export.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

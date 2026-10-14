@@ -594,3 +594,15 @@ add_test(NAME PIPELINE::OrientationAnalysis::T12_Cleanup_Examples
     -P "${CMAKE_CURRENT_LIST_DIR}/T12CleanupExamplePipelineTest.cmake")
 set_tests_properties(PIPELINE::OrientationAnalysis::T12_Cleanup_Examples
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 1500 LABELS "ExamplePipeline;T12_Cleanup_Examples")
+
+# Public prepared Small IN100 boundary network from the existing test archive.
+add_test(NAME PIPELINE::OrientationAnalysis::Small_IN100_Distribution_Examples
+  COMMAND ${CMAKE_COMMAND}
+    "-DNXRUNNER=$<TARGET_FILE:nxrunner>"
+    "-DEXAMPLE_DIR=${${PLUGIN_NAME}_SOURCE_DIR}/pipelines/Small_IN100_Distribution_Examples"
+    "-DARCHIVE_DATA_DIR=${DREAM3D_DATA_DIR}/TestFiles"
+    "-DWORK_DIR=${${PLUGIN_NAME}_BINARY_DIR}/Small_IN100_Distribution_Examples/$<CONFIG>"
+    "-DTEST_BINARY_ROOT=${${PLUGIN_NAME}_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/SmallIN100DistributionExamplePipelineTest.cmake")
+set_tests_properties(PIPELINE::OrientationAnalysis::Small_IN100_Distribution_Examples
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 900 LABELS "ExamplePipeline;ExternalData;Small_IN100_Distribution_Examples")

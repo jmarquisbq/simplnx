@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "plugin": "OrientationAnalysis",
+  "suite": "Small_IN100_Distribution_Examples",
+  "filters": [
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the SHA-pinned public Small IN100 processed mesh and its original feature/pair tables. This is an existing prepared network, not a fresh reconstruction or proof of identity with the paper mesh. Retain the imported data for comparison; physical calibration must be established separately from normalized distribution weights."
+    },
+    {
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 1,
+      "purpose": "Mark the 12 zero-area source triangles. Their normals are undefined; the mask is a geometric validity check, not a minimum-area cutoff or removal of small physical boundaries."
+    },
+    {
+      "filter": "RemoveFlaggedTrianglesFilter",
+      "uuid": "38155c61-2709-4731-be95-43745bb3f8d8",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 2,
+      "purpose": "Remove only degenerate triangles and compact vertices, transferring paired grain labels, original interface ID, and node types. All 4224 internal grain pairs remain represented; the supplied unique-pair table remains valid for metric uncertainty counts. Recompute areas and normals after geometry selection."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 3,
+      "purpose": "Recompute nonzero triangle areas from the retained geometry. MRD normalization uses relative area weights; a common length-scale factor cancels. Do not interpret source numeric coordinates as calibrated meters from the imported default unit tag."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 4,
+      "purpose": "Recompute finite unit normals from the same triangle winding and retained vertices. Preserve the correspondence between normals and the two face labels; arbitrary normal/label changes can alter crystallographic interpretation."
+    },
+    {
+      "filter": "ComputeGBCDFilter",
+      "uuid": "0cc592b7-a3d3-4c6a-8894-1533670a31b9",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 5,
+      "purpose": "Compute the area-weighted binned five-parameter distribution for the retained same-phase internal boundaries. Resolution 10 degrees follows the paper nominal coarse-bin comparison scale; the native partition is not a uniform angular neighborhood or a claim of identical paper bins. More bins require more independent boundary data; mesh triangles are not independent grain boundaries."
+    },
+    {
+      "filter": "ComputeGBCDPoleFigureFilter",
+      "uuid": "eed5183e-5a9c-485b-9e64-579a81f0d301",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 6,
+      "purpose": "Probe the binned distribution at the Sigma3 misorientation: angle first, [60,1,1,1]. The 128-pixel stereographic grid is a display sampling choice, not extra experimental resolution. Its coordinates are dimensionless projection coordinates despite the current image unit metadata."
+    },
+    {
+      "filter": "WriteGBCDGMTFileFilter",
+      "uuid": "31710abf-b8a6-423f-a03f-4b8885bd3633",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 7,
+      "purpose": "Export the same fixed-misorientation binned section on the writer sampling grid. Input is angle-axis [60,1,1,1]; the text header writes axis-angle. Use actual angular coordinates rather than assuming text rows correspond to image pixels."
+    },
+    {
+      "filter": "WriteGBCDTriangleDataFilter",
+      "uuid": "6e0da3a1-dc42-4b01-80aa-3af9e8209ee3",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 8,
+      "purpose": "Export retained positive-label internal triangles with both grain orientations, face normal and area for independent boundary-analysis tools. Areas are in the source coordinate scale squared, whose absolute physical calibration is not established by this converted fixture. Preserve the matching Euler/normal reference convention."
+    },
+    {
+      "filter": "ComputeGBCDMetricBasedFilter",
+      "uuid": "fc0d695a-e381-4f11-a8fd-26d5b5cda30a",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 9,
+      "purpose": "Probe Sigma3 using the metric method with 3-degree misorientation and 7-degree plane radii, matching the paper radius choice but on this different prepared network. Input order differs from the binned filters: axis then angle [1,1,1,60]. Keep triple-line triangles for the same baseline population. Save absolute sampling errors, not confidence in physical reconstruction."
+    },
+    {
+      "filter": "ComputeGBPDMetricBasedFilter",
+      "uuid": "8267878b-d23a-4666-83a0-f1a7711861ce",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 10,
+      "purpose": "Compute the marginal boundary-plane distribution with a 7-degree cap over all eligible same-phase boundaries, without fixing a misorientation. This is not another Sigma3 section. Retain triple-line triangles consistently and use the verified original unique-pair table, not the triangle count, for error estimates."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+      "step": 11,
+      "purpose": "Save source context, validated reduced mesh, binned GBCD and its stereographic section. Metric methods produce named text files alongside this checkpoint. No original paper peak, material acceptance threshold, or physical-area calibration is claimed."
+    }
+  ]
+}

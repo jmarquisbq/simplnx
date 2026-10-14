@@ -51,6 +51,8 @@ The *Triangle Data Handling* parameter controls which triangle (face) data array
 
 ## Example Pipelines
 
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 - Remove_Flagged_Triangles

@@ -20,24 +20,17 @@ After summing boundary areas, the distribution is normalized to multiples of a r
 
 ![Fig. 1: GBPD obtained for Small IN100 with the limiting distance set to 7&deg; and with triangles adjacent to triple lines removed. Units are MRDs.](Images/ComputeGBPDMetricBased_example.png)
 
-This **Filter** also calculates statistical errors of the distributions using the formula
-
-&epsilon; = ( *f* *n* *v* )<sup>1/2</sup>, where &epsilon;
-
-is the relative error of the distribution function at a given point, *f* is the value of the function at that point, and *n* stands for the number of grain boundaries (**not** the number of mesh triangles) in the considered network. The errors can be calculated either as their absolute values, i.e., &epsilon; &times; *f* or as relative errors, i.e., 100% &times; &epsilon;. The latter are computed in a way that if the relative error exceeds 100%, it is rounded down to 100%.
+The sampling model estimates relative error as **epsilon approximately 1 / sqrt(f n v)**, where *f* is density in MRD, *n* is the number of distinct grain boundaries, and *v* is the normalized neighborhood volume. Absolute error is **sqrt(f / (n v))** in MRD. The relative-error option writes **100 * absolute error / f**, capped at 100%. These estimates do not include reconstruction, segmentation, orientation-systematic, or calibration uncertainty. Use a valid unique boundary-pair table; mesh triangles and plotted directions are not independent observations.
 
 See also the documentation for [Compute GBCD (Metric-Based Approach)](ComputeGBCDMetricBasedFilter.md) for additional information.
 
 
 ## Format of Output Files
 
-Output files are formatted to be readable by GMT plotting program. The first line is always "0.0 0.0 0.0 0.0". Each of the remaining lines contains three numbers. The first two columns are angles (in degrees) describing a given sampling direction; let us denote them  *col*<sub>1</sub> and *col*<sub>2</sub>, respectively. The third column is either the value of the GBCD (in MRD) for that direction or its error (in MRD or %, depending on user's selection). If you use other software, you can retrive spherical angles &theta; and &phi; of the sampling directions in the following way:
+The first line is `0.0 0.0 0.0 0.0` because no fixed misorientation is selected. Subsequent rows contain **azimuth degrees, elevation degrees, value**. The value is MRD for a distribution file, MRD for absolute errors, or percent for relative errors. For azimuth *a* and elevation *e*, the direction is `[cos(e) cos(a), cos(e) sin(a), sin(e)]`; convert angles to radians when using ordinary trigonometric libraries.
 
-&theta; = 90&deg; - *col*<sub>1</sub>
+The writers add `_1` to a filename stem when it is absent. Requested sampling-point counts are approximate: equator points and symmetry expansion can change the number of rows. Match distribution and error rows by their angular coordinates. Do not treat an additional plotted point as an additional boundary measurement.
 
-&phi; = *col*<sub>2</sub>
-
-Then, the directions are given as [ sin &theta; &times; cos &phi; , sin &theta; &times; sin &phi; , cos &theta; ].
 
 ## Feedback
 
@@ -58,6 +51,8 @@ This filter operates on a grain-boundary surface mesh and requires the following
 [1] K. Glowinski and A. Morawiec, Analysis of experimental grain boundary distributions based on boundary-space metrics, Metall. Mater. Trans. A 45, 3189-3194 (2014)
 
 ## Example Pipelines
+
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

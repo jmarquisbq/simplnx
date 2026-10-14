@@ -1,0 +1,460 @@
+{
+  "schema_version": 1,
+  "pipeline_file": "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline",
+  "markdown_file": "(01) Small IN100 Boundary Distribution Comparison.md",
+  "title": "Small IN100 Boundary Distribution Comparison",
+  "summary": "Compare a binned fixed-misorientation GBCD section, a metric section, and the marginal boundary-plane distribution using one checked prepared Small IN100 network, with explicit source validity and uncertainty limits.",
+  "primary_industries": [
+    "Materials characterization"
+  ],
+  "secondary_industries": [
+    "Superalloys",
+    "Grain-boundary engineering"
+  ],
+  "use_cases": [
+    "Distinguish joint boundary character from marginal plane orientation",
+    "Inspect estimator and sampling choices on one grain-boundary network",
+    "Export boundary records with explicit precision limits"
+  ],
+  "keywords": [
+    "Small IN100",
+    "GBCD",
+    "GBPD",
+    "Sigma3",
+    "boundary plane",
+    "MRD",
+    "metric neighborhood",
+    "sampling errors",
+    "triangle data"
+  ],
+  "inputs": [
+    {
+      "path": "Data/Small_IN100_Distribution_Examples/compute_gbcd_metric_based.dream3d",
+      "role": "Original prepared network; retain unchanged and verify archive/member hashes"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/BinnedSigma3.dat",
+      "role": "Binned Sigma 3 sampling grid, axis-angle header then azimuth/elevation/MRD",
+      "sha256": "f84b095ed22665fa023f24ef926eb692d93e5ec5b031368bf5999ac159821850"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/InternalBoundaryTriangles.ph",
+      "role": "636954 internal triangle records:two Euler triples in radians, normal, area;four-decimal quantization",
+      "sha256": "72e88bcadbd365098b21e0496b8799ef1ca7cd8a2c267fc739c0d3d1b65b6abd"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/MetricSigma3Errors_1.dat",
+      "role": "Absolute sampling-error estimates matching metric Sigma 3 rows, in MRD",
+      "sha256": "aa6f93e4ebdceb7811a7e193bf53d2a01ebf5a46615f2c0437438f2aff285320"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/MetricSigma3_1.dat",
+      "role": "Metric Sigma 3 distribution, 3052 angular rows",
+      "sha256": "01c0f6fd1d7da655edb13fbb797b91b124bec8bfb727cb7e8cca12e23925603b"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/PlaneDistributionErrors_1.dat",
+      "role": "Absolute sampling-error estimates matching plane-distribution rows, in MRD",
+      "sha256": "5cdb5faee2c62f9a02497bc7781e4cd855eb611a87e02b5d15b472f8fe32ede6"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/PlaneDistribution_1.dat",
+      "role": "Marginal plane distribution, 3624 symmetry-expanded rows",
+      "sha256": "217eb661cac13b3120bce24bdaaa92b9c034cb9827ee69b0dd381c0ed73521ce"
+    },
+    {
+      "path": "Data/Output/Small_IN100_Distribution_Examples/SmallIN100BoundaryDistributions.dream3d",
+      "role": "Source and reduced mesh, phase 1 binned distribution and 128 squareSigma 3 image",
+      "sha256": "720367cb9832fcedf5a71b065e3dac5289b8f8af0da138c7a6a1965baed371f2"
+    }
+  ],
+  "input_data_strategy": {
+    "strategy": "public-measured-derived-validation-fixture",
+    "asset_keys": [
+      "compute_gbcd_metric_based.dream3d"
+    ],
+    "paper_doi": "10.1007/s11661-014-2325-y",
+    "paper_url": "https://doi.org/10.1007/s11661-014-2325-y",
+    "source_url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/compute_gbcd_metric_based.tar.gz",
+    "source_sha512": "fc326f260c42114031f2a914a0f21b60174b7215618c63db3ee4159ff5ed485b81d0f55d78de573344f1b24d35e95ce272686b3c2ad13cfdf0dd9f06f2e2d38d",
+    "reference_visual": "Native binned and metricSigma 3 sections plus marginalGBPD; no paper figure copied.",
+    "target_traits": [
+      "4224 distinct internal grain pairs",
+      "756966 source triangles, 12 degenerate",
+      "636954 valid internal triangles and 120000 exterior faces retained",
+      "Cubic-high phase 1;grain Euler angles in radians",
+      "Source Meter tag does not establish absolute calibration"
+    ],
+    "known_differences": "Uses a later released prepared validation mesh with 4224 internal boundary pairs, not the paper approximately 13000 boundaries/2.5 milliontriangles. Reconstruction history and physical calibration are not established. Twelve degenerate faces are removed; native binned and metric estimators have different neighborhoods and grids. No published peak or acceptance criterion is reproduced.",
+    "archive_provenance_file": "DataSources.json"
+  },
+  "python_generation": {
+    "specification_file": "PythonGeneration.yaml",
+    "resolve_from": "pipeline_suite_root",
+    "specification_id": "smallin100-distributions-python-generation-v1"
+  },
+  "mcp": {
+    "user_intents": [
+      "Compare boundary distribution estimators without changing the underlying mesh population",
+      "Understand whether a plot conditions on misorientation or averages over it"
+    ],
+    "questions_to_ask": [
+      "Is the mesh calibration and face-label/normal convention established?",
+      "Does each unique-pair row represent a distinct retained boundary?",
+      "What independent evidence supports the selected bandwidth and uncertainty interpretation?"
+    ],
+    "constraints": [
+      "Binned pole-image/GMT rotation order is[angle, x, y, z];metricGBCD order is[x, y, z, angle]. Both use degrees;grain Euler arrays use radians.",
+      "Use phase 1 only. Reserved phase 0 has no observations and its binned values are undefined.",
+      "Triple-line exclusion is false in both metric methods. Turning it on changes eligible faces; check the effective boundary population before interpreting errors.",
+      "Native source and reduced mesh keep questionable Meter metadata. No absolute physical size is inferred;normalized common-scale area weights cancel. Pole-image coordinates are dimensionless despite current Micrometer tag(#1803).",
+      "Use supplied unique-pair table only because all 4224 internalpairs remain after zero-area removal. Triangle counts and plotted sample counts are not independent observations.",
+      "Triangle text rounds all fields to four decimals;178 positive native areas become 0. Keep HDF5 for precision.",
+      "Current sampling-error model omits reconstruction, segmentation, calibration and systematic orientation uncertainty.",
+      "The same kernels and angular grids are not used by binned image, GMT output and metric text;maxima are not a pointwise equality test."
+    ]
+  },
+  "steps": [
+    {
+      "index": 0,
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "role": "Read the SHA-pinned public Small IN100 processed mesh and its original feature/pair tables. This is an existing prepared network, not a fresh reconstruction or proof of identity with the paper mesh. Retain the imported data for comparison; physical calibration must be established separately from normalized distribution weights.",
+      "key_parameters": {
+        "import_data_object": {
+          "file_path": "Data/Small_IN100_Distribution_Examples/compute_gbcd_metric_based.dream3d",
+          "data_paths": [],
+          "path_import_policy": 0
+        }
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
+      "filter": "MultiThresholdObjectsFilter",
+      "uuid": "4246245e-1011-4add-8436-0af6bed19228",
+      "role": "Mark the 12 zero-area source triangles. Their normals are undefined; the mask is a geometric validity check, not a minimum-area cutoff or removal of small physical boundaries.",
+      "key_parameters": {
+        "array_thresholds_object": {
+          "inverted": false,
+          "thresholds": [
+            {
+              "array_path": "TriangleDataContainer/FaceData/FaceAreas",
+              "comparison": 2,
+              "component_index": 0,
+              "inverted": false,
+              "type": "array",
+              "union": 0,
+              "value": 0.0
+            }
+          ],
+          "type": "collection",
+          "union": 0
+        },
+        "created_mask_type": 1,
+        "custom_false_value": 0.0,
+        "custom_true_value": 1.0,
+        "output_data_array_name": "ZeroAreaFaces",
+        "use_custom_false_value": false,
+        "use_custom_true_value": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 2,
+      "filter": "RemoveFlaggedTrianglesFilter",
+      "uuid": "38155c61-2709-4731-be95-43745bb3f8d8",
+      "role": "Remove only degenerate triangles and compact vertices, transferring paired grain labels, original interface ID, and node types. All 4224 internal grain pairs remain represented; the supplied unique-pair table remains valid for metric uncertainty counts. Recompute areas and normals after geometry selection.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "TriangleDataContainer",
+        "mask_array_path": "TriangleDataContainer/FaceData/ZeroAreaFaces",
+        "output_triangle_geometry_path": "BoundaryMesh",
+        "triangle_data_handling_index": 0,
+        "triangle_data_selected_array_paths": [
+          "TriangleDataContainer/FaceData/FaceLabels",
+          "TriangleDataContainer/FaceData/FeatureFaceId"
+        ],
+        "triangle_data_selected_attribute_matrix_path": "",
+        "vertex_data_handling_index": 0,
+        "vertex_data_selected_array_paths": [
+          "TriangleDataContainer/VertexData/NodeType"
+        ],
+        "vertex_data_selected_attribute_matrix_path": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 3,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Recompute nonzero triangle areas from the retained geometry. MRD normalization uses relative area weights; a common length-scale factor cancels. Do not interpret source numeric coordinates as calibrated meters from the imported default unit tag.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "BoundaryMesh",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Recompute finite unit normals from the same triangle winding and retained vertices. Preserve the correspondence between normals and the two face labels; arbitrary normal/label changes can alter crystallographic interpretation.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "BoundaryMesh",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "ComputeGBCDFilter",
+      "uuid": "0cc592b7-a3d3-4c6a-8894-1533670a31b9",
+      "role": "Compute the area-weighted binned five-parameter distribution for the retained same-phase internal boundaries. Resolution 10 degrees follows the paper nominal coarse-bin comparison scale; the native partition is not a uniform angular neighborhood or a claim of identical paper bins. More bins require more independent boundary data; mesh triangles are not independent grain boundaries.",
+      "key_parameters": {
+        "crystal_structures_array_path": "Small IN100/Phase Data/CrystalStructures",
+        "face_ensemble_attribute_matrix_name": "Face Ensemble Data",
+        "feature_euler_angles_array_path": "Small IN100/Grain Data/AvgEulerAngles",
+        "feature_phases_array_path": "Small IN100/Grain Data/Phases",
+        "gbcd_array_name": "GBCD",
+        "gbcd_resolution": 10.0,
+        "input_triangle_geometry_path": "BoundaryMesh",
+        "surface_mesh_face_areas_array_path": "BoundaryMesh/Face Data/FaceAreas",
+        "surface_mesh_face_labels_array_path": "BoundaryMesh/Face Data/FaceLabels",
+        "surface_mesh_face_normals_array_path": "BoundaryMesh/Face Data/FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
+      "filter": "ComputeGBCDPoleFigureFilter",
+      "uuid": "eed5183e-5a9c-485b-9e64-579a81f0d301",
+      "role": "Probe the binned distribution at the Sigma3 misorientation: angle first, [60,1,1,1]. The 128-pixel stereographic grid is a display sampling choice, not extra experimental resolution. Its coordinates are dimensionless projection coordinates despite the current image unit metadata.",
+      "key_parameters": {
+        "cell_attribute_matrix_name": "Cell Data",
+        "cell_intensity_array_name": "MRD",
+        "crystal_structures_array_path": "Small IN100/Phase Data/CrystalStructures",
+        "gbcd_array_path": "BoundaryMesh/Face Ensemble Data/GBCD",
+        "misorientation_rotation": [
+          60.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "output_image_dimension": 128,
+        "output_image_geometry_path": "BinnedSigma3Section",
+        "phase_of_interest": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 7,
+      "filter": "WriteGBCDGMTFileFilter",
+      "uuid": "31710abf-b8a6-423f-a03f-4b8885bd3633",
+      "role": "Export the same fixed-misorientation binned section on the writer sampling grid. Input is angle-axis [60,1,1,1]; the text header writes axis-angle. Use actual angular coordinates rather than assuming text rows correspond to image pixels.",
+      "key_parameters": {
+        "crystal_structures_array_path": "Small IN100/Phase Data/CrystalStructures",
+        "gbcd_array_path": "BoundaryMesh/Face Ensemble Data/GBCD",
+        "misorientation_rotation": [
+          60.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "output_file": "Data/Output/Small_IN100_Distribution_Examples/BinnedSigma3.dat",
+        "phase_of_interest": 1
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "WriteGBCDTriangleDataFilter",
+      "uuid": "6e0da3a1-dc42-4b01-80aa-3af9e8209ee3",
+      "role": "Export retained positive-label internal triangles with both grain orientations, face normal and area for independent boundary-analysis tools. Areas are in the source coordinate scale squared, whose absolute physical calibration is not established by this converted fixture. Preserve the matching Euler/normal reference convention.",
+      "key_parameters": {
+        "feature_euler_angles_array_path": "Small IN100/Grain Data/AvgEulerAngles",
+        "output_file": "Data/Output/Small_IN100_Distribution_Examples/InternalBoundaryTriangles.ph",
+        "surface_mesh_face_areas_array_path": "BoundaryMesh/Face Data/FaceAreas",
+        "surface_mesh_face_labels_array_path": "BoundaryMesh/Face Data/FaceLabels",
+        "surface_mesh_face_normals_array_path": "BoundaryMesh/Face Data/FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "ComputeGBCDMetricBasedFilter",
+      "uuid": "fc0d695a-e381-4f11-a8fd-26d5b5cda30a",
+      "role": "Probe Sigma3 using the metric method with 3-degree misorientation and 7-degree plane radii, matching the paper radius choice but on this different prepared network. Input order differs from the binned filters: axis then angle [1,1,1,60]. Keep triple-line triangles for the same baseline population. Save absolute sampling errors, not confidence in physical reconstruction.",
+      "key_parameters": {
+        "chosen_limit_dists_index": 0,
+        "crystal_structures_array_path": "Small IN100/Phase Data/CrystalStructures",
+        "dist_output_file": "Data/Output/Small_IN100_Distribution_Examples/MetricSigma3_1.dat",
+        "err_output_file": "Data/Output/Small_IN100_Distribution_Examples/MetricSigma3Errors_1.dat",
+        "exclude_triple_lines": false,
+        "feature_euler_angles_array_path": "Small IN100/Grain Data/AvgEulerAngles",
+        "feature_phases_array_path": "Small IN100/Grain Data/Phases",
+        "input_triangle_geometry_path": "BoundaryMesh",
+        "misorientation_rotation": [
+          1.0,
+          1.0,
+          1.0,
+          60.0
+        ],
+        "node_types_array_path": "BoundaryMesh/VertexData/NodeType",
+        "num_sampl_pts": 3000,
+        "phase_of_interest": 1,
+        "save_relative_err": false,
+        "surface_mesh_face_areas_array_path": "BoundaryMesh/Face Data/FaceAreas",
+        "surface_mesh_face_labels_array_path": "BoundaryMesh/Face Data/FaceLabels",
+        "surface_mesh_face_normals_array_path": "BoundaryMesh/Face Data/FaceNormals",
+        "surface_mesh_feature_face_labels_array_path": "TriangleDataContainer/FaceFeatureData/FaceLabels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 10,
+      "filter": "ComputeGBPDMetricBasedFilter",
+      "uuid": "8267878b-d23a-4666-83a0-f1a7711861ce",
+      "role": "Compute the marginal boundary-plane distribution with a 7-degree cap over all eligible same-phase boundaries, without fixing a misorientation. This is not another Sigma3 section. Retain triple-line triangles consistently and use the verified original unique-pair table, not the triangle count, for error estimates.",
+      "key_parameters": {
+        "crystal_structures_array_path": "Small IN100/Phase Data/CrystalStructures",
+        "dist_output_file": "Data/Output/Small_IN100_Distribution_Examples/PlaneDistribution_1.dat",
+        "err_output_file": "Data/Output/Small_IN100_Distribution_Examples/PlaneDistributionErrors_1.dat",
+        "exclude_triple_lines": false,
+        "feature_euler_angles_array_path": "Small IN100/Grain Data/AvgEulerAngles",
+        "feature_phases_array_path": "Small IN100/Grain Data/Phases",
+        "input_triangle_geometry_path": "BoundaryMesh",
+        "limit_dist": 7.0,
+        "node_types_array_path": "BoundaryMesh/VertexData/NodeType",
+        "num_sampl_pts": 3000,
+        "phase_of_interest": 1,
+        "save_relative_err": false,
+        "surface_mesh_face_areas_array_path": "BoundaryMesh/Face Data/FaceAreas",
+        "surface_mesh_face_labels_array_path": "BoundaryMesh/Face Data/FaceLabels",
+        "surface_mesh_face_normals_array_path": "BoundaryMesh/Face Data/FaceNormals",
+        "surface_mesh_feature_face_labels_array_path": "TriangleDataContainer/FaceFeatureData/FaceLabels"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "role": "Save source context, validated reduced mesh, binned GBCD and its stereographic section. Metric methods produce named text files alongside this checkpoint. No original paper peak, material acceptance threshold, or physical-area calibration is claimed.",
+      "key_parameters": {
+        "compression_level": 5,
+        "export_file_path": "Data/Output/Small_IN100_Distribution_Examples/SmallIN100BoundaryDistributions.dream3d",
+        "use_compression": true,
+        "write_xdmf_file": false
+      },
+      "parameters_version": 2
+    }
+  ],
+  "citations": [
+    {
+      "title": "Analysis of Experimental Grain Boundary Distributions Based on Boundary-Space Metrics",
+      "authors": [
+        "Krzysztof Glowinski",
+        "Adam Morawiec"
+      ],
+      "year": 2014,
+      "journal": "Metallurgical and Materials Transactions A45,3189-3194",
+      "doi": "10.1007/s11661-014-2325-y",
+      "url": "https://doi.org/10.1007/s11661-014-2325-y",
+      "scope": "pipeline_workflow",
+      "role": "Motivates binned-versus-metric distribution comparison and the 3 degree / 7 degree example radii; complete publisher scientific text and figures 1-3 captions consulted.",
+      "dataset": {
+        "availability": "Original public simplnx Data_Archive member; not normally installed with examples.",
+        "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/compute_gbcd_metric_based.tar.gz",
+        "doi": "",
+        "license": "No separate dataset redistribution license established; article license does not automatically cover data.",
+        "included": false,
+        "reproduction_status": "illustrative",
+        "reproduction_notes": "Uses a later released prepared validation mesh with 4224 internal boundary pairs, not the paper approximately 13000 boundaries/2.5 milliontriangles. Reconstruction history and physical calibration are not established. Twelve degenerate faces are removed; native binned and metric estimators have different neighborhoods and grids. No published peak or acceptance criterion is reproduced."
+      }
+    }
+  ],
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows Release in-core preflight/execution and 46 independent checks passed, including eight independent cubic GBPD cap integrals. Full 5Dmetric/binned algorithm validation, uncertainty-model validity, physical calibration, OOC, generated Python, GUI and materials interpretation remain unverified.",
+  "reference_results": {
+    "source_faces": 756966,
+    "removed_degenerates": 12,
+    "retained_faces": 756954,
+    "internal_faces": 636954,
+    "internal_pairs": 4224,
+    "area_sum_source_coordinate_units_squared": 12678.842711755202,
+    "absolute_physical_calibration": "NOT established by converted fixture Meter tag",
+    "area_max_abs_error_vs_Float64": 6.731792082104171e-09,
+    "histogram_shape": [
+      2,
+      9,
+      9,
+      9,
+      18,
+      18,
+      2
+    ],
+    "histogram_phase1_max": 1201.2112103163877,
+    "image_max": 1153.5102424847641,
+    "text_maxima": {
+      "BinnedSigma3": 1120.00124,
+      "MetricSigma3_1": 12175.8392,
+      "MetricSigma3Errors_1": 212.000177,
+      "PlaneDistribution_1": 3.14434443,
+      "PlaneDistributionErrors_1": 0.0456133748
+    },
+    "triangle_export_max_absolute_errors": [
+      4.995269775420752e-05,
+      4.983973503114303e-05,
+      4.992370605449992e-05,
+      4.995269775420752e-05,
+      4.983973503114303e-05,
+      4.992370605449992e-05,
+      4.999982971226613e-05,
+      4.999998072430234e-05,
+      4.99998526040657e-05,
+      5.000000000000143e-05
+    ],
+    "GBPD_independent_row_checks": [
+      0,
+      17,
+      73,
+      150,
+      451,
+      1207,
+      2401,
+      3623
+    ],
+    "GBPD_max_error": 4.37124869634431e-09,
+    "metric_error_check_limit": "Consistency with paper relation and filter-declared GBCD ball-volume constant; not independent validation of the full5Dmetric estimator or its uncertainty model."
+  },
+  "figure": {
+    "file": "BoundaryDistributions.png",
+    "sha256": "fc140fe74fd96f3d0a23b29ed43414d48d5d56d02a9e13f35856fe2ce09651f8",
+    "native_source_sha256": "720367cb9832fcedf5a71b065e3dac5289b8f8af0da138c7a6a1965baed371f2",
+    "native_text_sha256": {
+      "MetricSigma3_1.dat": "01c0f6fd1d7da655edb13fbb797b91b124bec8bfb727cb7e8cca12e23925603b",
+      "PlaneDistribution_1.dat": "217eb661cac13b3120bce24bdaaa92b9c034cb9827ee69b0dd381c0ed73521ce"
+    },
+    "method": "Render native128square MRD image and scatter native text values at their supplied azimuth/elevation directions. Stereographic projection only; no orientation/distribution calculation or interpolation.",
+    "projection_coordinates": "dimensionless",
+    "color_map": "viridis",
+    "sigma3_color_range_MRD": [
+      1,
+      15000
+    ],
+    "sigma3_color_scale": "log",
+    "plane_color_range_MRD": [
+      0,
+      3.2
+    ],
+    "plane_color_scale": "linear",
+    "limitations": "Estimator kernels and native sampling grids differ; peak height alone is not an accuracy comparison. Source spatial calibration and exact paper reproduction are not established."
+  },
+  "native_chain": {
+    "ctest": "PIPELINE::OrientationAnalysis::Small_IN100_Distribution_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS: SHA512-pinned archive extraction, SHA256-pinned member staging, native preflight/execution (19.77 seconds), and 46 independent checks."
+  }
+}

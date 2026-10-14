@@ -38,9 +38,18 @@ When the GBCD array is backed by chunked (OOC) disk storage, the algorithm cache
 
 Both paths use multi-threaded parallel pixel computation. The difference is only in how much GBCD data is loaded into memory: the in-core path loads everything; the OOC path loads only the phase of interest. For single-phase analyses, the performance is nearly identical. For multi-phase datasets stored out-of-core, the OOC path avoids loading irrelevant phase data and reduces memory consumption proportionally to the number of phases.
 
+### Interpretation and transfer limits
+
+The **Misorientation Angle-Axis** parameter uses **[angle in degrees, axis X, axis Y, axis Z]**. This differs from [Compute GBCD (Metric-Based Approach)](ComputeGBCDMetricBasedFilter.md), which uses axis components first and angle last. A 60-degree rotation about [111] is `[60, 1, 1, 1]` here.
+
+The image describes dimensionless stereographic projection coordinates, not a specimen length. Its current default physical unit tag is tracked in [#1803](https://github.com/BlueQuartzSoftware/simplnx/issues/1803). Increasing image dimensions changes display sampling, not the number of measured boundaries or the underlying GBCD partition.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 + (08) Small IN100 GBCD
 

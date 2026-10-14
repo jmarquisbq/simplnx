@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "dataset": "Public prepared Small IN100 boundary-analysis fixture",
+  "archives": [
+    {
+      "archive": "compute_gbcd_metric_based.tar.gz",
+      "url": "https://github.com/BlueQuartzSoftware/simplnx/releases/download/Data_Archive/compute_gbcd_metric_based.tar.gz",
+      "bytes": 24994061,
+      "sha512": "fc326f260c42114031f2a914a0f21b60174b7215618c63db3ee4159ff5ed485b81d0f55d78de573344f1b24d35e95ce272686b3c2ad13cfdf0dd9f06f2e2d38d"
+    }
+  ],
+  "files": [
+    {
+      "filename": "compute_gbcd_metric_based.dream3d",
+      "archive": "compute_gbcd_metric_based.tar.gz",
+      "archive_path": "compute_gbcd_metric_based/compute_gbcd_metric_based.dream3d",
+      "bytes": 58868934,
+      "sha256": "ab369cdc5bc6f853a4b44b2cbad8f47eb57389e83e233ecb6932b73ec088dd0b",
+      "sha512": "0f98a5104f4c0ec4e0af538a33c3686b04936c386d879dd2d6ac469235aaadf38ea9196f72a8b30177944cced9df337dc7fc5c60fc3a68b0d641dd4056636017",
+      "kind": "measured-derived,already reconstructed and processed",
+      "license": "No additional dataset redistribution permission established; package approval pending",
+      "normal_package_included": false,
+      "consuming_pipelines": [
+        "(01) Small IN100 Boundary Distribution Comparison.d3dpipeline"
+      ]
+    }
+  ],
+  "limitations": [
+    "12zero-area triangles with invalid normals",
+    "Imported Meter tag does not establish physical calibration; only relative area weights interpreted",
+    "Source unique-pair association and counts independently verified; zero-face removal retains all internal pairs"
+  ],
+  "source_history": "Converted from legacy Small IN100 boundary-analysis fixture; embedded pipeline records legacy read and NX write. Current mesh has756966triangles and4224distinct positive-label boundary pairs,not the paper roughly2.5million/13000network."
+}

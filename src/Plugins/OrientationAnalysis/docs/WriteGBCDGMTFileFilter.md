@@ -35,9 +35,16 @@ It samples the GBCD for the selected phase and misorientation and writes the res
 - **GBCD** -- produced by [Compute GBCD](ComputeGBCDFilter.md).
 - **Crystal Structures** -- typically read from EBSD data via [Read H5EBSD File](ReadH5EbsdFilter.md), [Read EDAX EBSD Data (.ang)](ReadAngDataFilter.md), or [Read Oxford Instr. EBSD Data (.ctf)](ReadCtfDataFilter.md).
 
+### Interpretation and transfer limits
+
+The rotation parameter uses **[angle in degrees, axis X, axis Y, axis Z]**; the output header writes the axis components followed by the angle. Subsequent rows contain **azimuth degrees, elevation degrees, MRD**. The angular sampling differs from the pixel grid produced by [Compute GBCD Pole Figure](ComputeGBCDPoleFigureFilter.md), so their maxima need not be equal even for the same distribution and misorientation.
+
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
+
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 + (08) Small IN100 GBCD
 

@@ -28,6 +28,8 @@ None — this filter reads directly from a `.dream3d` file on disk.
 
 ## Example Pipelines
 
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
+
 + `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.

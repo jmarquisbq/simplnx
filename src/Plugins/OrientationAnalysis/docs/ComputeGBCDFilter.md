@@ -21,11 +21,13 @@ The GBCD is a histogram over this 5-dimensional space. It records how much grain
 
 1. For each triangular face on the grain boundary mesh, the filter identifies the two grains on either side.
 2. It computes the misorientation between the two grains and determines the boundary plane normal in the crystal reference frame.
-3. Crystal symmetry is applied to map each boundary into a unique representation.
-4. The boundary is placed into the appropriate bin of the 5D histogram, weighted by its area.
+3. Crystal symmetry is applied to enumerate equivalent boundary representations.
+4. Those representations contribute area weights to the corresponding bins of the 5D histogram; one physical boundary can contribute to multiple bins.
 5. The result is normalized by the total boundary area.
 
-The **GBCD Resolution** parameter controls the bin size of the histogram. Smaller values give finer resolution but require more boundary data for statistical reliability.
+The **GBCD Resolution** parameter is a nominal angular setting in **degrees**. It controls the histogram partition, not a uniform angular radius around every boundary. Smaller values give finer resolution but require more boundary data for statistical reliability and more storage for the five-dimensional array. Repeated triangles on one interface are not independent boundary observations.
+
+Check finite unit normals, positive face areas, matching grain labels, and Euler angles in **radians** before execution. Interpret only populated phases; an empty phase can contain undefined normalized values. MRD is a normalized density, not an area percentage or a material-property prediction.
 
 ### Note
 
@@ -71,6 +73,8 @@ The dominant cost is the O(triangles * symmetry_ops^2) bin computation. By cachi
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
++ `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 + `(08) Small IN100 GBCD`
 
