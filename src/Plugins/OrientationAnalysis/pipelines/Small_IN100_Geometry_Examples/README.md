@@ -1,6 +1,6 @@
 # Small IN100 geometry examples
 
-These three examples turn a bounded, measured-derived EBSD label volume into a triangle interface mesh, compare constrained smoothing, attach boundary crystallography, and demonstrate a rigid transform followed by STL export. They combine SimplnxCore geometry filters with OrientationAnalysis on the Small IN100 preparation output. The category is flat: each numbered `.d3dpipeline` has a matching Markdown companion and JSON-compatible YAML sidecar beside it.
+These three examples turn a bounded, measured-derived EBSD label volume into a triangle interface mesh, compare constrained smoothing, attach boundary crystallography, compare alternative mesh methods, and demonstrate a rigid transform followed by STL export. They combine SimplnxCore geometry filters with OrientationAnalysis on the Small IN100 preparation output. The category is flat: each numbered `.d3dpipeline` has a matching Markdown companion and JSON-compatible YAML sidecar beside it.
 
 > **Validation warning:** Do not treat this example as a validated acceptance procedure. Adapt and validate it for the scanner, material, resolution, and quality requirement.
 
@@ -8,7 +8,7 @@ These three examples turn a bounded, measured-derived EBSD label volume into a t
 
 | Example | Purpose | Required predecessor |
 | --- | --- | --- |
-| `(01) Small IN100 Surface Mesh` | Crop to 24 cubed cells; connect unsmoothed interfaces to full-grain orientations, two-sided IPF colors, assumed-load slip metrics, and Sigma3 candidates | Feature Preparation from `Small_IN100_Examples` |
+| `(01) Small IN100 Surface Mesh` | Crop to 24 cubed cells; connect unsmoothed interfaces to full-grain orientations, two-sided IPF colors, assumed-load slip metrics, and Sigma3 candidates; compare M3C and legacy QuickMesh geometry | Feature Preparation from `Small_IN100_Examples` |
 | `(02) Small IN100 Surface Smoothing` | Create a second mesh from the same cropped labels with constrained relaxation | Geometry example 01 |
 | `(03) Small IN100 Surface Transform and Export` | Copy the baseline, rotate and translate it, then export STL | Geometry example 01 |
 
@@ -54,7 +54,7 @@ All paths below begin with `Data/Output/Small_IN100_Geometry_Examples/`.
 
 | File | Contents |
 | --- | --- |
-| `Surface/SmallIN100_SurfaceMesh.dream3d` | Cropped `DataContainer`, full-grain orientation/phase table, and `SurfaceMesh` with geometry and boundary crystallography |
+| `Surface/SmallIN100_SurfaceMesh.dream3d` | Cropped `DataContainer`, full-grain orientation/phase table, and `SurfaceMesh` with geometry and boundary crystallography, plus geometry-only M3C and legacy QuickMesh alternatives |
 | `Smoothing/SmallIN100_SurfaceSmoothing.dream3d` | Same crop and baseline plus `SmoothedSurfaceMesh` with fresh measurements |
 | `Transform/SmallIN100_SurfaceTransform.dream3d` | Same crop and baseline plus `SurfaceMesh_Transformed` and `SurfaceTransformMatrix` |
 | `Transform/SmallIN100_SurfaceTransformed.stl` | One binary STL of all transformed triangles; no label arrays or explicit unit declaration |
@@ -66,6 +66,8 @@ SurfaceNets is the current recommended default mesher. Both mesh examples retain
 Smoothing uses 10 iterations, factor 0.5, and a 0.5 per-coordinate cell-space displacement limit. At 0.25 spacing this gives a 0.125 coordinate-unit bound per axis, not a 0.5 physical-unit or radial tolerance. The current code's local clamp governs this interpretation. The input image uses Micrometer units. SurfaceNets otherwise leaves the new mesh at default Meter metadata, so each meshing pipeline creates a temporary mesh, copies its vertices and triangles through `CreateGeometryFilter` with length-unit index 6, copies FaceLabels and NodeTypes, and deletes the temporary geometry. This preserves numerical coordinates and topology while explicitly recording Micrometer units. The transform branch also uses explicit Triangle/Copy/Micrometer construction from the baseline vertex and triangle arrays, because a whole-geometry deep copy resets units to Meter. Separate array copies retain FaceLabels and NodeTypes.
 
 Stage 01 adds scalar boundary misorientation in degrees, TSL face-normal IPF colors for both label sides, dimensionless FCC slip-compatibility metrics under assumed sample-Z loading, and a uint8 Sigma3 candidate mask (2-degree angle and 3-degree axis tolerances). Restrict boundary summaries to faces whose two labels are positive. Caps are placeholders, not weak boundaries. Coherence is disabled because the raw voxel normals do not establish physical twin planes. Full-grain orientation representatives and cropped geometry have deliberately different scopes.
+
+Stage 01 also saves `M3CSurfaceMesh` and `LegacyQuickMesh` from the same unchanged crop. They retain caps, explicitly use Micrometer units, and have fresh areas/normals. QuickMesh is included for legacy comparison, with input-label correction disabled; SurfaceNets remains the default recommendation. Triangle counts and areas describe different tessellations, not a physical-accuracy ranking.
 
 The added crystallography belongs to the original `SurfaceMesh`. Examples 02 and 03 preserve that baseline but do not copy its boundary arrays onto their new meshes. Geometry-dependent interpretation must be recomputed for a new surface and coordinate frame.
 
@@ -93,13 +95,14 @@ The `.d3dpipeline` is executable authority. Markdown explains interpretation and
 
 `PythonGeneration.yaml` specifies temporary generation through `simplnx_utilities.generate_python_pipeline`. Regenerate from the pipeline after any change. Use the matching application's Python environment and the same data working folder. Report missing imports or conversion failures; do not silently hand-translate unsupported arguments. No persistent Python sidecar is installed.
 
-The current three-pipeline Windows in-memory Release chain passed on October 13, 2026 (21.97 seconds). The boundary extension passed 46 saved-output checks, including exact preservation of the prior Surface/Smoothing/Transform datasets, independent cubic-symmetry/FCC metric calculations, twin selection, and RGB indexing/invariants. The RGB color key and grain-averaging algorithm were not independently validated. Native GUI, OOC, generated Python, physical boundary accuracy, and downstream suitability remain separate checks.
+The extended Geometry chain passed Windows in-memory Release CTest on October 13, 2026 (22.53 seconds), followed by the dependent grain-surface chain (24.92 seconds). All 58 mesh checks passed, including exact preservation of the prior Surface/Smoothing/Transform datasets. QuickMesh matches an independent voxel-face ownership oracle; M3C has checked triangle arithmetic and label/plane invariants, without independent case-table reproduction. Existing boundary crystallography remains on the unchanged original mesh. Native GUI, OOC, generated Python, physical accuracy, global manifoldness and downstream suitability remain separate checks.
 
 | Result | Checked values for the supplied crop |
 | --- | --- |
 | Baseline | 23 original positive regions; 6,479 vertices; 14,052 triangles; area 439.125 µm² |
 | Smoothing | Same triangles and labels; mean displacement 0.0865 µm; maximum 0.2165 µm; area 346.630 µm² |
 | Transform/export | Exact prescribed coordinate mapping; unchanged area; STL 14,052 facets and 702,684 bytes |
+| Mesher alternatives | M3C: 7,931 vertices, 17,090 triangles, area 389.8829; legacy QuickMesh: 6,479 vertices, 14,052 triangles, area 439.125 (all areas in square micrometers) |
 | Boundary crystallography | 72 internal pairs; 6 Sigma3 candidate pairs occupying 2,602 faces and 81.3125 square micrometers; coherence disabled |
 
 Area totals include internal interfaces and artificial caps. The smoothing result includes very small triangles, so smoother appearance is not a mesh-quality guarantee. All three published mesh variants explicitly record Micrometer units. The mesh views display only the original-ID pair 533/1719 (1,138 triangles) for clarity; exported files retain the full mesh. The boundary figure also summarizes all internal faces and pairs. The source-image preview uses crop slice 12, centered at z = 14.625 µm. PNGs are data-derived scientific views, not screenshots of DREAM3D-NX or paper figures. Their source-output and image hashes are recorded in the YAML companions.

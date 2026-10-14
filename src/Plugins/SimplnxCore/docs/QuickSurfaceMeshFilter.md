@@ -141,9 +141,14 @@ sentinel-collision design (tracked as issue #1705), not a fix for it.
 
 % Auto generated parameter table will be inserted here
 
+The current output geometry does not inherit the input length-unit metadata ([issue #1792](https://github.com/BlueQuartzSoftware/simplnx/issues/1792)); coordinate numbers retain the input scale. Until corrected, check units before interpreting lengths or areas. The Small IN100 companion example uses explicit Triangle/Copy/Micrometer construction without rescaling vertices.
+
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 + (01) SmallIN100 Quick Mesh
++ `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

@@ -24,7 +24,7 @@ The filter writes a **Face Labels** array on each triangle: a 2-component value 
 
 The filter also attempts to repair the triangle **winding** (the order in which a triangle's three vertices are listed, which determines the direction its normal points). A fully consistent winding may not be achievable because of how meshes are stored in the software; see [Verify Triangle Winding](VerifyTriangleWindingFilter.md) for a detailed breakdown of the nuances.
 
-The *Relaxation Iterations* parameter is a dimensionless count of smoothing passes, and *Max Distance from Voxel Center* is a physical length (same units as the Image Geometry spacing) limiting how far a node may move from its originating voxel center.
+The *Relaxation Iterations* parameter is a dimensionless count of smoothing passes. The current implementation applies *Max Distance from Voxel Center* componentwise in local cell coordinates, before multiplying by image spacing. A value of 0.5 therefore permits up to half a cell's spacing along each axis, not 0.5 physical-length units or a Euclidean-radius bound. Unequal spacing gives unequal physical displacement limits.
 
 ---------------
 
@@ -197,6 +197,8 @@ array's **Data Path**. This is a mitigation for the underlying sentinel-collisio
 as issue #1705), not a fix for it.
 
 % Auto generated parameter table will be inserted here
+
+The current output geometry does not inherit the input length-unit metadata ([issue #1792](https://github.com/BlueQuartzSoftware/simplnx/issues/1792)); coordinate numbers retain the input scale. Until corrected, check units before interpreting lengths or areas. The Small IN100 companion example uses explicit Triangle/Copy/Micrometer construction without rescaling vertices.
 
 ## Example Pipelines
 

@@ -680,6 +680,564 @@
     },
     {
       "args": {
+        "input_grid_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "input_feature_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "repair_triangle_winding": {
+          "value": true,
+          "version": 1
+        },
+        "bounding_box_skin_mode_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_triangle_geometry_path": {
+          "value": "M3CMesh_Raw",
+          "version": 1
+        },
+        "vertex_data_group_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "node_types_array_name": {
+          "value": "NodeTypes",
+          "version": 1
+        },
+        "face_data_group_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "face_labels_array_name": {
+          "value": "FaceLabels",
+          "version": 1
+        },
+        "sharp_bounding_box_edges": {
+          "value": true,
+          "version": 1
+        },
+        "parameters_version": 3
+      },
+      "comments": "Generate the M3C alternative from exactly the same cleaned crop, preserving all caps and sharp bounding-box edges. No source labels, orientations or original mesh fields are changed; compare geometric representation, not physical accuracy.",
+      "filter": {
+        "name": "nx::core::M3CSurfaceMeshingFilter",
+        "uuid": "382ee804-ac3c-48d1-8632-a48e15c32779"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "M3CSurfaceMesh",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "M3CMesh_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "M3CMesh_Raw/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Publish M3CSurfaceMesh by copying generated vertices/triangles with explicit Micrometer units. Numerical coordinates and connectivity are not rescaled.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "M3CMesh_Raw/Face Data/FaceLabels"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "M3CSurfaceMesh/Face Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy generated FaceLabels into M3CSurfaceMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "M3CMesh_Raw/Vertex Data/NodeTypes"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "M3CSurfaceMesh/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy generated NodeTypes into M3CSurfaceMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "M3CMesh_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only the temporary M3CMesh_Raw geometry after publishing calibrated coordinates, triangles and ownership arrays.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "M3CSurfaceMesh",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "FaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute fresh per-triangle areas in square micrometers for M3CSurfaceMesh; separate internal interfaces from artificial caps when interpreting totals.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "M3CSurfaceMesh",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "FaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute fresh unit normals from M3CSurfaceMesh triangle winding. This does not establish a universally outward orientation or a closed-manifold network.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_grid_geometry_path": {
+          "value": "DataContainer",
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "DataContainer/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "input_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "input_feature_data_array_paths": {
+          "value": [],
+          "version": 1
+        },
+        "repair_triangle_winding": {
+          "value": true,
+          "version": 1
+        },
+        "bounding_box_skin_mode_index": {
+          "value": 0,
+          "version": 1
+        },
+        "output_triangle_geometry_path": {
+          "value": "LegacyQuickMesh_Raw",
+          "version": 1
+        },
+        "vertex_data_group_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "node_types_array_name": {
+          "value": "NodeTypes",
+          "version": 1
+        },
+        "face_data_group_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "face_labels_array_name": {
+          "value": "FaceLabels",
+          "version": 1
+        },
+        "fix_problem_voxels": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 3
+      },
+      "comments": "Generate an explicitly legacy QuickMesh branch for compatibility comparison. Keep problem-voxel correction off to preserve FeatureIds and retain all caps. SurfaceNets remains the recommended default for new workflows.",
+      "filter": {
+        "name": "nx::core::QuickSurfaceMeshFilter",
+        "uuid": "13dd00bd-ad49-4e04-95eb-3267952fd6e5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "LegacyQuickMesh",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "LegacyQuickMesh_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "LegacyQuickMesh_Raw/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Publish LegacyQuickMesh by copying generated vertices/triangles with explicit Micrometer units. Numerical coordinates and connectivity are not rescaled.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "LegacyQuickMesh_Raw/Face Data/FaceLabels"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "LegacyQuickMesh/Face Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy generated FaceLabels into LegacyQuickMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "LegacyQuickMesh_Raw/Vertex Data/NodeTypes"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "LegacyQuickMesh/Vertex Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy generated NodeTypes into LegacyQuickMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "LegacyQuickMesh_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only the temporary LegacyQuickMesh_Raw geometry after publishing calibrated coordinates, triangles and ownership arrays.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LegacyQuickMesh",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "FaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute fresh per-triangle areas in square micrometers for LegacyQuickMesh; separate internal interfaces from artificial caps when interpreting totals.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LegacyQuickMesh",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "FaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute fresh unit normals from LegacyQuickMesh triangle winding. This does not establish a universally outward orientation or a closed-manifold network.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "export_file_path": {
           "value": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
           "version": 1

@@ -3,7 +3,7 @@
   "pipeline_file": "(01) Small IN100 Surface Mesh.d3dpipeline",
   "markdown_file": "(01) Small IN100 Surface Mesh.md",
   "title": "Small IN100 Surface Mesh",
-  "summary": "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates.",
+  "summary": "Connect Small IN100 boundary crystallography to an original SurfaceNets mesh and compare geometry-only M3C and legacy QuickMesh alternatives on the same unchanged crop.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -12,7 +12,8 @@
     "Computational geometry"
   ],
   "use_cases": [
-    "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates."
+    "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates.",
+    "Compare current M3C and explicitly legacy QuickMesh with the preserved unsmoothed SurfaceNets reference"
   ],
   "keywords": [
     "Small IN100",
@@ -26,7 +27,11 @@
     "Sigma3",
     "IPF",
     "slip transmission",
-    "full-grain orientation"
+    "full-grain orientation",
+    "mesher choice",
+    "M3C",
+    "legacy QuickMesh",
+    "same-label comparison"
   ],
   "inputs": [
     {
@@ -37,8 +42,8 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
-      "role": "Cropped image and calibrated original mesh; full-cleaned-grain orientation/phase table and per-face crystallographic descriptors.",
-      "sha256": "30af0e81ace1f26679d6bc3c585d2e640da7da658ecc54c557eb0eb7328b4f4d"
+      "role": "Cropped image and full-cleaned-grain orientation table, original SurfaceMesh with crystallography, and separate M3CSurfaceMesh/LegacyQuickMesh with fresh geometric fields.",
+      "sha256": "bae7091f4f573c112cb701059c7e781cc98a152a2e53bb80a8c0c1c511491aed"
     }
   ],
   "input_data_strategy": {
@@ -619,6 +624,492 @@
     },
     {
       "index": 15,
+      "filter": "M3CSurfaceMeshingFilter",
+      "uuid": "382ee804-ac3c-48d1-8632-a48e15c32779",
+      "role": "Generate the M3C alternative from exactly the same cleaned crop, preserving all caps and sharp bounding-box edges. No source labels, orientations or original mesh fields are changed; compare geometric representation, not physical accuracy.",
+      "paths": [
+        {
+          "parameter": "input_grid_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "input_feature_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "output_triangle_geometry_path",
+          "value": "M3CMesh_Raw"
+        }
+      ],
+      "key_parameters": {
+        "input_grid_geometry_path": "DataContainer",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_data_array_paths": [],
+        "input_feature_data_array_paths": [],
+        "repair_triangle_winding": true,
+        "bounding_box_skin_mode_index": 0,
+        "output_triangle_geometry_path": "M3CMesh_Raw",
+        "vertex_data_group_name": "Vertex Data",
+        "node_types_array_name": "NodeTypes",
+        "face_data_group_name": "Face Data",
+        "face_labels_array_name": "FaceLabels",
+        "sharp_bounding_box_edges": true
+      },
+      "parameters_version": 3
+    },
+    {
+      "index": 16,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish M3CSurfaceMesh by copying generated vertices/triangles with explicit Micrometer units. Numerical coordinates and connectivity are not rescaled.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "M3CSurfaceMesh"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "M3CMesh_Raw/Shared Vertex List"
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": "M3CMesh_Raw/Shared Faces List"
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "M3CSurfaceMesh",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "M3CMesh_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "M3CMesh_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy generated FaceLabels into M3CSurfaceMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "M3CMesh_Raw/Face Data/FaceLabels"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "M3CSurfaceMesh/Face Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "M3CMesh_Raw/Face Data/FaceLabels"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "M3CSurfaceMesh/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy generated NodeTypes into M3CSurfaceMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "M3CMesh_Raw/Vertex Data/NodeTypes"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "M3CSurfaceMesh/Vertex Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "M3CMesh_Raw/Vertex Data/NodeTypes"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "M3CSurfaceMesh/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary M3CMesh_Raw geometry after publishing calibrated coordinates, triangles and ownership arrays.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "M3CMesh_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "M3CMesh_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Compute fresh per-triangle areas in square micrometers for M3CSurfaceMesh; separate internal interfaces from artificial caps when interpreting totals.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "M3CSurfaceMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "M3CSurfaceMesh",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 21,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Compute fresh unit normals from M3CSurfaceMesh triangle winding. This does not establish a universally outward orientation or a closed-manifold network.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "M3CSurfaceMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "M3CSurfaceMesh",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "QuickSurfaceMeshFilter",
+      "uuid": "13dd00bd-ad49-4e04-95eb-3267952fd6e5",
+      "role": "Generate an explicitly legacy QuickMesh branch for compatibility comparison. Keep problem-voxel correction off to preserve FeatureIds and retain all caps. SurfaceNets remains the recommended default for new workflows.",
+      "paths": [
+        {
+          "parameter": "input_grid_geometry_path",
+          "value": "DataContainer"
+        },
+        {
+          "parameter": "feature_ids_path",
+          "value": "DataContainer/Cell Data/FeatureIds"
+        },
+        {
+          "parameter": "input_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "input_feature_data_array_paths",
+          "value": []
+        },
+        {
+          "parameter": "output_triangle_geometry_path",
+          "value": "LegacyQuickMesh_Raw"
+        }
+      ],
+      "key_parameters": {
+        "input_grid_geometry_path": "DataContainer",
+        "feature_ids_path": "DataContainer/Cell Data/FeatureIds",
+        "input_data_array_paths": [],
+        "input_feature_data_array_paths": [],
+        "repair_triangle_winding": true,
+        "bounding_box_skin_mode_index": 0,
+        "output_triangle_geometry_path": "LegacyQuickMesh_Raw",
+        "vertex_data_group_name": "Vertex Data",
+        "node_types_array_name": "NodeTypes",
+        "face_data_group_name": "Face Data",
+        "face_labels_array_name": "FaceLabels",
+        "fix_problem_voxels": false
+      },
+      "parameters_version": 3
+    },
+    {
+      "index": 23,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Publish LegacyQuickMesh by copying generated vertices/triangles with explicit Micrometer units. Numerical coordinates and connectivity are not rescaled.",
+      "paths": [
+        {
+          "parameter": "output_geometry_path",
+          "value": "LegacyQuickMesh"
+        },
+        {
+          "parameter": "x_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "y_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "z_bounds_path",
+          "value": ""
+        },
+        {
+          "parameter": "vertex_list_path",
+          "value": "LegacyQuickMesh_Raw/Shared Vertex List"
+        },
+        {
+          "parameter": "edge_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "triangle_list_path",
+          "value": "LegacyQuickMesh_Raw/Shared Faces List"
+        },
+        {
+          "parameter": "quadrilateral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "tetrahedral_list_path",
+          "value": ""
+        },
+        {
+          "parameter": "hexahedral_list_path",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "LegacyQuickMesh",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "LegacyQuickMesh_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "LegacyQuickMesh_Raw/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy generated FaceLabels into LegacyQuickMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "LegacyQuickMesh_Raw/Face Data/FaceLabels"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "LegacyQuickMesh/Face Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "LegacyQuickMesh_Raw/Face Data/FaceLabels"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "LegacyQuickMesh/Face Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 25,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy generated NodeTypes into LegacyQuickMesh without transferring original SurfaceMesh crystallography or geometry-derived arrays.",
+      "paths": [
+        {
+          "parameter": "existing_data_path",
+          "value": [
+            "LegacyQuickMesh_Raw/Vertex Data/NodeTypes"
+          ]
+        },
+        {
+          "parameter": "new_data_path",
+          "value": "LegacyQuickMesh/Vertex Data"
+        },
+        {
+          "parameter": "new_path_suffix",
+          "value": ""
+        }
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "LegacyQuickMesh_Raw/Vertex Data/NodeTypes"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "LegacyQuickMesh/Vertex Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary LegacyQuickMesh_Raw geometry after publishing calibrated coordinates, triangles and ownership arrays.",
+      "paths": [
+        {
+          "parameter": "removed_data_path",
+          "value": [
+            "LegacyQuickMesh_Raw"
+          ]
+        }
+      ],
+      "key_parameters": {
+        "removed_data_path": [
+          "LegacyQuickMesh_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 27,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Compute fresh per-triangle areas in square micrometers for LegacyQuickMesh; separate internal interfaces from artificial caps when interpreting totals.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "LegacyQuickMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "LegacyQuickMesh",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 28,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Compute fresh unit normals from LegacyQuickMesh triangle winding. This does not establish a universally outward orientation or a closed-manifold network.",
+      "paths": [
+        {
+          "parameter": "input_triangle_geometry_path",
+          "value": "LegacyQuickMesh"
+        }
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "LegacyQuickMesh",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 29,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the cropped image, mesh geometry, labels, and explicitly named measurements as the reusable checkpoint.",
@@ -693,10 +1184,11 @@
     }
   ],
   "last_verified": "2026-10-13",
-  "verification_status": "Windows in-memory Release: the three-pipeline Geometry CTest chain passed; 46 saved-output checks passed, including original-data preservation, independent cubic-symmetry and FCC metric calculations, native neighbor parity, twin candidates, and RGB indexing/invariants. No independent RGB color-key or orientation-average oracle; no OOC, generated-Python, GUI, or scientific suitability claim.",
+  "verification_status": "Windows in-memory Release: Geometry and dependent grain-surface CTests passed. All 58 mesh checks passed, including original-data preservation, independent QuickMesh voxel-face ownership/counts/areas, and M3C triangle arithmetic and label/plane invariants. M3C case tables and global manifoldness were not independently validated.",
   "mcp": {
     "user_intents": [
-      "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates."
+      "Mesh a bounded Small IN100 region and relate internal faces to full-grain misorientation, two-sided IPF colors, assumed-load slip compatibility, and Sigma3 orientation candidates.",
+      "Compare current M3C and explicitly legacy QuickMesh with the preserved unsmoothed SurfaceNets reference"
     ],
     "questions_to_ask": [
       "Which label array represents the intended features?",
@@ -720,7 +1212,14 @@
       "Loading [0,0,1] is an illustrative specimen-Z direction. FCC {111}<110> geometric descriptors are not measured strength and are not generic BCC slip metrics.",
       "Strength components correspond to label0 to label1 and label1 to label0; F1spt uses slip-plane-normal alignment rather than physical boundary traces.",
       "Sigma3Candidate uses angle tolerance 2 degrees and axis tolerance 3 degrees. Find Coherence is false; no twin-plane or coherent-twin conclusion.",
-      "New crystallography belongs only to original SurfaceMesh. Smoothing and transformation variants do not inherit it; recompute any geometry-dependent interpretation in a consistent frame."
+      "New crystallography belongs only to original SurfaceMesh. Smoothing and transformation variants do not inherit it; recompute any geometry-dependent interpretation in a consistent frame.",
+      "M3C and legacy QuickMesh read the same unchanged cropped FeatureIds, retain caps, and transfer no source data arrays.",
+      "QuickMesh is deprecated and appears only for compatibility comparison. Keep fix_problem_voxels=false so input labels remain unchanged.",
+      "M3C uses parameter version3 with sharp_bounding_box_edges=true; older chamfered output is not the geometry demonstrated here.",
+      "Every added mesh is reconstructed with explicit Micrometer units, then receives fresh areas and normals.",
+      "Only original SurfaceMesh carries boundary crystallography. Do not copy per-face arrays between different tessellations or infer triangle-index correspondence.",
+      "M3C topology and pair areas need not equal voxel-face topology. Triangle counts, surface appearance and area differences are not accuracy or quality rankings.",
+      "No guarantee of watertight global network, globally outward normals, solver suitability or self-intersection freedom."
     ],
     "related_pipelines": [
       "(02) Small IN100 Surface Smoothing.d3dpipeline",
@@ -728,27 +1227,55 @@
     ]
   },
   "result_visual": {
-    "path": "BoundaryCrystallography.png",
-    "sha256": "c9f613ed050276fa64f964950499401f63c4136aa807cb30a548b8fdb729f04b",
+    "path": "MeshMethodComparison.png",
+    "sha256": "5b0bc30173beb7600ba55dba2cd4353ef260b007f13a9374eb146ca5cb97464e",
     "source_outputs": [
       {
         "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
-        "sha256": "30af0e81ace1f26679d6bc3c585d2e640da7da658ecc54c557eb0eb7328b4f4d"
+        "sha256": "bae7091f4f573c112cb701059c7e781cc98a152a2e53bb80a8c0c1c511491aed"
       }
     ],
-    "method": "Matplotlib reads saved native RGB, misorientation, F1, areas, and Sigma3 arrays. No crystallographic algorithms reimplemented. Area-weighted histograms and pair selection are display summaries only. No relighting of stored RGB.",
-    "selected_face_labels": [
-      533,
-      1719
+    "method": "Matplotlib displays saved native mesh vertices/triangles and selected native FaceAreas. Identical feature-pair selection and physical camera; no remeshing, vertex modification or mesher reimplementation.",
+    "meshes": [
+      {
+        "name": "SurfaceMesh",
+        "vertices": 6479,
+        "triangles": 14052,
+        "total_area_square_micrometers": 439.125,
+        "selected_pair": [
+          533,
+          1719
+        ],
+        "selected_triangles": 1138,
+        "selected_area_square_micrometers": 35.5625
+      },
+      {
+        "name": "M3CSurfaceMesh",
+        "vertices": 7931,
+        "triangles": 17090,
+        "total_area_square_micrometers": 389.88286572881043,
+        "selected_pair": [
+          533,
+          1719
+        ],
+        "selected_triangles": 1258,
+        "selected_area_square_micrometers": 25.6111814128235
+      },
+      {
+        "name": "LegacyQuickMesh",
+        "vertices": 6479,
+        "triangles": 14052,
+        "total_area_square_micrometers": 439.125,
+        "selected_pair": [
+          533,
+          1719
+        ],
+        "selected_triangles": 1138,
+        "selected_area_square_micrometers": 35.5625
+      }
     ],
-    "selected_triangle_count": 1138,
-    "internal_triangles": 7140,
-    "internal_pairs": 72,
-    "candidate_faces": 2602,
-    "candidate_pairs": 6,
-    "candidate_area_square_micrometers": 81.3125,
-    "visual_review": "2026-10-13: inspected matched cameras, native RGB colors, facet selection, units, legends, histogram area weighting, directional scatter, numeric annotations, and margins.",
-    "role": "Two saved native face-IPF RGB views of interface 533/1719, an area-weighted internal misorientation histogram split by Sigma3 flags, and the two saved F1 directions for all 72 internal grain pairs."
+    "visual_review": "2026-10-13: inspected matched interface/camera/scale, native triangle rendering, area and count annotations, Micrometer labels, legacy labeling, caveats, margins and text spacing.",
+    "role": "Native SurfaceNets/M3C/legacy QuickMesh interface 533/1719 under the same camera; all other interfaces and caps are hidden only for display."
   },
   "dimensional_scope": "A 24-cubed interior crop from the 117-section measured reconstruction; cropped fragments do not establish whole-grain shapes.",
   "cli_usage": {
@@ -762,7 +1289,7 @@
     "published_length_unit_index": 6,
     "unit": "Micrometer",
     "coordinates_rescaled": false,
-    "method": "SurfaceNets temporary mesh -> CreateGeometryFilter Triangle/Copy/Micrometer -> copy FaceLabels and NodeTypes -> delete temporary mesh. Example 03 separately constructs its transformed geometry with explicit Triangle/Copy/Micrometer settings.",
+    "method": "SurfaceNets temporary mesh -> CreateGeometryFilter Triangle/Copy/Micrometer -> copy FaceLabels and NodeTypes -> delete temporary mesh. Example 03 separately constructs its transformed geometry with explicit Triangle/Copy/Micrometer settings. M3C and legacy QuickMesh use the same temporary-mesh, explicit Micrometer construction, ownership-copy and cleanup pattern.",
     "reason": "Current SurfaceNets output retains the default Meter metadata rather than the input ImageGeom units."
   },
   "boundary_contract": {
@@ -821,111 +1348,183 @@
       ],
       "selected_triangle_count": 1138,
       "visual_review": "2026-10-08: labels, units, matched views, captions, margins, and numeric annotations inspected."
+    },
+    {
+      "path": "BoundaryCrystallography.png",
+      "sha256": "c9f613ed050276fa64f964950499401f63c4136aa807cb30a548b8fdb729f04b",
+      "source_outputs": [
+        {
+          "path": "Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d",
+          "sha256": "30af0e81ace1f26679d6bc3c585d2e640da7da658ecc54c557eb0eb7328b4f4d"
+        }
+      ],
+      "method": "Matplotlib reads saved native RGB, misorientation, F1, areas, and Sigma3 arrays. No crystallographic algorithms reimplemented. Area-weighted histograms and pair selection are display summaries only. No relighting of stored RGB.",
+      "selected_face_labels": [
+        533,
+        1719
+      ],
+      "selected_triangle_count": 1138,
+      "internal_triangles": 7140,
+      "internal_pairs": 72,
+      "candidate_faces": 2602,
+      "candidate_pairs": 6,
+      "candidate_area_square_micrometers": 81.3125,
+      "visual_review": "2026-10-13: inspected matched cameras, native RGB colors, facet selection, units, legends, histogram area weighting, directional scatter, numeric annotations, and margins.",
+      "role": "Two saved native face-IPF RGB views of interface 533/1719, an area-weighted internal misorientation histogram split by Sigma3 flags, and the two saved F1 directions for all 72 internal grain pairs."
     }
   ],
+  "mesh_comparison_contract": {
+    "source_geometry": "DataContainer",
+    "source_labels": "DataContainer/Cell Data/FeatureIds",
+    "reference": "SurfaceMesh",
+    "alternatives": {
+      "M3CSurfaceMesh": {
+        "filter": "M3CSurfaceMeshingFilter",
+        "parameters_version": 3,
+        "sharp_bounding_box_edges": true,
+        "repair_triangle_winding": true,
+        "bounding_box_skin_mode_index": 0
+      },
+      "LegacyQuickMesh": {
+        "filter": "QuickSurfaceMeshFilter",
+        "parameters_version": 3,
+        "fix_problem_voxels": false,
+        "repair_triangle_winding": true,
+        "bounding_box_skin_mode_index": 0,
+        "status": "Deprecated compatibility comparison; SurfaceNets remains recommended for new workflows"
+      }
+    },
+    "units": "Micrometer",
+    "areas": "square micrometers",
+    "normals": "dimensionless unit vectors from triangle winding",
+    "new_mesh_fields": [
+      "FaceLabels",
+      "FaceAreas",
+      "FaceNormals",
+      "NodeTypes"
+    ],
+    "crystallographic_fields": "Original SurfaceMesh only; no transfer between tessellations",
+    "input_arrays_transferred": [],
+    "feature_arrays_transferred": []
+  },
   "validation": {
     "date": "2026-10-13",
     "configuration": "Windows in-memory Release",
-    "pipeline_chain": {
-      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Geometry_Examples",
-      "passed": true,
-      "elapsed_seconds": 21.97,
-      "pipelines": 3
-    },
+    "pipeline_tests": [
+      {
+        "name": "PIPELINE::OrientationAnalysis::Small_IN100_Geometry_Examples",
+        "passed": true,
+        "elapsed_seconds": 22.53
+      },
+      {
+        "name": "PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples",
+        "passed": true,
+        "elapsed_seconds": 24.92
+      }
+    ],
     "independent_checks": {
-      "passed": 46,
-      "total": 46,
-      "scope": "Windows Release native in-memory. Orientation averages are conditioned inputs, not independently estimated. RGB checks establish indexing and invariants, not an independent color-key oracle."
+      "passed": 58,
+      "total": 58,
+      "scope": "Native Windows Release in-memory. QuickMesh is checked against voxel-face ownership; M3C triangle arithmetic and label/plane invariants are checked, not an independent reproduction of its multi-material case tables or global manifoldness."
     },
     "preservation": {
       "Surface": {
         "passed": true,
-        "datasets": 25,
+        "datasets": 36,
         "failed_paths": []
       },
       "Smoothing": {
         "passed": true,
-        "datasets": 32,
+        "datasets": 43,
         "failed_paths": []
       },
       "Transform": {
         "passed": true,
-        "datasets": 33,
+        "datasets": 44,
         "failed_paths": []
       }
     },
-    "pipeline_sha256": "4e3dc91c84fea603fbfa45c35af4d6d268cff1685032651aa3640acd341702ea",
-    "expected_current_fixture": {
-      "units": 6,
-      "vertices": 6479,
-      "triangles": 14052,
-      "internal_triangles": 7140,
-      "cap_triangles": 6912,
-      "internal_pairs": 72,
-      "crop_positive_feature_ids": 23,
-      "candidate_pairs": [
-        {
-          "labels": [
-            460,
-            1137
-          ],
-          "triangles": 20,
-          "area_um2": 0.625
-        },
-        {
-          "labels": [
-            533,
-            1719
-          ],
-          "triangles": 1138,
-          "area_um2": 35.5625
-        },
-        {
-          "labels": [
-            533,
-            2173
-          ],
-          "triangles": 236,
-          "area_um2": 7.375
-        },
-        {
-          "labels": [
-            938,
-            998
-          ],
-          "triangles": 594,
-          "area_um2": 18.5625
-        },
-        {
-          "labels": [
-            938,
-            1137
-          ],
-          "triangles": 30,
-          "area_um2": 0.9375
-        },
-        {
-          "labels": [
-            998,
-            1992
-          ],
-          "triangles": 584,
-          "area_um2": 18.25
+    "meshes": {
+      "SurfaceMesh": {
+        "vertices": 6479,
+        "triangles": 14052,
+        "label_pairs": 94,
+        "internal_triangles": 7140,
+        "cap_triangles": 6912,
+        "total_area_um2": 439.125,
+        "internal_area_um2": 223.125,
+        "cap_area_um2": 216.0,
+        "minimum_triangle_area_um2": 0.03125,
+        "displayed_pair_triangles": 1138,
+        "displayed_pair_area_um2": 35.5625,
+        "additional_pairs_vs_voxel_faces": [],
+        "missing_pairs_vs_voxel_faces": [],
+        "node_type_counts": {
+          "2": 2598,
+          "3": 383,
+          "4": 40,
+          "12": 2825,
+          "13": 590,
+          "14": 43
         }
-      ],
-      "candidate_triangles": 2602,
-      "candidate_area_square_micrometers": 81.3125,
-      "coherence_calculated": false
+      },
+      "M3CSurfaceMesh": {
+        "vertices": 7931,
+        "triangles": 17090,
+        "label_pairs": 94,
+        "internal_triangles": 9396,
+        "cap_triangles": 7694,
+        "total_area_um2": 389.88286572881043,
+        "internal_area_um2": 173.88286572881043,
+        "cap_area_um2": 216.0,
+        "minimum_triangle_area_um2": 0.0078125,
+        "displayed_pair_triangles": 1258,
+        "displayed_pair_area_um2": 25.6111814128235,
+        "additional_pairs_vs_voxel_faces": [],
+        "missing_pairs_vs_voxel_faces": [],
+        "node_type_counts": {
+          "2": 3570,
+          "3": 464,
+          "4": 48,
+          "12": 3176,
+          "13": 630,
+          "14": 43
+        }
+      },
+      "LegacyQuickMesh": {
+        "vertices": 6479,
+        "triangles": 14052,
+        "label_pairs": 94,
+        "internal_triangles": 7140,
+        "cap_triangles": 6912,
+        "total_area_um2": 439.125,
+        "internal_area_um2": 223.125,
+        "cap_area_um2": 216.0,
+        "minimum_triangle_area_um2": 0.03125,
+        "displayed_pair_triangles": 1138,
+        "displayed_pair_area_um2": 35.5625,
+        "additional_pairs_vs_voxel_faces": [],
+        "missing_pairs_vs_voxel_faces": [],
+        "node_type_counts": {
+          "2": 2598,
+          "3": 383,
+          "4": 40,
+          "12": 2825,
+          "13": 590,
+          "14": 43
+        }
+      }
     },
+    "pipeline_sha256": "cd5f3c10f1e7d4d57f6d6a097b0a19aca200f6f4754b4aa83eb6df3af67047d4",
     "unverified": [
-      "Independent reconstruction of grain-average orientations",
-      "Independent IPF color-key numerical oracle",
+      "Independent M3C case-table reproduction",
+      "global manifoldness or watertightness",
+      "self-intersection freedom",
+      "physical boundary accuracy",
       "OOC",
       "generated Python execution",
       "native GUI",
       "downstream solver or printing",
-      "manifoldness and self-intersection freedom",
-      "physical twin-plane coherence",
       "exact paper-result reproduction"
     ]
   }

@@ -12,13 +12,13 @@ Executable pipeline: `(01) Small IN100 Surface Mesh.d3dpipeline`
 | Input | `Data/Output/Small_IN100_Examples/Preparation/SmallIN100_Features.dream3d` |
 | Region | Inclusive XYZ `[82,88,46]` through `[105,111,69]`; 24 cells per axis at 0.25 micrometers |
 | Grain representatives | Fresh phases and average orientations from the full cleaned grains, before cropping |
-| Mesh | Original `SurfaceMesh`, with labels, areas, normals, and boundary crystallography |
+| Meshes | Original `SurfaceMesh` with crystallography; `M3CSurfaceMesh` and `LegacyQuickMesh` with geometry fields only |
 | Assumptions | FCC nickel slip systems; illustrative sample-Z loading; Sigma3 angle/axis tolerances 2/3 degrees; coherence disabled |
 | Output | `Data/Output/Small_IN100_Geometry_Examples/Surface/SmallIN100_SurfaceMesh.dream3d` |
 
 ## Purpose and real-world setting
 
-A segmented EBSD volume identifies which grain owns each voxel. A surface mesh lets us locate interfaces and ask which adjoining grains differ in orientation, have a near-twin relationship, or have compatible slip geometry under an assumed load. This example connects those questions in one bounded Small IN100 nickel-superalloy region. It keeps original grain IDs so every face can be traced back to the cleaned reconstruction.
+A segmented EBSD volume identifies which grain owns each voxel. A surface mesh lets us locate interfaces and ask which adjoining grains differ in orientation, have a near-twin relationship, or have compatible slip geometry under an assumed load. This example connects those questions in one bounded Small IN100 nickel-superalloy region. It keeps original grain IDs so every face can be traced back to the cleaned reconstruction. Two additional mesher branches show how geometry can differ while the input labels remain fixed.
 
 ## Input data and assumptions
 
@@ -26,11 +26,11 @@ The preparation checkpoint comes from 117 measured EBSD sections of 189 by 201 c
 
 Preparation removed stale feature measurements after cleanup. This pipeline rebuilds only `BoundaryFeaturePhases`, `BoundaryAvgQuats`, and `BoundaryAvgEulerAngles` on the **full cleaned volume**, then crops without renumbering. Those retained feature-table rows describe full-grain orientation representatives, even for grains absent from the crop. They are not cropped-fragment volumes, centroids, or orientations averaged only within the crop. Unused rows and row zero must not be treated as measured grains.
 
-SurfaceNets does not propagate the image's length-unit metadata. Explicit Triangle/Copy/Micrometer construction preserves its coordinates and connectivity while assigning the correct units; it does not rescale the mesh. Areas are square micrometers; normals are dimensionless unit vectors.
+The three meshers do not propagate the image's length-unit metadata ([issue #1792](https://github.com/BlueQuartzSoftware/simplnx/issues/1792)). Explicit Triangle/Copy/Micrometer construction preserves their coordinates and connectivity while assigning the correct units; it does not rescale the mesh. Areas are square micrometers; normals are dimensionless unit vectors.
 
 ## Data flow and filter choices
 
-Read preparation -> full-grain phases and average orientations -> crop -> unsmoothed mesh -> explicit units and ownership copies -> areas and normals -> per-face crystallography -> save.
+Read preparation -> full-grain phases and average orientations -> crop -> unsmoothed mesh -> explicit units and ownership copies -> areas and normals -> original per-face crystallography -> two separate mesher alternatives -> save.
 
 | Filter or choice | Motivation and alternatives |
 | --- | --- |
@@ -50,6 +50,16 @@ The IPF arrays `BoundaryIPFLabel0` and `BoundaryIPFLabel1` correspond to compone
 
 `BoundaryMPrime_Z`, `BoundaryF1_Z`, `BoundaryF1spt_Z`, and `BoundaryF7_Z` each contain two dimensionless components: label 0 -> label 1, then the reverse. The latter three can differ by direction. The implementation uses FCC `{111}<110>` slip geometry; sharing cubic symmetry does not make it a generic BCC slip model. It does not use the mesh normal: in particular, F1spt uses slip-plane-normal alignment, not slip traces on the actual boundary. None of these values proves slip transmission, crack initiation, or boundary strength.
 
+### Same labels, different mesh methods
+
+| Mesh | Choice and reason |
+| --- | --- |
+| `SurfaceMesh` | Unsmoothed SurfaceNets reference; the recommended starting method and the only mesh carrying boundary crystallography here |
+| `M3CSurfaceMesh` | M3C case-table alternative, with sharp bounding-box edges enabled; compare its tessellation and junction treatment |
+| `LegacyQuickMesh` | Deprecated voxel-face method for compatibility comparison; problem-voxel correction is off to keep input labels unchanged |
+
+All three retain the crop caps and record Micrometer units. The alternatives receive their own labels, node types, areas and normals. Their triangle indices are unrelated to the original mesh, so its per-face crystallography is not copied. More triangles, smaller area or a smoother appearance does not establish better physical accuracy. Both dependent examples continue to use the original SurfaceNets baseline.
+
 ## Outputs and interpretation
 
 ![Bounded Small IN100 surface mesh](SurfaceMesh.png)
@@ -61,6 +71,10 @@ For boundary summaries, select **both FaceLabels components > 0**. Caps have NaN
 ![Native face colors, misorientation areas, and directed F1 values](BoundaryCrystallography.png)
 
 The saved results contain 72 internal grain pairs. Six satisfy the chosen Sigma3 test: 460/1137, 533/1719, 533/2173, 938/998, 938/1137, and 998/1992. Together they occupy 2,602 triangles and 81.3125 square micrometers in this crop. The two top panels display the same 533/1719 facets using each adjoining grain's saved face-IPF colors. Their different colors express different crystal directions, not different boundary quality. The bottom panels summarize saved misorientation, candidate flags, face areas, and F1 values; plotting does not recalculate crystallography. Departures from the F1 diagonal show why the two directions must remain distinguishable.
+
+![Native SurfaceNets, M3C, and legacy QuickMesh results on the same interface](MeshMethodComparison.png)
+
+For this crop, M3C produces 7,931 vertices and 17,090 triangles, with total interface-plus-cap area 389.8829 square micrometers. QuickMesh matches the original's 6,479 vertices, 14,052 triangles, and 439.125 area. All three have the same 94 label pairs and 216 square micrometers of cap area. These observations are specific to this input, not a guarantee of equivalent topology. The figure displays saved native meshes and areas; M3C's case table has not been independently reproduced or certified as manifold.
 
 The combined mesh is a network of internal interfaces and artificial walls, not a single exterior shell. Several sheets can meet at junctions. A candidate flag establishes the chosen orientation test, not a coherent twin plane or a material-wide twin fraction.
 

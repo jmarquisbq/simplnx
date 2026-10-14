@@ -6,7 +6,7 @@ Surface Meshing (Generation)
 
 ## Description
 
-This **Filter** creates a watertight, conformal triangle surface mesh from a segmented volume using
+This **Filter** creates a labeled triangle interface network from a segmented volume using
 the **Multi-Material Marching Cubes (M3C)** algorithm. The input is an **Image Geometry**
 together with a **Cell** **Feature Ids** **Data Array** that assigns every
 **Voxel** to a **Feature** (for example a grain). The output is a **Triangle Geometry** whose faces
@@ -16,8 +16,9 @@ Classic marching cubes extracts the surface between exactly two regions. A segme
 however, has many **Feature** labels that meet along triple lines and at quadruple points. M3C
 generalizes marching cubes to the multi-material case: mesh vertices are placed on the **Cell** edges
 and faces where the **Feature Id** changes, and a multi-material case table drives how those points
-are connected into triangles so that every shared interface is represented by a single, coherent set
-of triangles (no cracks and no duplicated surfaces).
+are connected into triangles that represent shared interfaces. The combined network can contain
+non-manifold junctions and artificial crop caps; generation alone does not certify watertightness,
+self-intersection freedom, or suitability for a downstream solver.
 
 ![Images/M3C_SurfaceMesh_Comparison.png](Images/M3C_SurfaceMesh_Comparison.png)
 
@@ -204,9 +205,14 @@ DREAM3D-NX provides three **Filters** that convert a segmented grid into a multi
 
 % Auto generated parameter table will be inserted here
 
+The current output geometry does not inherit the input length-unit metadata ([issue #1792](https://github.com/BlueQuartzSoftware/simplnx/issues/1792)); coordinate numbers retain the input scale. Until corrected, check units before interpreting lengths or areas. The Small IN100 companion example uses explicit Triangle/Copy/Micrometer construction without rescaling vertices.
+
 ## Example Pipelines
 
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
 * Pipelines/SimplnxCore/M3C_Demo.d3dpipeline
++ `Small_IN100_Geometry_Examples/(01) Small IN100 Surface Mesh.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 
