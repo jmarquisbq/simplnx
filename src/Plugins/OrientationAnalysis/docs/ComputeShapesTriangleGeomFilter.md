@@ -6,6 +6,10 @@ Statistics (Morphological)
 
 ## Description
 
+### Current rotation-dependence defects
+
+Rigidly rotating the same asymmetric shape currently changes **Omega3** ([issue #1801](https://github.com/BlueQuartzSoftware/simplnx/issues/1801)) and can change **Axis Lengths / Aspect Ratios** ([issue #1802](https://github.com/BlueQuartzSoftware/simplnx/issues/1802)). The first uses coordinate-frame diagonal moments; the second uses one-sided rays whose direction depends on eigenvector sign. These outputs should not be relied on as orientation-independent shape descriptors until the issues are resolved.
+
 This **Filter** characterizes the 3D shape of each enclosed **Feature** in a **Triangle Geometry** surface mesh by fitting a best-fit ellipsoid. It produces the same types of shape descriptors as the [Compute Feature Shapes (Image Geometry)](ComputeShapesFilter.md) filter -- axis lengths, aspect ratios, axis orientations, and the Omega3 shape invariant -- but operates on triangle meshes rather than voxelized data.
 
 For a description of what each output represents (semi-axis lengths, aspect ratios, Omega3, etc.), see the [Compute Feature Shapes (Image Geometry)](ComputeShapesFilter.md) documentation.

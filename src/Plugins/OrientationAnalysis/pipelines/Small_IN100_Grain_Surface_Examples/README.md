@@ -53,3 +53,6 @@ Stage 04 also maps all 170 source points to explicit 0.5 micrometer cells and co
 
 
 Stage 03 also compares 5,000 native surface samples with the 170 source voxel centers and approximate hulls at 0.25 and 0.5 micrometer pitches (156 and 43 representative points). A separate 0.5 micrometer grid labels source image cells by spatial bin without replacing grain IDs. The companion explains the distinction between measured-derived locations, simulated surface sampling and unconnected hull representatives, plus the current attribute-transfer and vertex-preflight limitations. These additions use the same packaged source data and preserve the original registration and interchange arrays.
+
+
+Stage 02 now samples the complete shell back onto the source grid and exactly recovers its 170 cells. It compares the unique-surface-vertex mean with a reconstructed-volume centroid, then uses fixed-seed positioning bounds of 0.05 and 0.20 micrometers to illustrate correlated row/slice sampling effects. Correctly associated output grids retain 170 and 180 selected cells; the larger case changes 62 memberships without changing the mesh. The companion explains local labels, nominal storage positions, the metadata workaround and why triangle-shape outputs remain deferred. The original CSV columns remain intact and nominal voxel measurements are added.

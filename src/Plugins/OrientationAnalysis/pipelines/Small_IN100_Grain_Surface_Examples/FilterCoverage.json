@@ -38,20 +38,6 @@
       "purpose": "Repair the observed inconsistent winding of the single extracted shell."
     },
     {
-      "filter": "ComputeTriangleGeomVolumesFilter",
-      "uuid": "a979bd9b-834e-4497-84b0-ab7a8add341a",
-      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
-      "step": 6,
-      "purpose": "Integrate enclosed volume with a local [-1,1] label pair after closure checks."
-    },
-    {
-      "filter": "ComputeTriangleGeomCentroidsFilter",
-      "uuid": "074c0523-ab7a-4097-b0c3-c4dcbfb9a05e",
-      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
-      "step": 7,
-      "purpose": "Calculate the unique-surface-vertex mean with its actual implementation meaning."
-    },
-    {
       "filter": "ReadHDF5DatasetFilter",
       "uuid": "8027f145-c7d5-4589-900e-b909fb3a059c",
       "pipeline": "(04) Small IN100 Point Cloud Interchange.d3dpipeline",
@@ -421,6 +407,202 @@
       "pipeline": "(03) Small IN100 Grain Point Cloud Registration.d3dpipeline",
       "step": 39,
       "purpose": "Save source context, complementary calibrated tiles, the reassembled cloud, all three moving checkpoints, and the known and ICP residual transforms."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the verified complete-grain checkpoint; this stage does not rerun extraction."
+    },
+    {
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 1,
+      "purpose": "Allocate a two-component int32 face array for local exterior and grain labels."
+    },
+    {
+      "filter": "InitializeDataFilter",
+      "uuid": "01c82d15-ba52-4ffa-a7a5-487ee5a613f5",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 2,
+      "purpose": "Fill all tuples with the stated local labels."
+    },
+    {
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 3,
+      "purpose": "Create two local measurement rows: unused exterior 0 and occupied grain region 1."
+    },
+    {
+      "filter": "CreateDataArrayFilter",
+      "uuid": "67041f9b-bdc6-4122-acc6-c9fe9280e90d",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 4,
+      "purpose": "Allocate original reconstructed FeatureId lookup for the local rows."
+    },
+    {
+      "filter": "InitializeDataFilter",
+      "uuid": "01c82d15-ba52-4ffa-a7a5-487ee5a613f5",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 5,
+      "purpose": "Map local row 1 to original reconstructed FeatureId 2205; row 0 is unused."
+    },
+    {
+      "filter": "ComputeTriangleGeomVolumesFilter",
+      "uuid": "a979bd9b-834e-4497-84b0-ab7a8add341a",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 6,
+      "purpose": "Integrate the repaired, closed shell using local [-1,1] face labels; row 1 is the enclosed cubic-micrometer volume."
+    },
+    {
+      "filter": "ComputeTriangleGeomCentroidsFilter",
+      "uuid": "074c0523-ab7a-4097-b0c3-c4dcbfb9a05e",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 7,
+      "purpose": "Average unique surface vertices for local grain 1; this is a vertex mean rather than a volume centroid."
+    },
+    {
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 8,
+      "purpose": "Give every face sampling-local labels [0,1]: outside the selected shell and original grain 2205. Keep the [-1,1] surface-measurement labels and original neighbor labels unchanged."
+    },
+    {
+      "filter": "RegularGridSampleSurfaceMeshFilter",
+      "uuid": "7d061fe1-7c88-45ef-a7ee-f8ab027c8e85",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 9,
+      "purpose": "Sample the closed shell at the existing source image cell centers, preserving its exact origin, spacing and units. MeshSampledGrainIds 1 should match original FeatureIds 2205; zero means outside this selected grain, not necessarily void."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 10,
+      "purpose": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth."
+    },
+    {
+      "filter": "ComputeFeatureCentroidsFilter",
+      "uuid": "c6875ac7-8bdd-4f69-b6ce-82ac09bd3421",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 11,
+      "purpose": "Average equal-volume cell centers from recovered local grain 1. This is a volume centroid for the voxel reconstruction, distinct from SurfaceVertexMeans. It uses the same local row 1 -> original 2205 mapping."
+    },
+    {
+      "filter": "UncertainRegularGridSampleSurfaceMeshFilter",
+      "uuid": "c594cc3b-3f45-43b1-9030-1aa56c755fc8",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 12,
+      "purpose": "Use fixed seed 2205 and bounded 0.05 micrometer perturbations on the source grid. X is drawn per point, Y once per row, Z once per slice; this is an illustrative correlated positioning scenario. Labels remain stored at nominal grid locations."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 13,
+      "purpose": "Reconstruct the same calibrated image grid with a correctly designated Cell Data matrix. Issue 1800 misassociates the uncertain sampler output; this 24-cubed fixture also avoids its non-cubic tuple-order defect."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 14,
+      "purpose": "Copy the sampled labels unchanged onto the correctly associated nominal grid. This does not move or resample the values."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 15,
+      "purpose": "Remove only the temporary misassociated image after its sampled labels and calibration are retained."
+    },
+    {
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 16,
+      "purpose": "Create local rows 0 and 1 for the sampling result; only row 1 represents the selected original grain 2205."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 17,
+      "purpose": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth."
+    },
+    {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 18,
+      "purpose": "Mark nominal cells whose sampled membership changed: absolute difference of local 0/1 labels is 0 for agreement and 1 for a change."
+    },
+    {
+      "filter": "UncertainRegularGridSampleSurfaceMeshFilter",
+      "uuid": "c594cc3b-3f45-43b1-9030-1aa56c755fc8",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 19,
+      "purpose": "Use fixed seed 2205 and bounded 0.2 micrometer perturbations on the source grid. X is drawn per point, Y once per row, Z once per slice; this is an illustrative correlated positioning scenario. Labels remain stored at nominal grid locations."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 20,
+      "purpose": "Reconstruct the same calibrated image grid with a correctly designated Cell Data matrix. Issue 1800 misassociates the uncertain sampler output; this 24-cubed fixture also avoids its non-cubic tuple-order defect."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 21,
+      "purpose": "Copy the sampled labels unchanged onto the correctly associated nominal grid. This does not move or resample the values."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 22,
+      "purpose": "Remove only the temporary misassociated image after its sampled labels and calibration are retained."
+    },
+    {
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 23,
+      "purpose": "Create local rows 0 and 1 for the sampling result; only row 1 represents the selected original grain 2205."
+    },
+    {
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 24,
+      "purpose": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth."
+    },
+    {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 25,
+      "purpose": "Mark nominal cells whose sampled membership changed: absolute difference of local 0/1 labels is 0 for agreement and 1 for a change."
+    },
+    {
+      "filter": "WriteFeatureDataCSVFilter",
+      "uuid": "d734293f-3017-4699-b458-c05aca078b96",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 26,
+      "purpose": "Export local row IDs, original FeatureId mapping, enclosed volume, and surface vertex mean for inspection."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
+      "step": 27,
+      "purpose": "Save the calibrated shell with original identity, local labels, and audited measurements."
     }
   ]
 }

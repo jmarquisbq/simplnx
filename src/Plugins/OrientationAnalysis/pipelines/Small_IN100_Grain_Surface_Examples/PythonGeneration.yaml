@@ -50,5 +50,6 @@
     "grid_contract": "Stage 04 must preserve both explicit Micrometer image geometries, the float64 interpolation copy, map error handling, both kernel/sigma settings, and contribution counts. Keep all source-point arrays and CSV columns unchanged."
   },
   "gui_note": "GUI working folders vary; use absolute file parameters when relative paths do not resolve.",
-  "sampling_contract": "Regenerate all 40 steps of stage 03: sample geometry only (no face attribute transfer), recompute nearest-triangle association, retain fixed seed 2205 and explicit Micrometer copies, compare hull pitches 0.25/0.5, and partition DataContainer image cells rather than the vertex geometry. Preserve source grain IDs."
+  "sampling_contract": "Regenerate all 40 steps of stage 03: sample geometry only (no face attribute transfer), recompute nearest-triangle association, retain fixed seed 2205 and explicit Micrometer copies, compare hull pitches 0.25/0.5, and partition DataContainer image cells rather than the vertex geometry. Preserve source grain IDs.",
+  "grid_sampling_contract": "Regenerate all 28 measurement-stage steps. Retain measurement labels [-1,1] and original mapping; sampling labels are [0,1]. Use existing source geometry for regular sampling, fixed seed 2205 and physical uncertainty bounds 0.05/0.20, rebuild associated cubic image outputs for issue 1800, and preserve nominal storage positions. No triangle-shape calculation is delivered."
 }

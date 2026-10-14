@@ -3,7 +3,7 @@
   "pipeline_file": "(02) Small IN100 Grain Surface Measurements.d3dpipeline",
   "markdown_file": "(02) Small IN100 Grain Surface Measurements.md",
   "title": "Small IN100 Grain Surface Measurements",
-  "summary": "Measure the enclosed volume and mean unique surface-vertex position of a closed Small IN100 grain shell while mapping local region 1 to original FeatureId 2205.",
+  "summary": "Measure the complete grain shell, recover its source-grid membership and volume centroid, and compare apparent membership under two bounded correlated positioning scenarios.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -31,11 +31,12 @@
   "outputs": [
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.dream3d",
-      "role": "Full shell and local-to-original identity map with enclosed volume and unique-vertex mean."
+      "role": "Full shell and local-to-original identity map with enclosed volume and unique-vertex mean. Includes MeshSampledGrainIds, voxel volume centroids, Jitter005/Jitter020 calibrated grids, local counts/volumes and ChangedFromNominal flags.",
+      "sha256": "7ec1e44f1259bf91211e209ac75ab01ac6f73e1168ce128c9d4116394539a2b0"
     },
     {
       "path": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.csv",
-      "role": "Scalar feature CSV with count/header and one occupied data row: local Feature_ID 1 maps to original 2205. The DREAM3D matrix retains rows 0 and 1."
+      "role": "Scalar feature CSV with count/header and one occupied data row: local Feature_ID 1 maps to original 2205. The DREAM3D matrix retains rows 0 and 1. Original named fields retained; nominal voxel count, volume, equivalent diameter and volume-centroid columns added."
     }
   ],
   "input_data_strategy": {
@@ -54,7 +55,7 @@
       "original FeatureId 2205 occupies all 170 source voxels inside the crop",
       "unsmoothed shared-interface surface, 0.25 micrometer source spacing"
     ],
-    "known_differences": "This chosen grain, ROI, modern SurfaceNets reconstruction, extraction, and measurement are illustrative. Exact identity with the publisher supplement or a numerical paper result is not established.",
+    "known_differences": "This chosen grain, ROI, modern SurfaceNets reconstruction, extraction, and measurement are illustrative. Exact identity with the publisher supplement or a numerical paper result is not established. Seeded 0.05 and 0.20 micrometer position offsets are illustrative sensitivity scenarios, not measured instrument uncertainty. X changes per point, Y per row and Z per slice; output labels stay on nominal grid positions. Triangle-shape outputs are deferred for rotation-dependence issues 1801/1802.",
     "archive_provenance_file": "README.md"
   },
   "prerequisites": [
@@ -277,6 +278,473 @@
     },
     {
       "index": 8,
+      "filter": "CreateDataArrayAdvancedFilter",
+      "uuid": "f23464df-abcc-40cf-bf99-f71463df633c",
+      "role": "Give every face sampling-local labels [0,1]: outside the selected shell and original grain 2205. Keep the [-1,1] surface-measurement labels and original neighbor labels unchanged.",
+      "paths": [
+        "Grain2205/Face Data/SamplingPartLabels"
+      ],
+      "key_parameters": {
+        "numeric_type_index": 4,
+        "set_tuple_dimensions": false,
+        "component_dimensions": [
+          [
+            2.0
+          ]
+        ],
+        "tuple_dimensions": [
+          [
+            1.0
+          ]
+        ],
+        "output_array_path": "Grain2205/Face Data/SamplingPartLabels",
+        "data_format": "",
+        "init_type_index": 0,
+        "init_value": "0;1",
+        "starting_fill_value": "0",
+        "step_operation_index": 0,
+        "step_value": "1",
+        "use_seed": false,
+        "seed_value": 5489,
+        "seed_array_name": "InitializeDataFilter SeedValue",
+        "init_start_range": "0",
+        "init_end_range": "1",
+        "standardize_seed": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "RegularGridSampleSurfaceMeshFilter",
+      "uuid": "7d061fe1-7c88-45ef-a7ee-f8ab027c8e85",
+      "role": "Sample the closed shell at the existing source image cell centers, preserving its exact origin, spacing and units. MeshSampledGrainIds 1 should match original FeatureIds 2205; zero means outside this selected grain, not necessarily void.",
+      "paths": [
+        "Grain2205",
+        "Grain2205/Face Data/SamplingPartLabels",
+        "DataContainer",
+        "Unused"
+      ],
+      "key_parameters": {
+        "use_existing_geometry_index": 1,
+        "dimensions": [
+          24,
+          24,
+          24
+        ],
+        "spacing": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "origin": [
+          20.500003814697266,
+          22.0,
+          11.499996185302734
+        ],
+        "length_unit_index": 6,
+        "input_triangle_geometry_path": "Grain2205",
+        "surface_mesh_face_labels_array_path": "Grain2205/Face Data/SamplingPartLabels",
+        "existing_image_geometry_path": "DataContainer",
+        "input_image_geometry_path": "Unused",
+        "cell_attribute_matrix_name": "Cell Data",
+        "use_custom_output_type": false,
+        "output_type_index": 4,
+        "feature_ids_array_name": "MeshSampledGrainIds"
+      },
+      "parameters_version": 4
+    },
+    {
+      "index": 10,
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "role": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth.",
+      "paths": [
+        "Grain2205/Grain Measurements",
+        "DataContainer/Cell Data/MeshSampledGrainIds",
+        "DataContainer"
+      ],
+      "key_parameters": {
+        "equivalent_diameters_name": "NominalVoxelEquivalentDiameters",
+        "feature_attribute_matrix_path": "Grain2205/Grain Measurements",
+        "feature_ids_path": "DataContainer/Cell Data/MeshSampledGrainIds",
+        "input_image_geometry_path": "DataContainer",
+        "num_elements_name": "NominalVoxelCounts",
+        "save_element_sizes": false,
+        "volumes_name": "NominalVoxelVolumes"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 11,
+      "filter": "ComputeFeatureCentroidsFilter",
+      "uuid": "c6875ac7-8bdd-4f69-b6ce-82ac09bd3421",
+      "role": "Average equal-volume cell centers from recovered local grain 1. This is a volume centroid for the voxel reconstruction, distinct from SurfaceVertexMeans. It uses the same local row 1 -> original 2205 mapping.",
+      "paths": [
+        "DataContainer",
+        "Grain2205/Grain Measurements",
+        "DataContainer/Cell Data/MeshSampledGrainIds"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "DataContainer",
+        "feature_attribute_matrix_path": "Grain2205/Grain Measurements",
+        "centroids_array_name": "VoxelVolumeCentroids",
+        "is_periodic": false,
+        "feature_ids_path": "DataContainer/Cell Data/MeshSampledGrainIds"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "UncertainRegularGridSampleSurfaceMeshFilter",
+      "uuid": "c594cc3b-3f45-43b1-9030-1aa56c755fc8",
+      "role": "Use fixed seed 2205 and bounded 0.05 micrometer perturbations on the source grid. X is drawn per point, Y once per row, Z once per slice; this is an illustrative correlated positioning scenario. Labels remain stored at nominal grid locations.",
+      "paths": [
+        "Grain2205",
+        "Grain2205/Face Data/SamplingPartLabels",
+        "Jitter005_Raw"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "Grain2205",
+        "surface_mesh_face_labels_array_path": "Grain2205/Face Data/SamplingPartLabels",
+        "dimensions": [
+          24,
+          24,
+          24
+        ],
+        "spacing": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "origin": [
+          20.500003814697266,
+          22.0,
+          11.499996185302734
+        ],
+        "uncertainty": [
+          0.05,
+          0.05,
+          0.05
+        ],
+        "input_image_geometry_path": "Jitter005_Raw",
+        "cell_attribute_matrix_name": "Cell Data",
+        "feature_ids_array_name": "GrainIds",
+        "use_seed": true,
+        "seed_value": 2205,
+        "seed_array_name": "Jitter005Seed",
+        "output_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 13,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Reconstruct the same calibrated image grid with a correctly designated Cell Data matrix. Issue 1800 misassociates the uncertain sampler output; this 24-cubed fixture also avoids its non-cubic tuple-order defect.",
+      "paths": [
+        "Jitter005"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 0,
+        "length_unit_index": 6,
+        "output_geometry_path": "Jitter005",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          24,
+          24,
+          24
+        ],
+        "origin": [
+          20.500003814697266,
+          22.0,
+          11.499996185302734
+        ],
+        "spacing": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the sampled labels unchanged onto the correctly associated nominal grid. This does not move or resample the values.",
+      "paths": [
+        "Jitter005/Cell Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Jitter005_Raw/Cell Data/GrainIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "Jitter005/Cell Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary misassociated image after its sampled labels and calibration are retained.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Jitter005_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 16,
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "role": "Create local rows 0 and 1 for the sampling result; only row 1 represents the selected original grain 2205.",
+      "paths": [
+        "Jitter005/Grain Measurements"
+      ],
+      "key_parameters": {
+        "data_object_path": "Jitter005/Grain Measurements",
+        "tuple_dimensions": [
+          [
+            2.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "role": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth.",
+      "paths": [
+        "Jitter005/Grain Measurements",
+        "Jitter005/Cell Data/GrainIds",
+        "Jitter005"
+      ],
+      "key_parameters": {
+        "equivalent_diameters_name": "VoxelEquivalentDiameters",
+        "feature_attribute_matrix_path": "Jitter005/Grain Measurements",
+        "feature_ids_path": "Jitter005/Cell Data/GrainIds",
+        "input_image_geometry_path": "Jitter005",
+        "num_elements_name": "VoxelCounts",
+        "save_element_sizes": false,
+        "volumes_name": "VoxelVolumes"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 18,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Mark nominal cells whose sampled membership changed: absolute difference of local 0/1 labels is 0 for agreement and 1 for a change.",
+      "paths": [
+        "DataContainer/Cell Data/MeshSampledGrainIds",
+        "Jitter005/Cell Data/GrainIds",
+        "Jitter005/Cell Data/ChangedFromNominal"
+      ],
+      "key_parameters": {
+        "first_input_array_path": "DataContainer/Cell Data/MeshSampledGrainIds",
+        "second_input_array_path": "Jitter005/Cell Data/GrainIds",
+        "difference_map_array_path": "Jitter005/Cell Data/ChangedFromNominal"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
+      "filter": "UncertainRegularGridSampleSurfaceMeshFilter",
+      "uuid": "c594cc3b-3f45-43b1-9030-1aa56c755fc8",
+      "role": "Use fixed seed 2205 and bounded 0.2 micrometer perturbations on the source grid. X is drawn per point, Y once per row, Z once per slice; this is an illustrative correlated positioning scenario. Labels remain stored at nominal grid locations.",
+      "paths": [
+        "Grain2205",
+        "Grain2205/Face Data/SamplingPartLabels",
+        "Jitter020_Raw"
+      ],
+      "key_parameters": {
+        "input_triangle_geometry_path": "Grain2205",
+        "surface_mesh_face_labels_array_path": "Grain2205/Face Data/SamplingPartLabels",
+        "dimensions": [
+          24,
+          24,
+          24
+        ],
+        "spacing": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "origin": [
+          20.500003814697266,
+          22.0,
+          11.499996185302734
+        ],
+        "uncertainty": [
+          0.2,
+          0.2,
+          0.2
+        ],
+        "input_image_geometry_path": "Jitter020_Raw",
+        "cell_attribute_matrix_name": "Cell Data",
+        "feature_ids_array_name": "GrainIds",
+        "use_seed": true,
+        "seed_value": 2205,
+        "seed_array_name": "Jitter020Seed",
+        "output_type_index": 4
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 20,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Reconstruct the same calibrated image grid with a correctly designated Cell Data matrix. Issue 1800 misassociates the uncertain sampler output; this 24-cubed fixture also avoids its non-cubic tuple-order defect.",
+      "paths": [
+        "Jitter020"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 0,
+        "length_unit_index": 6,
+        "output_geometry_path": "Jitter020",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          24,
+          24,
+          24
+        ],
+        "origin": [
+          20.500003814697266,
+          22.0,
+          11.499996185302734
+        ],
+        "spacing": [
+          0.25,
+          0.25,
+          0.25
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 21,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Copy the sampled labels unchanged onto the correctly associated nominal grid. This does not move or resample the values.",
+      "paths": [
+        "Jitter020/Cell Data"
+      ],
+      "key_parameters": {
+        "existing_data_path": [
+          "Jitter020_Raw/Cell Data/GrainIds"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "Jitter020/Cell Data",
+        "new_path_suffix": ""
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary misassociated image after its sampled labels and calibration are retained.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "Jitter020_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
+      "filter": "CreateAttributeMatrixFilter",
+      "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
+      "role": "Create local rows 0 and 1 for the sampling result; only row 1 represents the selected original grain 2205.",
+      "paths": [
+        "Jitter020/Grain Measurements"
+      ],
+      "key_parameters": {
+        "data_object_path": "Jitter020/Grain Measurements",
+        "tuple_dimensions": [
+          [
+            2.0
+          ]
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "ComputeFeatureSizesFilter",
+      "uuid": "c666ee17-ca58-4969-80d0-819986c72485",
+      "role": "Summarize local grain 1 from nominal-grid membership: count, count times voxel volume, and equivalent sphere diameter. Exclude background row 0; a changed count under perturbation is a sampling effect, not physical grain growth.",
+      "paths": [
+        "Jitter020/Grain Measurements",
+        "Jitter020/Cell Data/GrainIds",
+        "Jitter020"
+      ],
+      "key_parameters": {
+        "equivalent_diameters_name": "VoxelEquivalentDiameters",
+        "feature_attribute_matrix_path": "Jitter020/Grain Measurements",
+        "feature_ids_path": "Jitter020/Cell Data/GrainIds",
+        "input_image_geometry_path": "Jitter020",
+        "num_elements_name": "VoxelCounts",
+        "save_element_sizes": false,
+        "volumes_name": "VoxelVolumes"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 25,
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "role": "Mark nominal cells whose sampled membership changed: absolute difference of local 0/1 labels is 0 for agreement and 1 for a change.",
+      "paths": [
+        "DataContainer/Cell Data/MeshSampledGrainIds",
+        "Jitter020/Cell Data/GrainIds",
+        "Jitter020/Cell Data/ChangedFromNominal"
+      ],
+      "key_parameters": {
+        "first_input_array_path": "DataContainer/Cell Data/MeshSampledGrainIds",
+        "second_input_array_path": "Jitter020/Cell Data/GrainIds",
+        "difference_map_array_path": "Jitter020/Cell Data/ChangedFromNominal"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 26,
       "filter": "WriteFeatureDataCSVFilter",
       "uuid": "d734293f-3017-4699-b458-c05aca078b96",
       "role": "Export local row IDs, original FeatureId mapping, enclosed volume, and surface vertex mean for inspection.",
@@ -300,7 +768,7 @@
       "parameters_version": 1
     },
     {
-      "index": 9,
+      "index": 27,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the calibrated shell with original identity, local labels, and audited measurements.",
@@ -343,8 +811,8 @@
       }
     }
   ],
-  "last_verified": "2026-10-12",
-  "verification_status": "Windows in-memory Release: registered two-pipeline CTest chain passed 1/1 in 19.91 s; independent saved-output audit passed 76/76 checks. Enclosed native volume 2.6562402248 cubic micrometers differs from independent 2.65625 by 9.7752e-6 cubic micrometers. OOC, generated Python, GUI, and installed-app execution are unverified.",
+  "last_verified": "2026-10-14",
+  "verification_status": "Native Windows in-memory Release with independent source-voxel membership and seeded-position checks. Materials interpretation, OOC, generated Python, GUI and full installation remain separate checks.",
   "mcp": {
     "user_intents": [
       "Measure the enclosed volume and mean unique surface-vertex position of a closed Small IN100 grain shell while mapping local region 1 to original FeatureId 2205."
@@ -368,5 +836,111 @@
   "result_visual": {
     "path": "SmallIN100GrainMeasurements.png",
     "role": "Preview rendered from saved native output; numerical checks are recorded separately."
+  },
+  "sampling_visual": {
+    "image": "SmallIN100VoxelizationSensitivity.png",
+    "sha256": "163cf21c14a893a0e09b94ba077fec0f680d694290975704f963f60780aaed20",
+    "native_output": "Data/Output/Small_IN100_Grain_Surface_Examples/Measurements/SmallIN100_Grain2205_Measurements.dream3d",
+    "native_output_sha256": "7ec1e44f1259bf91211e209ac75ab01ac6f73e1168ce128c9d4116394539a2b0",
+    "arrays": [
+      "DataContainer/Cell Data/MeshSampledGrainIds",
+      "Jitter005/Cell Data/GrainIds",
+      "Jitter020/Cell Data/GrainIds",
+      "Jitter020/Cell Data/ChangedFromNominal"
+    ],
+    "display_slice_index": 16,
+    "nominal_z_um": 15.624996185302734,
+    "display_crop_rows": [
+      12,
+      24
+    ],
+    "display_crop_columns": [
+      14,
+      24
+    ],
+    "rendering": "Categorical comparison of saved native membership arrays; no mesh sampling or random perturbation algorithm is used to generate the figure. The selected display slice maximizes the saved change count, and titles report full-volume totals."
+  },
+  "grid_sampling_validation": {
+    "passed": 28,
+    "total": 28,
+    "preserved_prior_datasets": 49,
+    "nominal": {
+      "count": 170,
+      "volume_um3": 2.65625,
+      "closed_mesh_volume_um3": 2.656240224838257,
+      "voxel_volume_centroid": [
+        25.252944946289062,
+        26.604412078857422,
+        15.444113731384277
+      ],
+      "surface_vertex_mean": [
+        25.247072219848633,
+        26.5810546875,
+        15.462889671325684
+      ],
+      "centroid_max_error_um": 3.141515385607363e-07
+    },
+    "variants": [
+      {
+        "name": "Jitter005",
+        "bound_um": 0.05,
+        "count": 170,
+        "volume_um3": 2.65625,
+        "changed": 0,
+        "gained": 0,
+        "lost": 0
+      },
+      {
+        "name": "Jitter020",
+        "bound_um": 0.2,
+        "count": 180,
+        "volume_um3": 2.8125,
+        "changed": 62,
+        "gained": 36,
+        "lost": 26
+      }
+    ],
+    "oracle": "Independent NumPy MT19937 word stream, documented per-slice Z/per-row Y/per-point X draws, and original occupied-voxel lookup. Rounded full-word and upper24-bit float variants give identical ownership. This checks classification, not an experimentally calibrated uncertainty model.",
+    "private_zero_uncertainty_control": "Native point sampling at zero uncertainty exactly recovers the same 170 source cells as regular scanline sampling.",
+    "pipeline_sha256": "b92b532e996fed067a598e4d83842f7da174c6fc284619e1d34668c8665c0d7a",
+    "metadata_workaround": "https://github.com/BlueQuartzSoftware/simplnx/issues/1800",
+    "deferred_shape_issues": [
+      "https://github.com/BlueQuartzSoftware/simplnx/issues/1801",
+      "https://github.com/BlueQuartzSoftware/simplnx/issues/1802"
+    ],
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::Small_IN100_Grain_Surface_Examples",
+      "passed": true,
+      "elapsed_seconds": 27.28,
+      "configuration": "Release, serial",
+      "pipelines": 4
+    },
+    "csv": {
+      "prior_columns_exact": [
+        "Feature_ID",
+        "ClosedSurfaceVolumes",
+        "OriginalFeatureIds",
+        "SurfaceVertexMeans_0",
+        "SurfaceVertexMeans_1",
+        "SurfaceVertexMeans_2"
+      ],
+      "current_columns": [
+        "Feature_ID",
+        "ClosedSurfaceVolumes",
+        "NominalVoxelCounts",
+        "NominalVoxelEquivalentDiameters",
+        "NominalVoxelVolumes",
+        "OriginalFeatureIds",
+        "SurfaceVertexMeans_0",
+        "SurfaceVertexMeans_1",
+        "SurfaceVertexMeans_2",
+        "VoxelVolumeCentroids_0",
+        "VoxelVolumeCentroids_1",
+        "VoxelVolumeCentroids_2"
+      ],
+      "data_rows": 1,
+      "local_feature_id": 1,
+      "original_feature_id": 2205
+    }
   }
 }
