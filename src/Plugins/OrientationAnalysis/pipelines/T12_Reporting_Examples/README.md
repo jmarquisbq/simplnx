@@ -40,3 +40,6 @@ The supplied map selects 1,443 grains. Their equal-grain mean GOS is **2.325059Â
 To regenerate after changing segmentation, spacing, or the reporting threshold, rerun the combined orientation case study, then derived fields and the desired reporting branch. Recreate the compact report before either import example. `PythonGeneration.yaml` describes optional temporary Python conversion; `FilterCoverage.json` lists the filters used.
 
 These examples passed Windows in-memory preflight/execution and independent output checks. GUI use, OOC, generated Python and full application installation remain unverified; scientific interpretation still requires review.
+
+
+Mapping example 02 also creates `T12BoundaryEdges` from every change in the original 2D feature labels, omitting the artificial image frame. The 252,527 calibrated half-micrometer edges support an overlay on grain-value maps; they include grain/background interfaces and carry no adjacent-grain labels. The companion explains the Z display placement, pixel-resolution limits and open contour ends. This uses the existing source data and leaves all mapped values and summaries unchanged.

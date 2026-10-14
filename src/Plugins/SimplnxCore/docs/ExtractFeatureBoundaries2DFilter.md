@@ -10,6 +10,10 @@ This **Filter** extracts the 2D boundaries between **Features** in an **Image Ge
 
 The filter operates only in the XY plane and requires the input **Image Geometry** to have a Z dimension of 1 (a single slice).
 
+Internal edges include any change in the chosen integer labels, including transitions to background 0. The optional virtual sample edges add the image's outer frame. Disabling them avoids that artificial frame but can leave open contour ends at the image boundary. The output has geometric connectivity; it does not attach the adjacent feature IDs or boundary crystallography to each edge. These pixel-side segments are not a subpixel reconstruction of a smooth boundary.
+
+Current extraction retains coordinate numbers but defaults the output length-unit metadata ([issue #1796](https://github.com/BlueQuartzSoftware/simplnx/issues/1796)). Restore the source unit explicitly before interpreting or sharing the geometry.
+
 **NOTE**: The Feature IDs array can be any integer type, not just the *signed int32* type used by typical feature-id arrays. This means it can operate directly on scalar images that have not been segmented. For example, the user could run a simple threshold to create a *uint8* mask (a boolean per-cell flag stored as 0/1) and feed that mask in as the Feature IDs input. This is useful for outlining just the sample border when there is **overscan** — extra collected area surrounding the actual sample — or for outlining specific regions of a 2D **Image Geometry**.
 
 The algorithm scans the Feature IDs array and identifies boundaries where adjacent cells have different feature IDs. For each such boundary, an edge (line segment) is created along the shared cell interface. The resulting **Edge Geometry** contains:
@@ -48,6 +52,10 @@ After edge creation, duplicate vertices are eliminated to ensure a clean, connec
 ## Example Pipelines
 
 - ExtractFeatureBoundaries2D.d3dpipeline
+
+Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
+
++ `T12_Reporting_Examples/(02) T12 Feature to Cell Mapping.d3dpipeline` (OrientationAnalysis)
 
 ## License & Copyright
 

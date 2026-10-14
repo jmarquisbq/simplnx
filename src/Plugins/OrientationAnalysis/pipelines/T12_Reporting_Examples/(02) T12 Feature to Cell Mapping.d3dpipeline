@@ -185,6 +185,165 @@
     },
     {
       "args": {
+        "input_image_geometry_path": {
+          "value": "T12",
+          "version": 1
+        },
+        "feature_ids_array_path": {
+          "value": "T12/Cell Data/FeatureIds",
+          "version": 1
+        },
+        "output_edge_geometry_path": {
+          "value": "T12BoundaryEdges_Raw",
+          "version": 1
+        },
+        "z_value_choice_index": {
+          "value": 1,
+          "version": 1
+        },
+        "custom_z_value": {
+          "value": 0.0,
+          "version": 1
+        },
+        "extract_virtual_sample_edges": {
+          "value": false,
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Trace shared pixel faces where original FeatureIds differ, including grain/background interfaces. Omit the artificial image perimeter. Place edges on the single-slice top Z face for overlay, not as an extra measured section.",
+      "filter": {
+        "name": "nx::core::ExtractFeatureBoundaries2DFilter",
+        "uuid": "e7d2f9b8-4a3c-5d1e-8f6a-9b0c2d3e4f5a"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 3,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "T12BoundaryEdges",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "T12BoundaryEdges_Raw/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "T12BoundaryEdges_Raw/Shared Edge List",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the generated vertices and edges into an explicit Micrometer geometry without rescaling. Boundary extraction currently defaults unit metadata instead of retaining the source image unit.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "removed_data_path": {
+          "value": [
+            "T12BoundaryEdges_Raw"
+          ],
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Remove only the temporary boundary geometry. Keep the original T12 image, labels, feature values, copied cell fields and summaries.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "compression_level": {
           "value": 5,
           "version": 1

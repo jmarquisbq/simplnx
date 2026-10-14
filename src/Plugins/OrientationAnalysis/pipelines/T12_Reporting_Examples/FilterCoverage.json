@@ -26,34 +26,6 @@
     {
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
-      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
-      "step": 0,
-      "purpose": "Read the complete predecessor checkpoint with original row indexing and source arrays."
-    },
-    {
-      "filter": "CopyFeatureArrayToElementArrayFilter",
-      "uuid": "4c8c976a-993d-438b-bd8e-99f71114b9a1",
-      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
-      "step": 1,
-      "purpose": "Map selected feature values through unchanged FeatureIds to cell arrays."
-    },
-    {
-      "filter": "ComputeArrayStatisticsFilter",
-      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
-      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
-      "step": 2,
-      "purpose": "Calculate a masked one-row summary; standardize reportable grain GOS only in step 01."
-    },
-    {
-      "filter": "WriteDREAM3DFilter",
-      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
-      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
-      "step": 3,
-      "purpose": "Save the complete data structure for downstream examples and verification."
-    },
-    {
-      "filter": "ReadDREAM3DFilter",
-      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(03) T12 Compact Report.d3dpipeline",
       "step": 0,
       "purpose": "Read the complete predecessor checkpoint with original row indexing and source arrays."
@@ -92,6 +64,55 @@
       "pipeline": "(03) T12 Compact Report.d3dpipeline",
       "step": 5,
       "purpose": "Save the complete data structure for downstream examples and verification."
+    },
+    {
+      "filter": "ReadDREAM3DFilter",
+      "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 0,
+      "purpose": "Read the complete saved checkpoint; preserve its original T12 labels and arrays."
+    },
+    {
+      "filter": "CopyFeatureArrayToElementArrayFilter",
+      "uuid": "4c8c976a-993d-438b-bd8e-99f71114b9a1",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 1,
+      "purpose": "Broadcast three grain values through unchanged FeatureIds; feature ID 0 maps to row 0."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 2,
+      "purpose": "Each accepted cell contributes its grain GOS once. Compare this pixel-weighted mean with the equal-grain mean saved in T12/ReportingReferenceSummary for the same eligible grains."
+    },
+    {
+      "filter": "ExtractFeatureBoundaries2DFilter",
+      "uuid": "e7d2f9b8-4a3c-5d1e-8f6a-9b0c2d3e4f5a",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 3,
+      "purpose": "Trace shared pixel faces where original FeatureIds differ, including grain/background interfaces. Omit the artificial image perimeter. Place edges on the single-slice top Z face for overlay, not as an extra measured section."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 4,
+      "purpose": "Copy the generated vertices and edges into an explicit Micrometer geometry without rescaling. Boundary extraction currently defaults unit metadata instead of retaining the source image unit."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 5,
+      "purpose": "Remove only the temporary boundary geometry. Keep the original T12 image, labels, feature values, copied cell fields and summaries."
+    },
+    {
+      "filter": "WriteDREAM3DFilter",
+      "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
+      "pipeline": "(02) T12 Feature to Cell Mapping.d3dpipeline",
+      "step": 6,
+      "purpose": "Save the complete data structure with compression and without an XDMF sidecar."
     }
   ]
 }

@@ -3,7 +3,7 @@
   "pipeline_file": "(02) T12 Feature to Cell Mapping.d3dpipeline",
   "markdown_file": "(02) T12 Feature to Cell Mapping.md",
   "title": "T12 Feature to Cell Mapping",
-  "summary": "Broadcast feature GOS, relative z score, and reporting mask to unchanged pixel labels, then compare pixel and grain weighting.",
+  "summary": "Map grain values to cells, compare grain and pixel weighting, and trace the original label interfaces as calibrated 2D boundary edges.",
   "primary_industries": [
     "Materials characterization"
   ],
@@ -32,7 +32,8 @@
   "outputs": [
     {
       "path": "Data/Output/T12_Reporting_Examples/Mapping/T12_FeatureMaps.dream3d",
-      "role": "Full checkpoint with three mapped cell fields and a cell-weighted GOS summary."
+      "role": "Full checkpoint with three mapped cell fields and a cell-weighted GOS summary. Includes T12BoundaryEdges with Micrometer coordinates; no adjacent-grain edge attributes are created.",
+      "sha256": "8509d7888513897338ff07050f9a744d841507d74491ffc3e45f21d3bc51fb8c"
     }
   ],
   "input_data_strategy": {
@@ -52,7 +53,7 @@
       "Cubic phase symmetry from the CTF checkpoint",
       "ReportableFeatures selects grains with at least four pixels"
     ],
-    "known_differences": "Pixel broadcasting and weighting comparison are additional NX teaching choices, not paper reproduction.",
+    "known_differences": "Pixel broadcasting and weighting comparison are additional NX teaching choices, not paper reproduction. The boundary overlay is an illustrative geometric view of existing segmentation labels, including grain/background interfaces. It adds no segmentation, boundary crystallography, smooth-interface reconstruction or physical perimeter validation.",
     "archive_provenance_file": "README.md"
   },
   "python_generation": {
@@ -116,7 +117,7 @@
       "role": "Current filter UUIDs, parameters, symmetry-aware misorientation implementations, output units, and masked statistics semantics."
     }
   ],
-  "last_verified": "2026-10-09",
+  "last_verified": "2026-10-14",
   "execution_status": "Windows Release in-core CTest chain passed; independent reporting/import output verification passed 131 checks across both suites. Native GUI, OOC, and generated Python execution are unverified.",
   "steps": [
     {
@@ -217,6 +218,86 @@
     },
     {
       "index": 3,
+      "filter": "ExtractFeatureBoundaries2DFilter",
+      "uuid": "e7d2f9b8-4a3c-5d1e-8f6a-9b0c2d3e4f5a",
+      "role": "Trace shared pixel faces where original FeatureIds differ, including grain/background interfaces. Omit the artificial image perimeter. Place edges on the single-slice top Z face for overlay, not as an extra measured section.",
+      "paths": [
+        "T12",
+        "T12/Cell Data/FeatureIds",
+        "T12BoundaryEdges_Raw"
+      ],
+      "key_parameters": {
+        "input_image_geometry_path": "T12",
+        "feature_ids_array_path": "T12/Cell Data/FeatureIds",
+        "output_edge_geometry_path": "T12BoundaryEdges_Raw",
+        "z_value_choice_index": 1,
+        "custom_z_value": 0.0,
+        "extract_virtual_sample_edges": false
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 4,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy the generated vertices and edges into an explicit Micrometer geometry without rescaling. Boundary extraction currently defaults unit metadata instead of retaining the source image unit.",
+      "paths": [
+        "T12BoundaryEdges",
+        "T12BoundaryEdges_Raw/Shared Vertex List",
+        "T12BoundaryEdges_Raw/Shared Edge List"
+      ],
+      "key_parameters": {
+        "geometry_type_index": 3,
+        "length_unit_index": 6,
+        "output_geometry_path": "T12BoundaryEdges",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "T12BoundaryEdges_Raw/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "T12BoundaryEdges_Raw/Shared Edge List",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 5,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove only the temporary boundary geometry. Keep the original T12 image, labels, feature values, copied cell fields and summaries.",
+      "paths": [],
+      "key_parameters": {
+        "removed_data_path": [
+          "T12BoundaryEdges_Raw"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 6,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save the complete data structure with compression and without an XDMF sidecar.",
@@ -245,5 +326,66 @@
     "equal_feature_gos_mean_degrees": 2.325058801692142,
     "eligible_pixel_count": 1036035,
     "pixel_weighted_gos_mean_degrees": 3.330604353939533
+  },
+  "verification_status": "Native Windows in-memory Release with exact label-interface and preservation checks. Interpretation, OOC, generated Python, GUI and full installation remain separate checks.",
+  "boundary_validation": {
+    "passed": 20,
+    "total": 20,
+    "preserved_prior_datasets": 60,
+    "counts": {
+      "vertices": 230263,
+      "edges": 252527,
+      "vertical_edges": 119307,
+      "horizontal_edges": 133220,
+      "degree_counts": {
+        "1": 548,
+        "2": 196923,
+        "3": 20508,
+        "4": 12284
+      }
+    },
+    "coordinate_units": "Micrometer",
+    "z": 0.0,
+    "total_raster_interface_length_um": 126263.5,
+    "scope": "Exact label-grid interfaces, not smooth physical boundaries, boundary character, per-grain perimeters or closed contours. Includes feature/background transitions; excludes artificial image frame.",
+    "pipeline_sha256": "6eb2f7d64b3a9f07b3eebffb94060be75a0648e08abebf257bf5ace369bf389b",
+    "unit_workaround": "https://github.com/BlueQuartzSoftware/simplnx/issues/1796",
+    "pipeline_chain": {
+      "test": "PIPELINE::OrientationAnalysis::T12_Reporting_Examples",
+      "passed": true,
+      "elapsed_seconds": 8.76,
+      "configuration": "Release, serial",
+      "scope": "Orientation prerequisites and all three reporting examples"
+    }
+  },
+  "boundary_visual": {
+    "image": "T12BoundaryOverlay.png",
+    "sha256": "534fd72650ef488d5a033e60265170fe7812357616250e5a3cf99a7d3474ed0e",
+    "native_output": "Data/Output/T12_Reporting_Examples/Mapping/T12_FeatureMaps.dream3d",
+    "native_output_sha256": "8509d7888513897338ff07050f9a744d841507d74491ffc3e45f21d3bc51fb8c",
+    "arrays": [
+      "T12/Cell Data/GrainOrientationSpread_Cell",
+      "T12/Cell Data/ReportableFeatures_Cell",
+      "T12BoundaryEdges/Shared Vertex List",
+      "T12BoundaryEdges/Shared Edge List"
+    ],
+    "display_crop": {
+      "rows": [
+        300,
+        460
+      ],
+      "columns": [
+        520,
+        760
+      ],
+      "world_extent_um": [
+        -367.5,
+        -247.5,
+        150.0,
+        230.0
+      ]
+    },
+    "display": "Matplotlib viridis, range0 to maximum reportable GOS in this view; gray for masked cells. Native edge coordinates drawn directly; no boundary extraction reimplemented for the image. Full source data and geometry remain uncropped.",
+    "display_max_degrees": 6.948583126068115
   }
 }

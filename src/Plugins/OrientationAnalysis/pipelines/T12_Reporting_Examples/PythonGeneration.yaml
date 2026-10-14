@@ -48,5 +48,6 @@
     "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
-  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified."
+  "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",
+  "boundary_contract": "Regenerate all seven steps of mapping stage 02. Extract all original FeatureId interfaces with virtual image-frame edges disabled, use the single-slice top Z face, copy coordinates/connectivity with Micrometer units and delete only the temporary geometry. Keep reporting masks and summaries unchanged."
 }
