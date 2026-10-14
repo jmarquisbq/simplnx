@@ -35,6 +35,8 @@ The output is a 3-component **unit vector** (length 1) and is therefore **dimens
 
 ## Example Pipelines
 
++ `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)
+
 + `Small_IN100_Distribution_Examples/(01) Small IN100 Boundary Distribution Comparison.d3dpipeline` (OrientationAnalysis)
 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.

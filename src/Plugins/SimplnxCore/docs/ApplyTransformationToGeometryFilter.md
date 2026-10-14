@@ -101,6 +101,8 @@ represents the 4x4 matrix:
 
 ## Example Pipelines
 
++ `Bentheimer_Resolution_Examples/(04) Bentheimer VTK Interchange.d3dpipeline` (SimplnxCore)
+
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.
 
 - Pipelines/SimplnxCore/Examples/apply_transformation_basic.d3dpipeline

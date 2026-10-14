@@ -26,9 +26,7 @@
       "args": {
         "import_data_object": {
           "value": {
-            "data_paths": [
-              "BentheimerPaddedROI6um"
-            ],
+            "data_paths": [],
             "file_path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
             "path_import_policy": 0
           },
@@ -36,7 +34,7 @@
         },
         "parameters_version": 1
       },
-      "comments": "Load the original padded geometry as the independent reference, including its support and coordinate context.",
+      "comments": "Read the complete predecessor checkpoint with import policy All. Retain the padded reference for VTK comparison and the unpadded fine ROI for contouring, with all existing context arrays. An include-list would require path_import_policy=1; a nonempty list is ignored by policy 0.",
       "filter": {
         "name": "nx::core::ReadDREAM3DFilter",
         "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d"
@@ -286,6 +284,578 @@
       "filter": {
         "name": "nx::core::ComputeArrayStatisticsFilter",
         "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "filter": {
+        "name": "nx::core::FlyingEdges3DFilter",
+        "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e"
+      },
+      "args": {
+        "parameters_version": 1,
+        "input_image_geometry_path": {
+          "value": "BentheimerLR_ROI6um",
+          "version": 1
+        },
+        "input_data_array_path": {
+          "value": "BentheimerLR_ROI6um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "output_triangle_geometry_path": {
+          "value": "RawContourLower",
+          "version": 1
+        },
+        "contour_value": {
+          "value": 0.400025,
+          "version": 1
+        }
+      },
+      "comments": "Extract the 0.400025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill.",
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "LowerIsosurface",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "RawContourLower/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "RawContourLower/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "LowerIsosurface",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              3.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              3.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              3.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "LowerIsosurface/CellCenterTranslation",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "parameters_version": 1,
+        "removed_data_path": {
+          "value": [
+            "RawContourLower"
+          ],
+          "version": 1
+        }
+      },
+      "comments": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LowerIsosurface",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "FaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "LowerIsosurface",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "FaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
+      },
+      "isDisabled": false
+    },
+    {
+      "filter": {
+        "name": "nx::core::FlyingEdges3DFilter",
+        "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e"
+      },
+      "args": {
+        "parameters_version": 1,
+        "input_image_geometry_path": {
+          "value": "BentheimerLR_ROI6um",
+          "version": 1
+        },
+        "input_data_array_path": {
+          "value": "BentheimerLR_ROI6um/CellData/ScaledIntensity",
+          "version": 1
+        },
+        "output_triangle_geometry_path": {
+          "value": "RawContourHigher",
+          "version": 1
+        },
+        "contour_value": {
+          "value": 0.500025,
+          "version": 1
+        }
+      },
+      "comments": "Extract the 0.500025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill.",
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "geometry_type_index": {
+          "value": 4,
+          "version": 1
+        },
+        "length_unit_index": {
+          "value": 6,
+          "version": 1
+        },
+        "output_geometry_path": {
+          "value": "HigherIsosurface",
+          "version": 1
+        },
+        "warnings_as_errors": {
+          "value": true,
+          "version": 1
+        },
+        "array_handling_index": {
+          "value": 0,
+          "version": 1
+        },
+        "dimensions": {
+          "value": [
+            1,
+            1,
+            1
+          ],
+          "version": 1
+        },
+        "origin": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "spacing": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "x_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "y_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "z_bounds_path": {
+          "value": "",
+          "version": 1
+        },
+        "vertex_list_path": {
+          "value": "RawContourHigher/Shared Vertex List",
+          "version": 1
+        },
+        "vertex_attribute_matrix_name": {
+          "value": "Vertex Data",
+          "version": 1
+        },
+        "edge_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "edge_attribute_matrix_name": {
+          "value": "Edge Data",
+          "version": 1
+        },
+        "triangle_list_path": {
+          "value": "RawContourHigher/Shared Faces List",
+          "version": 1
+        },
+        "quadrilateral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "face_attribute_matrix_name": {
+          "value": "Face Data",
+          "version": 1
+        },
+        "tetrahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "hexahedral_list_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_attribute_matrix_name": {
+          "value": "Cell Data",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction.",
+      "filter": {
+        "name": "nx::core::CreateGeometryFilter",
+        "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometry_path": {
+          "value": "HigherIsosurface",
+          "version": 1
+        },
+        "transformation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "interpolation_type_index": {
+          "value": 2,
+          "version": 1
+        },
+        "manual_transformation_matrix": {
+          "value": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              3.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              3.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              3.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "version": 1
+        },
+        "rotation": {
+          "value": [
+            0.0,
+            0.0,
+            1.0,
+            90.0
+          ],
+          "version": 1
+        },
+        "translation": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "scale": {
+          "value": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "version": 1
+        },
+        "computed_transformation_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "translate_geometry_to_global_origin": {
+          "value": false,
+          "version": 1
+        },
+        "cell_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "save_transform_matrix": {
+          "value": true,
+          "version": 1
+        },
+        "output_transform_matrix_path": {
+          "value": "HigherIsosurface/CellCenterTranslation",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex.",
+      "filter": {
+        "name": "nx::core::ApplyTransformationToGeometryFilter",
+        "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "parameters_version": 1,
+        "removed_data_path": {
+          "value": [
+            "RawContourHigher"
+          ],
+          "version": 1
+        }
+      },
+      "comments": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh.",
+      "filter": {
+        "name": "nx::core::DeleteDataFilter",
+        "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "HigherIsosurface",
+          "version": 1
+        },
+        "triangle_areas_array_name": {
+          "value": "FaceAreas",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result.",
+      "filter": {
+        "name": "nx::core::ComputeTriangleAreasFilter",
+        "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_triangle_geometry_path": {
+          "value": "HigherIsosurface",
+          "version": 1
+        },
+        "output_normals_array_name": {
+          "value": "FaceNormals",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned.",
+      "filter": {
+        "name": "nx::core::TriangleNormalFilter",
+        "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f"
       },
       "isDisabled": false
     },

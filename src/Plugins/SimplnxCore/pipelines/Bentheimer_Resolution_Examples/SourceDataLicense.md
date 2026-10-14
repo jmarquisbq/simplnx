@@ -24,3 +24,5 @@ Example 03 also exports selected intensity/support arrays to binary legacy VTK; 
 The examples have illustrative reproduction status. They do not reproduce the paper's learned image enhancement or physical flow results, and they do not re-estimate the authors' normalization or registration transforms.
 
 The region workflow also splits the same fine ROI into two contiguous slabs and reconstructs it by ordered concatenation, without altering measured intensities. The interchange workflow exports the predecessor processing recipe; these are processing and provenance exercises, not additional acquisitions or paper results.
+
+The interchange example also computes two interpolated intensity-contour meshes from the retained fine ROI and applies documented coordinate/unit corrections. The thresholds are illustrative and do not identify validated material phases. The contour preview displays native mesh sections over the unchanged native source slice.

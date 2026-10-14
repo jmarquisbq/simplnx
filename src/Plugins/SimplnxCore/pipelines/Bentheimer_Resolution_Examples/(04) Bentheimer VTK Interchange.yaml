@@ -108,7 +108,7 @@
   "pipeline_file": "(04) Bentheimer VTK Interchange.d3dpipeline",
   "markdown_file": "(04) Bentheimer VTK Interchange.md",
   "title": "Bentheimer VTK Interchange",
-  "summary": "Transfer measured-derived intensity and its support mask through binary legacy VTK, checking values, geometry and supported statistics against a retained native reference. Extract the predecessor checkpoint processing recipe for traceable handoff.",
+  "summary": "Transfer measured-derived intensity and its support mask through binary legacy VTK, checking values, geometry and supported statistics against a retained native reference. Extract the predecessor checkpoint processing recipe for traceable handoff. Compare two intensity-contour surfaces from the retained unpadded ROI, with explicit cell-center and micrometer corrections and quantization-aware levels.",
   "use_cases": [
     "Transfer a calibrated volume to scientific visualization software",
     "Distinguish grid-point counts from cell counts",
@@ -139,7 +139,7 @@
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
       "role": "Native reference, imported grid, coordinate/intensity diagnostics and masked summaries.",
-      "sha256": "1cdf561260174350f6de3f3514ff50d662e0e49bfa8dc44d3ec7c61ef6b0e064"
+      "sha256": "24b837e78f63517b14926bdf11d6efea25111acafb7030adeabaceb706d41030"
     },
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/BentheimerRegionProcessing.d3dpipeline",
@@ -170,12 +170,10 @@
       "index": 1,
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
-      "role": "Load the original padded geometry as the independent reference, including its support and coordinate context.",
+      "role": "Read the complete predecessor checkpoint with import policy All. Retain the padded reference for VTK comparison and the unpadded fine ROI for contouring, with all existing context arrays. An include-list would require path_import_policy=1; a nonempty list is ignored by policy 0.",
       "key_parameters": {
         "import_data_object": {
-          "data_paths": [
-            "BentheimerPaddedROI6um"
-          ],
+          "data_paths": [],
           "file_path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
           "path_import_policy": 0
         }
@@ -279,6 +277,302 @@
     },
     {
       "index": 7,
+      "filter": "FlyingEdges3DFilter",
+      "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e",
+      "role": "Extract the 0.400025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill.",
+      "key_parameters": {
+        "input_image_geometry_path": "BentheimerLR_ROI6um",
+        "input_data_array_path": "BentheimerLR_ROI6um/CellData/ScaledIntensity",
+        "output_triangle_geometry_path": "RawContourLower",
+        "contour_value": 0.400025
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 8,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction.",
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "LowerIsosurface",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "RawContourLower/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "RawContourLower/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 9,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex.",
+      "key_parameters": {
+        "input_image_geometry_path": "LowerIsosurface",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            3.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            3.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            3.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "LowerIsosurface/CellCenterTranslation"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 10,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh.",
+      "key_parameters": {
+        "removed_data_path": [
+          "RawContourLower"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 11,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "LowerIsosurface",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 12,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "LowerIsosurface",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 13,
+      "filter": "FlyingEdges3DFilter",
+      "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e",
+      "role": "Extract the 0.500025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill.",
+      "key_parameters": {
+        "input_image_geometry_path": "BentheimerLR_ROI6um",
+        "input_data_array_path": "BentheimerLR_ROI6um/CellData/ScaledIntensity",
+        "output_triangle_geometry_path": "RawContourHigher",
+        "contour_value": 0.500025
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 14,
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "role": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction.",
+      "key_parameters": {
+        "geometry_type_index": 4,
+        "length_unit_index": 6,
+        "output_geometry_path": "HigherIsosurface",
+        "warnings_as_errors": true,
+        "array_handling_index": 0,
+        "dimensions": [
+          1,
+          1,
+          1
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "spacing": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "x_bounds_path": "",
+        "y_bounds_path": "",
+        "z_bounds_path": "",
+        "vertex_list_path": "RawContourHigher/Shared Vertex List",
+        "vertex_attribute_matrix_name": "Vertex Data",
+        "edge_list_path": "",
+        "edge_attribute_matrix_name": "Edge Data",
+        "triangle_list_path": "RawContourHigher/Shared Faces List",
+        "quadrilateral_list_path": "",
+        "face_attribute_matrix_name": "Face Data",
+        "tetrahedral_list_path": "",
+        "hexahedral_list_path": "",
+        "cell_attribute_matrix_name": "Cell Data"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 15,
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "role": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex.",
+      "key_parameters": {
+        "input_image_geometry_path": "HigherIsosurface",
+        "transformation_type_index": 2,
+        "interpolation_type_index": 2,
+        "manual_transformation_matrix": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            3.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            3.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0,
+            3.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          1.0,
+          90.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "computed_transformation_matrix_path": "",
+        "translate_geometry_to_global_origin": false,
+        "cell_attribute_matrix_path": "",
+        "save_transform_matrix": true,
+        "output_transform_matrix_path": "HigherIsosurface/CellCenterTranslation"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 16,
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "role": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh.",
+      "key_parameters": {
+        "removed_data_path": [
+          "RawContourHigher"
+        ]
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 17,
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "role": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "HigherIsosurface",
+        "triangle_areas_array_name": "FaceAreas"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 18,
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "role": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned.",
+      "key_parameters": {
+        "input_triangle_geometry_path": "HigherIsosurface",
+        "output_normals_array_name": "FaceNormals"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 19,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review.",
@@ -292,7 +586,7 @@
     }
   ],
   "last_verified": "2026-10-14",
-  "verification_status": "Windows Release in-core full four-stage chain passed,6.67seconds.34 new assembly/provenance checks passed;40 prior region datasets,49 prior interchange datasets,and VTK bytes are exact. Prior figures remain applicable because their native arrays are unchanged. OOC,generated Python,GUI and materials interpretation remain unverified.",
+  "verification_status": "Final registered native four-stage Windows Release chain and 29 independent contour checks passed. All 62 prior datasets and geometry are preserved. OOC, generated Python, GUI, pore/solid segmentation and simulation suitability remain unverified.",
   "dimensional_scope": {
     "cell_dimensions": [
       147,
@@ -344,8 +638,12 @@
       "Mask zero is outside the chosen ROI, not proof of unmeasured acquisition.",
       "File carries selected cell arrays only, not all NX context or provenance.",
       "This case does not validate arbitrary VTK dataset types, external applications, pore segmentation or physical properties.",
-      "Extracted JSON must match the embedded pipeline and original stage03 filter order/arguments. It is not a self-contained reproduction archive,does not include upstream pipelines/raw data,and may overwrite named outputs if replayed unchanged.",
-      "Current writer copies lose comments and disabled states(#1807). Extractor faithfully exports stored JSON. All28nodes in this predecessor are enabled; preserve original pipeline and companion for comments and context. This is not a complete portable reproduction archive."
+      "Extracted JSON must match the embedded pipeline and original stage 03 filter order/arguments. It is not a self-contained reproduction archive, does not include upstream pipelines/raw data, and may overwrite named outputs if replayed unchanged.",
+      "Current writer copies lose comments and disabled states(#1807). Extractor faithfully exports stored JSON. All 28 nodes in this predecessor are enabled; preserve original pipeline and companion for comments and context. This is not a complete portable reproduction archive.",
+      "The unpadded fine ROI is used for contours; padding zeros would add artificial closure. Float 32 levels 0.400025 and 0.500025 correspond to original normalized counts 8000.5 and 10000.5 divided by 20000, avoiding exact ties in this quantized input.",
+      "Current FlyingEdges point-sample placement is corrected by adding half the 6 micrometer spacing=[3, 3, 3]micrometers (#1808). Remove this translation after the filter is fixed. Explicit geometry construction restores Micrometer metadata (#1792).",
+      "Every corrected mesh vertex recovers the source trilinear intensity within 1 e-6. Output face areas are positive, but open edges remain at the sampled domain boundary; no watertightness or material-interface validation claimed.",
+      "Import policy All retains the complete predecessor checkpoint. Path lists are ignored by policy 0; use IncludeList 1 for selective import."
     ],
     "related_pipelines": [
       "(03) Bentheimer Interior Region Comparison.d3dpipeline"
@@ -447,6 +745,82 @@
       "executable_order_arguments_match_source": true,
       "comments_lost_in_writer": true,
       "disabled_state_risk": "#1807; this recipe has no disabled nodes; retain original source and compare other recovered recipes before replay."
+    },
+    "isosurfaces": {
+      "LowerIsosurface": {
+        "contour_value": 0.400025,
+        "vertices": 268020,
+        "triangles": 528496,
+        "bounds_um": [
+          [
+            -402.0,
+            -402.0,
+            -402.0
+          ],
+          [
+            402.0,
+            402.0,
+            402.0
+          ]
+        ],
+        "area_um2": 6268990.043642765,
+        "min_triangle_area_um2": 2.690404471650254e-06,
+        "open_edges": 7948,
+        "max_interpolated_signal_error": 4.854151238187221e-07
+      },
+      "HigherIsosurface": {
+        "contour_value": 0.500025,
+        "vertices": 343836,
+        "triangles": 678304,
+        "bounds_um": [
+          [
+            -402.0,
+            -402.0,
+            -402.0
+          ],
+          [
+            402.0,
+            402.0,
+            402.0
+          ]
+        ],
+        "area_um2": 8111925.94036678,
+        "min_triangle_area_um2": 3.0063517897360725e-06,
+        "open_edges": 10382,
+        "max_interpolated_signal_error": 4.857744847486245e-07
+      },
+      "preserved_prior_datasets": 62
     }
+  },
+  "isosurface_figure": {
+    "file": "IsosurfaceComparison.png",
+    "sha256": "8cc2de33caac2e29da679a4bcf06e6318e53f36bcf099b07a7f8909f6ee04e4e",
+    "native_source_sha256": "24b837e78f63517b14926bdf11d6efea25111acafb7030adeabaceb706d41030",
+    "method": "Render saved source XY slice at Z=0 and intersect every native triangle crossing that plane. Lines are native-mesh sections,not a separately calculated intensity isocontour. No smoothing or scientific-data modification in plotting.",
+    "source_array": "BentheimerLR_ROI6um/CellData/ScaledIntensity",
+    "slice_z_index": 67,
+    "slice_z_um": 0,
+    "contour_geometries": [
+      "LowerIsosurface",
+      "HigherIsosurface"
+    ],
+    "line_segments": [
+      2708,
+      3426
+    ],
+    "display_range": [
+      0.3,
+      0.65
+    ],
+    "display_colormap": "gray",
+    "contour_colors": [
+      "#d95f02",
+      "#0072b2"
+    ]
+  },
+  "native_chain": {
+    "ctest": "PIPELINE::SimplnxCore::Bentheimer_Resolution_Examples",
+    "configuration": "Windows Release in-core",
+    "result": "PASS: all four pipelines,5.79 seconds; 29 contour checks and all62 prior native datasets preserved."
   }
 }

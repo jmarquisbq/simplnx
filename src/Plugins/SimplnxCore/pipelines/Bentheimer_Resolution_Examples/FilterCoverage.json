@@ -294,7 +294,7 @@
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
       "step": 1,
-      "purpose": "Load the original padded geometry as the independent reference, including its support and coordinate context."
+      "purpose": "Read the complete predecessor checkpoint with import policy All. Retain the padded reference for VTK comparison and the unpadded fine ROI for contouring, with all existing context arrays. An include-list would require path_import_policy=1; a nonempty list is ignored by policy 0."
     },
     {
       "filter": "ReadVtkStructuredPointsFilter",
@@ -332,10 +332,94 @@
       "purpose": "Use the imported support mask to exclude the fill margin from count and intensity statistics; zero intensity alone is not a validity test."
     },
     {
+      "filter": "FlyingEdges3DFilter",
+      "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 7,
+      "purpose": "Extract the 0.400025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 8,
+      "purpose": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 9,
+      "purpose": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 10,
+      "purpose": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 11,
+      "purpose": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 12,
+      "purpose": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned."
+    },
+    {
+      "filter": "FlyingEdges3DFilter",
+      "uuid": "c15b1af6-c43d-44ba-b180-f0130afafc8e",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 13,
+      "purpose": "Extract the 0.500025 contour from the unpadded measured fine ROI. The levels correspond to 8000.5 and 10000.5 original normalized counts, divided by 20000. Half-count positions avoid exact ties with quantized cell values. They bracket part of the low-count intensity interval between dark and bright bands; neither is a calibrated pore/solid threshold. Float32 signal preserves the fractional level. Avoid artificial closure against padding fill."
+    },
+    {
+      "filter": "CreateGeometryFilter",
+      "uuid": "24768170-5b90-4a9d-82ac-9aeecd9f892e",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 14,
+      "purpose": "Copy the native contour vertices and triangles into an explicitly Micrometer geometry. Flying Edges currently loses the source unit tag (#1792). Coordinates remain in the source micrometer scale; this is metadata repair, not numerical rescaling. Raw gradient normals are omitted; geometric face normals are recomputed after placement correction."
+    },
+    {
+      "filter": "ApplyTransformationToGeometryFilter",
+      "uuid": "f5bbc16b-3426-4ae0-b27b-ba7862dc40fe",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 15,
+      "purpose": "Correct the current Flying Edges point-versus-cell position mismatch (#1808): add half of the 6 micrometer spacing on every axis. Native samples were placed at lower corners, while measured cell values belong at centers. This translation is version-dependent; remove it when the filter is corrected, and verify the scalar crossing at every vertex."
+    },
+    {
+      "filter": "DeleteDataFilter",
+      "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 16,
+      "purpose": "Remove the scratch mesh carrying incorrect unit metadata and uncorrected point positions. Retain the original calibrated image and the explicitly corrected output mesh."
+    },
+    {
+      "filter": "ComputeTriangleAreasFilter",
+      "uuid": "b149addd-c0c8-4010-a264-596005eaf2a5",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 17,
+      "purpose": "Compute triangle area in square micrometers after final placement. This is contour geometry, not a measured pore-surface area or a segmentation-validation result."
+    },
+    {
+      "filter": "TriangleNormalFilter",
+      "uuid": "8133d419-1919-4dbf-a5bf-1c97282ba63f",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 18,
+      "purpose": "Compute geometric unit face normals from the retained triangle winding. No grain labels, crystal orientations or crystallographic boundary interpretation are assigned."
+    },
+    {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 7,
+      "step": 19,
       "purpose": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review."
     }
   ]
