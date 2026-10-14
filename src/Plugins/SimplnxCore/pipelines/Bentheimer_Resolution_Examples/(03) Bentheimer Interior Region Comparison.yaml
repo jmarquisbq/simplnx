@@ -3,7 +3,7 @@
   "pipeline_file": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
   "markdown_file": "(03) Bentheimer Interior Region Comparison.md",
   "title": "Bentheimer Interior Region Comparison",
-  "summary": "Compare one physical interior region on native grids, then preserve its placement while padding a fine reference grid and sampling coarse ROI values with an explicit support mask.",
+  "summary": "Compare one physical interior region on native grids, then preserve its placement while padding a fine reference grid and sampling coarse ROI values with an explicit support mask. Reassemble two contiguous slabs from the same fine ROI and verify zero intensity difference and unchanged placement.",
   "primary_industries": [
     "Digital rock analysis"
   ],
@@ -39,7 +39,7 @@
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
       "role": "Original centered full volumes, coordinates, masks and summaries plus two reduced working crops and a padded fine reference containing native and sampled coarse fields.",
-      "sha256": "8b214fcba9621f76f8c1c009fa2061408399a36a5cb9b3ece83e19c268d4b0b2"
+      "sha256": "6de89103c55e69b64cc2f4af2bbc437bd7fcb1d60cafbb1cdf1772b06d87163c"
     },
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
@@ -125,7 +125,6 @@
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "role": "Read the complete predecessor checkpoint; retain both native grids and all saved arrays.",
-      "paths": [],
       "key_parameters": {
         "import_data_object": {
           "data_paths": [],
@@ -140,12 +139,6 @@
       "filter": "SetImageGeomOriginScalingFilter",
       "uuid": "057bc7fd-c84a-4902-9397-87e51b1b1fe0",
       "role": "Set the explicit lower-corner origin to (-675,-675,-675) micrometers without changing spacing or data. This centers the example-local 1350 micrometer field of view; it does not recover scanner coordinates.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerVLR18um"
-        }
-      ],
       "key_parameters": {
         "input_image_geometry_path": "BentheimerVLR18um",
         "change_origin": true,
@@ -169,12 +162,6 @@
       "filter": "SetImageGeomOriginScalingFilter",
       "uuid": "057bc7fd-c84a-4902-9397-87e51b1b1fe0",
       "role": "Set the explicit lower-corner origin to (-675,-675,-675) micrometers without changing spacing or data. This centers the example-local 1350 micrometer field of view; it does not recover scanner coordinates.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerLR6um"
-        }
-      ],
       "key_parameters": {
         "input_image_geometry_path": "BentheimerLR6um",
         "change_origin": true,
@@ -198,12 +185,6 @@
       "filter": "SetImageGeomOriginScalingFilter",
       "uuid": "057bc7fd-c84a-4902-9397-87e51b1b1fe0",
       "role": "Set the explicit lower-corner origin to (-675,-675,-675) micrometers without changing spacing or data. This centers the example-local 1350 micrometer field of view; it does not recover scanner coordinates.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerVLRMapped6um"
-        }
-      ],
       "key_parameters": {
         "input_image_geometry_path": "BentheimerVLRMapped6um",
         "change_origin": true,
@@ -227,20 +208,6 @@
       "filter": "ComputeCoordinatesImageGeomFilter",
       "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
       "role": "Create three-component Float32 X,Y,Z cell-center coordinates after geometry placement: origin + (index + 0.5) * spacing. X varies fastest.",
-      "paths": [
-        {
-          "parameter": "selected_image_geom_path",
-          "value": "BentheimerVLR18um"
-        },
-        {
-          "parameter": "coords_array_path",
-          "value": "BentheimerVLR18um/CellData/CoordinatesMicrometers"
-        },
-        {
-          "parameter": "indices_array_path",
-          "value": "BentheimerVLR18um/CellData/UnusedIndices"
-        }
-      ],
       "key_parameters": {
         "output_type_index": 0,
         "selected_image_geom_path": "BentheimerVLR18um",
@@ -254,16 +221,6 @@
       "filter": "ComputeCoordinateThresholdFilter",
       "uuid": "04986173-dcfa-4d27-85ed-85af8b947a69",
       "role": "Select cells whose complete lower and upper corners lie within the inclusive [-405,405] micrometer cube. The UInt8 mask represents an example-selected 810 micrometer interior region, not a measured pore phase or a representative elementary volume.",
-      "paths": [
-        {
-          "parameter": "selected_geometry_path",
-          "value": "BentheimerVLR18um"
-        },
-        {
-          "parameter": "created_mask_path",
-          "value": "BentheimerVLR18um/CellData/InteriorROI"
-        }
-      ],
       "key_parameters": {
         "container_shape_type_index": 0,
         "invert_container": false,
@@ -293,24 +250,6 @@
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Compute count, minimum, maximum and mean inside the full-cell InteriorROI mask. These are intensity summaries, not porosity, permeability, or accuracy scores.",
-      "paths": [
-        {
-          "parameter": "selected_array_path",
-          "value": "BentheimerVLR18um/CellData/ScaledIntensity"
-        },
-        {
-          "parameter": "destination_attribute_matrix_path",
-          "value": "BentheimerVLR18um/InteriorIntensityStatistics"
-        },
-        {
-          "parameter": "mask_array_path",
-          "value": "BentheimerVLR18um/CellData/InteriorROI"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        }
-      ],
       "key_parameters": {
         "selected_array_path": "BentheimerVLR18um/CellData/ScaledIntensity",
         "destination_attribute_matrix_path": "BentheimerVLR18um/InteriorIntensityStatistics",
@@ -353,20 +292,6 @@
       "filter": "ComputeCoordinatesImageGeomFilter",
       "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
       "role": "Create three-component Float32 X,Y,Z cell-center coordinates after geometry placement: origin + (index + 0.5) * spacing. X varies fastest.",
-      "paths": [
-        {
-          "parameter": "selected_image_geom_path",
-          "value": "BentheimerLR6um"
-        },
-        {
-          "parameter": "coords_array_path",
-          "value": "BentheimerLR6um/CellData/CoordinatesMicrometers"
-        },
-        {
-          "parameter": "indices_array_path",
-          "value": "BentheimerLR6um/CellData/UnusedIndices"
-        }
-      ],
       "key_parameters": {
         "output_type_index": 0,
         "selected_image_geom_path": "BentheimerLR6um",
@@ -380,16 +305,6 @@
       "filter": "ComputeCoordinateThresholdFilter",
       "uuid": "04986173-dcfa-4d27-85ed-85af8b947a69",
       "role": "Select cells whose complete lower and upper corners lie within the inclusive [-405,405] micrometer cube. The UInt8 mask represents an example-selected 810 micrometer interior region, not a measured pore phase or a representative elementary volume.",
-      "paths": [
-        {
-          "parameter": "selected_geometry_path",
-          "value": "BentheimerLR6um"
-        },
-        {
-          "parameter": "created_mask_path",
-          "value": "BentheimerLR6um/CellData/InteriorROI"
-        }
-      ],
       "key_parameters": {
         "container_shape_type_index": 0,
         "invert_container": false,
@@ -419,24 +334,6 @@
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Compute count, minimum, maximum and mean inside the full-cell InteriorROI mask. These are intensity summaries, not porosity, permeability, or accuracy scores.",
-      "paths": [
-        {
-          "parameter": "selected_array_path",
-          "value": "BentheimerLR6um/CellData/ScaledIntensity"
-        },
-        {
-          "parameter": "destination_attribute_matrix_path",
-          "value": "BentheimerLR6um/InteriorIntensityStatistics"
-        },
-        {
-          "parameter": "mask_array_path",
-          "value": "BentheimerLR6um/CellData/InteriorROI"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        }
-      ],
       "key_parameters": {
         "selected_array_path": "BentheimerLR6um/CellData/ScaledIntensity",
         "destination_attribute_matrix_path": "BentheimerLR6um/InteriorIntensityStatistics",
@@ -479,24 +376,6 @@
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Compute count, minimum, maximum and mean inside the full-cell InteriorROI mask. These are intensity summaries, not porosity, permeability, or accuracy scores.",
-      "paths": [
-        {
-          "parameter": "selected_array_path",
-          "value": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference"
-        },
-        {
-          "parameter": "destination_attribute_matrix_path",
-          "value": "BentheimerLR6um/InteriorDifferenceStatistics"
-        },
-        {
-          "parameter": "mask_array_path",
-          "value": "BentheimerLR6um/CellData/InteriorROI"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        }
-      ],
       "key_parameters": {
         "selected_array_path": "BentheimerLR6um/CellData/AbsoluteScaledIntensityDifference",
         "destination_attribute_matrix_path": "BentheimerLR6um/InteriorDifferenceStatistics",
@@ -539,24 +418,6 @@
       "filter": "CropImageGeometryFilter",
       "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
       "role": "Copy inclusive XYZ indices 15..59 from BentheimerVLR18um into BentheimerVLR_ROI18um; this is the already declared physical ROI [-405,405] micrometers. Retain the full original geometry.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerVLR18um"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        },
-        {
-          "parameter": "cell_feature_attribute_matrix_path",
-          "value": ""
-        },
-        {
-          "parameter": "output_image_geometry_path",
-          "value": "BentheimerVLR_ROI18um"
-        }
-      ],
       "key_parameters": {
         "use_physical_bounds": false,
         "crop_x_dim": true,
@@ -596,24 +457,6 @@
       "filter": "CropImageGeometryFilter",
       "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
       "role": "Copy inclusive XYZ indices 45..179 from BentheimerLR6um into BentheimerLR_ROI6um; this is the already declared physical ROI [-405,405] micrometers. Retain the full original geometry.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerLR6um"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        },
-        {
-          "parameter": "cell_feature_attribute_matrix_path",
-          "value": ""
-        },
-        {
-          "parameter": "output_image_geometry_path",
-          "value": "BentheimerLR_ROI6um"
-        }
-      ],
       "key_parameters": {
         "use_physical_bounds": false,
         "crop_x_dim": true,
@@ -653,21 +496,6 @@
       "filter": "DeleteDataFilter",
       "uuid": "bf286740-e987-49fe-a7c8-6e566e3a0606",
       "role": "Keep only ScaledIntensity and the all-one InteriorROI support mask in each working crop. Remove copied coordinate arrays and non-cell statistics from these copies; all original full-volume outputs remain intact.",
-      "paths": [
-        {
-          "parameter": "removed_data_path",
-          "value": [
-            "BentheimerVLR_ROI18um/CellData/AuthorNormalizedIntensity",
-            "BentheimerVLR_ROI18um/CellData/CoordinatesMicrometers",
-            "BentheimerVLR_ROI18um/InteriorIntensityStatistics",
-            "BentheimerLR_ROI6um/CellData/AuthorNormalizedIntensity",
-            "BentheimerLR_ROI6um/CellData/CoordinatesMicrometers",
-            "BentheimerLR_ROI6um/CellData/AbsoluteScaledIntensityDifference",
-            "BentheimerLR_ROI6um/InteriorIntensityStatistics",
-            "BentheimerLR_ROI6um/InteriorDifferenceStatistics"
-          ]
-        }
-      ],
       "key_parameters": {
         "removed_data_path": [
           "BentheimerVLR_ROI18um/CellData/AuthorNormalizedIntensity",
@@ -687,20 +515,6 @@
       "filter": "PadImageGeometryFilter",
       "uuid": "1a003f19-aa26-406c-bbef-061f508fc422",
       "role": "Add six 6-micrometer cells on every side into a separate 147-cubed reference grid. Update the lower-corner origin from -405 to -441 to preserve the selected data placement. Zero-filled margin means outside the chosen ROI, not unmeasured scanner area.",
-      "paths": [
-        {
-          "parameter": "input_image_geometry_path",
-          "value": "BentheimerLR_ROI6um"
-        },
-        {
-          "parameter": "attribute_matrix_path",
-          "value": "BentheimerLR_ROI6um/CellData"
-        },
-        {
-          "parameter": "output_image_geometry_path",
-          "value": "BentheimerPaddedROI6um"
-        }
-      ],
       "key_parameters": {
         "input_image_geometry_path": "BentheimerLR_ROI6um",
         "attribute_matrix_path": "BentheimerLR_ROI6um/CellData",
@@ -731,20 +545,6 @@
       "filter": "ComputeCoordinatesImageGeomFilter",
       "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
       "role": "Compute all reference cell centers after final padding and origin placement, including the added margin. Do not pad an old coordinate array with zero and treat it as valid reference coordinates.",
-      "paths": [
-        {
-          "parameter": "selected_image_geom_path",
-          "value": "BentheimerPaddedROI6um"
-        },
-        {
-          "parameter": "coords_array_path",
-          "value": "BentheimerPaddedROI6um/CellData/CoordinatesMicrometers"
-        },
-        {
-          "parameter": "indices_array_path",
-          "value": "BentheimerPaddedROI6um/CellData/UnusedIndices"
-        }
-      ],
       "key_parameters": {
         "output_type_index": 0,
         "selected_image_geom_path": "BentheimerPaddedROI6um",
@@ -758,12 +558,6 @@
       "filter": "CreateAttributeMatrixFilter",
       "uuid": "a6a28355-ee69-4874-bcac-76ed427423ed",
       "role": "Create a separate 147 by 147 by 147 destination matrix for sampled coarse values; keep native fine values in CellData without name collisions.",
-      "paths": [
-        {
-          "parameter": "data_object_path",
-          "value": "BentheimerPaddedROI6um/SampledVLR"
-        }
-      ],
       "key_parameters": {
         "data_object_path": "BentheimerPaddedROI6um/SampledVLR",
         "tuple_dimensions": [
@@ -781,24 +575,6 @@
       "filter": "NearestPointFuseRegularGridsFilter",
       "uuid": "c8746bf8-fa5f-48b0-8a47-11023402e543",
       "role": "Copy coarse ScaledIntensity and InteriorROI onto the fixed padded fine grid. For these aligned 18-to-6 micrometer grids, each source voxel repeats 3 times per axis. Zero source-support mask marks fill outside the source ROI; no averaging, registration or super-resolution is performed.",
-      "paths": [
-        {
-          "parameter": "input_reference_image_geometry__path",
-          "value": "BentheimerPaddedROI6um"
-        },
-        {
-          "parameter": "input_sampling_image_geometry_path",
-          "value": "BentheimerVLR_ROI18um"
-        },
-        {
-          "parameter": "reference_cell_attribute_matrix_path",
-          "value": "BentheimerPaddedROI6um/SampledVLR"
-        },
-        {
-          "parameter": "sampling_cell_attribute_matrix_path",
-          "value": "BentheimerVLR_ROI18um/CellData"
-        }
-      ],
       "key_parameters": {
         "input_reference_image_geometry__path": "BentheimerPaddedROI6um",
         "input_sampling_image_geometry_path": "BentheimerVLR_ROI18um",
@@ -814,24 +590,6 @@
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Summarize copied coarse intensities only where sampled InteriorROI is nonzero. Exclude the zero-filled margin; repeated samples do not add independent measurements.",
-      "paths": [
-        {
-          "parameter": "selected_array_path",
-          "value": "BentheimerPaddedROI6um/SampledVLR/ScaledIntensity"
-        },
-        {
-          "parameter": "destination_attribute_matrix_path",
-          "value": "BentheimerPaddedROI6um/SampledVLRIntensityStatistics"
-        },
-        {
-          "parameter": "mask_array_path",
-          "value": "BentheimerPaddedROI6um/SampledVLR/InteriorROI"
-        },
-        {
-          "parameter": "feature_ids_path",
-          "value": ""
-        }
-      ],
       "key_parameters": {
         "selected_array_path": "BentheimerPaddedROI6um/SampledVLR/ScaledIntensity",
         "destination_attribute_matrix_path": "BentheimerPaddedROI6um/SampledVLRIntensityStatistics",
@@ -871,10 +629,192 @@
     },
     {
       "index": 19,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy inclusive Z indices 0..66 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          0
+        ],
+        "max_voxel": [
+          134,
+          134,
+          66
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "BentheimerLR_ROI6um",
+        "renumber_features": false,
+        "feature_ids_path": "",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "BentheimerLowerSlab6um"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 20,
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "role": "Copy inclusive Z indices 67..134 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units.",
+      "key_parameters": {
+        "use_physical_bounds": false,
+        "crop_x_dim": true,
+        "crop_y_dim": true,
+        "crop_z_dim": true,
+        "min_voxel": [
+          0,
+          0,
+          67
+        ],
+        "max_voxel": [
+          134,
+          134,
+          134
+        ],
+        "min_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max_coord": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "remove_original_geometry": false,
+        "input_image_geometry_path": "BentheimerLR_ROI6um",
+        "renumber_features": false,
+        "feature_ids_path": "",
+        "cell_feature_attribute_matrix_path": "",
+        "output_image_geometry_path": "BentheimerUpperSlab6um"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 21,
+      "filter": "AppendImageGeometryFilter",
+      "uuid": "c62c5c89-5ea8-4948-99ca-51cbc5b54b05",
+      "role": "Reassemble lower then upper slab along Z with matching spacing, retaining both pieces. Append concatenates tuple blocks; it does not register scans or check whether physical origins are contiguous. These crop bounds guarantee a shared interface at Z=-3 micrometers. The new geometry uses the lower slab origin and micrometer units; output cell matrix is named Cell Data.",
+      "key_parameters": {
+        "input_image_geometries_paths": [
+          "BentheimerUpperSlab6um"
+        ],
+        "destination_image_geometry_path": "BentheimerLowerSlab6um",
+        "direction_index": 2,
+        "mirror_geometry": false,
+        "check_resolution": true,
+        "default_value": "0",
+        "save_as_new_geometry": true,
+        "output_image_geometry_path": "BentheimerReassembledROI6um"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 22,
+      "filter": "ComputeCoordinatesImageGeomFilter",
+      "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
+      "role": "Compute new cell centers from the final reassembled geometry. Reassembly must preserve the original ROI placement, not just its tuple count and values.",
+      "key_parameters": {
+        "output_type_index": 0,
+        "selected_image_geom_path": "BentheimerReassembledROI6um",
+        "coords_array_path": "BentheimerReassembledROI6um/Cell Data/CoordinatesMicrometers",
+        "indices_array_path": "BentheimerReassembledROI6um/Cell Data/UnusedIndices"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 23,
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "role": "Retain the unmodified ROI intensity beside the assembled values for an explicit per-cell equality check. Copy an array, not an Image Geometry.",
+      "key_parameters": {
+        "existing_data_path": [
+          "BentheimerLR_ROI6um/CellData/ScaledIntensity"
+        ],
+        "use_new_parent": true,
+        "new_data_path": "BentheimerReassembledROI6um/Cell Data",
+        "new_path_suffix": "_Reference"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 24,
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "role": "Compare all assembled intensities against the same original ROI tuple positions. Every difference must be zero; this tests concatenation and order, not agreement between independent scans.",
+      "key_parameters": {
+        "calculator_parameter": {
+          "equation": "abs(ScaledIntensity-ScaledIntensity_Reference)",
+          "selected_group": "BentheimerReassembledROI6um/Cell Data",
+          "units": 0
+        },
+        "scalar_type_index": 8,
+        "calculated_array_path": "BentheimerReassembledROI6um/Cell Data/AbsoluteReassemblyDifference"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 25,
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "role": "Summarize all 2,460,375 reconstruction differences. Count must match the original ROI and minimum, maximum and mean must all be zero. Retained support must also match; no default-filled data are expected.",
+      "key_parameters": {
+        "selected_array_path": "BentheimerReassembledROI6um/Cell Data/AbsoluteReassemblyDifference",
+        "destination_attribute_matrix_path": "BentheimerReassembledROI6um/ReassemblyDifferenceStatistics",
+        "use_mask": false,
+        "mask_array_path": "",
+        "compute_by_index": false,
+        "feature_ids_path": "",
+        "feature_has_data_array_name": "HasData",
+        "range_type_index": 0,
+        "range": [
+          0,
+          -1
+        ],
+        "feature_ids_indexing_name": "UnusedFeatureIndices",
+        "standardize_data": false,
+        "standardized_array_name": "UnusedStandardized",
+        "find_length": true,
+        "length_array_name": "CellCount",
+        "find_min": true,
+        "minimum_array_name": "Minimum",
+        "find_max": true,
+        "maximum_array_name": "Maximum",
+        "find_mean": true,
+        "mean_array_name": "Mean",
+        "find_median": false,
+        "median_array_name": "UnusedMedian",
+        "find_mode": false,
+        "mode_array_name": "UnusedMode",
+        "find_std_deviation": false,
+        "std_deviation_array_name": "UnusedStandardDeviation",
+        "find_summation": false,
+        "summation_array_name": "UnusedSum",
+        "find_unique_values": false,
+        "number_unique_values_name": "UnusedUniqueCount"
+      },
+      "parameters_version": 2
+    },
+    {
+      "index": 26,
       "filter": "WriteVtkStructuredPointsFilter",
       "uuid": "68a4d758-c5ff-43d3-a394-1508ad00a0d2",
       "role": "Export selected cell intensity and support as binary legacy STRUCTURED_POINTS. Point dimensions are 148 cubed; cell values are 147 cubed. Coordinates retain micrometer numbers, but VTK does not store that unit.",
-      "paths": [],
       "key_parameters": {
         "output_file": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
         "write_binary_file": true,
@@ -887,16 +827,10 @@
       "parameters_version": 1
     },
     {
-      "index": 20,
+      "index": 27,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results.",
-      "paths": [
-        {
-          "parameter": "export_file_path",
-          "value": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d"
-        }
-      ],
       "key_parameters": {
         "export_file_path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
         "write_xdmf_file": false,
@@ -937,7 +871,8 @@
       "The current mapper uses reference lower-corner index coordinates and a containing sampling-cell index, not a general nearest-center search. For these aligned 18-to-6 micrometer grids it agrees with nearest-center copying in the overlap.",
       "Zero-filled intensity does not identify support. Use sampled InteriorROI=1 inside overlap and 0 outside; no masked statistic may count the fill margin.",
       "Outside the selected ROI is not an unmeasured acquisition region. The original full scans cover the margin and remain available.",
-      "Fusion is value copying without averaging, interpolation, registration, or added resolution; repeated tuples are not new independent measurements."
+      "Fusion is value copying without averaging, interpolation, registration, or added resolution; repeated tuples are not new independent measurements.",
+      "Slabs are controlled contiguous partitions of the same measured ROI. Append is ordered concatenation,not scan registration. Lower Z0..66 and upper Z67..134 meet at-3micrometers; preserve origin[-405,-405,-405],spacing6micrometers and135cubed dimensions. Matching spacing does not establish physical adjacency. Save as new geometry uses Cell Data,not CellData. No array may be silently default-filled."
     ],
     "related_pipelines": [
       "(01) Bentheimer Native Volume Preparation.d3dpipeline",
@@ -1092,7 +1027,7 @@
     "support_semantics": "selected ROI overlap, not absence of acquisition measurements",
     "summary": "SampledVLRIntensityStatistics excludes fill with SampledVLR/InteriorROI"
   },
-  "verification_status": "Four-stage Windows in-memory Release CTest passed in 4.02 seconds on 2026-10-14. Existing region results were preserved and 36 interchange checks passed; other runtime modes and scientific approval remain separate.",
+  "verification_status": "Windows Release in-core full four-stage chain passed,6.67seconds.34 new assembly/provenance checks passed;40 prior region datasets,49 prior interchange datasets,and VTK bytes are exact. Prior figures remain applicable because their native arrays are unchanged. OOC,generated Python,GUI and materials interpretation remain unverified.",
   "additional_visuals": [
     {
       "path": "Regions.png",
@@ -1210,5 +1145,38 @@
     ],
     "units": "Coordinate numbers are micrometers by source provenance; no unit declaration in file.",
     "consumer": "(04) Bentheimer VTK Interchange.d3dpipeline"
+  },
+  "reference_results": {
+    "slab_assembly": {
+      "lower_dimensions_xyz": [
+        135,
+        135,
+        67
+      ],
+      "upper_dimensions_xyz": [
+        135,
+        135,
+        68
+      ],
+      "interface_z_um": -3,
+      "reassembled_dimensions_xyz": [
+        135,
+        135,
+        135
+      ],
+      "origin_um": [
+        -405,
+        -405,
+        -405
+      ],
+      "spacing_um": [
+        6,
+        6,
+        6
+      ],
+      "count": 2460375,
+      "maximum_intensity_difference": 0,
+      "maximum_coordinate_difference": 0
+    }
   }
 }

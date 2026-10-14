@@ -5,6 +5,25 @@
   "pipeline": [
     {
       "args": {
+        "input_file_path": {
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
+          "version": 1
+        },
+        "output_file_path": {
+          "value": "Data/Output/Bentheimer_Resolution_Examples/Interchange/BentheimerRegionProcessing.d3dpipeline",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Recover the processing recipe embedded in the predecessor DREAM3D checkpoint beside the VTK round-trip result. This is provenance for example 03 only; it does not bundle raw data, earlier stages, binaries or GUI state. Inspect paths before replaying because outputs may be overwritten. The predecessor must exist before preflight.",
+      "filter": {
+        "name": "nx::core::ExtractPipelineToFileFilter",
+        "uuid": "27203c99-9975-4528-88cc-42b270165d79"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "import_data_object": {
           "value": {
             "data_paths": [

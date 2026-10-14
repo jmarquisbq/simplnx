@@ -220,46 +220,95 @@
       "purpose": "Summarize copied coarse intensities only where sampled InteriorROI is nonzero. Exclude the zero-filled margin; repeated samples do not add independent measurements."
     },
     {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 19,
+      "purpose": "Copy inclusive Z indices 0..66 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units."
+    },
+    {
+      "filter": "CropImageGeometryFilter",
+      "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 20,
+      "purpose": "Copy inclusive Z indices 67..134 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units."
+    },
+    {
+      "filter": "AppendImageGeometryFilter",
+      "uuid": "c62c5c89-5ea8-4948-99ca-51cbc5b54b05",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 21,
+      "purpose": "Reassemble lower then upper slab along Z with matching spacing, retaining both pieces. Append concatenates tuple blocks; it does not register scans or check whether physical origins are contiguous. These crop bounds guarantee a shared interface at Z=-3 micrometers. The new geometry uses the lower slab origin and micrometer units; output cell matrix is named Cell Data."
+    },
+    {
+      "filter": "ComputeCoordinatesImageGeomFilter",
+      "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 22,
+      "purpose": "Compute new cell centers from the final reassembled geometry. Reassembly must preserve the original ROI placement, not just its tuple count and values."
+    },
+    {
+      "filter": "CopyDataObjectFilter",
+      "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 23,
+      "purpose": "Retain the unmodified ROI intensity beside the assembled values for an explicit per-cell equality check. Copy an array, not an Image Geometry."
+    },
+    {
+      "filter": "ArrayCalculatorFilter",
+      "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 24,
+      "purpose": "Compare all assembled intensities against the same original ROI tuple positions. Every difference must be zero; this tests concatenation and order, not agreement between independent scans."
+    },
+    {
+      "filter": "ComputeArrayStatisticsFilter",
+      "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
+      "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
+      "step": 25,
+      "purpose": "Summarize all 2,460,375 reconstruction differences. Count must match the original ROI and minimum, maximum and mean must all be zero. Retained support must also match; no default-filled data are expected."
+    },
+    {
       "filter": "WriteVtkStructuredPointsFilter",
       "uuid": "68a4d758-c5ff-43d3-a394-1508ad00a0d2",
       "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
-      "step": 19,
+      "step": 26,
       "purpose": "Export selected cell intensity and support as binary legacy STRUCTURED_POINTS. Point dimensions are 148 cubed; cell values are 147 cubed. Coordinates retain micrometer numbers, but VTK does not store that unit."
     },
     {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(03) Bentheimer Interior Region Comparison.d3dpipeline",
-      "step": 20,
+      "step": 27,
       "purpose": "Save a reusable checkpoint, retaining source arrays and explicitly named derived results."
+    },
+    {
+      "filter": "ExtractPipelineToFileFilter",
+      "uuid": "27203c99-9975-4528-88cc-42b270165d79",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 0,
+      "purpose": "Recover the processing recipe embedded in the predecessor DREAM3D checkpoint beside the VTK round-trip result. This is provenance for example 03 only; it does not bundle raw data, earlier stages, binaries or GUI state. Inspect paths before replaying because outputs may be overwritten. The predecessor must exist before preflight."
     },
     {
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 0,
+      "step": 1,
       "purpose": "Load the original padded geometry as the independent reference, including its support and coordinate context."
     },
     {
       "filter": "ReadVtkStructuredPointsFilter",
       "uuid": "60d55662-ca7a-4be7-b0a0-ed6e785eb51b",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 1,
+      "step": 2,
       "purpose": "Read CELL_DATA only from the predecessor export. The file must exist before preflight; point counts in its header are one larger per axis than the imported cell dimensions."
     },
     {
       "filter": "ComputeCoordinatesImageGeomFilter",
       "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 2,
-      "purpose": "Reconstruct cell-center positions from the imported header geometry. Micrometers come from this example's provenance, not a unit declaration in the VTK file."
-    },
-    {
-      "filter": "ComputeDifferencesMapFilter",
-      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
-      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
       "step": 3,
-      "purpose": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary."
+      "purpose": "Reconstruct cell-center positions from the imported header geometry. Micrometers come from this example's provenance, not a unit declaration in the VTK file."
     },
     {
       "filter": "ComputeDifferencesMapFilter",
@@ -269,17 +318,24 @@
       "purpose": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary."
     },
     {
+      "filter": "ComputeDifferencesMapFilter",
+      "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
+      "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
+      "step": 5,
+      "purpose": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary."
+    },
+    {
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 5,
+      "step": 6,
       "purpose": "Use the imported support mask to exclude the fill margin from count and intensity statistics; zero intensity alone is not a validity test."
     },
     {
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "pipeline": "(04) Bentheimer VTK Interchange.d3dpipeline",
-      "step": 6,
+      "step": 7,
       "purpose": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review."
     }
   ]

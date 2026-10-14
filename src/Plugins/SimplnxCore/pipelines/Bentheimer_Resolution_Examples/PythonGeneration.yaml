@@ -45,7 +45,7 @@
     "syntax": "Compile the generated text with Python compile().",
     "structure": "Match generated filter calls and order to enabled pipeline steps.",
     "paths": "Check every relative input and output path against the source pipeline.",
-    "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED.",
+    "execution": "Run each generated program with its documented predecessors and inspect outputs. NOT VERIFIED. Also verify contiguous67/68plane Z assembly,all2460375values/support and physical centers,and extracted predecessor JSON. Comment/disabled-state limitations(#1807)must remain explicit.",
     "storage": "Validate OOC separately before claiming OOC support."
   },
   "gui_note": "GUI working folders vary by launch and installation layout. Set absolute file input/output parameters if relative Data paths do not resolve; native GUI execution is unverified.",

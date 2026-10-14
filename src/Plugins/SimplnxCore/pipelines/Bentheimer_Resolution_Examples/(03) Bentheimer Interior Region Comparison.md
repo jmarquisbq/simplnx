@@ -12,6 +12,7 @@ Executable pipeline: `(03) Bentheimer Interior Region Comparison.d3dpipeline`
 | Input | Common Grid Comparison checkpoint from example 02 |
 | Main result | Matching native ROI summaries, preserved working crops, and coarse values sampled onto a padded fine reference with an explicit support mask |
 | Region | An 810-micrometer ROI; a 36-micrometer margin on every side creates an 882-micrometer padded reference |
+| Assembly check | Split the fine ROI into two contiguous Z slabs, reassemble them, and verify zero intensity difference and unchanged physical placement |
 
 ## Purpose and real-world setting
 
@@ -36,6 +37,8 @@ Run examples 01 and 02 using the [README](README.md). This example reads `Data/O
 | Compute fresh reference coordinates | Describe every padded reference cell center, including the margin |
 | Create Attribute Matrix, then Fuse Regular Grids | Keep fine data in `CellData`; put sampled coarse values and support in separate `SampledVLR` on the same reference grid |
 | Masked sampled-intensity summary | Count only supported values; zero fill must not lower the intensity mean |
+| Crop two contiguous slabs; Append Image Geometry | Demonstrate ordered block assembly on one measured ROI, keeping the originals and checking spacing; this is concatenation, not scan registration |
+| Fresh coordinates; reference copy; difference summary | Verify both physical placement and every reassembled intensity, rather than checking dimensions alone |
 | Write Vtk Structured Points | Export padded fine intensity and its support mask for the follow-up interchange check; retain the calibrated grid and typed binary values |
 | Write DREAM3D | Save full scans, working crops, padded reference, masks, coordinates, and summaries |
 
@@ -78,6 +81,22 @@ The binary export `Regions/BentheimerPaddedROI6um.vtk` contains the fine `CellDa
 The saved reference contains 3,176,523 cells: 2,460,375 supported cells in index slices `[6:141]` on every axis and 716,148 fill cells. Its regenerated cell centers run from -438 to 438 micrometers. The masked sampled-coarse mean is 0.5362334251, matching the original coarse ROI mean within floating-point precision; repetition does not create additional independent observations.
 
 All three panels show saved native arrays at z = 0 micrometers. The hatched margin is displayed separately from intensity and is excluded from the summary. The common 0-1 display clips brighter values visually; saved values above one remain intact. The native fine ROI mask and sampled coarse support mask agree for this deliberately matched domain. Neither is a pore mask.
+
+## Reassembling contiguous slabs
+
+Large scans are often processed or transferred in blocks. This example splits the retained fine ROI into two pieces and reconstructs it to show the assembly contract without introducing registration uncertainty from independent acquisitions.
+
+| Geometry | Inclusive local Z indices | Dimensions X/Y/Z | Lower-corner Z (µm) |
+| --- | --- | --- | ---: |
+| `BentheimerLowerSlab6um` | 0–66 | 135 / 135 / 67 | −405 |
+| `BentheimerUpperSlab6um` | 67–134 | 135 / 135 / 68 | −3 |
+| `BentheimerReassembledROI6um` | Complete ROI | 135 / 135 / 135 | −405 |
+
+The shared face is at **Z = −3 µm**: −405 + 67 × 6. Append uses the lower slab as destination, the upper slab as input, **Z direction**, **Check Spacing on**, **Mirror off**, and **Save As New Geometry on**. It concatenates values in that order and retains the destination origin; it does **not** inspect whether input origins imply a gap, overlap, or reversed ordering. Matching spacing is necessary but insufficient for assembling independent scans. Register/resample those first and establish their physical adjacency.
+
+In `BentheimerReassembledROI6um/Cell Data`, `ScaledIntensity` and `InteriorROI` match the original ROI exactly; the output matrix has a space in its name, unlike source `CellData`. `AbsoluteReassemblyDifference` is zero everywhere. `ReassemblyDifferenceStatistics` contains **2,460,375** cells and minimum/maximum/mean **0**. Fresh `CoordinatesMicrometers` span −402 to 402 µm on every axis, matching the original cell centers. Inspect placement and support as well as intensities.
+
+No default fill is needed because both slabs carry the same fields, types, and component shapes. On other data, missing fields can introduce default values and mismatched fields can produce warnings; investigate those before treating the assembled result as complete. Mirroring would reverse plane order, not correct a coordinate-registration error. This preserves one acquisition; it does not validate agreement between different scans.
 
 ## Adaptation and quality checks
 

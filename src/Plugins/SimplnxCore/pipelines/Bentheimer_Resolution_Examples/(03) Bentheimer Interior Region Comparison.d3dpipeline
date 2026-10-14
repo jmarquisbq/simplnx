@@ -1192,6 +1192,434 @@
     },
     {
       "args": {
+        "use_physical_bounds": {
+          "value": false,
+          "version": 1
+        },
+        "crop_x_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_y_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_z_dim": {
+          "value": true,
+          "version": 1
+        },
+        "min_voxel": {
+          "value": [
+            0,
+            0,
+            0
+          ],
+          "version": 1
+        },
+        "max_voxel": {
+          "value": [
+            134,
+            134,
+            66
+          ],
+          "version": 1
+        },
+        "min_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "max_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "remove_original_geometry": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "BentheimerLR_ROI6um",
+          "version": 1
+        },
+        "renumber_features": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "BentheimerLowerSlab6um",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy inclusive Z indices 0..66 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units.",
+      "filter": {
+        "name": "nx::core::CropImageGeometryFilter",
+        "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "use_physical_bounds": {
+          "value": false,
+          "version": 1
+        },
+        "crop_x_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_y_dim": {
+          "value": true,
+          "version": 1
+        },
+        "crop_z_dim": {
+          "value": true,
+          "version": 1
+        },
+        "min_voxel": {
+          "value": [
+            0,
+            0,
+            67
+          ],
+          "version": 1
+        },
+        "max_voxel": {
+          "value": [
+            134,
+            134,
+            134
+          ],
+          "version": 1
+        },
+        "min_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "max_coord": {
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "version": 1
+        },
+        "remove_original_geometry": {
+          "value": false,
+          "version": 1
+        },
+        "input_image_geometry_path": {
+          "value": "BentheimerLR_ROI6um",
+          "version": 1
+        },
+        "renumber_features": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "cell_feature_attribute_matrix_path": {
+          "value": "",
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "BentheimerUpperSlab6um",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Copy inclusive Z indices 67..134 from the measured fine ROI, retaining all X/Y cells, intensity and support. These are contiguous pieces of one acquisition, not separate scans requiring registration. Preserve source coordinates and micrometer units.",
+      "filter": {
+        "name": "nx::core::CropImageGeometryFilter",
+        "uuid": "e6476737-4aa7-48ba-a702-3dfab82c96e2"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "input_image_geometries_paths": {
+          "value": [
+            "BentheimerUpperSlab6um"
+          ],
+          "version": 1
+        },
+        "destination_image_geometry_path": {
+          "value": "BentheimerLowerSlab6um",
+          "version": 1
+        },
+        "direction_index": {
+          "value": 2,
+          "version": 1
+        },
+        "mirror_geometry": {
+          "value": false,
+          "version": 1
+        },
+        "check_resolution": {
+          "value": true,
+          "version": 1
+        },
+        "default_value": {
+          "value": "0",
+          "version": 1
+        },
+        "save_as_new_geometry": {
+          "value": true,
+          "version": 1
+        },
+        "output_image_geometry_path": {
+          "value": "BentheimerReassembledROI6um",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Reassemble lower then upper slab along Z with matching spacing, retaining both pieces. Append concatenates tuple blocks; it does not register scans or check whether physical origins are contiguous. These crop bounds guarantee a shared interface at Z=-3 micrometers. The new geometry uses the lower slab origin and micrometer units; output cell matrix is named Cell Data.",
+      "filter": {
+        "name": "nx::core::AppendImageGeometryFilter",
+        "uuid": "c62c5c89-5ea8-4948-99ca-51cbc5b54b05"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "output_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "selected_image_geom_path": {
+          "value": "BentheimerReassembledROI6um",
+          "version": 1
+        },
+        "coords_array_path": {
+          "value": "BentheimerReassembledROI6um/Cell Data/CoordinatesMicrometers",
+          "version": 1
+        },
+        "indices_array_path": {
+          "value": "BentheimerReassembledROI6um/Cell Data/UnusedIndices",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Compute new cell centers from the final reassembled geometry. Reassembly must preserve the original ROI placement, not just its tuple count and values.",
+      "filter": {
+        "name": "nx::core::ComputeCoordinatesImageGeomFilter",
+        "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "existing_data_path": {
+          "value": [
+            "BentheimerLR_ROI6um/CellData/ScaledIntensity"
+          ],
+          "version": 1
+        },
+        "use_new_parent": {
+          "value": true,
+          "version": 1
+        },
+        "new_data_path": {
+          "value": "BentheimerReassembledROI6um/Cell Data",
+          "version": 1
+        },
+        "new_path_suffix": {
+          "value": "_Reference",
+          "version": 1
+        },
+        "parameters_version": 1
+      },
+      "comments": "Retain the unmodified ROI intensity beside the assembled values for an explicit per-cell equality check. Copy an array, not an Image Geometry.",
+      "filter": {
+        "name": "nx::core::CopyDataObjectFilter",
+        "uuid": "ac8d51d8-9167-5628-a060-95a8863a76b1"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "calculator_parameter": {
+          "value": {
+            "equation": "abs(ScaledIntensity-ScaledIntensity_Reference)",
+            "selected_group": "BentheimerReassembledROI6um/Cell Data",
+            "units": 0
+          },
+          "version": 1
+        },
+        "scalar_type_index": {
+          "value": 8,
+          "version": 1
+        },
+        "calculated_array_path": {
+          "value": "BentheimerReassembledROI6um/Cell Data/AbsoluteReassemblyDifference",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Compare all assembled intensities against the same original ROI tuple positions. Every difference must be zero; this tests concatenation and order, not agreement between independent scans.",
+      "filter": {
+        "name": "nx::core::ArrayCalculatorFilter",
+        "uuid": "eea49b17-0db2-5bbc-80ef-f44249cc8d55"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
+        "selected_array_path": {
+          "value": "BentheimerReassembledROI6um/Cell Data/AbsoluteReassemblyDifference",
+          "version": 1
+        },
+        "destination_attribute_matrix_path": {
+          "value": "BentheimerReassembledROI6um/ReassemblyDifferenceStatistics",
+          "version": 1
+        },
+        "use_mask": {
+          "value": false,
+          "version": 1
+        },
+        "mask_array_path": {
+          "value": "",
+          "version": 1
+        },
+        "compute_by_index": {
+          "value": false,
+          "version": 1
+        },
+        "feature_ids_path": {
+          "value": "",
+          "version": 1
+        },
+        "feature_has_data_array_name": {
+          "value": "HasData",
+          "version": 1
+        },
+        "range_type_index": {
+          "value": 0,
+          "version": 1
+        },
+        "range": {
+          "value": [
+            0,
+            -1
+          ],
+          "version": 1
+        },
+        "feature_ids_indexing_name": {
+          "value": "UnusedFeatureIndices",
+          "version": 1
+        },
+        "standardize_data": {
+          "value": false,
+          "version": 1
+        },
+        "standardized_array_name": {
+          "value": "UnusedStandardized",
+          "version": 1
+        },
+        "find_length": {
+          "value": true,
+          "version": 1
+        },
+        "length_array_name": {
+          "value": "CellCount",
+          "version": 1
+        },
+        "find_min": {
+          "value": true,
+          "version": 1
+        },
+        "minimum_array_name": {
+          "value": "Minimum",
+          "version": 1
+        },
+        "find_max": {
+          "value": true,
+          "version": 1
+        },
+        "maximum_array_name": {
+          "value": "Maximum",
+          "version": 1
+        },
+        "find_mean": {
+          "value": true,
+          "version": 1
+        },
+        "mean_array_name": {
+          "value": "Mean",
+          "version": 1
+        },
+        "find_median": {
+          "value": false,
+          "version": 1
+        },
+        "median_array_name": {
+          "value": "UnusedMedian",
+          "version": 1
+        },
+        "find_mode": {
+          "value": false,
+          "version": 1
+        },
+        "mode_array_name": {
+          "value": "UnusedMode",
+          "version": 1
+        },
+        "find_std_deviation": {
+          "value": false,
+          "version": 1
+        },
+        "std_deviation_array_name": {
+          "value": "UnusedStandardDeviation",
+          "version": 1
+        },
+        "find_summation": {
+          "value": false,
+          "version": 1
+        },
+        "summation_array_name": {
+          "value": "UnusedSum",
+          "version": 1
+        },
+        "find_unique_values": {
+          "value": false,
+          "version": 1
+        },
+        "number_unique_values_name": {
+          "value": "UnusedUniqueCount",
+          "version": 1
+        },
+        "parameters_version": 2
+      },
+      "comments": "Summarize all 2,460,375 reconstruction differences. Count must match the original ROI and minimum, maximum and mean must all be zero. Retained support must also match; no default-filled data are expected.",
+      "filter": {
+        "name": "nx::core::ComputeArrayStatisticsFilter",
+        "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f"
+      },
+      "isDisabled": false
+    },
+    {
+      "args": {
         "output_file": {
           "value": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
           "version": 1

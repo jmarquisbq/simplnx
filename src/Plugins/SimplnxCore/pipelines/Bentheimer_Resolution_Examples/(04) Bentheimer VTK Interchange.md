@@ -13,6 +13,7 @@ Executable pipeline: `(04) Bentheimer VTK Interchange.d3dpipeline`
 | Inputs | `Regions/BentheimerPaddedROI6um.vtk` and the reference `Regions/InteriorRegionComparison.dream3d`, under `Data/Output/Bentheimer_Resolution_Examples/` |
 | Imported grid | 147 cubed cells, spacing 6 micrometers, lower-corner origin [-441,-441,-441] |
 | Output | `Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d` |
+| Processing record | `Interchange/BentheimerRegionProcessing.d3dpipeline`, extracted from the predecessor checkpoint; retain the original source and companion for complete context |
 
 ## Purpose and real-world setting
 
@@ -25,6 +26,7 @@ The source is the same public, registered CT pair used by the preceding examples
 | Stage | Motivation and alternatives |
 | --- | --- |
 | Example 03: Write Vtk Structured Points | Export only `ScaledIntensity` (float32) and `InteriorROI` (uint8) from `BentheimerPaddedROI6um/CellData`. Keep the data and its validity rule together. Binary encoding retains their typed values without decimal formatting choices; ASCII is easier to inspect manually. |
+| Extract DREAM3D-NX Pipeline To File | Recover the predecessor's embedded processing recipe beside the exported data. This records which filters and arguments produced the checkpoint, but does not package inputs or earlier pipelines. |
 | Read reference DREAM3D | Import the original padded geometry as a separate reference. This allows the transferred result to be checked against the actual source. |
 | Read Vtk Structured Points, Cell Data on / Point Data off | The export contains `CELL_DATA`. Selecting point data would describe a different association. Read into `VTKImportedROI` without replacing the reference. |
 | Compute image coordinates | Reconstruct cell centers from the imported geometry, so placement can be checked independently of scalar values. |
@@ -41,6 +43,12 @@ The [VTK legacy format](https://docs.vtk.org/en/latest/vtk_file_formats/vtk_lega
 The file has no length-unit declaration. Micrometers are established by this dataset's provenance; the current reader's default Micrometer metadata alone does not establish units for an arbitrary file. Do not rescale or shift one grid merely to make its arrays compare. Confirm dimensions, spacing, origin and association first.
 
 Only the two selected cell arrays are exported. The VTK file does not preserve the NX pipeline, other attribute matrices, reference scans or provenance records. Reconstruct coordinates after import instead of treating sampled source coordinates as destination positions. The coordinate arrays and their differences use flat X-fastest tuples with three components; intensity arrays retain a three-dimensional tuple shape.
+
+### Recovering the processing recipe
+
+`BentheimerRegionProcessing.d3dpipeline` matches the JSON embedded in the stage-03 DREAM3D checkpoint. Its **28 filters, UUIDs, argument values, and order** match that stage, including slab reassembly. It does not include stages 01/02, their input data, plugin binaries, or companion explanations. Relative paths still require the same working-directory layout; inspect output paths before replaying to avoid replacing results.
+
+**Current writer limitation:** embedded recipes lose filter comments and can re-enable disabled nodes ([#1807](https://github.com/BlueQuartzSoftware/simplnx/issues/1807)). All nodes in this example are enabled, so its executable choices are preserved; its comments are empty in the recovered file. Extraction cannot restore information already lost by the writer. Keep the original `.d3dpipeline` and companion as the authoritative record, and compare disabled states before replaying recipes from other files. Files written without a nonempty embedded pipeline cannot supply one.
 
 ## Outputs and checks
 

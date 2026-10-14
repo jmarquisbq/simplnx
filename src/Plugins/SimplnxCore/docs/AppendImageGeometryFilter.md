@@ -12,6 +12,12 @@ For an introduction to Image Geometry dimensions and spacing, see [Create Image 
 
 This filter also has an option to mirror the resulting geometry in the chosen direction.  If the X direction is chosen, it will mirror the positions of the YZ planes.  If the Y direction is chosen, it will mirror the positions of the XZ planes.  If the Z direction is chosen, it will mirror the positions of the XY planes.
 
+### Physical placement and field compatibility
+
+Append is ordered concatenation, not registration. It retains the destination origin and spacing and places input tuple blocks after the destination along the chosen axis. It does not use the input origins to detect gaps, overlaps, or reversed physical order. Establish adjacency and a common calibrated grid before combining independent scans; **Check Spacing** alone does not prove this.
+
+Preserve matching cell-array names, element types, and component shapes. Missing fields can introduce default-filled tuples; mismatched fields can produce warnings. Confirm each required field and its support mask after execution. With **Save As New Geometry**, the output cell Attribute Matrix is named `Cell Data`, which may differ from the source matrix name. The Bentheimer example verifies every reconstructed value and cell center using two contiguous pieces of one measured ROI.
+
 ### Direction
 
 The *Direction* parameter selects the axis along which the input geometries are appended onto the destination geometry:
@@ -102,6 +108,8 @@ And here is what the geometry looks like after appending the three pieces togeth
 % Auto generated parameter table will be inserted here
 
 ## Example Pipelines
+
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
 
 ## License & Copyright
 

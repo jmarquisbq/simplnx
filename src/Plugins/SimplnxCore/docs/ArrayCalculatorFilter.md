@@ -144,6 +144,8 @@ This equation raises *3* to the power of the value stored in every component of 
 
 ## Example Pipelines
 
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
+
 + `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
 
 Companion pipeline paths are relative to the named plugin's `pipelines/` directory. Each has a Markdown guide beside it.

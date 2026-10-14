@@ -30,6 +30,8 @@ When *Copy to New Parent* is toggled on, a new parameter appears. This parameter
 
 ## Example Pipelines
 
++ `Bentheimer_Resolution_Examples/(03) Bentheimer Interior Region Comparison.d3dpipeline` (SimplnxCore)
+
 + `T12_Cleanup_Examples/(01) T12 Missing Data Cleanup Comparison.d3dpipeline` (OrientationAnalysis)
 
 + `T12_Orientation_Examples/(02) T12 Orientation Interchange.d3dpipeline` (OrientationAnalysis)

@@ -108,7 +108,7 @@
   "pipeline_file": "(04) Bentheimer VTK Interchange.d3dpipeline",
   "markdown_file": "(04) Bentheimer VTK Interchange.md",
   "title": "Bentheimer VTK Interchange",
-  "summary": "Transfer measured-derived intensity and its support mask through binary legacy VTK, checking values, geometry and supported statistics against a retained native reference.",
+  "summary": "Transfer measured-derived intensity and its support mask through binary legacy VTK, checking values, geometry and supported statistics against a retained native reference. Extract the predecessor checkpoint processing recipe for traceable handoff.",
   "use_cases": [
     "Transfer a calibrated volume to scientific visualization software",
     "Distinguish grid-point counts from cell counts",
@@ -139,7 +139,12 @@
     {
       "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
       "role": "Native reference, imported grid, coordinate/intensity diagnostics and masked summaries.",
-      "sha256": "e62b0b914dceeb0fd0c8a73b5cddeddcb909ab6ab27c069e00b56e66f834048a"
+      "sha256": "1cdf561260174350f6de3f3514ff50d662e0e49bfa8dc44d3ec7c61ef6b0e064"
+    },
+    {
+      "path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/BentheimerRegionProcessing.d3dpipeline",
+      "role": "Native extracted predecessor processing recipe; original inputs/outputs remain relative and must be inspected before replay.",
+      "sha256": "ca42200bd7b4eeea1f6584831299516d34c30725c5ccaa0806f4641082f17cde"
     }
   ],
   "prerequisites": [
@@ -152,10 +157,20 @@
   "steps": [
     {
       "index": 0,
+      "filter": "ExtractPipelineToFileFilter",
+      "uuid": "27203c99-9975-4528-88cc-42b270165d79",
+      "role": "Recover the processing recipe embedded in the predecessor DREAM3D checkpoint beside the VTK round-trip result. This is provenance for example 03 only; it does not bundle raw data, earlier stages, binaries or GUI state. Inspect paths before replaying because outputs may be overwritten. The predecessor must exist before preflight.",
+      "key_parameters": {
+        "input_file_path": "Data/Output/Bentheimer_Resolution_Examples/Regions/InteriorRegionComparison.dream3d",
+        "output_file_path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/BentheimerRegionProcessing.d3dpipeline"
+      },
+      "parameters_version": 1
+    },
+    {
+      "index": 1,
       "filter": "ReadDREAM3DFilter",
       "uuid": "0dbd31c7-19e0-4077-83ef-f4a6459a0e2d",
       "role": "Load the original padded geometry as the independent reference, including its support and coordinate context.",
-      "paths": [],
       "key_parameters": {
         "import_data_object": {
           "data_paths": [
@@ -168,11 +183,10 @@
       "parameters_version": 1
     },
     {
-      "index": 1,
+      "index": 2,
       "filter": "ReadVtkStructuredPointsFilter",
       "uuid": "60d55662-ca7a-4be7-b0a0-ed6e785eb51b",
       "role": "Read CELL_DATA only from the predecessor export. The file must exist before preflight; point counts in its header are one larger per axis than the imported cell dimensions.",
-      "paths": [],
       "key_parameters": {
         "input_file": "Data/Output/Bentheimer_Resolution_Examples/Regions/BentheimerPaddedROI6um.vtk",
         "read_point_data": false,
@@ -185,11 +199,10 @@
       "parameters_version": 1
     },
     {
-      "index": 2,
+      "index": 3,
       "filter": "ComputeCoordinatesImageGeomFilter",
       "uuid": "ff9c292f-eb3d-4c35-a80d-9c099aaa4714",
       "role": "Reconstruct cell-center positions from the imported header geometry. Micrometers come from this example's provenance, not a unit declaration in the VTK file.",
-      "paths": [],
       "key_parameters": {
         "output_type_index": 0,
         "selected_image_geom_path": "VTKImportedROI",
@@ -199,11 +212,10 @@
       "parameters_version": 1
     },
     {
-      "index": 3,
+      "index": 4,
       "filter": "ComputeDifferencesMapFilter",
       "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
       "role": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary.",
-      "paths": [],
       "key_parameters": {
         "first_input_array_path": "BentheimerPaddedROI6um/CellData/ScaledIntensity",
         "second_input_array_path": "VTKImportedROI/CellData/ScaledIntensity",
@@ -212,11 +224,10 @@
       "parameters_version": 1
     },
     {
-      "index": 4,
+      "index": 5,
       "filter": "ComputeDifferencesMapFilter",
       "uuid": "5a0ee5b5-c135-4535-85d0-9c2058943099",
       "role": "Compare corresponding saved reference and imported values; all components should be zero for this exact binary round trip. Geometry and mask checks remain necessary.",
-      "paths": [],
       "key_parameters": {
         "first_input_array_path": "BentheimerPaddedROI6um/CellData/CoordinatesMicrometers",
         "second_input_array_path": "VTKImportedROI/CellData/CoordinatesMicrometers",
@@ -225,11 +236,10 @@
       "parameters_version": 1
     },
     {
-      "index": 5,
+      "index": 6,
       "filter": "ComputeArrayStatisticsFilter",
       "uuid": "645ecae2-cb30-4b53-8165-c9857dfa754f",
       "role": "Use the imported support mask to exclude the fill margin from count and intensity statistics; zero intensity alone is not a validity test.",
-      "paths": [],
       "key_parameters": {
         "selected_array_path": "VTKImportedROI/CellData/ScaledIntensity",
         "destination_attribute_matrix_path": "VTKImportedROI/SupportedIntensityStatistics",
@@ -268,11 +278,10 @@
       "parameters_version": 2
     },
     {
-      "index": 6,
+      "index": 7,
       "filter": "WriteDREAM3DFilter",
       "uuid": "b3a95784-2ced-41ec-8d3d-0242ac130003",
       "role": "Keep original and imported grids, difference diagnostics, coordinates and masked summaries together for review.",
-      "paths": [],
       "key_parameters": {
         "export_file_path": "Data/Output/Bentheimer_Resolution_Examples/Interchange/VTKRoundTrip.dream3d",
         "write_xdmf_file": false,
@@ -283,7 +292,7 @@
     }
   ],
   "last_verified": "2026-10-14",
-  "verification_status": "Four-stage Windows in-memory Release CTest passed in 4.02 seconds; 36 independent file/output checks passed and the native figure was inspected. No OOC, generated-Python, external-GUI or full-installer claim.",
+  "verification_status": "Windows Release in-core full four-stage chain passed,6.67seconds.34 new assembly/provenance checks passed;40 prior region datasets,49 prior interchange datasets,and VTK bytes are exact. Prior figures remain applicable because their native arrays are unchanged. OOC,generated Python,GUI and materials interpretation remain unverified.",
   "dimensional_scope": {
     "cell_dimensions": [
       147,
@@ -334,7 +343,9 @@
       "Check coordinates and support as well as scalar differences.",
       "Mask zero is outside the chosen ROI, not proof of unmeasured acquisition.",
       "File carries selected cell arrays only, not all NX context or provenance.",
-      "This case does not validate arbitrary VTK dataset types, external applications, pore segmentation or physical properties."
+      "This case does not validate arbitrary VTK dataset types, external applications, pore segmentation or physical properties.",
+      "Extracted JSON must match the embedded pipeline and original stage03 filter order/arguments. It is not a self-contained reproduction archive,does not include upstream pipelines/raw data,and may overwrite named outputs if replayed unchanged.",
+      "Current writer copies lose comments and disabled states(#1807). Extractor faithfully exports stored JSON. All28nodes in this predecessor are enabled; preserve original pipeline and companion for comments and context. This is not a complete portable reproduction archive."
     ],
     "related_pipelines": [
       "(03) Bentheimer Interior Region Comparison.d3dpipeline"
@@ -428,5 +439,14 @@
     "data_license": "CC BY 4.0; see SourceDataLicense.md.",
     "role": "Matched reference and imported padded fine intensity/support with point-versus-cell header contract.",
     "visual_review": "2026-10-14: axes, shared display scale, support hatching, header text, captions and margins inspected."
+  },
+  "reference_results": {
+    "extracted_recipe": {
+      "filters": 28,
+      "matches_embedded_json": true,
+      "executable_order_arguments_match_source": true,
+      "comments_lost_in_writer": true,
+      "disabled_state_risk": "#1807; this recipe has no disabled nodes; retain original source and compare other recovered recipes before replay."
+    }
   }
 }

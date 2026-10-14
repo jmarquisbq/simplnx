@@ -22,3 +22,5 @@ Example 03 also exports selected intensity/support arrays to binary legacy VTK; 
 `Preparation.png`, `Comparison.png`, `Regions.png`, `PaddingFusion.png`, and `VTKInterchange.png` are new visualizations derived from the saved example outputs. They are not copied paper figures. Display scaling, selected middle slices, coordinate axes, ROI outlines, and annotations are visualization choices; they do not modify source arrays. The underlying data and their adaptation should retain this attribution and CC BY 4.0 license notice when shared.
 
 The examples have illustrative reproduction status. They do not reproduce the paper's learned image enhancement or physical flow results, and they do not re-estimate the authors' normalization or registration transforms.
+
+The region workflow also splits the same fine ROI into two contiguous slabs and reconstructs it by ordered concatenation, without altering measured intensities. The interchange workflow exports the predecessor processing recipe; these are processing and provenance exercises, not additional acquisitions or paper results.
