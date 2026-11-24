@@ -81,7 +81,7 @@ Result<> CreateGeometry::operator()()
   auto treatWarningsAsErrors = m_InputValues->warnings_as_errors;
 
   auto* iGeometryPtr = m_DataStructure.getDataAs<IGeometry>(geometryPath);
-  auto lengthUnit = static_cast<IGeometry::LengthUnit>(m_InputValues->length_unit_index);
+  const auto lengthUnit = IGeometry::GetLengthUnitFromChoiceIndex(m_InputValues->length_unit_index);
   iGeometryPtr->setUnits(lengthUnit);
 
   DataPath sharedVertexListArrayPath;

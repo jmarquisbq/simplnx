@@ -2369,6 +2369,7 @@ TEST_CASE("SimplnxCore::CreateGeometry: Valid Execution", "[SimplnxCore][CreateG
   {
     // Create default Parameters for the filter.
     args.insertOrAssign(CreateGeometryFilter::k_GeometryType_Key, std::make_any<ChoicesParameter::ValueType>(CreateGeometryFilter::k_ImageGeometry));
+    args.insertOrAssign(CreateGeometryFilter::k_LengthUnitType_Key, ChoicesParameter::ValueType{27});
     args.insertOrAssign(CreateGeometryFilter::k_GeometryPath_Key, std::make_any<DataPath>(geometryPath));
     args.insertOrAssign(CreateGeometryFilter::k_WarningsAsErrors_Key, std::make_any<bool>(false));
     args.insertOrAssign(CreateGeometryFilter::k_ArrayHandling_Key, std::make_any<ChoicesParameter::ValueType>(CreateGeometryFilter::k_CopyArray));
@@ -2412,6 +2413,7 @@ TEST_CASE("SimplnxCore::CreateGeometry: Valid Execution", "[SimplnxCore][CreateG
 
     auto* const createdGeomPtr = dataStructure.getDataAs<ImageGeom>(geometryPath);
     REQUIRE(createdGeomPtr != nullptr);
+    CHECK(createdGeomPtr->getUnits() == IGeometry::LengthUnit::Unspecified);
     auto* const cellAmPtr = dataStructure.getDataAs<AttributeMatrix>(geometryPath.createChildPath(cellAmName));
     REQUIRE(cellAmPtr != nullptr);
     REQUIRE(createdGeomPtr->getCellData() != nullptr);
