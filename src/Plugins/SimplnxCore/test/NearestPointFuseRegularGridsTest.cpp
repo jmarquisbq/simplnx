@@ -128,19 +128,20 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Basic Valid Executio
   REQUIRE(dataStructure.getData(k_CopiedNeighborListPath) == nullptr);
 
   auto& copiedArray = dataStructure.getDataRefAs<Float64ArrayType>(k_CopiedDataArrayPath);
-  REQUIRE(copiedArray[0] == 13.0);
-  REQUIRE(copiedArray[1] == 14.0);
-  REQUIRE(copiedArray[2] == 15.0);
+  // The first two reference centers on X and Y are 3 and 4. The next is 5, the excluded upper face.
+  REQUIRE(copiedArray[0] == 19.0);
+  REQUIRE(copiedArray[1] == 20.0);
+  REQUIRE(copiedArray[2] == 9.8);
   REQUIRE(copiedArray[3] == 9.8);
   REQUIRE(copiedArray[4] == 9.8);
-  REQUIRE(copiedArray[5] == 18.0);
-  REQUIRE(copiedArray[6] == 19.0);
-  REQUIRE(copiedArray[7] == 20.0);
+  REQUIRE(copiedArray[5] == 24.0);
+  REQUIRE(copiedArray[6] == 25.0);
+  REQUIRE(copiedArray[7] == 9.8);
   REQUIRE(copiedArray[8] == 9.8);
   REQUIRE(copiedArray[9] == 9.8);
-  REQUIRE(copiedArray[10] == 23.0);
-  REQUIRE(copiedArray[11] == 24.0);
-  REQUIRE(copiedArray[12] == 25.0);
+  REQUIRE(copiedArray[10] == 9.8);
+  REQUIRE(copiedArray[11] == 9.8);
+  REQUIRE(copiedArray[12] == 9.8);
   REQUIRE(copiedArray[13] == 9.8);
   REQUIRE(copiedArray[14] == 9.8);
   REQUIRE(copiedArray[15] == 9.8);
@@ -157,10 +158,11 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Basic Valid Executio
   auto& copiedBoolArray = dataStructure.getDataRefAs<BoolArrayType>(k_CopiedBoolArrayPath);
   auto& copiedMultiComponentArray = dataStructure.getDataRefAs<Int32ArrayType>(k_CopiedMultiComponentArrayPath);
   REQUIRE(copiedBoolArray[0] == true);
+  REQUIRE(copiedBoolArray[1] == false);
   REQUIRE(copiedBoolArray[3] == static_cast<bool>(9.8));
-  REQUIRE(copiedMultiComponentArray[0] == 12);
-  REQUIRE(copiedMultiComponentArray[1] == 112);
-  REQUIRE(copiedMultiComponentArray[2] == 212);
+  REQUIRE(copiedMultiComponentArray[0] == 18);
+  REQUIRE(copiedMultiComponentArray[1] == 118);
+  REQUIRE(copiedMultiComponentArray[2] == 218);
 
   unit_test::CheckArraysInheritTupleDims(dataStructure);
 }
@@ -173,7 +175,8 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: No Overlap Valid Exe
   unit_test::AlgorithmTestScope algorithmTestScope(scenario);
 
   const CreateImageGeometryAction::DimensionType refDims = {5, 5, 1};
-  const CreateImageGeometryAction::OriginType refOrigin = {10.0f, 10.0f, 3.0f};
+  // The second grid overlaps in X and Y. Its centers lie exactly on the excluded upper Z face.
+  const auto refOrigin = GENERATE((CreateImageGeometryAction::OriginType{10.0f, 10.0f, 3.0f}), (CreateImageGeometryAction::OriginType{0.0f, 0.0f, 0.5f}));
   const CreateImageGeometryAction::SpacingType refSpacing = {1.0f, 1.0f, 1.0f};
 
   // Configure the filter arguments.
@@ -201,6 +204,35 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: No Overlap Valid Exe
     REQUIRE(value == 9.8);
   }
 
+  unit_test::CheckArraysInheritTupleDims(dataStructure);
+}
+
+TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Centers just below sampling faces", "[SimplnxCore][NearestPointFuseRegularGridsFilter]")
+{
+  Application::GetOrCreateInstance();
+  const auto scenario = GENERATE(from_range(unit_test::SelectAlgorithmTestScenariosForInMemoryStores()));
+  CAPTURE(scenario);
+  unit_test::AlgorithmTestScope algorithmTestScope(scenario);
+  DataStructure dataStructure = CreateDualImageGeomDataStructure({5, 5, 1}, {-1.5f, 1.5f, 0.0f}, {1.0f, 1.0f, 1.0f});
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath));
+  REQUIRE(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath).setOrigin({0x1p-56f, 0x1p-56f, 0.0f}).valid());
+
+  NearestPointFuseRegularGridsFilter filter;
+  Arguments args;
+  args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingGeometryPath_Key, std::make_any<DataPath>(k_SampleImageGeomPath));
+  args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_SamplingCellAttributeMatrixPath_Key, std::make_any<DataPath>(k_SampleCellDataPath));
+  args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceGeometryPath_Key, std::make_any<DataPath>(k_RefImageGeomPath));
+  args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_ReferenceCellAttributeMatrixPath_Key, std::make_any<DataPath>(k_RefCellDataPath));
+  const auto executeResult = algorithmTestScope.executeFilter(filter, dataStructure, args);
+  SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
+
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<Float64ArrayType>(k_CopiedDataArrayPath));
+  const auto& copiedArray = dataStructure.getDataRefAs<Float64ArrayType>(k_CopiedDataArrayPath);
+  // X = 0 is below the minimum face. X = 1 and Y = 2 lie just inside source cell (0, 1).
+  CHECK(copiedArray[1] == 0.0);
+  CHECK(copiedArray[2] == 6.0);
+  // Y = 5 lies just below the maximum face, in the last sampling row.
+  CHECK(copiedArray[17] == 21.0);
   unit_test::CheckArraysInheritTupleDims(dataStructure);
 }
 
@@ -272,12 +304,17 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Encompassing Valid E
   unit_test::AlgorithmTestScope algorithmTestScope(scenario);
 
   const CreateImageGeometryAction::DimensionType refDims = {5, 5, 1};
-  const CreateImageGeometryAction::OriginType refOrigin = {-2.0f, -2.0f, 0.0f};
-  const CreateImageGeometryAction::SpacingType refSpacing = {2.0f, 2.0f, 2.0f};
+  // At the larger common origin, adding 1.5 to an absolute X coordinate would round away the offset even in double precision.
+  const auto xOrigin = GENERATE(0.0f, 0x1p55f);
+  CAPTURE(xOrigin);
+  const CreateImageGeometryAction::OriginType refOrigin = {xOrigin, -2.5f, -2.0f};
+  const CreateImageGeometryAction::SpacingType refSpacing = {3.0f, 2.5f, 4.0f};
 
   // Configure the filter arguments.
   NearestPointFuseRegularGridsFilter filter;
   DataStructure dataStructure(CreateDualImageGeomDataStructure(refDims, refOrigin, refSpacing));
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath));
+  REQUIRE(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath).setOrigin({xOrigin, 0.0f, 0.0f}).valid());
   Arguments args;
 
   args.insertOrAssign(NearestPointFuseRegularGridsFilter::k_UseFill_Key, std::make_any<bool>(true));
@@ -300,20 +337,21 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Encompassing Valid E
   REQUIRE(copiedArray[2] == 9.8);
   REQUIRE(copiedArray[3] == 9.8);
   REQUIRE(copiedArray[4] == 9.8);
-  REQUIRE(copiedArray[5] == 9.8);
-  REQUIRE(copiedArray[6] == 1.0);
-  REQUIRE(copiedArray[7] == 3.0);
-  REQUIRE(copiedArray[8] == 5.0);
+  // Relative to the sampling origin, the in-bounds centers have X = 1.5 or 4.5, Y = 1.25 or 3.75, and Z = 0.
+  REQUIRE(copiedArray[5] == 7.0);
+  REQUIRE(copiedArray[6] == 10.0);
+  REQUIRE(copiedArray[7] == 9.8);
+  REQUIRE(copiedArray[8] == 9.8);
   REQUIRE(copiedArray[9] == 9.8);
-  REQUIRE(copiedArray[10] == 9.8);
-  REQUIRE(copiedArray[11] == 11.0);
-  REQUIRE(copiedArray[12] == 13.0);
-  REQUIRE(copiedArray[13] == 15.0);
+  REQUIRE(copiedArray[10] == 17.0);
+  REQUIRE(copiedArray[11] == 20.0);
+  REQUIRE(copiedArray[12] == 9.8);
+  REQUIRE(copiedArray[13] == 9.8);
   REQUIRE(copiedArray[14] == 9.8);
   REQUIRE(copiedArray[15] == 9.8);
-  REQUIRE(copiedArray[16] == 21.0);
-  REQUIRE(copiedArray[17] == 23.0);
-  REQUIRE(copiedArray[18] == 25.0);
+  REQUIRE(copiedArray[16] == 9.8);
+  REQUIRE(copiedArray[17] == 9.8);
+  REQUIRE(copiedArray[18] == 9.8);
   REQUIRE(copiedArray[19] == 9.8);
   REQUIRE(copiedArray[20] == 9.8);
   REQUIRE(copiedArray[21] == 9.8);
