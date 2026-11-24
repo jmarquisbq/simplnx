@@ -405,7 +405,7 @@ IFilter::PreflightResult ReadBinaryCTNorthstarFilter::preflightImpl(const DataSt
   auto pImageGeometryPathValue = filterArgs.value<DataPath>(k_ImageGeometryPath_Key);
   auto pCellAttributeMatrixNameValue = filterArgs.value<std::string>(k_CellAttributeMatrixName_Key);
   auto pDensityArrayNameValue = filterArgs.value<std::string>(k_DensityArrayName_Key);
-  auto pLengthUnitValue = filterArgs.value<ChoicesParameter::ValueType>(k_LengthUnit_Key);
+  const auto lengthUnit = IGeometry::GetLengthUnitFromChoiceIndex(filterArgs.value<ChoicesParameter::ValueType>(k_LengthUnit_Key));
   auto pImportSubvolumeValue = filterArgs.value<bool>(k_ImportSubvolume_Key);
   auto pStartVoxelCoordValue = filterArgs.value<VectorInt32ParameterType::ValueType>(k_StartVoxelCoord_Key);
   auto pEndVoxelCoordValue = filterArgs.value<VectorInt32ParameterType::ValueType>(k_EndVoxelCoord_Key);
@@ -503,8 +503,8 @@ IFilter::PreflightResult ReadBinaryCTNorthstarFilter::preflightImpl(const DataSt
 
   // Set the output actions
   nx::core::Result<OutputActions> resultOutputActions;
-  auto createImageGeometryAction =
-      std::make_unique<CreateImageGeometryAction>(pImageGeometryPathValue, importedGeometryInfo.dimensions, importedGeometryInfo.origin, importedGeometryInfo.spacing, pCellAttributeMatrixNameValue);
+  auto createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(pImageGeometryPathValue, importedGeometryInfo.dimensions, importedGeometryInfo.origin, importedGeometryInfo.spacing,
+                                                                               pCellAttributeMatrixNameValue, lengthUnit);
   resultOutputActions.value().appendAction(std::move(createImageGeometryAction));
 
   DataPath densityArrayPath = pImageGeometryPathValue.createChildPath(pCellAttributeMatrixNameValue).createChildPath(pDensityArrayNameValue);
@@ -512,7 +512,7 @@ IFilter::PreflightResult ReadBinaryCTNorthstarFilter::preflightImpl(const DataSt
       DataType::float32, std::vector<usize>{importedGeometryInfo.dimensions[2], importedGeometryInfo.dimensions[1], importedGeometryInfo.dimensions[0]}, std::vector<usize>{1}, densityArrayPath));
 
   // Set the preflight updated values
-  std::string volumeDescription = GenerateGeometryInfoString(geometryInfo, static_cast<IGeometry::LengthUnit>(pLengthUnitValue));
+  std::string volumeDescription = GenerateGeometryInfoString(geometryInfo, lengthUnit);
   std::string dataFileInfo = GenerateDataFileListInfoString(dataFiles);
 
   std::vector<PreflightValue> preflightUpdatedValues;
@@ -521,7 +521,7 @@ IFilter::PreflightResult ReadBinaryCTNorthstarFilter::preflightImpl(const DataSt
 
   if(pImportSubvolumeValue)
   {
-    std::string importedVolumeDescription = GenerateGeometryInfoString(importedGeometryInfo, static_cast<IGeometry::LengthUnit>(pLengthUnitValue));
+    std::string importedVolumeDescription = GenerateGeometryInfoString(importedGeometryInfo, lengthUnit);
     preflightUpdatedValues.push_back({"Subvolume", importedVolumeDescription});
   }
 

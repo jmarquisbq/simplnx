@@ -638,6 +638,22 @@ TEST_CASE("CreateVertexGeometryAction: units and cloning", "[simplnx][CreateVert
   unit_test::CheckArraysInheritTupleDims(dataStructure);
 }
 
+TEST_CASE("simplnx::Geometry length unit choice indices", "[simplnx][IGeometry]")
+{
+  using unit = IGeometry::LengthUnit;
+  const auto& names = IGeometry::GetAllLengthUnitStrings();
+  REQUIRE(names.size() == 29);
+  CHECK(IGeometry::GetLengthUnitFromChoiceIndex(7) == unit::Millimeter);
+  CHECK(IGeometry::GetLengthUnitFromChoiceIndex(27) == unit::Unspecified);
+  CHECK(IGeometry::GetLengthUnitFromChoiceIndex(28) == unit::Unknown);
+  CHECK(IGeometry::GetLengthUnitFromChoiceIndex(names.size()) == unit::Unknown);
+  for(usize i = 0; i < names.size(); ++i)
+  {
+    CAPTURE(i);
+    CHECK(names[i] == IGeometry::LengthUnitToString(IGeometry::GetLengthUnitFromChoiceIndex(i)));
+  }
+}
+
 TEST_CASE("CreateImageGeometryAction: units and cloning", "[simplnx][CreateImageGeometryAction]")
 {
   const auto units = GENERATE(IGeometry::LengthUnit::Unspecified, IGeometry::LengthUnit::Millimeter, IGeometry::LengthUnit::Micrometer);
