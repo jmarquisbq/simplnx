@@ -136,6 +136,7 @@ TEST_CASE("NXImageProcessing::ReadImageFilter: Tiled_Tiff_Photometric_Orientatio
   const std::string cellDataName = "Cell Data";
   const std::string imageDataName = "Pixels";
   args.insertOrAssign(ReadImageFilter::k_FileName_Key, fixture.path());
+  args.insertOrAssign(ReadImageFilter::k_LengthUnit_Key, ChoicesParameter::ValueType{27});
   args.insertOrAssign(ReadImageFilter::k_ImageGeometryPath_Key, imageGeometryPath);
   args.insertOrAssign(ReadImageFilter::k_CellDataName_Key, static_cast<DataObjectNameParameter::ValueType>(cellDataName));
   args.insertOrAssign(ReadImageFilter::k_ImageDataArrayPath_Key, static_cast<DataObjectNameParameter::ValueType>(imageDataName));
@@ -148,6 +149,8 @@ TEST_CASE("NXImageProcessing::ReadImageFilter: Tiled_Tiff_Photometric_Orientatio
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result)
 
   const DataPath pixelPath = imageGeometryPath.createChildPath(cellDataName).createChildPath(imageDataName);
+  REQUIRE_NOTHROW(dataStructure.getDataRefAs<ImageGeom>(imageGeometryPath));
+  CHECK(dataStructure.getDataRefAs<ImageGeom>(imageGeometryPath).getUnits() == IGeometry::LengthUnit::Unspecified);
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<UInt8ArrayType>(pixelPath));
   const auto& pixels = dataStructure.getDataRefAs<UInt8ArrayType>(pixelPath).getDataStoreRef();
   REQUIRE(pixels.getSize() == static_cast<usize>(TemporaryTiledFilterFixture::k_Width) * TemporaryTiledFilterFixture::k_Height);
@@ -966,13 +969,15 @@ TEST_CASE("NXImageProcessing::ReadImageFilter: NRRD scalar 3D round trip (raw + 
 
       DataStructure dataStructure;
       ReadImageFilter filter;
-      const Arguments args = MakeReadImageNrrdArgs(p, geomPath, amName, arrName);
+      Arguments args = MakeReadImageNrrdArgs(p, geomPath, amName, arrName);
+      args.insertOrAssign(ReadImageFilter::k_LengthUnit_Key, static_cast<ChoicesParameter::ValueType>(IGeometry::LengthUnit::Millimeter));
       const auto preflight = filter.preflight(dataStructure, args);
       SIMPLNX_RESULT_REQUIRE_VALID(preflight.output_actions);
       const auto execute = filter.execute(dataStructure, args);
       SIMPLNX_RESULT_REQUIRE_VALID(execute.result);
 
       const auto& geom = dataStructure.getDataRefAs<ImageGeom>(geomPath);
+      CHECK(geom.getUnits() == IGeometry::LengthUnit::Millimeter);
       REQUIRE(geom.getDimensions()[0] == 4);
       REQUIRE(geom.getDimensions()[1] == 3);
       REQUIRE(geom.getDimensions()[2] == 2);
@@ -1102,13 +1107,16 @@ TEST_CASE("NXImageProcessing::ReadImageFilter: NRRD VoxelSubvolume crop", "[NXIm
   const DataPath arrPath = geomPath.createChildPath("Cell Data").createChildPath("ImageData");
   DataStructure dataStructure;
   ReadImageFilter filter;
-  const Arguments args = MakeReadImageNrrdArgs(p, geomPath, "Cell Data", "ImageData", crop);
+  Arguments args = MakeReadImageNrrdArgs(p, geomPath, "Cell Data", "ImageData", crop);
+  // Saved pipelines encode the Unknown choice at index 28.
+  args.insertOrAssign(ReadImageFilter::k_LengthUnit_Key, ChoicesParameter::ValueType{28});
   const auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.output_actions);
   const auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   const auto& geom = dataStructure.getDataRefAs<ImageGeom>(geomPath);
+  CHECK(geom.getUnits() == IGeometry::LengthUnit::Unknown);
   REQUIRE(geom.getDimensions()[0] == 3);
   REQUIRE(geom.getDimensions()[1] == 3);
   REQUIRE(geom.getDimensions()[2] == 2);
