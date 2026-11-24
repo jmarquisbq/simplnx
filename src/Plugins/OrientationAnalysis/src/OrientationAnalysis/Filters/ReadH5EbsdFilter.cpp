@@ -136,7 +136,8 @@ IFilter::PreflightResult ReadH5EbsdFilter::preflightImpl(const DataStructure& /*
     return {.output_actions = ConvertInvalidResult<OutputActions>(std::move(geometryResult))};
   }
 
-  resultOutputActions.value().appendAction(std::make_unique<CreateImageGeometryAction>(imageGeomPath, imageGeomDims, origin, spacing, pCellAttributeMatrixNameValue));
+  resultOutputActions.value().appendAction(
+      std::make_unique<CreateImageGeometryAction>(imageGeomPath, imageGeomDims, origin, spacing, pCellAttributeMatrixNameValue, IGeometry::LengthUnit::Micrometer));
 
   ebsdlib::OEM mManufacturer = {ebsdlib::OEM::Unknown};
   std::string manufacturer = reader->getManufacturer();

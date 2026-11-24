@@ -192,7 +192,7 @@ IFilter::PreflightResult ReadZeissTxmFileFilter::preflightImpl(const DataStructu
   DataStructure tmpDs;
   OutputActions tmpActions;
 
-  auto createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(pNewImageGeometryPathValue, dims, origin, spacing, pCellAttributeMatrixNameValue);
+  auto createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(pNewImageGeometryPathValue, dims, origin, spacing, pCellAttributeMatrixNameValue, metadata.units);
   tmpActions.appendAction(std::move(createImageGeometryAction));
 
   // Create the input data array
@@ -244,7 +244,7 @@ IFilter::PreflightResult ReadZeissTxmFileFilter::preflightImpl(const DataStructu
     spacing = croppedGeom.getSpacing().toContainer<std::vector<float32>>();
   }
 
-  createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(pNewImageGeometryPathValue, dims, origin, spacing, pCellAttributeMatrixNameValue);
+  createImageGeometryAction = std::make_unique<CreateImageGeometryAction>(pNewImageGeometryPathValue, dims, origin, spacing, pCellAttributeMatrixNameValue, metadata.units);
   resultOutputActions.value().appendAction(std::move(createImageGeometryAction));
 
   // Create the input data array

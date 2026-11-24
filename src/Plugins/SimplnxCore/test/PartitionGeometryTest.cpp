@@ -484,6 +484,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic RectGrid bounds", "[Plugi
   auto* rectGeomPtr = RectGridGeom::Create(dataStructure, "RectGrid");
   REQUIRE(rectGeomPtr != nullptr);
   rectGeomPtr->setDimensions({3, 4, 2});
+  rectGeomPtr->setUnits(IGeometry::LengthUnit::Millimeter);
   auto* xArrayPtr = unit_test::CreateTestDataArray<float32>(dataStructure, "X Bounds", {xBounds.size()}, {1}, rectGeomPtr->getId());
   auto* yArrayPtr = unit_test::CreateTestDataArray<float32>(dataStructure, "Y Bounds", {yBounds.size()}, {1}, rectGeomPtr->getId());
   auto* zArrayPtr = unit_test::CreateTestDataArray<float32>(dataStructure, "Z Bounds", {zBounds.size()}, {1}, rectGeomPtr->getId());
@@ -507,6 +508,7 @@ TEST_CASE("SimplnxCore::PartitionGeometryFilter: Basic RectGrid bounds", "[Plugi
 
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<ImageGeom>(partitionGridPath));
   const auto& partitionGeom = dataStructure.getDataRefAs<ImageGeom>(partitionGridPath);
+  CHECK(partitionGeom.getUnits() == IGeometry::LengthUnit::Millimeter);
   REQUIRE(partitionGeom.getDimensions() == SizeVec3Type{3, 5, 2});
   REQUIRE(partitionGeom.getOrigin() == FloatVec3Type{xBounds.front(), yBounds.front(), zBounds.front()});
   const auto spacing = partitionGeom.getSpacing();

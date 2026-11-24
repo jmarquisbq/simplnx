@@ -299,8 +299,9 @@ IFilter::PreflightResult ReadMhaFileFilter::preflightImpl(const DataStructure& d
   {
     return {.output_actions = ConvertInvalidResult<OutputActions>(std::move(geometryResult))};
   }
+  constexpr auto k_LengthUnit = IGeometry::LengthUnit::Unspecified;
 
-  preflightUpdatedValues.push_back({"Full Input Geometry", nx::core::geometry_helpers::description::GenerateGeometryInfo(dims, spacing, origin, IGeometry::LengthUnit::Unspecified)});
+  preflightUpdatedValues.push_back({"Full Input Geometry", nx::core::geometry_helpers::description::GenerateGeometryInfo(dims, spacing, origin, k_LengthUnit)});
 
   // ---- optional crop delegation (verbatim from the NRRD reader's preflight) ----
   if(pCroppingOptions.type != CropGeometryParameter::CropValues::TypeEnum::NoCropping)
@@ -308,7 +309,7 @@ IFilter::PreflightResult ReadMhaFileFilter::preflightImpl(const DataStructure& d
     DataStructure tmpDs;
     OutputActions tmpActions;
     {
-      auto tmpGeomAction = std::make_unique<CreateImageGeometryAction>(pImageGeomPath, dims, origin, spacing, pCellAttrMatName);
+      auto tmpGeomAction = std::make_unique<CreateImageGeometryAction>(pImageGeomPath, dims, origin, spacing, pCellAttrMatName, k_LengthUnit);
       tmpActions.appendAction(std::move(tmpGeomAction));
     }
     Result<> tmpActionsResult = tmpActions.applyAll(tmpDs, IDataAction::Mode::Preflight);
@@ -337,7 +338,7 @@ IFilter::PreflightResult ReadMhaFileFilter::preflightImpl(const DataStructure& d
   }
 
   {
-    auto createGeomAction = std::make_unique<CreateImageGeometryAction>(pImageGeomPath, dims, origin, spacing, pCellAttrMatName);
+    auto createGeomAction = std::make_unique<CreateImageGeometryAction>(pImageGeomPath, dims, origin, spacing, pCellAttrMatName, k_LengthUnit);
     resultOutputActions.value().appendAction(std::move(createGeomAction));
   }
 
@@ -349,7 +350,7 @@ IFilter::PreflightResult ReadMhaFileFilter::preflightImpl(const DataStructure& d
     resultOutputActions.value().appendAction(std::move(createArrayAction));
   }
 
-  preflightUpdatedValues.push_back({"Imported Geometry Info", nx::core::geometry_helpers::description::GenerateGeometryInfo(dims, spacing, origin, IGeometry::LengthUnit::Unspecified)});
+  preflightUpdatedValues.push_back({"Imported Geometry Info", nx::core::geometry_helpers::description::GenerateGeometryInfo(dims, spacing, origin, k_LengthUnit)});
   preflightUpdatedValues.push_back({"MetaImage Header", fmt::format("type: {}  |  components: {}  |  compressed: {}  |  byte-swap: {}", md.type_string, md.component_count,
                                                                     (md.encoding == mhd::Encoding::Compressed ? "yes" : "no"), md.byte_swap_required ? "yes" : "no")});
 

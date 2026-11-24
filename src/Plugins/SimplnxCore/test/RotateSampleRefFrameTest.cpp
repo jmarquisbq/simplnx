@@ -270,7 +270,8 @@ TEST_CASE("SimplnxCore::RotateSampleRefFrame: Class 1 - anisotropic spacing perm
   CAPTURE(scenario);
 
   DataStructure dataStructure;
-  CreateSequentialImageGeom(dataStructure, "Input", SizeVec3Type{2, 2, 1}, FloatVec3Type{2.0f, 5.0f, 1.0f});
+  auto* inputGeom = CreateSequentialImageGeom(dataStructure, "Input", SizeVec3Type{2, 2, 1}, FloatVec3Type{2.0f, 5.0f, 1.0f});
+  inputGeom->setUnits(IGeometry::LengthUnit::Millimeter);
   RotateSampleRefFrameFilter filter;
   Arguments args = MakeAxisAngleArgs(k_InputPath, k_OutputPath, VectorFloat32ParameterType::ValueType{0.0f, 0.0f, 1.0f, 90.0f});
 
@@ -283,6 +284,7 @@ TEST_CASE("SimplnxCore::RotateSampleRefFrame: Class 1 - anisotropic spacing perm
   const auto* outputGeomPtr = dataStructure.getDataAs<ImageGeom>(k_OutputPath);
   REQUIRE(outputGeomPtr != nullptr);
   const FloatVec3Type outSpacing = outputGeomPtr->getSpacing();
+  CHECK(outputGeomPtr->getUnits() == IGeometry::LengthUnit::Millimeter);
   REQUIRE(outSpacing[0] == Approx(5.0f));
   REQUIRE(outSpacing[1] == Approx(2.0f));
   REQUIRE(outSpacing[2] == Approx(1.0f));

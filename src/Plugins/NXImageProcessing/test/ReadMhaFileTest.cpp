@@ -594,7 +594,7 @@ DataStructure BuildMhaTarget(DataType dataType, const std::array<usize, 3>& dest
   const CreateImageGeometryAction::DimensionType dims = {destDims[0], destDims[1], destDims[2]};
   const CreateImageGeometryAction::OriginType origin = {0.0f, 0.0f, 0.0f};
   const CreateImageGeometryAction::SpacingType spacing = {1.0f, 1.0f, 1.0f};
-  auto geomAction = CreateImageGeometryAction(k_AlgoGeomPath, dims, origin, spacing, k_AlgoCellDataName);
+  auto geomAction = CreateImageGeometryAction(k_AlgoGeomPath, dims, origin, spacing, k_AlgoCellDataName, IGeometry::LengthUnit::Unspecified);
   REQUIRE(geomAction.apply(dataStructure, IDataAction::Mode::Execute).valid());
   const std::vector<usize> tupleDims = {destDims[2], destDims[1], destDims[0]}; // [Z, Y, X]
   auto arrayAction = CreateArrayAction(dataType, tupleDims, {comp}, AlgoImageDataPath());
@@ -819,6 +819,7 @@ TEST_CASE("NXImageProcessing::ReadMhaFileFilter: scalar 2D round trip (raw + zli
       SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
       const auto& geom = dataStructure.getDataRefAs<ImageGeom>(geomPath);
+      CHECK(geom.getUnits() == IGeometry::LengthUnit::Unspecified);
       REQUIRE(geom.getDimensions()[0] == 4);
       REQUIRE(geom.getDimensions()[1] == 3);
       REQUIRE(geom.getDimensions()[2] == 1);
@@ -898,6 +899,7 @@ TEST_CASE("NXImageProcessing::ReadMhaFileFilter: PhysicalSubvolume crop clamps o
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
   const auto& geom = dataStructure.getDataRefAs<ImageGeom>(geomPath);
+  CHECK(geom.getUnits() == IGeometry::LengthUnit::Unspecified);
   REQUIRE(geom.getDimensions()[0] == k_X);
   REQUIRE(geom.getDimensions()[1] == k_Y);
   REQUIRE(geom.getDimensions()[2] == k_Z);

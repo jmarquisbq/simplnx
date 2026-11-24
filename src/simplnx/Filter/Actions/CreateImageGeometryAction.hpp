@@ -26,10 +26,9 @@ public:
    * @param origin The origin of the ImageGeometry
    * @param spacing The spacing of the ImageGeometry
    * @param cellAttributeMatrixName The name of the cell AttributeMatrix to be created
-   * @param units The length units for the geometry
+   * @param units Length unit of the origin and spacing. Use IGeometry::LengthUnit::Unspecified when the coordinates have no specified physical unit.
    */
-  CreateImageGeometryAction(const DataPath& path, DimensionType dims, OriginType origin, SpacingType spacing, std::string cellAttributeMatrixName,
-                            IGeometry::LengthUnit units = IGeometry::LengthUnit::Micrometer);
+  CreateImageGeometryAction(const DataPath& path, DimensionType dims, OriginType origin, SpacingType spacing, std::string cellAttributeMatrixName, IGeometry::LengthUnit units);
 
   ~CreateImageGeometryAction() noexcept override;
 

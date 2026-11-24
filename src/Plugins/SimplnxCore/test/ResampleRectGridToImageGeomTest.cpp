@@ -48,6 +48,7 @@ TEST_CASE("SimplnxCore::ResampleRectGridToImageGeomFilter: Noncubic cell arrays 
   auto* rectGridGeomPtr = RectGridGeom::Create(dataStructure, k_RectGridGeomPath.getTargetName());
   REQUIRE(rectGridGeomPtr != nullptr);
   rectGridGeomPtr->setDimensions(dimensions);
+  rectGridGeomPtr->setUnits(IGeometry::LengthUnit::Millimeter);
   auto* cellDataPtr = AttributeMatrix::Create(dataStructure, k_CellData, cellTupleShape, rectGridGeomPtr->getId());
   REQUIRE(cellDataPtr != nullptr);
   rectGridGeomPtr->setCellData(*cellDataPtr);
@@ -102,6 +103,10 @@ TEST_CASE("SimplnxCore::ResampleRectGridToImageGeomFilter: Noncubic cell arrays 
 
   auto preflightResult = filter.preflight(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(preflightResult.output_actions);
+  DataStructure preflightData = dataStructure;
+  const auto applyResult = preflightResult.output_actions.value().applyRegular(preflightData, IDataAction::Mode::Preflight);
+  SIMPLNX_RESULT_REQUIRE_VALID(applyResult);
+  CHECK(unit_test::GetRequiredData<ImageGeom>(preflightData, k_ImageGeomComputed).getUnits() == IGeometry::LengthUnit::Millimeter);
   auto executeResult = filter.execute(dataStructure, args);
   SIMPLNX_RESULT_REQUIRE_VALID(executeResult.result);
 
@@ -134,6 +139,7 @@ TEST_CASE("SimplnxCore::ResampleRectGridToImageGeomFilter: Noncubic cell arrays 
   }
 
   CHECK(imageGeomPtr->getDimensions() == dimensions);
+  CHECK(imageGeomPtr->getUnits() == IGeometry::LengthUnit::Millimeter);
   CHECK(outputCellDataPtr->getShape() == cellTupleShape);
   CHECK(outputNumericPtr->getTupleShape() == cellTupleShape);
   CHECK(outputStringsPtr->getTupleShape() == cellTupleShape);
