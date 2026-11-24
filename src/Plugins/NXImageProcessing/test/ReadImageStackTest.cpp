@@ -298,6 +298,44 @@ Result<> ExecuteImportImageStack(DataStructure& dataStructure, const DataPath& o
   return executeResult.result;
 }
 
+// Compare against the full-resolution reference for this crop and color mode. The exact ratio of
+// source to output pixel widths gives an integer oracle for the source pixel containing each center.
+void CheckResampledStack(const UInt8ArrayType& source, const UInt8ArrayType& output, usize stepNumerator, usize stepDenominator, bool flipAboutX)
+{
+  const auto src = source.getTupleShape();
+  const auto dest = output.getTupleShape();
+  REQUIRE(src.size() == 3);
+  REQUIRE(dest.size() == 3);
+  REQUIRE(src[0] == dest[0]);
+  REQUIRE(source.getComponentShape() == output.getComponentShape());
+  const usize components = source.getNumberOfComponents();
+  const auto sourcePixel = [=](usize pixel) { return ((2 * pixel + 1) * stepNumerator) / (2 * stepDenominator); };
+  REQUIRE(sourcePixel(dest[1] - 1) < src[1]);
+  REQUIRE(sourcePixel(dest[2] - 1) < src[2]);
+  for(usize z = 0; z < dest[0]; ++z)
+  {
+    for(usize y = 0; y < dest[1]; ++y)
+    {
+      const usize sourceY = sourcePixel(flipAboutX ? dest[1] - 1 - y : y);
+      for(usize x = 0; x < dest[2]; ++x)
+      {
+        const usize in = ((z * src[1] + sourceY) * src[2] + sourcePixel(x)) * components;
+        const usize out = ((z * dest[1] + y) * dest[2] + x) * components;
+        for(usize component = 0; component < components; ++component)
+        {
+          const auto expected = source[in + component];
+          const auto actual = output[out + component];
+          if(actual != expected)
+          {
+            CAPTURE(x, y, z, component);
+            REQUIRE(actual == expected);
+          }
+        }
+      }
+    }
+  }
+}
+
 /**
  * @brief Verify expected geometry dimensions
  */
@@ -812,10 +850,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Resample_ScalingFactor", "[N
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Resample_Scaling_50", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Baseline_Geometry", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 2, 1, false);
 }
 
 TEST_CASE("NXImageProcessing::ReadImageStackFilter::Resample_ExactDimensions", "[NXImageProcessing][ReadImageStackFilter][Resampling]")
@@ -839,10 +877,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Resample_ExactDimensions", "
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Resample_Exact_128x128", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Baseline_Geometry", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 200, 128, false);
 }
 
 // =============================================================================
@@ -1051,10 +1089,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Crop_Resample", 
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Crop_And_Resample", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Crop_Voxel_XY", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 101, 64, false);
 }
 
 TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Crop_Flip", "[NXImageProcessing][ReadImageStackFilter][Interaction]")
@@ -1105,10 +1143,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Resample_Flip", 
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Resample_And_FlipX", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Baseline_Geometry", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 200, 128, true);
 }
 
 TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Crop_Grayscale", "[NXImageProcessing][ReadImageStackFilter][Interaction]")
@@ -1165,10 +1203,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Resample_Graysca
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Resample_And_Grayscale", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Grayscale_Conversion", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 200, 128, false);
 }
 
 TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_Grayscale_Flip", "[NXImageProcessing][ReadImageStackFilter][Interaction]")
@@ -1225,10 +1263,10 @@ TEST_CASE("NXImageProcessing::ReadImageStackFilter::Interaction_FullPipeline", "
   unit_test::CompareImageGeometry(exemplarGeomPtr, generatedGeomPtr);
 
   DataPath generatedDataPath = geomPath.createChildPath(constants::k_CellDataWithSpaces).createChildPath(k_ImageDataName);
-  DataPath exemplarDataPath = DataPath({"Full_Pipeline", constants::k_CellDataWithSpaces, k_ImageDataName});
+  DataPath exemplarDataPath = DataPath({"Crop_And_Grayscale", constants::k_CellDataWithSpaces, k_ImageDataName});
   const auto& generatedArray = dataStructure.getDataRefAs<UInt8ArrayType>(generatedDataPath);
   const auto& exemplarArray = exemplarDS.getDataRefAs<UInt8ArrayType>(exemplarDataPath);
-  unit_test::CompareDataArrays<uint8_t>(exemplarArray, generatedArray);
+  CheckResampledStack(exemplarArray, generatedArray, 2, 1, true);
 }
 
 // =============================================================================
