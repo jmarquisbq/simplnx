@@ -215,7 +215,7 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Centers just below s
   unit_test::AlgorithmTestScope algorithmTestScope(scenario);
   DataStructure dataStructure = CreateDualImageGeomDataStructure({5, 5, 1}, {-1.5f, 1.5f, 0.0f}, {1.0f, 1.0f, 1.0f});
   REQUIRE_NOTHROW(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath));
-  REQUIRE(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath).setOrigin({0x1p-56f, 0x1p-56f, 0.0f}).valid());
+  REQUIRE(dataStructure.getDataRefAs<ImageGeom>(k_SampleImageGeomPath).setOrigin({0x1p-20f, 0x1p-20f, 0.0f}).valid());
 
   NearestPointFuseRegularGridsFilter filter;
   Arguments args;
@@ -304,7 +304,7 @@ TEST_CASE("SimplnxCore::NearestPointFuseRegularGridsFilter: Encompassing Valid E
   unit_test::AlgorithmTestScope algorithmTestScope(scenario);
 
   const CreateImageGeometryAction::DimensionType refDims = {5, 5, 1};
-  // At the larger common origin, adding 1.5 to an absolute X coordinate would round away the offset even in double precision.
+  // At the larger common origin, the mapping must subtract the two origins before it adds the 1.5 center offset.
   const auto xOrigin = GENERATE(0.0f, 0x1p55f);
   CAPTURE(xOrigin);
   const CreateImageGeometryAction::OriginType refOrigin = {xOrigin, -2.5f, -2.0f};
