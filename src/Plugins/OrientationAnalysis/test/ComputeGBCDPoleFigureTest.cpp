@@ -42,15 +42,15 @@ constexpr int32 k_Dimension = 300;
 
 TEST_CASE("OrientationAnalysis::ComputeGBCDPoleFigureFilter: Odd image samples centered inside the stereographic disk", "[OrientationAnalysis][ComputeGBCDPoleFigureFilter]")
 {
-  const auto scenario = GENERATE(from_range(UnitTest::SelectAlgorithmTestScenariosForInMemoryStores()));
+  const auto scenario = GENERATE(from_range(unit_test::SelectAlgorithmTestScenariosForInMemoryStores()));
   CAPTURE(scenario);
-  UnitTest::AlgorithmTestScope scope(scenario);
+  unit_test::AlgorithmTestScope scope(scenario);
   DataStructure ds;
   const DataPath gbcdPath({"GBCD"});
-  auto* gbcd = UnitTest::CreateTestDataArray<float64>(ds, gbcdPath.getTargetName(), {2}, {2, 2, 2, 2, 2, 2});
+  auto* gbcd = unit_test::CreateTestDataArray<float64>(ds, gbcdPath.getTargetName(), {2}, {2, 2, 2, 2, 2, 2});
   REQUIRE(gbcd != nullptr);
   const DataPath crystalPath({"Crystal Structures"});
-  auto* crystals = UnitTest::CreateTestDataArray<uint32>(ds, crystalPath.getTargetName(), {2}, {1});
+  auto* crystals = unit_test::CreateTestDataArray<uint32>(ds, crystalPath.getTargetName(), {2}, {1});
   REQUIRE(crystals != nullptr);
 
   ComputeGBCDPoleFigureFilter filter;
@@ -81,15 +81,15 @@ TEST_CASE("OrientationAnalysis::ComputeGBCDPoleFigureFilter: Odd image samples c
   const auto result = scope.executeFilter(filter, ds, args);
   SIMPLNX_RESULT_REQUIRE_VALID(result.result);
   const auto intensityPath = imagePath.createChildPath("Cells").createChildPath("Intensity");
-  REQUIRE_NOTHROW(ds.getDataRefAs<Float64Array>(intensityPath));
-  const auto& intensity = ds.getDataRefAs<Float64Array>(intensityPath);
+  REQUIRE_NOTHROW(ds.getDataRefAs<Float64ArrayType>(intensityPath));
+  const auto& intensity = ds.getDataRefAs<Float64ArrayType>(intensityPath);
   REQUIRE(intensity.getNumberOfTuples() == static_cast<usize>(imageDimension * imageDimension));
   for(usize pixel = 0; pixel < intensity.getNumberOfTuples(); ++pixel)
   {
     CAPTURE(pixel);
     CHECK(intensity[pixel] == 7.0);
   }
-  UnitTest::CheckArraysInheritTupleDims(ds);
+  unit_test::CheckArraysInheritTupleDims(ds);
 }
 
 TEST_CASE("OrientationAnalysis::ComputeGBCDPoleFigureFilter", "[OrientationAnalysis][ComputeGBCDPoleFigureFilter]")

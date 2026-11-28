@@ -240,7 +240,7 @@ IFilter::PreflightResult ReadNIfTIFileFilter::preflightImpl(const DataStructure&
     return {.output_actions = ConvertInvalidResult<OutputActions>(std::move(geometryResult))};
   }
 
-  const auto lengthUnit = GetSpatialLengthUnit(md.spatialUnits);
+  const auto lengthUnit = GetSpatialLengthUnit(md.spatial_units);
   preflightUpdatedValues.push_back({"Full Input Geometry", nx::core::geometry_helpers::description::GenerateGeometryInfo(dims, spacing, origin, lengthUnit)});
 
   // If cropping is enabled, use the shared crop planner on a temporary DataStructure.

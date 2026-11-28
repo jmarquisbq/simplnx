@@ -74,8 +74,8 @@ TEST_CASE("SimplnxCore::FlyingEdges3D: Contour passes through the physical cell 
   REQUIRE(mesh.getNumberOfFaces() > 0);
   // The isoplane lies halfway between X samples 3 and 9 and spans the Y and Z sample centers.
   const auto bounds = mesh.getBoundingBox();
-  CHECK(bounds.getMinPoint() == Point3D<float32>{6, 3, 3});
-  CHECK(bounds.getMaxPoint() == Point3D<float32>{6, 15, 15});
+  CHECK(bounds.getMinPoint() == Vec3<float32>{6, 3, 3});
+  CHECK(bounds.getMaxPoint() == Vec3<float32>{6, 15, 15});
   unit_test::CheckArraysInheritTupleDims(ds);
 }
 

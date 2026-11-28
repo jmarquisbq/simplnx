@@ -97,7 +97,7 @@ void CheckVtkGridHeader(std::istream& computedFile, std::istream& exemplarFile, 
         REQUIRE(exemplarFile.ignore(sizeof(actual)));
         if constexpr(endian::native == endian::little)
         {
-          actual = nx::core::byteswap(actual);
+          actual = nx::core::Byteswap(actual);
         }
       }
       else

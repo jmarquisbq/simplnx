@@ -13,10 +13,10 @@ inline constexpr usize k_InvalidIndex = std::numeric_limits<usize>::max();
  */
 struct Axis
 {
-  float64 OriginOffset;
-  float64 ReferenceSpacing;
-  float64 SampleSpacing;
-  usize SampleDim;
+  float64 origin_offset;
+  float64 reference_spacing;
+  float64 sample_spacing;
+  usize sample_dim;
 };
 
 /**
@@ -28,10 +28,10 @@ struct Axis
  */
 inline Axis MakeAxis(const ImageGeom& reference, const ImageGeom& sample, usize axis)
 {
-  return {.OriginOffset = static_cast<float64>(reference.getOrigin()[axis]) - static_cast<float64>(sample.getOrigin()[axis]),
-          .ReferenceSpacing = static_cast<float64>(reference.getSpacing()[axis]),
-          .SampleSpacing = static_cast<float64>(sample.getSpacing()[axis]),
-          .SampleDim = sample.getDimensions()[axis]};
+  return {.origin_offset = static_cast<float64>(reference.getOrigin()[axis]) - static_cast<float64>(sample.getOrigin()[axis]),
+          .reference_spacing = static_cast<float64>(reference.getSpacing()[axis]),
+          .sample_spacing = static_cast<float64>(sample.getSpacing()[axis]),
+          .sample_dim = sample.getDimensions()[axis]};
 }
 
 /**
@@ -45,8 +45,8 @@ inline Axis MakeAxis(const ImageGeom& reference, const ImageGeom& sample, usize 
  */
 inline usize GetSourceIndex(const Axis& axis, usize refIndex)
 {
-  const float64 position = (axis.OriginOffset + (static_cast<float64>(refIndex) + 0.5) * axis.ReferenceSpacing) / axis.SampleSpacing;
-  if(position >= 0.0 && position < static_cast<float64>(axis.SampleDim))
+  const float64 position = (axis.origin_offset + (static_cast<float64>(refIndex) + 0.5) * axis.reference_spacing) / axis.sample_spacing;
+  if(position >= 0.0 && position < static_cast<float64>(axis.sample_dim))
   {
     return static_cast<usize>(position);
   }
